@@ -1,6 +1,11 @@
+//const BASE_URL = "https://kurachi.onrender.com/";
+const BASE_URL = "http://localhost:3000/";
+
+
+
 async function fetchFactoryDefects() {
   try {
-      const response = await fetch("http://localhost:3000/queries", {
+      const response = await fetch(`${BASE_URL}queries`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -81,6 +86,8 @@ async function fetchFactoryDefects() {
   }
 }
 
+
+
 function renderAnalyticsCharts(factoryNames, defectRates, data) {
   const chartContainer1 = document.getElementById("analyticsChart1");
   const chartContainer2 = document.getElementById("analyticsChart2");
@@ -156,6 +163,17 @@ function renderAnalyticsCharts(factoryNames, defectRates, data) {
 
   analyticsChart1.setOption(options1);
 
+  analyticsChart1.on('click', function (params) {
+    if (params.componentType === 'series' && params.seriesType === 'bar') {
+        const clickedFactory = params.name;
+        console.log("Redirecting to:", clickedFactory);
+        loadPage("factories"); // Ensure factories page is ready
+        setTimeout(() => {
+            loadFactoryPage(clickedFactory); // Trigger loading that specific factory
+        }, 200); // Small delay to ensure page is rendered
+    }
+});
+
   // --- Graph 2: Counter 1-12 per Factory (Side by Side) ---
   const counterNames = Array.from({ length: 12 }, (_, i) => `Counter ${i + 1}`);
 
@@ -209,4 +227,73 @@ function renderAnalyticsCharts(factoryNames, defectRates, data) {
       analyticsChart1.resize();
       analyticsChart2.resize();
   });
+}
+
+
+function renderFactoryCharts({ pressData, srsData, slitData, kensaData }) {
+    const processNames = ["Press", "SRS", "Slit", "Kensa"];
+    const defectRates = [pressData, srsData, slitData, kensaData].map(d => {
+        const totalProc = d.reduce((sum, doc) => sum + (doc.totalProcess ?? 0), 0);
+        const totalNG = d.reduce((sum, doc) => sum + (doc.totalNG ?? 0), 0);
+        return totalProc ? parseFloat(((totalNG / totalProc) * 100).toFixed(2)) : 0;
+    });
+
+    const cycleTimes = [pressData, srsData, slitData, kensaData].map(d => {
+        const total = d.reduce((sum, doc) => sum + (doc.avgCycle ?? 0), 0);
+        return d.length ? parseFloat((total / d.length).toFixed(2)) : 0;
+    });
+
+    const defectChart = echarts.init(document.getElementById("defectRateChart"));
+    const cycleChart = echarts.init(document.getElementById("cycleTimeChart"));
+
+    defectChart.setOption({
+        xAxis: {
+            type: 'category',
+            data: processNames
+        },
+        yAxis: {
+            type: 'value',
+            name: '%',
+            min: 0,
+            max: 100
+        },
+        tooltip: {},
+        series: [{
+            data: defectRates,
+            type: 'bar',
+            color: '#EF4444',
+            barWidth: '50%'
+        }],
+        title: {
+            text: 'Defect Rate (%)',
+            left: 'center'
+        }
+    });
+
+    cycleChart.setOption({
+        xAxis: {
+            type: 'category',
+            data: processNames
+        },
+        yAxis: {
+            type: 'value',
+            name: 'Sec'
+        },
+        tooltip: {},
+        series: [{
+            data: cycleTimes,
+            type: 'bar',
+            color: '#3B82F6',
+            barWidth: '50%'
+        }],
+        title: {
+            text: 'Avg. Cycle Time (s)',
+            left: 'center'
+        }
+    });
+
+    window.addEventListener("resize", () => {
+        defectChart.resize();
+        cycleChart.resize();
+    });
 }

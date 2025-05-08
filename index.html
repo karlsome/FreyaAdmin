@@ -1,108 +1,131 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Factory Management System</title>
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Remix Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Factory Management System</title>
 
-    <!-- ECharts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Custom Styles -->
-    <link rel="stylesheet" href="css/styles.css">
+  <!-- Remix Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet" />
+
+  <!-- ECharts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- jsPDF Core -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- jsPDF AutoTable Plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 </head>
 
 <body class="bg-gray-50">
-    <div class="flex h-screen">
-        <!-- Sidebar -->
-        <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
-            <div class="p-4 border-b border-gray-200">
-                <a href="index.html">
-                    
-                </a>
+  
+  <div class="flex min-h-screen">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
+      <div class="p-4 border-b border-gray-200 flex justify-center items-center">
+        <a href="index.html">
+          <img src="src/logo.png" alt="Sasaki Coating Logo" class="h-19" />
+        </a>
+      </div>
+      <nav class="flex-1 overflow-y-auto p-4">
+        <ul class="space-y-2">
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-900 rounded-lg bg-gray-100" data-page="dashboard">
+              <i class="ri-dashboard-line text-lg"></i>
+              <span class="ml-3" data-i18n="dashboard">Dashboard</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="factories">
+              <i class="ri-building-line text-lg"></i>
+              <span class="ml-3" data-i18n="factories">Factories</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="processes">
+              <i class="ri-settings-line text-lg"></i>
+              <span class="ml-3" data-i18n="processes">Processes</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="notifications">
+              <i class="ri-notification-line text-lg"></i>
+              <span class="ml-3" data-i18n="notifications">Notifications</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="analytics">
+              <i class="ri-line-chart-line text-lg"></i>
+              <span class="ml-3" data-i18n="analytics">Analytics</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="userManagement">
+              <i class="ri-user-settings-line text-lg"></i>
+              <span class="ml-3" data-i18n="userManagement">User Management</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="approvals">
+              <i class="ri-checkbox-line text-lg"></i>
+              <span class="ml-3" data-i18n="approvals">Approvals</span>
+              <span class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">12</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col overflow-y-auto">
+      <header class="bg-white border-b border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <input type="text" id="searchInput" class="w-64 p-2 bg-gray-100 rounded-md" placeholder="Search..." />
+            <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+            </select>
+          </div>
+      
+          <!-- Profile Dropdown -->
+          <div class="relative" id="profileMenu">
+            <button onclick="toggleDropdown()" class="focus:outline-none">
+              <img src="https://i.pravatar.cc/40" class="w-10 h-10 rounded-full border" alt="Profile" />
+            </button>
+      
+            <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-white border rounded shadow-lg z-50">
+              <div class="px-4 py-2 text-sm text-gray-700">
+                Role: <span id="userRole">admin</span>
+              </div>
+              <div class="border-t"></div>
+              <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100">
+                Logout
+              </button>
             </div>
-            <nav class="flex-1 overflow-y-auto p-4">
-                <ul class="space-y-2">
-                    <li>
-                        <button class="nav-btn flex items-center w-full p-2 text-gray-900 rounded-lg bg-gray-100" data-page="dashboard">
-                            <i class="ri-dashboard-line text-lg"></i>
-                            <span class="ml-3">Dashboard</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="factories">
-                            <i class="ri-building-line text-lg"></i>
-                            <span class="ml-3">Factories</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="processes">
-                            <i class="ri-settings-line text-lg"></i>
-                            <span class="ml-3">Processes</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="notifications">
-                            <i class="ri-notification-line text-lg"></i>
-                            <span class="ml-3">Notifications</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="analytics">
-                            <i class="ri-line-chart-line text-lg"></i>
-                            <span class="ml-3">Analytics</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="userManagement">
-                            <i class="ri-user-settings-line text-lg"></i>
-                            <span class="ml-3">User Management</span>
-                        </button>
-                    </li>
-                    <li>
-                        <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="approvals">
-                            <i class="ri-checkbox-line text-lg"></i>
-                            <span class="ml-3">Approvals</span>
-                            <span class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">12</span>
-                        </button>
-                    </li>
-                </ul>
-            </nav>
-        </aside>
+          </div>
+        </div>
+      </header>
 
-        <!-- Main Content -->
-        <main class="flex-1 flex flex-col overflow-hidden">
-            <header class="bg-white border-b border-gray-200 p-4">
-                <div class="flex items-center justify-between">
-                    <input type="text" id="searchInput" class="w-64 p-2 bg-gray-100 rounded-md" placeholder="Search...">
-                    <button id="profileButton">
-                        <img src="https://i.pravatar.cc/40" class="w-8 h-8 rounded-full" alt="Profile">
-                    </button>
-                </div>
-            </header>
+      <!-- Content Will Be Dynamically Loaded Here -->
+      <div id="mainContent" class="p-6">
+        <h2 class="text-2xl font-semibold">Loading...</h2>
+      </div>
+    </main>
+  </div>
 
-            <!-- Content Will Be Dynamically Loaded Here -->
-             <!-- <div id="analyticsChart" style="width: 80%; height: 400px;"></div> -->
-            <div id="mainContent" class="p-6">
-                <h2 class="text-2xl font-semibold">Loading...</h2>
-            </div>
-           
-        </main>
-    </div>
-
-    
-    
-
-    <!-- JavaScript -->
-    <script src="js/data.js"></script>
-    <script src="js/charts.js"></script>
-    <script src="js/app.js"></script>
-    
+  <!-- JavaScript -->
+  <script src="js/languages.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
