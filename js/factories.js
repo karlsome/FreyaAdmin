@@ -366,11 +366,17 @@ function showSidebar(item) {
       .reduce((acc, [k, v]) => (acc[k] = v, acc), {})
   };
 
-  const entries = [];
-  const isKensa = item?.Counters !== undefined;
-  const isSRS = item?.["SRSコード"] !== undefined;
-  const isPress = item?.["ショット数"] !== undefined;
-  const isSlit = !isKensa && !isSRS && !isPress;
+    const entries = [];
+    const isKensa = item?.Counters !== undefined;
+    const isSRS = item?.["SRSコード"] !== undefined;
+    const isPress = (
+    !isKensa &&
+    !isSRS &&
+    ("ショット数" in item) // ✅ only treat as Press if ショット数 is present
+    );
+    const isSlit = !isKensa && !isSRS && !isPress;
+
+    console.log("Process Type Detected:", { isKensa, isPress, isSRS, isSlit });
 
   if (isKensa) {
     processType = "kensaDB";
