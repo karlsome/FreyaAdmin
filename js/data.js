@@ -15,5 +15,9 @@ const mockData = {
     notifications: [
         { id: 1, type: "critical", message: "Press machine failure at Europe Factory", time: "10 minutes ago" },
         { id: 2, type: "warning", message: "SRS process efficiency below threshold", time: "25 minutes ago" }
+    ],
+    masterDB: [
+        { id: 1, type: "critical", message: "Press machine failure at Europe Factory", time: "10 minutes ago" },
+        { id: 2, type: "warning", message: "SRS process efficiency below threshold", time: "25 minutes ago" }
     ]
 };

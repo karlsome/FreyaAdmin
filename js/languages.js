@@ -1,3 +1,6 @@
+
+
+
 // js/languages.js
 const translations = {
     en: {
@@ -23,7 +26,8 @@ const translations = {
       defectRate: "Defect Rate",
       exportCSV: "Export CSV",
       exportPDF: "Export PDF",
-      monthlySummary: "Monthly Summary"
+      monthlySummary: "Monthly Summary",
+      masterDB: "Master DB"
     },
     ja: {
       dashboard: "ダッシュボード",
@@ -48,6 +52,32 @@ const translations = {
       defectRate: "不良率",
       exportCSV: "CSVでエクスポート",
       exportPDF: "PDFでエクスポート",
-      monthlySummary: "月次サマリー"
+      monthlySummary: "月次サマリー",
+      masterDB: "マスターデータベース"
     }
   };
+
+
+
+  let currentLang = localStorage.getItem("lang") || "en";
+  
+  function applyLanguage() {
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+      const key = el.getAttribute("data-i18n");
+      el.textContent = translations[currentLang][key] || key;
+    });
+  
+    const search = document.getElementById("searchInput");
+    if (search) {
+      search.placeholder = translations[currentLang].searchPlaceholder;
+    }
+  }
+
+
+document.getElementById("languageSelector").value = currentLang;
+document.getElementById("languageSelector").addEventListener("change", (e) => {
+  currentLang = e.target.value;
+  localStorage.setItem("lang", currentLang);
+  applyLanguage();
+});
+applyLanguage();

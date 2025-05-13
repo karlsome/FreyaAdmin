@@ -18,11 +18,17 @@
   <!-- Custom Styles -->
   <link rel="stylesheet" href="css/styles.css" />
 
-  <!-- jsPDF Core -->
+      <!-- jsPDF Core -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <!-- jsPDF AutoTable Plugin -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- jsPDF HTML2Canvas Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+    <!-- jsPDF HTML2Canvas Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@1.0.30/encoding.min.js"></script>
 </head>
 
 <body class="bg-gray-50">
@@ -47,6 +53,12 @@
             <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="factories">
               <i class="ri-building-line text-lg"></i>
               <span class="ml-3" data-i18n="factories">Factories</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="masterDB">
+              <i class="ri-settings-line text-lg"></i>
+              <span class="ml-3" data-i18n="masterDB">Master 製品</span>
             </button>
           </li>
           <li>
@@ -127,5 +139,13 @@
   <script src="js/data.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/masterDB.js"></script>
+  <script src="js/factories.js"></script>
+  <script src="js/processes.js"></script>
+  <script src="js/notifications.js"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/userManagement.js"></script>
+  <script src="js/approvals.js"></script>
+  <script src="js/dashboard.js"></script>
 </body>
 </html>
