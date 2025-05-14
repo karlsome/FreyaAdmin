@@ -18,75 +18,72 @@
   <!-- Custom Styles -->
   <link rel="stylesheet" href="css/styles.css" />
 
-      <!-- jsPDF Core -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-    <!-- jsPDF AutoTable Plugin -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-
-    <!-- jsPDF HTML2Canvas Plugin -->
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-
-    <!-- jsPDF HTML2Canvas Plugin -->
-    <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@1.0.30/encoding.min.js"></script>
+  <!-- jsPDF Plugins -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@1.0.30/encoding.min.js"></script>
 </head>
 
 <body class="bg-gray-50">
-  
-  <div class="flex min-h-screen">
+  <!-- Mobile Sidebar Overlay -->
+  <div id="sidebarOverlay" class="fixed inset-0 bg-black bg-opacity-30 hidden z-40 md:hidden" onclick="toggleSidebar()"></div>
+
+  <div class="relative flex flex-col md:flex-row min-h-screen">
     <!-- Sidebar -->
-    <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
+    <aside id="sidebar"
+  class="fixed md:fixed md:top-0 md:left-0 md:h-screen w-64 bg-white border-r border-gray-200 flex flex-col transition-transform transform -translate-x-full md:translate-x-0 z-50">
       <div class="p-4 border-b border-gray-200 flex justify-center items-center">
         <a href="index.html">
-          <img src="src/logo.png" alt="Sasaki Coating Logo" class="h-19" />
+          <img src="src/logo.png" alt="Sasaki Coating Logo" class="h-16" />
         </a>
       </div>
       <nav class="flex-1 overflow-y-auto p-4">
         <ul class="space-y-2">
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-900 rounded-lg bg-gray-100" data-page="dashboard">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-900 rounded-lg bg-gray-100" data-page="dashboard" onclick="handleNavClick()">
               <i class="ri-dashboard-line text-lg"></i>
               <span class="ml-3" data-i18n="dashboard">Dashboard</span>
             </button>
           </li>
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="factories">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="factories" onclick="handleNavClick()">
               <i class="ri-building-line text-lg"></i>
               <span class="ml-3" data-i18n="factories">Factories</span>
             </button>
           </li>
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="masterDB">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="masterDB" onclick="handleNavClick()">
               <i class="ri-settings-line text-lg"></i>
               <span class="ml-3" data-i18n="masterDB">Master 製品</span>
             </button>
           </li>
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="processes">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="processes" onclick="handleNavClick()">
               <i class="ri-settings-line text-lg"></i>
               <span class="ml-3" data-i18n="processes">Processes</span>
             </button>
           </li>
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="notifications">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="notifications" onclick="handleNavClick()">
               <i class="ri-notification-line text-lg"></i>
               <span class="ml-3" data-i18n="notifications">Notifications</span>
             </button>
           </li>
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="analytics">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="analytics" onclick="handleNavClick()">
               <i class="ri-line-chart-line text-lg"></i>
               <span class="ml-3" data-i18n="analytics">Analytics</span>
             </button>
           </li>
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="userManagement">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="userManagement" onclick="handleNavClick()">
               <i class="ri-user-settings-line text-lg"></i>
               <span class="ml-3" data-i18n="userManagement">User Management</span>
             </button>
           </li>
           <li>
-            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="approvals">
+            <button class="nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100" data-page="approvals" onclick="handleNavClick()">
               <i class="ri-checkbox-line text-lg"></i>
               <span class="ml-3" data-i18n="approvals">Approvals</span>
               <span class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">12</span>
@@ -97,23 +94,27 @@
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 flex flex-col overflow-y-auto">
+    <main class="flex-1 flex flex-col overflow-y-auto md:ml-64 min-h-screen">
       <header class="bg-white border-b border-gray-200 p-4">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <input type="text" id="searchInput" class="w-64 p-2 bg-gray-100 rounded-md" placeholder="Search..." />
+          <div class="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
+            <!-- Hamburger button for mobile -->
+            <button id="mobileMenuButton" class="md:hidden text-gray-600 focus:outline-none text-2xl">
+              <i class="ri-menu-line"></i>
+            </button>
+            <input type="text" id="searchInput" class="w-full md:w-64 p-2 bg-gray-100 rounded-md" placeholder="Search..." />
             <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
               <option value="en">English</option>
               <option value="ja">日本語</option>
             </select>
           </div>
-      
+
           <!-- Profile Dropdown -->
           <div class="relative" id="profileMenu">
             <button onclick="toggleDropdown()" class="focus:outline-none">
               <img src="https://i.pravatar.cc/40" class="w-10 h-10 rounded-full border" alt="Profile" />
             </button>
-      
+
             <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-white border rounded shadow-lg z-50">
               <div class="px-4 py-2 text-sm text-gray-700">
                 Role: <span id="userRole">admin</span>
@@ -127,14 +128,14 @@
         </div>
       </header>
 
-      <!-- Content Will Be Dynamically Loaded Here -->
-      <div id="mainContent" class="p-6">
+      <!-- Main Page Content -->
+      <div id="mainContent" class="p-4 md:p-6 space-y-4">
         <h2 class="text-2xl font-semibold">Loading...</h2>
       </div>
     </main>
   </div>
 
-  <!-- JavaScript -->
+  <!-- JS Scripts -->
   <script src="js/languages.js"></script>
   <script src="js/data.js"></script>
   <script src="js/charts.js"></script>
@@ -147,5 +148,26 @@
   <script src="js/userManagement.js"></script>
   <script src="js/approvals.js"></script>
   <script src="js/dashboard.js"></script>
+
+  <!-- Sidebar Toggle -->
+  <script>
+  const sidebar = document.getElementById("sidebar");
+  const menuBtn = document.getElementById("mobileMenuButton");
+  const overlay = document.getElementById("sidebarOverlay");
+
+  function toggleSidebar() {
+    sidebar.classList.toggle("-translate-x-full");
+    overlay.classList.toggle("hidden");
+  }
+
+  function handleNavClick() {
+    // Only hide sidebar on mobile
+    if (window.innerWidth < 768) {
+      toggleSidebar();
+    }
+  }
+
+  menuBtn.addEventListener("click", toggleSidebar);
+</script>
 </body>
 </html>

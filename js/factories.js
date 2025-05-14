@@ -219,7 +219,7 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
 
         <!-- Summary Cards -->
-        <div class="grid grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         ${[["Press", pressData], ["SRS", srsData], ["Slit", slitData], ["Kensa", kensaData]].map(([label, data]) => {
             const totalProc = data.reduce((sum, d) => sum + (d.totalProcess ?? 0), 0);
             const totalNG = data.reduce((sum, d) => sum + (d.totalNG ?? 0), 0);
@@ -244,7 +244,7 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
 
         <!-- Charts -->
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-white p-4 rounded shadow">
             <h3 class="font-semibold mb-2">${translations[currentLang].defectRate} per Process</h3>
             <div id="defectRateChart" style="height: 300px;"></div>
@@ -420,7 +420,7 @@ function showSidebar(item) {
             <div>
               <p class="font-semibold text-sm mb-1">${label}</p>
               <a href="#" onclick="openImageTab('${url}', '${label}'); return false;">
-                <img src="${url}" alt="${label}" class="rounded shadow w-full max-h-60 object-contain hover:opacity-90 cursor-zoom-in" />
+                <img src="${url}" alt="${label}" class="rounded shadow w-full max-h-60 object-contain sm:max-w-md mx-auto hover:opacity-90 cursor-zoom-in" />
               </a>
             </div>
           `;
@@ -850,6 +850,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
             return `
               <div class="bg-white p-4 rounded shadow mb-6">
                 <h3 class="text-xl font-semibold mb-2">${procLabel} Process (${sorted.length})</h3>
+                <div class="overflow-x-auto">
                 <table class="w-full text-sm mb-2">
                   <thead>
                     <tr class="border-b font-semibold text-left">
@@ -876,6 +877,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                     `).join("")}
                   </tbody>
                 </table>
+                </div>
   
                 <div class="mt-4">
                   <h5 class="font-semibold mb-2">${procLabel} Summary</h5>
