@@ -213,9 +213,21 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         <div id="dailyProduction" class="mb-10"></div>
 
         <!-- Detail Sidebar -->
-        <div id="detailSidebar" class="fixed top-0 right-0 w-[600px] h-full bg-white shadow-lg transform translate-x-full transition-transform duration-300 z-50 p-4 overflow-y-auto">
-        <button onclick="closeSidebar()" class="mb-4 text-red-500 font-semibold">Close</button>
-        <div id="sidebarContent"></div>
+        <div id="detailSidebar" class="fixed top-0 right-0 w-full md:w-[600px] h-full bg-white shadow-lg transform translate-x-full transition-transform duration-300 z-50 p-4 overflow-y-auto max-h-screen">
+          <button onclick="closeSidebar()" class="mb-4 text-red-500 font-semibold w-full text-left md:w-auto">Close</button>
+          <div id="sidebarContent"></div>
+        </div>
+
+        <!-- Backdrop for mobile -->
+        <div id="sidebarBackdrop"
+            class="fixed inset-0 bg-black bg-opacity-30 z-40 hidden md:hidden"
+            onclick="closeSidebar()"></div>
+
+        <!-- Detail Sidebar -->
+        <div id="detailSidebar"
+            class="fixed top-0 right-0 w-full max-w-lg h-full bg-white shadow-lg transform translate-x-full transition-transform duration-300 z-50 p-4 overflow-y-auto md:w-[600px]">
+          <button onclick="closeSidebar()" class="mb-4 text-red-500 font-semibold">Close</button>
+          <div id="sidebarContent"></div>
         </div>
 
         <!-- Summary Cards -->
@@ -348,6 +360,7 @@ function showSidebarFromElement(el) {
 
 function showSidebar(item) {
   const sidebar = document.getElementById("detailSidebar");
+  const backdrop = document.getElementById("sidebarBackdrop");
   const content = document.getElementById("sidebarContent");
   const originalItem = JSON.parse(JSON.stringify(item));
   const factoryName = item["工場"]; // Required for reload
@@ -429,6 +442,7 @@ function showSidebar(item) {
   `;
 
   sidebar.classList.remove("translate-x-full");
+  backdrop.classList.remove("hidden");
   //picLINK(item["背番号"], item["品番"]);
 
   const inputs = () => Array.from(document.querySelectorAll(".editable-input"));
@@ -621,6 +635,7 @@ function validateInputs() {
 
 function closeSidebar() {
     document.getElementById("detailSidebar").classList.add("translate-x-full");
+    document.getElementById("sidebarBackdrop").classList.add("hidden");
 }
 
 
@@ -702,14 +717,16 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
             <div class="mb-8">
               ${index > 0 ? '<hr class="my-6 border-t-2 border-gray-300">' : ''}
               <h3 class="text-2xl font-semibold mb-4">${label} Production</h3>
-              <div class="grid grid-cols-2 gap-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 ${processes.map((proc, i) => {
                   const original = results[i];
-                  if (!original?.length) return `<div class="bg-white p-4 rounded shadow">${proc.name} Process (0)</div>`;
-  
+                  if (!original?.length) return `
+                    <div class="bg-white p-4 rounded-xl shadow">${proc.name} Process (0)</div>
+                  `;
+
                   const state = sortStates[label];
                   let sorted = [...original];
-  
+
                   if (state.process === proc.name && state.column) {
                     sorted.sort((a, b) => {
                       const valA = a[state.column] ?? "";
@@ -717,56 +734,57 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                       return valA.toString().localeCompare(valB.toString(), "ja") * state.direction;
                     });
                   }
-  
-                  const arrow = (col) =>
+
+                  const arrow = col =>
                     state.process === proc.name && state.column === col
                       ? state.direction > 0 ? " ↑" : " ↓"
                       : "";
-  
+
                   const summary = groupAndSummarize(sorted);
-  
+
                   const bgClassMap = {
                     Kensa: "bg-yellow-50",
                     Press: "bg-green-50",
                     SRS: "bg-gray-100",
                     Slit: "bg-blue-50"
                   };
-                  
                   const bgClass = bgClassMap[proc.name] || "bg-white";
-                  
+
                   return `
-                    <div class="${bgClass} p-4 rounded shadow">
+                    <div class="bg-white p-4 rounded-xl shadow">
                       <h4 class="font-semibold mb-2">${proc.name} Process (${sorted.length})</h4>
-                      <table class="w-full text-sm mb-2">
-                        <thead>
-                          <tr class="border-b font-semibold text-left">
-                            <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', '品番')">品番${arrow("品番")}</th>
-                            <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', '背番号')">背番号${arrow("背番号")}</th>
-                            <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Worker_Name')">作業者${arrow("Worker_Name")}</th>
-                            <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Date')">日付${arrow("Date")}</th>
-                            <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Total')">Total${arrow("Total")}</th>
-                            <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Total_NG')">Total NG${arrow("Total_NG")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${sorted.map(item => `
-                            <tr class="cursor-pointer hover:bg-gray-100"
-                                onclick='showSidebarFromElement(this)'
-                                data-item='${encodeURIComponent(JSON.stringify(item))}'>
-                              <td>${item.品番 ?? "-"}</td>
-                              <td>${item.背番号 ?? "-"}</td>
-                              <td>${item.Worker_Name ?? "-"}</td>
-                              <td>${item.Date ?? "-"}</td>
-                              <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
-                              <td>${item.Total_NG ?? 0}</td>
+                      <div class="overflow-x-auto">
+                        <table class="w-full text-sm min-w-[600px] mb-2">
+                          <thead>
+                            <tr class="border-b font-semibold text-left">
+                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', '品番')">品番${arrow("品番")}</th>
+                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', '背番号')">背番号${arrow("背番号")}</th>
+                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Worker_Name')">作業者${arrow("Worker_Name")}</th>
+                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Date')">日付${arrow("Date")}</th>
+                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Total')">Total${arrow("Total")}</th>
+                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Total_NG')">Total NG${arrow("Total_NG")}</th>
                             </tr>
-                          `).join("")}
-                        </tbody>
-                      </table>
-  
-                      <div class="mt-4">
+                          </thead>
+                          <tbody>
+                            ${sorted.map(item => `
+                              <tr class="cursor-pointer hover:bg-gray-100"
+                                  onclick='showSidebarFromElement(this)'
+                                  data-item='${encodeURIComponent(JSON.stringify(item))}'>
+                                <td>${item.品番 ?? "-"}</td>
+                                <td>${item.背番号 ?? "-"}</td>
+                                <td>${item.Worker_Name ?? "-"}</td>
+                                <td>${item.Date ?? "-"}</td>
+                                <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
+                                <td>${item.Total_NG ?? 0}</td>
+                              </tr>
+                            `).join("")}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div class="mt-4 overflow-x-auto">
                         <h5 class="font-semibold mb-2">${label} Summary</h5>
-                        <table class="w-full text-sm border-t mb-2">
+                        <table class="w-full text-sm border-t min-w-[500px]">
                           <thead>
                             <tr class="border-b font-semibold text-left">
                               <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th>
@@ -783,7 +801,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                             `).join("")}
                           </tbody>
                         </table>
-                        <div class="flex gap-4">
+                        <div class="flex gap-4 mt-2">
                           <button onclick='exportToCSV(${JSON.stringify(summary)})' class="text-blue-600 underline text-sm">Export CSV</button>
                           <button onclick='exportToPDFGrouped([{ name: "${proc.name}", summary: ${JSON.stringify(summary)} }], "${label} ${proc.name} Summary")' class="text-blue-600 underline text-sm">Export PDF</button>
                         </div>
@@ -829,7 +847,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
           container.innerHTML = processOrder.map((procLabel, index) => {
             const records = resultsByProcess[index];
             if (!records.length) return "";
-  
+
             const sorted = [...records].sort((a, b) => {
               if (sortState.process === procLabel && sortState.column) {
                 const valA = a[sortState.column] ?? "";
@@ -838,50 +856,50 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
               }
               return 0;
             });
-  
+
             const summary = groupAndSummarize(sorted);
             summaryByProcess.push({ name: procLabel, summary });
-  
+
             const arrow = col =>
               sortState.process === procLabel && sortState.column === col
                 ? sortState.direction > 0 ? " ↑" : " ↓"
                 : "";
-  
+
             return `
-              <div class="bg-white p-4 rounded shadow mb-6">
+              <div class="bg-white p-4 rounded-xl shadow mb-6">
                 <h3 class="text-xl font-semibold mb-2">${procLabel} Process (${sorted.length})</h3>
                 <div class="overflow-x-auto">
-                <table class="w-full text-sm mb-2">
-                  <thead>
-                    <tr class="border-b font-semibold text-left">
-                      <th class="cursor-pointer" onclick="handleSort('${procLabel}', '品番')">品番${arrow("品番")}</th>
-                      <th class="cursor-pointer" onclick="handleSort('${procLabel}', '背番号')">背番号${arrow("背番号")}</th>
-                      <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Worker_Name')">作業者${arrow("Worker_Name")}</th>
-                      <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Date')">日付${arrow("Date")}</th>
-                      <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total')">Total${arrow("Total")}</th>
-                      <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total_NG')">Total NG${arrow("Total_NG")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${sorted.map(item => `
-                      <tr class="cursor-pointer hover:bg-gray-100"
-                          onclick='showSidebarFromElement(this)'
-                          data-item='${encodeURIComponent(JSON.stringify(item))}'>
-                        <td>${item.品番 ?? "-"}</td>
-                        <td>${item.背番号 ?? "-"}</td>
-                        <td>${item.Worker_Name ?? "-"}</td>
-                        <td>${item.Date ?? "-"}</td>
-                        <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
-                        <td>${item.Total_NG ?? 0}</td>
+                  <table class="w-full text-sm min-w-[600px] mb-2">
+                    <thead>
+                      <tr class="border-b font-semibold text-left">
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', '品番')">品番${arrow("品番")}</th>
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', '背番号')">背番号${arrow("背番号")}</th>
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Worker_Name')">作業者${arrow("Worker_Name")}</th>
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Date')">日付${arrow("Date")}</th>
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total')">Total${arrow("Total")}</th>
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total_NG')">Total NG${arrow("Total_NG")}</th>
                       </tr>
-                    `).join("")}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      ${sorted.map(item => `
+                        <tr class="cursor-pointer hover:bg-gray-100"
+                            onclick='showSidebarFromElement(this)'
+                            data-item='${encodeURIComponent(JSON.stringify(item))}'>
+                          <td>${item.品番 ?? "-"}</td>
+                          <td>${item.背番号 ?? "-"}</td>
+                          <td>${item.Worker_Name ?? "-"}</td>
+                          <td>${item.Date ?? "-"}</td>
+                          <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
+                          <td>${item.Total_NG ?? 0}</td>
+                        </tr>
+                      `).join("")}
+                    </tbody>
+                  </table>
                 </div>
-  
-                <div class="mt-4">
+
+                <div class="mt-4 overflow-x-auto">
                   <h5 class="font-semibold mb-2">${procLabel} Summary</h5>
-                  <table class="w-full text-sm border-t mb-2">
+                  <table class="w-full text-sm border-t min-w-[500px] mb-2">
                     <thead>
                       <tr class="border-b font-semibold text-left">
                         <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th>
@@ -898,34 +916,40 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                       `).join("")}
                     </tbody>
                   </table>
+                  <div class="flex gap-4">
+                    <button onclick='exportToCSV(${JSON.stringify(summary)})' class="text-blue-600 underline text-sm">Export CSV</button>
+                    <button onclick='exportToPDFGrouped([{ name: "${procLabel}", summary: ${JSON.stringify(summary)} }], "${procLabel} Summary")' class="text-blue-600 underline text-sm">Export PDF</button>
+                  </div>
                 </div>
               </div>
             `;
           }).join("") + `
-            <div class="bg-white p-4 rounded shadow mt-8">
+            <div class="bg-white p-4 rounded-xl shadow mt-8">
               <h3 class="text-lg font-semibold mb-4">Summary by Process</h3>
               ${summaryByProcess.map(proc => {
                 if (!proc.summary.length) return "";
                 return `
                   <div class="mb-6">
                     <h4 class="font-semibold mb-2 border-b pb-1">${proc.name} Summary</h4>
-                    <table class="w-full text-sm mb-2">
-                      <thead>
-                        <tr class="border-b font-semibold text-left">
-                          <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${proc.summary.map(row => `
-                          <tr>
-                            <td>${row.品番}</td>
-                            <td>${row.背番号}</td>
-                            <td>${row.Total}</td>
-                            <td>${row.Total_NG}</td>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-sm min-w-[500px] mb-2">
+                        <thead>
+                          <tr class="border-b font-semibold text-left">
+                            <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th>
                           </tr>
-                        `).join("")}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          ${proc.summary.map(row => `
+                            <tr>
+                              <td>${row.品番}</td>
+                              <td>${row.背番号}</td>
+                              <td>${row.Total}</td>
+                              <td>${row.Total_NG}</td>
+                            </tr>
+                          `).join("")}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 `;
               }).join("")}

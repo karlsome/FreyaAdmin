@@ -34,6 +34,59 @@ function setupNavigation() {
   });
 }
 
+const navItemsConfig = {
+  dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
+  factories: { icon: "ri-building-line", label: "Factories" },
+  masterDB: { icon: "ri-settings-line", label: "Master 製品" },
+  processes: { icon: "ri-settings-line", label: "Processes" },
+  notifications: { icon: "ri-notification-line", label: "Notifications" },
+  analytics: { icon: "ri-line-chart-line", label: "Analytics" },
+  userManagement: { icon: "ri-user-settings-line", label: "User Management" },
+  approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
+};
+
+function createNavItem(page) {
+  const { icon, label, badge } = navItemsConfig[page] || {};
+  if (!icon || !label) return null;
+
+  const button = document.createElement("button");
+  button.className = "nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100";
+  button.setAttribute("data-page", page);
+
+  button.innerHTML = `
+    <i class="${icon} text-lg"></i>
+    <span class="ml-3" data-i18n="${page}">${label}</span>
+    ${badge ? `<span class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">${badge}</span>` : ""}
+  `;
+
+  const li = document.createElement("li");
+  li.appendChild(button);
+  return li;
+}
+
+function renderSidebarNavigation() {
+  const navList = document.getElementById("dynamicNav");
+  navList.innerHTML = ""; // Clear existing items
+
+  const allowedPages = roleAccess[role] || [];
+
+  allowedPages.forEach(page => {
+    const navItem = createNavItem(page);
+    if (navItem) navList.appendChild(navItem);
+  });
+
+  // Setup nav click handlers (for active styling + loading)
+  document.querySelectorAll(".nav-btn").forEach(button => {
+    const page = button.getAttribute("data-page");
+    button.addEventListener("click", function () {
+      document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("bg-gray-100", "text-gray-900"));
+      this.classList.add("bg-gray-100", "text-gray-900");
+      loadPage(page); // You must define loadPage(page) elsewhere
+    });
+  });
+}
+renderSidebarNavigation();
+
 function toggleDropdown() {
   const dropdown = document.getElementById("dropdownContent");
   dropdown.classList.toggle("hidden");
@@ -72,12 +125,14 @@ function loadPage(page) {
 
     switch (page) {
         case "dashboard":
-            mainContent.innerHTML = `
-                <h2 class="text-2xl font-semibold">Factory Overview</h2>
-                <div id="factoryCards" class="grid grid-cols-3 gap-6"></div>
-            `;
-            renderFactoryCards();
-            break;
+        mainContent.innerHTML = `
+            <div class="bg-white p-6 rounded-xl shadow mb-6">
+                <h2 class="text-2xl font-semibold mb-4">Factory Overview</h2>
+                <div id="factoryCards" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+            </div>
+        `;
+        renderFactoryCards();
+        break;
 
         case "analytics":
             mainContent.innerHTML = `
@@ -289,12 +344,14 @@ function loadPage(page) {
               break;
 
         case "factories":
-            mainContent.innerHTML = `
-                <h2 class="text-2xl font-semibold mb-4">Factory List</h2>
-                <div id="factoryList" class="grid grid-cols-3 gap-6"></div>
-            `;
-            renderFactoryList();
-            break;
+          mainContent.innerHTML = `
+              <div class="bg-white p-6 rounded-xl shadow mb-6">
+                  <h2 class="text-2xl font-semibold mb-4">Factory List</h2>
+                  <div id="factoryList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+              </div>
+          `;
+          renderFactoryList();
+          break;
 
         case "masterDB":
           mainContent.innerHTML = `
