@@ -274,26 +274,54 @@ function loadPage(page) {
               loadUserTable(); // simply re-fetch and render again
             };
             
+            // window.saveUser = async (userId) => {
+            //   const inputs = document.querySelectorAll(`[user-id="${userId}"]`);
+            //   const updated = {};
+            //   inputs.forEach(el => {
+            //     const field = el.dataset.field || (el.dataset.role ? "role" : null);
+            //     if (field) updated[field] = el.value;
+            //   });
+            
+            //   try {
+            //     const res = await fetch(BASE_URL + "updateUser", {
+            //       method: "POST",
+            //       headers: { "Content-Type": "application/json" },
+            //       body: JSON.stringify({ userId, ...updated })
+            //     });
+            
+            //     const result = await res.json();
+            //     if (!res.ok) throw new Error(result.error || "Failed to update user");
+            
+            //     alert("User updated");
+            //     loadUserTable();
+            //   } catch (err) {
+            //     alert(err.message);
+            //   }
+            // };
+
             window.saveUser = async (userId) => {
               const inputs = document.querySelectorAll(`[user-id="${userId}"]`);
               const updated = {};
               inputs.forEach(el => {
-                const field = el.dataset.field || (el.dataset.role ? "role" : null);
-                if (field) updated[field] = el.value;
+                // Corrected line below
+                const field = el.dataset.field || (el.hasAttribute('data-role') ? "role" : null);
+                if (field) {
+                  updated[field] = el.value;
+                }
               });
             
               try {
                 const res = await fetch(BASE_URL + "updateUser", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ userId, ...updated })
+                  body: JSON.stringify({ userId, ...updated }) // Spread updated properties
                 });
             
                 const result = await res.json();
                 if (!res.ok) throw new Error(result.error || "Failed to update user");
             
                 alert("User updated");
-                loadUserTable();
+                loadUserTable(); // Reloads the table to show updated data and reset edit states
               } catch (err) {
                 alert(err.message);
               }
