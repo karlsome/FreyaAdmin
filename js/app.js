@@ -244,15 +244,31 @@ function loadPage(page) {
               });
             };
             
-            window.resetPassword = async (id) => {
-              const newPass = prompt("Enter new password:");
-              if (!newPass) return;
-              await fetch(BASE_URL + "resetPassword", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId: id, newPassword: newPass })
-              });
-              alert("Password reset");
+            window.resetPassword = async (userId) => {
+              const newPass = prompt("Enter a new password:");
+              if (!newPass) {
+                alert("Password reset cancelled.");
+                return;
+              }
+
+              try {
+                const res = await fetch(BASE_URL + "resetUserPassword", { // Changed to the new route
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ userId: userId, newPassword: newPass })
+                });
+
+                const result = await res.json();
+
+                if (res.ok) {
+                  alert(result.message);
+                } else {
+                  throw new Error(result.error || "Failed to reset password.");
+                }
+              } catch (err) {
+                console.error("Error resetting password:", err);
+                alert(`Error: ${err.message}`);
+              }
             };
             
             window.editUser = (id) => {

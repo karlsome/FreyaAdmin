@@ -1,3 +1,6 @@
+/**
+ * Handles uploading and previewing a CSV file for master data import.
+ */
 function handleMasterCSVUpload() {
   const file = document.getElementById("csvUploadInput").files[0];
   if (!file) return alert("No file selected");
@@ -27,6 +30,9 @@ function handleMasterCSVUpload() {
   reader.readAsArrayBuffer(file);
 }
 
+/**
+ * Displays a preview of the uploaded CSV data before import.
+ */
 function displayCSVPreview(data) {
   const preview = data.slice(0, 5); // show only first 5
   const keys = Object.keys(preview[0]);
@@ -50,6 +56,9 @@ function displayCSVPreview(data) {
   document.getElementById("csvPreviewContainer").innerHTML = html;
 }
 
+/**
+ * Confirms and inserts the uploaded master data into the database.
+ */
 async function confirmMasterInsert() {
   const records = window._csvMasterRecords;
   const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
@@ -94,9 +103,10 @@ async function confirmMasterInsert() {
   loadPage("masterDB"); // Refresh view
 }
 
-
-
-  function ensureMasterSidebarExists() {
+/**
+ * Ensures the master sidebar DOM element exists, creating it if needed.
+ */
+function ensureMasterSidebarExists() {
   if (!document.getElementById("masterSidebar")) {
     const sidebar = document.createElement("div");
     sidebar.id = "masterSidebar";
@@ -109,6 +119,10 @@ async function confirmMasterInsert() {
   }
 }
 
+/**
+ * Shows the right-side master detail sidebar with all information for a master record.
+ * @param {Object} data - The master record data
+ */
 function showMasterSidebar(data) {
   ensureMasterSidebarExists();
 
@@ -230,6 +244,9 @@ document.getElementById("masterImageUploadInput").addEventListener("change", asy
   });
 }
 
+/**
+ * Closes the right-side master detail sidebar.
+ */
 function closeMasterSidebar() {
   const sidebar = document.getElementById("masterSidebar");
   if (sidebar) {
@@ -237,7 +254,10 @@ function closeMasterSidebar() {
   }
 }
 
-
+/**
+ * Handles uploading a new image for a master record.
+ * @param {string} recordId - The record ID to update
+ */
 async function triggerMasterImageUpload(recordId) {
   const input = document.getElementById("masterImageUploadInput");
   input.click();
@@ -274,3 +294,12 @@ async function triggerMasterImageUpload(recordId) {
     }
   };
 }
+
+// Ensure master sidebar closes when clicking outside (desktop and mobile)
+document.addEventListener("mousedown", function(event) {
+  const sidebar = document.getElementById("masterSidebar");
+  if (!sidebar || sidebar.classList.contains("translate-x-full")) return; // Sidebar not open
+  if (!sidebar.contains(event.target)) {
+    closeMasterSidebar();
+  }
+});

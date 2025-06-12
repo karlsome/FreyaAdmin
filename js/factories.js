@@ -1,10 +1,12 @@
-
 // Thresholds for defect rate classification
 const DEFECT_RATE_THRESHOLDS = {
     high: 2.0,
     warning: 1.5
 };
-  
+
+/**
+ * Renders the dashboard cards for each factory, showing total, NG, and defect rate.
+ */
 async function renderFactoryCards() {
     const container = document.getElementById("factoryCards");
     container.innerHTML = "Loading factories...";
@@ -76,6 +78,9 @@ async function renderFactoryCards() {
 }
 
 
+/**
+ * Renders the list of factories (used in the factories page).
+ */
 function renderFactoryList() {
     const container = document.getElementById("factoryList");
     const factoryNames = ["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"];
@@ -89,6 +94,10 @@ function renderFactoryList() {
 }
 
 
+/**
+ * Loads and displays the dashboard for a specific factory, including stats and charts.
+ * @param {string} factoryName - The name of the factory to load.
+ */
 async function loadFactoryPage(factoryName) {
     const mainContent = document.getElementById("mainContent");
     mainContent.innerHTML = `<p>Loading data for ${factoryName}...</p>`;
@@ -165,7 +174,10 @@ async function loadFactoryPage(factoryName) {
 }
 
 
-
+/**
+ * Renders the main dashboard for a factory, including filters, summary cards, and charts.
+ * @param {Object} param0 - Data for the dashboard (factoryName, pressData, etc.)
+ */
 function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, slitData, topDefects }) {
     const mainContent = document.getElementById("mainContent");
 
@@ -220,7 +232,7 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
 
         <!-- Backdrop for mobile -->
         <div id="sidebarBackdrop"
-            class="fixed inset-0 bg-black bg-opacity-30 z-40 hidden md:hidden"
+            class="fixed inset-0 bg-black bg-opacity-30 z-40 hidden"
             onclick="closeSidebar()"></div>
 
         <!-- Detail Sidebar -->
@@ -291,7 +303,11 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
 }
 
 
-
+/**
+ * Loads and displays daily production data for a factory.
+ * @param {string} factory - Factory name
+ * @param {string} date - Date string (YYYY-MM-DD)
+ */
 async function loadDailyProduction(factory, date) {
     const dailyContainer = document.getElementById("dailyProduction");
     dailyContainer.innerHTML = "Loading daily data...";
@@ -351,13 +367,20 @@ async function loadDailyProduction(factory, date) {
     }
 }
 
+/**
+ * Helper to show the sidebar with details for a clicked element (row).
+ * @param {HTMLElement} el - The element containing encoded item data
+ */
 function showSidebarFromElement(el) {
     const item = JSON.parse(decodeURIComponent(el.dataset.item));
     showSidebar(item);
 }
 
 
-
+/**
+ * Shows the right-side detail sidebar with all information for a production record.
+ * @param {Object} item - The production record data
+ */
 function showSidebar(item) {
   const sidebar = document.getElementById("detailSidebar");
   const backdrop = document.getElementById("sidebarBackdrop");
@@ -555,6 +578,11 @@ function showSidebar(item) {
 }
 
 
+/**
+ * Opens an image in a new tab for viewing larger.
+ * @param {string} url - The image URL
+ * @param {string} label - The label for the image
+ */
 function openImageTab(url, label) {
   const encodedFileName = url.split("/").pop().split("?")[0];
   const decodedFileName = decodeURIComponent(encodedFileName);  // ✅ Fix here
@@ -582,6 +610,9 @@ function openImageTab(url, label) {
   }
 }
 
+/**
+ * Validates the sidebar input fields and displays errors if any.
+ */
 function validateInputs() {
   const intFields = ["数量", "残数量", "不良数", "Total", "疵引不良", "加工不良", "その他", "ショット数", ...Array.from({ length: 12 }, (_, i) => `counter-${i + 1}`)];
   const timeFields = ["開始", "終了"];
@@ -632,14 +663,33 @@ function validateInputs() {
 }
 
 
-
+/**
+ * Closes the right-side detail sidebar and hides the backdrop.
+ */
 function closeSidebar() {
     document.getElementById("detailSidebar").classList.add("translate-x-full");
     document.getElementById("sidebarBackdrop").classList.add("hidden");
 }
 
+// Ensure sidebar closes when clicking outside (desktop and mobile)
+document.addEventListener("mousedown", function(event) {
+  const sidebar = document.getElementById("detailSidebar");
+  const backdrop = document.getElementById("sidebarBackdrop");
+  if (!sidebar || sidebar.classList.contains("translate-x-full")) return; // Sidebar not open
+  if (!sidebar.contains(event.target)) {
+    closeSidebar();
+  }
+});
 
 
+/**
+ * Loads production data for a factory by period (daily, weekly, monthly) and renders tables/sections.
+ * @param {string} factory - Factory name
+ * @param {string} from - Start date
+ * @param {string} to - End date
+ * @param {string} part - Part number filter
+ * @param {string} serial - Serial number filter
+ */
 async function loadProductionByPeriod(factory, from, to, part = "", serial = "") {
     const container = document.getElementById("dailyProduction");
     container.innerHTML = "Loading production data...";
@@ -970,7 +1020,9 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
 }
 
 
-
+/**
+ * Builds a query object for filtering production data.
+ */
 function getFilterQuery(factory, from, to, part, serial) {
   const query = {
     工場: factory,
@@ -986,6 +1038,9 @@ function getFilterQuery(factory, from, to, part, serial) {
   return query;
 }
 
+/**
+ * Groups and summarizes records for summary tables.
+ */
 function groupAndSummarize(records) {
     const grouped = {};
 
@@ -1006,6 +1061,9 @@ function groupAndSummarize(records) {
     return Object.values(grouped);
 }
 
+/**
+ * Exports data to CSV file.
+ */
 function exportToCSV(data, filename = "export.csv") {
     const headers = Object.keys(data[0]);
     const rows = data.map(row => headers.map(h => row[h] ?? "").join(","));
@@ -1020,6 +1078,9 @@ function exportToCSV(data, filename = "export.csv") {
     link.remove();
 }
 
+/**
+ * Exports data to PDF file.
+ */
 async function exportToPDF(data, filename = "export.pdf") {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -1040,6 +1101,9 @@ async function exportToPDF(data, filename = "export.pdf") {
 }
 
 
+/**
+ * Exports grouped process summaries to CSV.
+ */
 function exportToCSVGrouped(processSummaries, filename = "summary.csv") {
     const rows = [];
   
@@ -1064,6 +1128,9 @@ function exportToCSVGrouped(processSummaries, filename = "summary.csv") {
     document.body.removeChild(link);
   }
   
+  /**
+   * Exports grouped process summaries to PDF.
+   */
   function exportToPDFGrouped(processSummaries, filename = "summary.pdf") {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -1092,7 +1159,7 @@ function exportToCSVGrouped(processSummaries, filename = "summary.csv") {
     });
   
     doc.save(filename);
-}
+  }
 
 
 
