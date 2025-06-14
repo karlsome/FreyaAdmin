@@ -1,26 +1,27 @@
-// Global definitions for navigation items and role-based access
-// These are made global to ensure they are accessible throughout the application
-const roleAccess = {
-  // Admin role has access to all pages
-  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement"],
-  // '班長' (Foreman) role has limited access
-  班長: ["dashboard", "factories", "approvals", "masterDB"],
-  // 'member' role has the most limited access
-  member: ["dashboard"]
-};
+// Navigation utilities and functions
+// roleAccess and navItemsConfig are defined in app.js to ensure proper loading order
+// But we make sure they're available globally here too
 
-// Configuration for each navigation item, including icon, label, and optional badge
-const navItemsConfig = {
-  dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
-  factories: { icon: "ri-building-line", label: "Factories" },
-  masterDB: { icon: "ri-settings-line", label: "Master 製品" }, // Master Product
-  processes: { icon: "ri-settings-line", label: "Processes" },
-  notifications: { icon: "ri-notification-line", label: "Notifications" },
-  analytics: { icon: "ri-line-chart-line", label: "Analytics" },
-  userManagement: { icon: "ri-user-settings-line", label: "User Management" },
-  approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" }, // Example badge
-  customerManagement: { icon: "ri-user-3-line", label: "Customer Management" }
-};
+// Ensure navigation config is globally available
+if (typeof window !== 'undefined') {
+  window.roleAccess = window.roleAccess || {
+    admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement"],
+    班長: ["dashboard", "factories", "approvals", "masterDB"],
+    member: ["dashboard"]
+  };
+
+  window.navItemsConfig = window.navItemsConfig || {
+    dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
+    factories: { icon: "ri-building-line", label: "Factories" },
+    masterDB: { icon: "ri-settings-line", label: "Master 製品" },
+    processes: { icon: "ri-settings-line", label: "Processes" },
+    notifications: { icon: "ri-notification-line", label: "Notifications" },
+    analytics: { icon: "ri-line-chart-line", label: "Analytics" },
+    userManagement: { icon: "ri-user-settings-line", label: "User Management" },
+    approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
+    customerManagement: { icon: "ri-user-3-line", label: "Customer Management" }
+  };
+}
 
 /**
  * Toggles the visibility of the sidebar and its overlay for mobile responsiveness.
@@ -94,19 +95,14 @@ function createNavItem(page, role) {
     button.classList.add('bg-gray-100', 'text-gray-900');
 
     // Handle navigation logic
-    if (page === 'customerManagement') {
-      // For 'customerManagement', perform a full page redirect to masterUser.html
-      window.location.href = 'masterUser.html';
+    // For all pages, attempt to load content dynamically using the loadPage function.
+    // This assumes `loadPage` is defined in `app.js` or another loaded script.
+    if (typeof window.loadPage === 'function') {
+      window.loadPage(page);
     } else {
-      // For other pages, attempt to load content dynamically using the loadPage function.
-      // This assumes `loadPage` is defined in `app.js` or another loaded script.
-      if (typeof window.loadPage === 'function') {
-        window.loadPage(page);
-      } else {
-        // Fallback: If `loadPage` is not found, log a warning and perform a full page redirect
-        console.warn(`'loadPage' function not found. Cannot load "${page}" dynamically. Redirecting to its HTML file.`);
-        window.location.href = `${page}.html`;
-      }
+      // Fallback: If `loadPage` is not found, log a warning and perform a full page redirect
+      console.warn(`'loadPage' function not found. Cannot load "${page}" dynamically. Redirecting to its HTML file.`);
+      window.location.href = `${page}.html`;
     }
 
     // Hide sidebar on mobile after navigation

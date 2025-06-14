@@ -1,9 +1,32 @@
 
 
+// Check if user is logged in
 if (!localStorage.getItem("authUser")) {
   window.location.href = "login.html";
 }
 
+// Global navigation configuration - Must be defined early
+window.roleAccess = {
+  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement"],
+  班長: ["dashboard", "factories", "approvals", "masterDB"],
+  member: ["dashboard"]
+};
+
+window.navItemsConfig = {
+  dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
+  factories: { icon: "ri-building-line", label: "Factories" },
+  masterDB: { icon: "ri-settings-line", label: "Master 製品" },
+  processes: { icon: "ri-settings-line", label: "Processes" },
+  notifications: { icon: "ri-notification-line", label: "Notifications" },
+  analytics: { icon: "ri-line-chart-line", label: "Analytics" },
+  userManagement: { icon: "ri-user-settings-line", label: "User Management" },
+  approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
+  customerManagement: { icon: "ri-user-3-line", label: "Customer Management" }
+};
+
+// Make them available as global constants too
+const roleAccess = window.roleAccess;
+const navItemsConfig = window.navItemsConfig;
 
 const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
 const roleDisplay = document.getElementById("userRole");
@@ -11,13 +34,6 @@ if (roleDisplay) {
   roleDisplay.textContent = currentUser.role || "guest";
 }
 const role = currentUser.role || "guest"; // Default to guest if no role is found
-
-
-const roleAccess = {
-  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals","masterDB"],
-  班長: ["dashboard", "factories", "approvals","masterDB"],
-  member: ["dashboard"]
-};
 
 function setupNavigation() {
   document.querySelectorAll(".nav-btn").forEach(button => {
@@ -33,17 +49,6 @@ function setupNavigation() {
     }
   });
 }
-
-const navItemsConfig = {
-  dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
-  factories: { icon: "ri-building-line", label: "Factories" },
-  masterDB: { icon: "ri-settings-line", label: "Master 製品" },
-  processes: { icon: "ri-settings-line", label: "Processes" },
-  notifications: { icon: "ri-notification-line", label: "Notifications" },
-  analytics: { icon: "ri-line-chart-line", label: "Analytics" },
-  userManagement: { icon: "ri-user-settings-line", label: "User Management" },
-  approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
-};
 
 function createNavItem(page) {
   const { icon, label, badge } = navItemsConfig[page] || {};
@@ -66,6 +71,11 @@ function createNavItem(page) {
 
 function renderSidebarNavigation() {
   const navList = document.getElementById("dynamicNav");
+  if (!navList) {
+    console.error("dynamicNav element not found!");
+    return; // Exit if element doesn't exist
+  }
+  
   navList.innerHTML = ""; // Clear existing items
 
   const allowedPages = roleAccess[role] || [];
@@ -81,11 +91,16 @@ function renderSidebarNavigation() {
     button.addEventListener("click", function () {
       document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("bg-gray-100", "text-gray-900"));
       this.classList.add("bg-gray-100", "text-gray-900");
-      loadPage(page); // You must define loadPage(page) elsewhere
+      
+      loadPage(page);
     });
   });
 }
-renderSidebarNavigation();
+
+// Wait for DOM to be ready before rendering navigation
+document.addEventListener("DOMContentLoaded", function() {
+  renderSidebarNavigation();
+});
 
 function toggleDropdown() {
   const dropdown = document.getElementById("dropdownContent");
@@ -113,7 +128,23 @@ function logout() {
 // It uses the Fetch API to retrieve data from a server and dynamically updates the HTML content based on user interactions.
 document.addEventListener("DOMContentLoaded", () => {
     setupNavigation();
-    loadPage("dashboard"); // Load dashboard by default
+    
+    // Check for hash in URL for direct navigation
+    const hash = window.location.hash.substring(1);
+    if (hash && roleAccess[role]?.includes(hash)) {
+        loadPage(hash);
+        // Update navigation active state
+        setTimeout(() => {
+            document.querySelectorAll(".nav-btn").forEach(btn => {
+                btn.classList.remove("bg-gray-100", "text-gray-900");
+                if (btn.getAttribute("data-page") === hash) {
+                    btn.classList.add("bg-gray-100", "text-gray-900");
+                }
+            });
+        }, 100);
+    } else {
+        loadPage("dashboard"); // Load dashboard by default
+    }
 });
 
 
@@ -244,31 +275,15 @@ function loadPage(page) {
               });
             };
             
-            window.resetPassword = async (userId) => {
-              const newPass = prompt("Enter a new password:");
-              if (!newPass) {
-                alert("Password reset cancelled.");
-                return;
-              }
-
-              try {
-                const res = await fetch(BASE_URL + "resetUserPassword", { // Changed to the new route
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ userId: userId, newPassword: newPass })
-                });
-
-                const result = await res.json();
-
-                if (res.ok) {
-                  alert(result.message);
-                } else {
-                  throw new Error(result.error || "Failed to reset password.");
-                }
-              } catch (err) {
-                console.error("Error resetting password:", err);
-                alert(`Error: ${err.message}`);
-              }
+            window.resetPassword = async (id) => {
+              const newPass = prompt("Enter new password:");
+              if (!newPass) return;
+              await fetch(BASE_URL + "resetPassword", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: id, newPassword: newPass })
+              });
+              alert("Password reset");
             };
             
             window.editUser = (id) => {
@@ -585,11 +600,280 @@ function loadPage(page) {
           loadMasterFilters();
           break;
 
+        case "customerManagement":
+          if (role !== "admin") {
+            mainContent.innerHTML = `<p class="text-red-600 font-semibold">Access Denied</p>`;
+            return;
+          }
+
+          mainContent.innerHTML = `
+            <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow">
+              <h1 class="text-2xl font-semibold mb-6">Master User Admin Panel</h1>
+              <input type="text" id="searchInput" placeholder="Search by username, company, or email..." class="w-full p-2 border mb-4 rounded" />
+
+              <form id="createMasterUserForm" class="bg-white p-6 rounded shadow-md mb-6">
+                <h2 class="text-xl font-semibold mb-4">Create Master User</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <input id="masterUsername" placeholder="Username" class="p-2 border rounded" />
+                  <input type="password" id="masterPassword" placeholder="Password" class="p-2 border rounded" />
+                  <input id="masterCompany" placeholder="Company Name" class="p-2 border rounded" />
+                  <input type="email" id="masterEmail" placeholder="Email" class="p-2 border rounded" />
+                  <input type="date" id="masterValidUntil" class="p-2 border rounded" />
+                  <input id="masterDbName" placeholder="Database Name" class="p-2 border rounded" />
+                </div>
+                <h3 class="text-md font-semibold mt-4 mb-2">Devices (optional)</h3>
+                <div id="deviceListCreate" class="mb-4"></div>
+                <button type="button" onclick="addDeviceRow(document.getElementById('deviceListCreate'))" class="text-blue-600 text-sm mb-4">+ Add Device</button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded w-full">Create Master User</button>
+              </form>
+
+              <table class="w-full text-sm border">
+                <thead class="bg-gray-200">
+                  <tr>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('username')">Username</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('company')">Company</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('email')">Email</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('validUntil')">Valid Until</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('dbName')">Database</th>
+                    <th class="px-3 py-2">Devices</th>
+                    <th class="px-3 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="masterUsersTable"></tbody>
+              </table>
+            </div>
+
+            <!-- Edit Modal -->
+            <div id="editModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+              <div class="bg-white p-6 rounded shadow max-w-2xl w-full">
+                <h2 class="text-lg font-semibold mb-4">Edit Master User</h2>
+                <form id="editMasterUserForm" class="grid gap-4">
+                  <input hidden id="editId" />
+                  <input id="editCompany" placeholder="Company Name" class="border p-2 rounded" />
+                  <input type="email" id="editEmail" placeholder="Email" class="border p-2 rounded" />
+                  <input type="date" id="editValidUntil" class="border p-2 rounded" />
+                  <input id="editDbName" placeholder="Database Name" class="border p-2 rounded" />
+
+                  <h3 class="text-md font-semibold mt-2">Devices</h3>
+                  <div id="deviceListContainer"></div>
+                  <button type="button" onclick="addDeviceRow(document.getElementById('deviceListContainer'))" class="text-blue-600 text-sm">+ Add Device</button>
+
+                  <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closeEditModal()" class="bg-gray-300 px-3 py-1 rounded">Cancel</button>
+                    <button type="submit" class="bg-green-600 text-white px-3 py-1 rounded">Save</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          `;
+
+          // Customer Management JavaScript functionality
+          const masterUserURL = "https://kurachi.onrender.com";
+          let masterUsers = [];
+          let masterUserSortKey = "";
+          let masterUserSortDirection = 1;
+
+          function generateUniqueID() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+          }
+
+          window.addDeviceRow = function(container, device = {}) {
+            const id = device.uniqueId || generateUniqueID();
+            const div = document.createElement("div");
+            div.className = "device-row grid grid-cols-1 md:grid-cols-3 gap-2 mb-2 items-center";
+            div.innerHTML = `
+              <input placeholder="Device Name" class="device-name border p-2 rounded" value="${device.name || ""}" />
+              <input placeholder="Unique ID" class="device-uid border p-2 rounded" value="${id}" readonly />
+              <div class="flex gap-2">
+                <input placeholder="Brand" class="device-brand border p-2 rounded w-full" value="${device.brand || ""}" />
+                <button class="bg-red-500 text-white px-2 rounded" onclick="this.closest('.device-row').remove()">&times;</button>
+              </div>`;
+            container.appendChild(div);
+          };
+
+          async function fetchMasterUsers() {
+            try {
+              const res = await fetch(`${masterUserURL}/masterUsers`);
+              masterUsers = await res.json();
+              renderMasterUserTable();
+            } catch (err) {
+              console.error("Failed to fetch master users:", err);
+            }
+          }
+
+          function renderMasterUserTable() {
+            const search = document.getElementById("searchInput").value.toLowerCase();
+            let filtered = masterUsers.filter(u =>
+              u.username.toLowerCase().includes(search) ||
+              u.company.toLowerCase().includes(search) ||
+              u.email.toLowerCase().includes(search)
+            );
+
+            if (masterUserSortKey) {
+              filtered.sort((a, b) => {
+                const aVal = (a[masterUserSortKey] || "").toLowerCase?.() ?? "";
+                const bVal = (b[masterUserSortKey] || "").toLowerCase?.() ?? "";
+                return (aVal > bVal ? 1 : -1) * masterUserSortDirection;
+              });
+            }
+
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+
+            const tbody = document.getElementById("masterUsersTable");
+            tbody.innerHTML = filtered.map(u => {
+              const validDate = new Date(u.validUntil);
+              const isExpiring =
+                validDate.getMonth() === currentMonth &&
+                validDate.getFullYear() === currentYear;
+
+              const rowClass = isExpiring ? "bg-yellow-100 text-red-600 font-semibold" : "";
+
+              return `
+                <tr class="border-t ${rowClass}">
+                  <td class="px-3 py-2">${u.username}</td>
+                  <td class="px-3 py-2">${u.company}</td>
+                  <td class="px-3 py-2">${u.email}</td>
+                  <td class="px-3 py-2">${u.validUntil?.split("T")[0]}</td>
+                  <td class="px-3 py-2">${u.dbName}</td>
+                  <td class="px-3 py-2">${(u.devices || []).length}</td>
+                  <td class="px-3 py-2">
+                    <button class="text-blue-600 mr-2" onclick='openEditModal(${JSON.stringify(u)})'>Edit</button>
+                    <button class="text-red-600" onclick='deleteMasterUser("${u._id}")'>Delete</button>
+                  </td>
+                </tr>
+              `;
+            }).join("");
+          }
+
+          window.openEditModal = function(user) {
+            document.getElementById("editId").value = user._id;
+            document.getElementById("editCompany").value = user.company;
+            document.getElementById("editEmail").value = user.email;
+            document.getElementById("editValidUntil").value = user.validUntil?.split("T")[0];
+            document.getElementById("editDbName").value = user.dbName;
+            const container = document.getElementById("deviceListContainer");
+            container.innerHTML = "";
+            (user.devices || []).forEach(d => addDeviceRow(container, d));
+            document.getElementById("editModal").classList.remove("hidden");
+            document.getElementById("editModal").classList.add("flex");
+          };
+
+          window.closeEditModal = function() {
+            document.getElementById("editModal").classList.add("hidden");
+            document.getElementById("editModal").classList.remove("flex");
+          };
+
+          window.sortMasterUserTable = function(key) {
+            masterUserSortKey = key;
+            masterUserSortDirection *= -1;
+            renderMasterUserTable();
+          };
+
+          window.deleteMasterUser = async function(id) {
+            if (!confirm("Are you sure?")) return;
+            try {
+              const res = await fetch(`${masterUserURL}/deleteMasterUser`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id })
+              });
+              if (res.ok) {
+                alert("Deleted");
+                fetchMasterUsers();
+              }
+            } catch (err) {
+              console.error("Failed to delete master user:", err);
+            }
+          };
+
+          // Form submission handlers
+          document.getElementById("editMasterUserForm").onsubmit = async (e) => {
+            e.preventDefault();
+            const container = document.getElementById("deviceListContainer");
+            const devices = Array.from(container.querySelectorAll(".device-row")).map(row => ({
+              name: row.querySelector(".device-name").value.trim(),
+              uniqueId: row.querySelector(".device-uid").value.trim(),
+              brand: row.querySelector(".device-brand").value.trim()
+            }));
+            const ids = devices.map(d => d.uniqueId);
+            if (new Set(ids).size !== ids.length) return alert("Duplicate device uniqueID found.");
+            
+            const body = {
+              id: document.getElementById("editId").value,
+              company: document.getElementById("editCompany").value,
+              email: document.getElementById("editEmail").value,
+              validUntil: document.getElementById("editValidUntil").value,
+              dbName: document.getElementById("editDbName").value,
+              devices
+            };
+            
+            try {
+              const res = await fetch(`${masterUserURL}/updateMasterUser`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+              });
+              if (res.ok) {
+                alert("Updated");
+                closeEditModal();
+                fetchMasterUsers();
+              }
+            } catch (err) {
+              console.error("Failed to update master user:", err);
+            }
+          };
+
+          document.getElementById("createMasterUserForm").onsubmit = async (e) => {
+            e.preventDefault();
+            const devices = Array.from(document.getElementById("deviceListCreate").querySelectorAll(".device-row")).map(row => ({
+              name: row.querySelector(".device-name").value.trim(),
+              uniqueId: row.querySelector(".device-uid").value.trim(),
+              brand: row.querySelector(".device-brand").value.trim()
+            }));
+            const ids = devices.map(d => d.uniqueId);
+            if (new Set(ids).size !== ids.length) return alert("Duplicate device uniqueID found.");
+            
+            const body = {
+              username: document.getElementById("masterUsername").value,
+              password: document.getElementById("masterPassword").value,
+              company: document.getElementById("masterCompany").value,
+              email: document.getElementById("masterEmail").value,
+              validUntil: document.getElementById("masterValidUntil").value,
+              dbName: document.getElementById("masterDbName").value,
+              devices
+            };
+            
+            try {
+              const res = await fetch(`${masterUserURL}/createMasterUser`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+              });
+              if (res.ok) {
+                alert("Master user created");
+                e.target.reset();
+                document.getElementById("deviceListCreate").innerHTML = "";
+                fetchMasterUsers();
+              }
+            } catch (err) {
+              console.error("Failed to create master user:", err);
+            }
+          };
+
+          document.getElementById("searchInput").addEventListener("input", renderMasterUserTable);
+          fetchMasterUsers();
+          break;
+
         default:
             mainContent.innerHTML = `<h2 class="text-xl font-semibold">Page Not Found</h2>`;
             break;
     }
 }
+
+// Make loadPage globally available for navbar.js
+window.loadPage = loadPage;
 
 
 function renderApprovals() {

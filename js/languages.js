@@ -27,7 +27,8 @@ const translations = {
       exportCSV: "Export CSV",
       exportPDF: "Export PDF",
       monthlySummary: "Monthly Summary",
-      masterDB: "Master DB"
+      masterDB: "Master DB",
+      customerManagement: "Customer Management"
     },
     ja: {
       dashboard: "ダッシュボード",
@@ -53,7 +54,8 @@ const translations = {
       exportCSV: "CSVでエクスポート",
       exportPDF: "PDFでエクスポート",
       monthlySummary: "月次サマリー",
-      masterDB: "マスターデータベース"
+      masterDB: "マスターデータベース",
+      customerManagement: "顧客管理"
     }
   };
 
@@ -74,10 +76,13 @@ const translations = {
   }
 
 
-document.getElementById("languageSelector").value = currentLang;
-document.getElementById("languageSelector").addEventListener("change", (e) => {
-  currentLang = e.target.value;
-  localStorage.setItem("lang", currentLang);
-  applyLanguage();
-});
+const languageSelector = document.getElementById("languageSelector");
+if (languageSelector) {
+  languageSelector.value = currentLang;
+  languageSelector.addEventListener("change", (e) => {
+    currentLang = e.target.value;
+    localStorage.setItem("lang", currentLang);
+    applyLanguage();
+  });
+}
 applyLanguage();
