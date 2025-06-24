@@ -449,6 +449,9 @@ function showSidebar(item) {
       <button id="cancelSidebarBtn" class="hidden bg-gray-300 text-black px-3 py-1 rounded text-sm">Cancel</button>
     </div>
         <div class="mt-6 space-y-4">
+        <div id="masterImageContainer">
+          <!-- Master DB image will be loaded here -->
+        </div>
         ${["初物チェック画像", "終物チェック画像", "材料ラベル画像"].map(label => {
           const url = item[label];
           if (!url) return "";
@@ -463,6 +466,9 @@ function showSidebar(item) {
         }).join("")}
       </div>
   `;
+
+  // Load master DB image
+  loadMasterImage(item["品番"], item["背番号"]);
 
   sidebar.classList.remove("translate-x-full");
   backdrop.classList.remove("hidden");
@@ -1172,3 +1178,119 @@ document.getElementById("applyFilterBtn").addEventListener("click", () => {
   
     loadProductionByPeriod(currentFactory, from, to, part, serial);
 });
+
+/**
+ * Loads and displays the master image from masterDB collection for comparison
+ * @param {string} 品番 - Part number to search for
+ * @param {string} 背番号 - Serial number to search for
+ */
+async function loadMasterImage(品番, 背番号) {
+  const container = document.getElementById("masterImageContainer");
+  
+  if (!container) return;
+  
+  // Show loading state
+  container.innerHTML = `
+    <div>
+      <p class="font-semibold text-sm mb-1">正しい形状</p>
+      <div class="rounded shadow w-full max-h-60 bg-gray-100 flex items-center justify-center">
+        <span class="text-gray-500">Loading...</span>
+      </div>
+    </div>
+  `;
+
+  try {
+    // First try to find by 品番
+    let query = { 品番: 品番 };
+    if (!品番 && 背番号) {
+      // If no 品番, try with 背番号
+      query = { 背番号: 背番号 };
+    }
+
+    const response = await fetch(BASE_URL + "queries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: query,
+        projection: { imageURL: 1, 品番: 1, 背番号: 1, 品名: 1 }
+      })
+    });
+
+    const results = await response.json();
+
+    if (results && results.length > 0 && results[0].imageURL) {
+      const masterData = results[0];
+      container.innerHTML = `
+        <div>
+          <p class="font-semibold text-sm mb-1">正しい形状</p>
+          <p class="text-xs text-gray-600 mb-2">品番: ${masterData.品番 || 'N/A'} | 背番号: ${masterData.背番号 || 'N/A'}</p>
+          <a href="#" onclick="openImageTab('${masterData.imageURL}', '正しい形状'); return false;">
+            <img src="${masterData.imageURL}" alt="正しい形状" class="rounded shadow w-full max-h-60 object-contain sm:max-w-md mx-auto hover:opacity-90 cursor-zoom-in border-2 border-green-200" />
+          </a>
+        </div>
+      `;
+    } else {
+      // Try alternative search if first attempt failed
+      if (品番 && 背番号) {
+        // If we searched by 品番 first, try 背番号
+        const altResponse = await fetch(BASE_URL + "queries", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dbName: "Sasaki_Coating_MasterDB",
+            collectionName: "masterDB",
+            query: { 背番号: 背番号 },
+            projection: { imageURL: 1, 品番: 1, 背番号: 1, 品名: 1 }
+          })
+        });
+
+        const altResults = await altResponse.json();
+        
+        if (altResults && altResults.length > 0 && altResults[0].imageURL) {
+          const masterData = altResults[0];
+          container.innerHTML = `
+            <div>
+              <p class="font-semibold text-sm mb-1">正しい形状</p>
+              <p class="text-xs text-gray-600 mb-2">品番: ${masterData.品番 || 'N/A'} | 背番号: ${masterData.背番号 || 'N/A'}</p>
+              <a href="#" onclick="openImageTab('${masterData.imageURL}', '正しい形状'); return false;">
+                <img src="${masterData.imageURL}" alt="正しい形状" class="rounded shadow w-full max-h-60 object-contain sm:max-w-md mx-auto hover:opacity-90 cursor-zoom-in border-2 border-green-200" />
+              </a>
+            </div>
+          `;
+        } else {
+          // No image found
+          container.innerHTML = `
+            <div>
+              <p class="font-semibold text-sm mb-1">正しい形状</p>
+              <div class="rounded shadow w-full max-h-60 bg-gray-100 flex items-center justify-center border-2 border-gray-300">
+                <span class="text-gray-500">画像が見つかりません</span>
+              </div>
+            </div>
+          `;
+        }
+      } else {
+        // No image found
+        container.innerHTML = `
+          <div>
+            <p class="font-semibold text-sm mb-1">正しい形状</p>
+            <div class="rounded shadow w-full max-h-60 bg-gray-100 flex items-center justify-center border-2 border-gray-300">
+              <span class="text-gray-500">画像が見つかりません</span>
+            </div>
+          </div>
+        `;
+      }
+    }
+  } catch (error) {
+    console.error("Error loading master image:", error);
+    container.innerHTML = `
+      <div>
+        <p class="font-semibold text-sm mb-1">正しい形状</p>
+        <div class="rounded shadow w-full max-h-60 bg-red-100 flex items-center justify-center border-2 border-red-300">
+          <span class="text-red-500">画像の読み込みに失敗しました</span>
+        </div>
+      </div>
+    `;
+  }
+}
