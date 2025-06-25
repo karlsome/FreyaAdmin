@@ -2620,7 +2620,7 @@ function getApprovalStatusHTML(item) {
         statusHTML += `
             <div class="mt-3">
                 <h5 class="text-sm font-medium text-gray-900 mb-2">承認履歴</h5>
-                <div class="space-y-1 max-h-32 overflow-y-auto">
+                <div class="space-y-1 max-h-80 overflow-y-auto border rounded-lg bg-white p-3">
                     ${item.approvalHistory.map(history => `
                         <div class="text-xs text-gray-600 bg-gray-50 p-2 rounded">
                             <div class="font-medium">${history.action} - ${history.user}</div>
