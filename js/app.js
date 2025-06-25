@@ -173,7 +173,7 @@ function loadPage(page) {
                 <!-- Tab Content Container -->
                 <div id="approvalTabContent">
                     <!-- Stats Cards -->
-                    <div class="grid grid-cols-5 gap-4 mb-6">
+                    <div class="grid grid-cols-${role === '班長' ? '6' : '5'} gap-4 mb-6">
                         <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
                             <h3 class="text-sm font-medium text-yellow-800">保留中</h3>
                             <p class="text-2xl font-bold text-yellow-900" id="pendingCount">0</p>
@@ -194,6 +194,13 @@ function loadPage(page) {
                             <p class="text-2xl font-bold text-red-900" id="correctionCount">0</p>
                             <p class="text-xs text-red-600">要修正・再提出</p>
                         </div>
+                        ${role === '班長' ? `
+                        <div class="bg-orange-50 p-4 rounded-lg border border-orange-200 cursor-pointer hover:bg-orange-100 transition-colors" onclick="filterByStatus('correction_needed_from_kacho')">
+                            <h3 class="text-sm font-medium text-orange-800">課長修正要求</h3>
+                            <p class="text-2xl font-bold text-orange-900" id="kachoRequestCount">0</p>
+                            <p class="text-xs text-orange-600">班長対応必要</p>
+                        </div>
+                        ` : ''}
                         <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors" onclick="filterByStatus('today')">
                             <h3 class="text-sm font-medium text-gray-800">今日の総数</h3>
                             <p class="text-2xl font-bold text-gray-900" id="totalCount">0</p>
@@ -1810,6 +1817,7 @@ function updateStats() {
     const correction = allApprovalData.filter(item => 
         item.approvalStatus === 'correction_needed' || item.approvalStatus === 'correction_needed_from_kacho'
     ).length;
+    const kachoRequest = allApprovalData.filter(item => item.approvalStatus === 'correction_needed_from_kacho').length;
     const today = new Date().toISOString().split('T')[0];
     const todayTotal = allApprovalData.filter(item => item.Date === today).length;
 
@@ -1817,6 +1825,12 @@ function updateStats() {
     document.getElementById('hanchoApprovedCount').textContent = hanchoApproved;
     document.getElementById('fullyApprovedCount').textContent = fullyApproved;
     document.getElementById('correctionCount').textContent = correction;
+    if (role === '班長') {
+        const kachoRequestElement = document.getElementById('kachoRequestCount');
+        if (kachoRequestElement) {
+            kachoRequestElement.textContent = kachoRequest;
+        }
+    }
     document.getElementById('totalCount').textContent = todayTotal;
 }
 
