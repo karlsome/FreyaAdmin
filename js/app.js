@@ -353,7 +353,26 @@ function loadPage(page) {
 
 
             window.startEditingUser = (userId) => {
+              // Enable all input fields
               document.querySelectorAll(`[user-id="${userId}"]`).forEach(el => el.disabled = false);
+              
+              // Get user role
+              const roleSelect = document.querySelector(`select[user-id="${userId}"][data-role]`);
+              const userRole = roleSelect ? roleSelect.value : null;
+              
+              // Handle factory editing interface
+              const factoryDisplay = document.getElementById(`factoryDisplay-${userId}`);
+              const factoryEdit = document.getElementById(`factoryEdit-${userId}`);
+              
+              if (userRole === "班長") {
+                // For 班長: Hide display mode, show edit mode
+                if (factoryDisplay) factoryDisplay.style.display = "none";
+                if (factoryEdit) factoryEdit.classList.remove('hidden');
+              } else {
+                // For other roles: Keep display mode hidden, edit mode hidden
+                if (factoryDisplay) factoryDisplay.style.display = "none";
+                if (factoryEdit) factoryEdit.classList.add('hidden');
+              }
             
               const actionsCell = document.getElementById(`actions-${userId}`);
               actionsCell.innerHTML = `
@@ -398,9 +417,20 @@ function loadPage(page) {
                 // Corrected line below
                 const field = el.dataset.field || (el.hasAttribute('data-role') ? "role" : null);
                 if (field) {
-                  updated[field] = el.value;
+                  if (field === 'factory') {
+                    // Handle factory data from hidden input - map 工場 to factory for backend
+                    try {
+                      updated['factory'] = JSON.parse(el.value || '[]');
+                    } catch (e) {
+                      updated['factory'] = [];
+                    }
+                  } else {
+                    updated[field] = el.value;
+                  }
                 }
               });
+
+              console.log('Sending user update:', { userId, ...updated }); // Debug log
             
               try {
                 const res = await fetch(BASE_URL + "updateUser", {
@@ -415,6 +445,7 @@ function loadPage(page) {
                 alert("User updated");
                 loadUserTable(); // Reloads the table to show updated data and reset edit states
               } catch (err) {
+                console.error('Update error:', err);
                 alert(err.message);
               }
             };
@@ -458,6 +489,189 @@ function loadPage(page) {
               );
               renderUserTable(filtered);
             });
+            
+            // User table management functions with factory support
+            async function loadUserTable() {
+              try {
+                const res = await fetch(BASE_URL + "queries", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    dbName: "Sasaki_Coating_MasterDB",
+                    collectionName: "users",
+                    query: {},
+                    projection: { password: 0 }
+                  })
+                });
+
+                allUsers = await res.json();
+                renderUserTable(allUsers);
+              } catch (err) {
+                console.error("Failed to load users:", err);
+                document.getElementById("userTableContainer").innerHTML = `<p class="text-red-600">Failed to load users</p>`;
+              }
+            }
+
+            function renderUserTable(users) {
+              if (currentUser.role !== "admin") {
+                document.getElementById("userTableContainer").innerHTML = "";
+                return;
+              }
+
+              const headers = ["firstName", "lastName", "email", "username", "role", "factory"];
+              const tableHTML = `
+                <table class="w-full text-sm border">
+                  <thead class="bg-gray-100">
+                    <tr>
+                      ${headers.map(h => `<th class="px-4 py-2">${h.charAt(0).toUpperCase() + h.slice(1)}</th>`).join("")}
+                      <th class='px-4 py-2'>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${users.map(u => {
+                      // Handle factory data - support both string and array formats
+                      const userFactories = u.工場 || u.factory || [];
+                      const factoryArray = Array.isArray(userFactories) ? userFactories : (userFactories ? [userFactories] : []);
+                      const factoryDisplayText = factoryArray.length > 0 ? factoryArray.join(', ') : '-';
+                      
+                      return `
+                        <tr class="border-t" id="userRow-${u._id}">
+                          ${headers.map(h => `
+                            <td class="px-4 py-2">
+                              ${h === "role"
+                                ? `<select class="border p-1 rounded" disabled data-role user-id="${u._id}" onchange="toggleEditFactoryField('${u._id}', this.value)">
+                                    ${["admin", "班長", "係長", "課長", "member"].map(r => `
+                                      <option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>
+                                    `).join("")}
+                                  </select>`
+                                : h === "factory"
+                                ? `<div class="factory-container" user-id="${u._id}">
+                                    <div class="factory-tags-display" id="factoryDisplay-${u._id}" ${u.role !== "班長" ? "style='display:none'" : ""}>
+                                      ${factoryArray.map(f => `<span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full mr-1 mb-1">${f}</span>`).join('')}
+                                      ${factoryArray.length === 0 ? '<span class="text-gray-500 text-xs">工場未設定</span>' : ''}
+                                    </div>
+                                    <div class="factory-tags-edit hidden" id="factoryEdit-${u._id}">
+                                      <div class="factory-tag-input-container">
+                                        <div class="selected-factories flex flex-wrap gap-1 mb-2" id="selectedFactories-${u._id}">
+                                          ${factoryArray.map(f => `
+                                            <span class="factory-tag bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center">
+                                              ${f}
+                                              <button type="button" class="ml-1 text-blue-600 hover:text-blue-800" onclick="removeFactoryTag('${u._id}', '${f}')">×</button>
+                                            </span>
+                                          `).join('')}
+                                        </div>
+                                        <select class="border p-1 rounded text-xs" onchange="addFactoryTag('${u._id}', this.value); this.value='';">
+                                          <option value="">工場を追加</option>
+                                          ${["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"].map(f => 
+                                            `<option value="${f}">${f}</option>`
+                                          ).join("")}
+                                        </select>
+                                      </div>
+                                    </div>
+                                    <input type="hidden" class="factory-data" data-field="factory" user-id="${u._id}" value='${JSON.stringify(factoryArray)}' />
+                                    ${u.role !== "班長" ? `<span class="text-gray-500 factory-readonly">${factoryDisplayText}</span>` : ""}
+                                  </div>`
+                                : `<input class="border p-1 rounded w-full" value="${u[h] || ""}" disabled data-field="${h}" user-id="${u._id}" />`}
+                            </td>
+                          `).join("")}
+                          <td class="px-4 py-2" id="actions-${u._id}">
+                            <button class="text-blue-600 hover:underline" onclick="startEditingUser('${u._id}')">Edit</button>
+                            <button class="ml-2 text-yellow-600 hover:underline" onclick="resetPassword('${u._id}')">Reset Password</button>
+                            <button class="ml-2 text-red-600 hover:underline" onclick="deleteUser('${u._id}')">Delete</button>
+                          </td>
+                        </tr>`;
+                    }).join("")}
+                  </tbody>
+                </table>
+              `;
+
+              document.getElementById("userTableContainer").innerHTML = tableHTML;
+            }
+
+            // Factory tag management functions
+            window.addFactoryTag = function(userId, factory) {
+              if (!factory) return;
+              
+              const hiddenInput = document.querySelector(`input.factory-data[user-id="${userId}"]`);
+              const selectedContainer = document.getElementById(`selectedFactories-${userId}`);
+              
+              if (!hiddenInput || !selectedContainer) return;
+              
+              let currentFactories = [];
+              try {
+                currentFactories = JSON.parse(hiddenInput.value || '[]');
+              } catch (e) {
+                currentFactories = [];
+              }
+              
+              // Don't add if already exists
+              if (currentFactories.includes(factory)) return;
+              
+              currentFactories.push(factory);
+              hiddenInput.value = JSON.stringify(currentFactories);
+              
+              // Add visual tag
+              const tagHTML = `
+                <span class="factory-tag bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center">
+                  ${factory}
+                  <button type="button" class="ml-1 text-blue-600 hover:text-blue-800" onclick="removeFactoryTag('${userId}', '${factory}')">×</button>
+                </span>
+              `;
+              selectedContainer.insertAdjacentHTML('beforeend', tagHTML);
+            };
+
+            window.removeFactoryTag = function(userId, factory) {
+              const hiddenInput = document.querySelector(`input.factory-data[user-id="${userId}"]`);
+              
+              if (!hiddenInput) return;
+              
+              let currentFactories = [];
+              try {
+                currentFactories = JSON.parse(hiddenInput.value || '[]');
+              } catch (e) {
+                currentFactories = [];
+              }
+              
+              currentFactories = currentFactories.filter(f => f !== factory);
+              hiddenInput.value = JSON.stringify(currentFactories);
+              
+              // Remove visual tag
+              const tagElements = document.querySelectorAll(`#selectedFactories-${userId} .factory-tag`);
+              tagElements.forEach(tag => {
+                if (tag.textContent.trim().startsWith(factory)) {
+                  tag.remove();
+                }
+              });
+            };
+
+            // Updated factory field toggle function for editing users
+            window.toggleEditFactoryField = function(userId, role) {
+              const factoryDisplay = document.getElementById(`factoryDisplay-${userId}`);
+              const factoryEdit = document.getElementById(`factoryEdit-${userId}`);
+              const factoryReadonly = document.querySelector(`tr#userRow-${userId} .factory-readonly`);
+              
+              // Check if we're in edit mode
+              const actionsCell = document.getElementById(`actions-${userId}`);
+              const isInEditMode = actionsCell && actionsCell.innerHTML.includes('OK');
+              
+              if (role === "班長") {
+                if (isInEditMode) {
+                  // In edit mode: hide display, show edit interface
+                  if (factoryDisplay) factoryDisplay.style.display = "none";
+                  if (factoryEdit) factoryEdit.classList.remove('hidden');
+                } else {
+                  // In view mode: show display, hide edit interface
+                  if (factoryDisplay) factoryDisplay.style.display = "block";
+                  if (factoryEdit) factoryEdit.classList.add('hidden');
+                }
+                if (factoryReadonly) factoryReadonly.style.display = "none";
+              } else {
+                // For non-班長 roles: always hide factory interfaces, show readonly text
+                if (factoryDisplay) factoryDisplay.style.display = "none";
+                if (factoryEdit) factoryEdit.classList.add('hidden');
+                if (factoryReadonly) factoryReadonly.style.display = "inline";
+              }
+            };
             
             loadUserTable();
           
