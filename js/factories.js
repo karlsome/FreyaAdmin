@@ -49,7 +49,7 @@ async function renderFactoryCards() {
           red: "bg-red-100 text-red-800"
         }[statusColor];
   
-        const isClickable = ["admin", "班長"].includes(role);
+        const isClickable = role !== "member"; // All roles except member can click
         return `
           <div 
             class="${isClickable ? "cursor-pointer hover:shadow-md" : "opacity-100 cursor-not-allowed"} bg-white p-6 rounded-lg shadow border transition"
@@ -332,8 +332,19 @@ async function loadDailyProduction(factory, date) {
             }).then(res => res.json())
         ));
 
+        console.log('Daily production data loaded:', results);
+
         dailyContainer.innerHTML = processes.map((proc, i) => {
           const data = results[i];
+          
+          // Debug: Check for problematic data
+          data.forEach((item, index) => {
+            try {
+              JSON.stringify(item);
+            } catch (error) {
+              console.error(`Problematic item in ${proc.name} at index ${index}:`, item, error);
+            }
+          });
         
           const bgMap = {
             kensa: "bg-yellow-50",
@@ -349,13 +360,17 @@ async function loadDailyProduction(factory, date) {
             <div class="${bgClass} p-4 rounded shadow">
               <h3 class="font-semibold mb-2">${proc.name} Process (${data.length})</h3>
               <ul class="divide-y divide-gray-200">
-                ${data.map(item => `
-                  <li class="py-2 cursor-pointer hover:bg-gray-100 rounded px-2"
-                      onclick='showSidebarFromElement(this)'
-                      data-item='${encodeURIComponent(JSON.stringify(item))}'>
-                    ${item.品番} - ${item.背番号}
-                  </li>
-                `).join("")}
+                ${data.map(item => {
+                  const encodedData = safeEncodeItemData(item);
+                  return `
+                    <li class="py-2 cursor-pointer hover:bg-gray-100 rounded px-2"
+                        onclick='showSidebarFromElement(this)'
+                        data-item='${encodedData.encodedItem}'
+                        data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
+                      ${item.品番} - ${item.背番号}
+                    </li>
+                  `;
+                }).join("")}
               </ul>
             </div>
           `;
@@ -372,8 +387,36 @@ async function loadDailyProduction(factory, date) {
  * @param {HTMLElement} el - The element containing encoded item data
  */
 function showSidebarFromElement(el) {
-    const item = JSON.parse(decodeURIComponent(el.dataset.item));
-    showSidebar(item);
+    try {
+        const encodedData = el.dataset.item;
+        const comment = el.dataset.comment || '';
+        
+        console.log('Raw encoded data length:', encodedData.length);
+        console.log('Comment length:', comment.length);
+        
+        const decodedData = decodeURIComponent(encodedData);
+        console.log('Decoded data preview:', decodedData.substring(0, 600) + '...');
+        
+        // Parse the item without comment
+        const itemWithoutComment = JSON.parse(decodedData);
+        
+        // Reconstruct the complete item with comment
+        const completeItem = {
+            ...itemWithoutComment,
+            Comment: comment
+        };
+        
+        console.log('Complete item reconstructed successfully');
+        showSidebar(completeItem);
+        
+    } catch (error) {
+        console.error('Error parsing item data:', error);
+        console.error('Problematic encoded data:', el.dataset.item);
+        console.error('Comment data:', el.dataset.comment);
+        
+        // Show a simple error message to user
+        alert('データの読み込みに失敗しました。開発者コンソールでエラーを確認してください。');
+    }
 }
 
 
@@ -436,12 +479,28 @@ function showSidebar(item) {
   content.innerHTML = `
     <h3 class="text-xl font-bold mb-4">${item["品番"] ?? "データ"}</h3>
     <div class="space-y-2" id="sidebarFields">
-      ${entries.map(([label, value]) => `
-        <div class="flex items-center gap-2">
-          <label class="font-medium w-32 shrink-0">${label}</label>
-          <input type="text" class="editable-input p-1 border rounded w-full bg-gray-100" data-label="${label}" value="${value ?? ""}" disabled />
-        </div>
-      `).join("")}
+      ${entries.map(([label, value]) => {
+        const isComment = label === "コメント" || label === "Comment";
+        if (isComment) {
+          return `
+            <div class="flex items-start gap-2">
+              <label class="font-medium w-32 shrink-0 pt-1">${label}</label>
+              <textarea class="editable-input p-1 border rounded w-full bg-gray-100 resize-none overflow-hidden" 
+                        data-label="${label}" 
+                        disabled
+                        style="min-height: 2.5rem;"
+                        oninput="this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'">${value ?? ""}</textarea>
+            </div>
+          `;
+        } else {
+          return `
+            <div class="flex items-center gap-2">
+              <label class="font-medium w-32 shrink-0">${label}</label>
+              <input type="text" class="editable-input p-1 border rounded w-full bg-gray-100" data-label="${label}" value="${value ?? ""}" disabled />
+            </div>
+          `;
+        }
+      }).join("")}
     </div>
     <div class="mt-4 flex gap-2">
       <button id="editSidebarBtn" class="text-blue-600 underline text-sm">Edit</button>
@@ -466,6 +525,14 @@ function showSidebar(item) {
         }).join("")}
       </div>
   `;
+
+  // Initialize textarea height for comment fields
+  const commentTextareas = content.querySelectorAll('textarea[data-label="コメント"], textarea[data-label="Comment"]');
+  commentTextareas.forEach(textarea => {
+    // Set initial height based on content
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+  });
 
   // Load master DB image
   loadMasterImage(item["品番"], item["背番号"]);
@@ -510,6 +577,14 @@ function showSidebar(item) {
         recalculateLive();
         validateInputs();
       });
+      
+      // For textareas (comment fields), add auto-resize functionality when editing
+      if (i.tagName.toLowerCase() === 'textarea') {
+        i.addEventListener("input", () => {
+          i.style.height = 'auto';
+          i.style.height = i.scrollHeight + 'px';
+        });
+      }
     });
     document.getElementById("saveSidebarBtn").classList.remove("hidden");
     document.getElementById("cancelSidebarBtn").classList.remove("hidden");
@@ -822,18 +897,22 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                             </tr>
                           </thead>
                           <tbody>
-                            ${sorted.map(item => `
-                              <tr class="cursor-pointer hover:bg-gray-100"
-                                  onclick='showSidebarFromElement(this)'
-                                  data-item='${encodeURIComponent(JSON.stringify(item))}'>
-                                <td>${item.品番 ?? "-"}</td>
-                                <td>${item.背番号 ?? "-"}</td>
-                                <td>${item.Worker_Name ?? "-"}</td>
-                                <td>${item.Date ?? "-"}</td>
-                                <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
-                                <td>${item.Total_NG ?? 0}</td>
-                              </tr>
-                            `).join("")}
+                            ${sorted.map(item => {
+                              const encodedData = safeEncodeItemData(item);
+                              return `
+                                <tr class="cursor-pointer hover:bg-gray-100"
+                                    onclick='showSidebarFromElement(this)'
+                                    data-item='${encodedData.encodedItem}'
+                                    data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
+                                  <td>${item.品番 ?? "-"}</td>
+                                  <td>${item.背番号 ?? "-"}</td>
+                                  <td>${item.Worker_Name ?? "-"}</td>
+                                  <td>${item.Date ?? "-"}</td>
+                                  <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
+                                  <td>${item.Total_NG ?? 0}</td>
+                                </tr>
+                              `;
+                            }).join("")}
                           </tbody>
                         </table>
                       </div>
@@ -937,18 +1016,22 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                       </tr>
                     </thead>
                     <tbody>
-                      ${sorted.map(item => `
-                        <tr class="cursor-pointer hover:bg-gray-100"
-                            onclick='showSidebarFromElement(this)'
-                            data-item='${encodeURIComponent(JSON.stringify(item))}'>
-                          <td>${item.品番 ?? "-"}</td>
-                          <td>${item.背番号 ?? "-"}</td>
-                          <td>${item.Worker_Name ?? "-"}</td>
-                          <td>${item.Date ?? "-"}</td>
-                          <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
-                          <td>${item.Total_NG ?? 0}</td>
-                        </tr>
-                      `).join("")}
+                      ${sorted.map(item => {
+                        const encodedData = safeEncodeItemData(item);
+                        return `
+                          <tr class="cursor-pointer hover:bg-gray-100"
+                              onclick='showSidebarFromElement(this)'
+                              data-item='${encodedData.encodedItem}'
+                              data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
+                            <td>${item.品番 ?? "-"}</td>
+                            <td>${item.背番号 ?? "-"}</td>
+                            <td>${item.Worker_Name ?? "-"}</td>
+                            <td>${item.Date ?? "-"}</td>
+                            <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
+                            <td>${item.Total_NG ?? 0}</td>
+                          </tr>
+                        `;
+                      }).join("")}
                     </tbody>
                   </table>
                 </div>
@@ -1293,4 +1376,49 @@ async function loadMasterImage(品番, 背番号) {
       </div>
     `;
   }
+}
+
+/**
+ * Safely encode item data for HTML attributes, excluding problematic Comment field
+ * @param {Object} item - The item object to encode
+ * @returns {Object} - Object with encoded item data and separate comment
+ */
+function safeEncodeItemData(item) {
+    try {
+        // Create a copy without the Comment field
+        const itemWithoutComment = { ...item };
+        const comment = itemWithoutComment.Comment || '';
+        delete itemWithoutComment.Comment;
+        
+        // Encode the clean item (without comment)
+        const encodedItem = encodeURIComponent(JSON.stringify(itemWithoutComment));
+        
+        // Return both encoded item and raw comment
+        return {
+            encodedItem,
+            comment
+        };
+        
+    } catch (error) {
+        console.error('Error in safeEncodeItemData:', error);
+        console.error('Problematic item:', item);
+        
+        // Create a minimal safe fallback
+        const safeItem = {
+            _id: item._id || 'unknown',
+            品番: item.品番 || 'unknown',
+            背番号: item.背番号 || 'unknown',
+            工場: item.工場 || 'unknown',
+            Total: item.Total || 0,
+            Total_NG: item.Total_NG || 0,
+            Worker_Name: item.Worker_Name || 'unknown',
+            Date: item.Date || 'unknown',
+            error: 'Data simplified due to encoding issues'
+        };
+        
+        return {
+            encodedItem: encodeURIComponent(JSON.stringify(safeItem)),
+            comment: item.Comment || ''
+        };
+    }
 }

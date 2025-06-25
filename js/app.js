@@ -13,6 +13,9 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 const roleAccess = {
   admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement"],
+  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB"], // Same as 部長
+  係長: ["dashboard", "factories", "approvals", "masterDB"], // Same as 班長 but factory-limited
   班長: ["dashboard", "factories", "approvals", "masterDB"],
   member: ["dashboard"]
 };
@@ -170,22 +173,31 @@ function loadPage(page) {
                 <!-- Tab Content Container -->
                 <div id="approvalTabContent">
                     <!-- Stats Cards -->
-                    <div class="grid grid-cols-4 gap-4 mb-6">
-                        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                    <div class="grid grid-cols-5 gap-4 mb-6">
+                        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
                             <h3 class="text-sm font-medium text-yellow-800">保留中</h3>
                             <p class="text-2xl font-bold text-yellow-900" id="pendingCount">0</p>
+                            <p class="text-xs text-yellow-600">班長承認待ち</p>
                         </div>
-                        <div class="bg-green-50 p-4 rounded-lg border border-green-200">
-                            <h3 class="text-sm font-medium text-green-800">承認済み</h3>
-                            <p class="text-2xl font-bold text-green-900" id="approvedCount">0</p>
+                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors" onclick="filterByStatus('hancho_approved')">
+                            <h3 class="text-sm font-medium text-blue-800">班長承認済み</h3>
+                            <p class="text-2xl font-bold text-blue-900" id="hanchoApprovedCount">0</p>
+                            <p class="text-xs text-blue-600">課長承認待ち</p>
                         </div>
-                        <div class="bg-red-50 p-4 rounded-lg border border-red-200">
+                        <div class="bg-green-50 p-4 rounded-lg border border-green-200 cursor-pointer hover:bg-green-100 transition-colors" onclick="filterByStatus('fully_approved')">
+                            <h3 class="text-sm font-medium text-green-800">完全承認済み</h3>
+                            <p class="text-2xl font-bold text-green-900" id="fullyApprovedCount">0</p>
+                            <p class="text-xs text-green-600">課長承認完了</p>
+                        </div>
+                        <div class="bg-red-50 p-4 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors" onclick="filterByStatus('correction_needed')">
                             <h3 class="text-sm font-medium text-red-800">修正要求</h3>
                             <p class="text-2xl font-bold text-red-900" id="correctionCount">0</p>
+                            <p class="text-xs text-red-600">要修正・再提出</p>
                         </div>
-                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                            <h3 class="text-sm font-medium text-blue-800">今日の総数</h3>
-                            <p class="text-2xl font-bold text-blue-900" id="totalCount">0</p>
+                        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors" onclick="filterByStatus('today')">
+                            <h3 class="text-sm font-medium text-gray-800">今日の総数</h3>
+                            <p class="text-2xl font-bold text-gray-900" id="totalCount">0</p>
+                            <p class="text-xs text-gray-600">本日提出分</p>
                         </div>
                     </div>
 
@@ -199,9 +211,11 @@ function loadPage(page) {
                         </select>
                         <select id="statusFilter" class="p-2 border rounded">
                             <option value="">All Status</option>
-                            <option value="pending">保留中</option>
-                            <option value="approved">承認済み</option>
+                            <option value="pending">保留中 (班長承認待ち)</option>
+                            <option value="hancho_approved">班長承認済み (課長承認待ち)</option>
+                            <option value="fully_approved">完全承認済み</option>
                             <option value="correction_needed">修正要求</option>
+                            <option value="correction_needed_from_kacho">課長修正要求（班長対応）</option>
                         </select>
                         <input type="date" id="dateFilter" class="p-2 border rounded">
                         <input type="text" id="approvalSearchInput" placeholder="品番、背番号、作業者で検索..." class="p-2 border rounded flex-1 min-w-64">
@@ -245,7 +259,7 @@ function loadPage(page) {
             break;
 
           case "userManagement":
-              if (role !== "admin") {
+              if (!["admin", "部長", "課長"].includes(role)) {
                   mainContent.innerHTML = `<p class="text-red-600 font-semibold">Access Denied</p>`;
                   return;
               }
@@ -267,11 +281,25 @@ function loadPage(page) {
                     <input required type="email" placeholder="Email" id="email" class="border p-2 rounded" />
                     <input required placeholder="Username" id="username" class="border p-2 rounded" />
                     <input required type="password" placeholder="Password" id="password" class="border p-2 rounded" />
-                    <select id="role" class="border p-2 rounded" required>
+                    <select id="role" class="border p-2 rounded" required onchange="toggleFactorySelection()">
+                      <option value="">Select Role</option>
                       <option value="admin">admin</option>
+                      <option value="部長">部長</option>
+                      <option value="課長">課長</option>
+                      <option value="係長">係長</option>
                       <option value="班長">班長</option>
                       <option value="member">member</option>
                     </select>
+                    
+                    <!-- Factory Selection (shown only for 班長 and 係長) -->
+                    <div id="factorySelectionContainer" class="col-span-2 hidden">
+                      <label class="block text-sm font-medium text-gray-700 mb-2">工場 Selection</label>
+                      <div class="grid grid-cols-3 gap-2" id="factoryCheckboxes">
+                        <!-- Will be populated with factory options -->
+                      </div>
+                      <input type="hidden" id="selectedFactories" name="factories" />
+                    </div>
+                    
                     <button type="submit" class="col-span-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
                       Submit
                     </button>
@@ -286,18 +314,106 @@ function loadPage(page) {
           
             document.getElementById("toggleCreateUserForm").onclick = () => {
               document.getElementById("createUserFormWrapper").classList.toggle("hidden");
+              // Load factory options when form is opened
+              if (!document.getElementById("createUserFormWrapper").classList.contains("hidden")) {
+                loadFactoryOptions();
+              }
             };
+            
+            // Function to toggle factory selection based on role
+            window.toggleFactorySelection = function() {
+              const role = document.getElementById("role").value;
+              const factoryContainer = document.getElementById("factorySelectionContainer");
+              
+              if (role === "班長" || role === "係長") {
+                factoryContainer.classList.remove("hidden");
+              } else {
+                factoryContainer.classList.add("hidden");
+                // Clear selected factories for non-factory roles
+                document.getElementById("selectedFactories").value = "";
+                updateFactoryDisplay();
+              }
+            };
+            
+            // Function to load factory options from masterDB
+            async function loadFactoryOptions() {
+              try {
+                const response = await fetch(BASE_URL + "queries", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    dbName: "Sasaki_Coating_MasterDB",
+                    collectionName: "masterDB",
+                    query: {},
+                    projection: { "工場": 1 }
+                  })
+                });
+                
+                if (response.ok) {
+                  const data = await response.json();
+                  const factories = [...new Set(data.map(item => item.工場).filter(Boolean))].sort();
+                  renderFactoryCheckboxes(factories);
+                }
+              } catch (error) {
+                console.error("Failed to load factory options:", error);
+                // Fallback to default factories
+                const defaultFactories = ["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"];
+                renderFactoryCheckboxes(defaultFactories);
+              }
+            }
+            
+            // Function to render factory checkboxes
+            function renderFactoryCheckboxes(factories) {
+              const container = document.getElementById("factoryCheckboxes");
+              container.innerHTML = factories.map(factory => `
+                <label class="flex items-center space-x-2 p-2 border rounded hover:bg-gray-50">
+                  <input type="checkbox" value="${factory}" onchange="updateSelectedFactories()" class="factory-checkbox">
+                  <span class="text-sm">${factory}</span>
+                </label>
+              `).join('');
+            }
+            
+            // Function to update selected factories
+            window.updateSelectedFactories = function() {
+              const checkboxes = document.querySelector
+              const selectedFactories = Array.from(checkboxes).map(cb => cb.value);
+              document.getElementById("selectedFactories").value = JSON.stringify(selectedFactories);
+              updateFactoryDisplay();
+            };
+            
+            // Function to update factory display
+            function updateFactoryDisplay() {
+              // This can be expanded to show selected factories if needed
+            }
             
             document.getElementById("createUserForm").addEventListener("submit", async (e) => {
               e.preventDefault();
+              const role = document.getElementById("role").value;
+              const selectedFactoriesValue = document.getElementById("selectedFactories").value;
+              
+              // Validate factory selection for roles that require it
+              if ((role === "班長" || role === "係長") && (!selectedFactoriesValue || selectedFactoriesValue === "[]")) {
+                alert(`${role} role requires at least one factory assignment.`);
+                return;
+              }
+              
               const body = {
                 firstName: document.getElementById("firstName").value.trim(),
                 lastName: document.getElementById("lastName").value.trim(),
                 email: document.getElementById("email").value.trim(),
                 username: document.getElementById("username").value.trim(),
                 password: document.getElementById("password").value.trim(),
-                role: document.getElementById("role").value
+                role: role
               };
+              
+              // Add factory data for roles that need it
+              if ((role === "班長" || role === "係長") && selectedFactoriesValue) {
+                try {
+                  body.factory = JSON.parse(selectedFactoriesValue);
+                } catch (e) {
+                  body.factory = [];
+                }
+              }
             
               try {
                 const res = await fetch(BASE_URL + "createUser", {
@@ -308,9 +424,10 @@ function loadPage(page) {
             
                 const result = await res.json();
                 if (!res.ok) throw new Error(result.error || "Failed to create user");
-                alert("User created");
+                alert("User created successfully");
                 e.target.reset();
                 document.getElementById("createUserFormWrapper").classList.add("hidden");
+                document.getElementById("factorySelectionContainer").classList.add("hidden");
                 loadUserTable(); // refresh list
               } catch (err) {
                 alert(err.message);
@@ -543,7 +660,7 @@ function loadPage(page) {
             }
 
             function renderUserTable(users) {
-              if (currentUser.role !== "admin") {
+              if (!["admin", "部長", "課長"].includes(currentUser.role)) {
                 document.getElementById("userTableContainer").innerHTML = "";
                 return;
               }
@@ -570,13 +687,13 @@ function loadPage(page) {
                             <td class="px-4 py-2">
                               ${h === "role"
                                 ? `<select class="border p-1 rounded" disabled data-role user-id="${u._id}" onchange="toggleEditFactoryField('${u._id}', this.value)">
-                                    ${["admin", "班長", "係長", "課長", "member"].map(r => `
+                                    ${["admin", "部長", "課長", "係長", "班長", "member"].map(r => `
                                       <option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>
                                     `).join("")}
                                   </select>`
                                 : h === "factory"
                                 ? `<div class="factory-container" user-id="${u._id}">
-                                    <div class="factory-tags-display" id="factoryDisplay-${u._id}" ${u.role !== "班長" ? "style='display:none'" : ""}>
+                                    <div class="factory-tags-display" id="factoryDisplay-${u._id}" ${u.role !== "班長" && u.role !== "係長" ? "style='display:none'" : ""}>
                                       ${factoryArray.map(f => `<span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full mr-1 mb-1">${f}</span>`).join('')}
                                       ${factoryArray.length === 0 ? '<span class="text-gray-500 text-xs">工場未設定</span>' : ''}
                                     </div>
@@ -599,7 +716,7 @@ function loadPage(page) {
                                       </div>
                                     </div>
                                     <input type="hidden" class="factory-data" data-field="factory" user-id="${u._id}" value='${JSON.stringify(factoryArray)}' />
-                                    ${u.role !== "班長" ? `<span class="text-gray-500 factory-readonly">${factoryDisplayText}</span>` : ""}
+                                    ${u.role !== "班長" && u.role !== "係長" ? `<span class="text-gray-500 factory-readonly">${factoryDisplayText}</span>` : ""}
                                   </div>`
                                 : `<input class="border p-1 rounded w-full" value="${u[h] || ""}" disabled data-field="${h}" user-id="${u._id}" />`}
                             </td>
@@ -684,7 +801,7 @@ function loadPage(page) {
               const actionsCell = document.getElementById(`actions-${userId}`);
               const isInEditMode = actionsCell && actionsCell.innerHTML.includes('OK');
               
-              if (role === "班長") {
+              if (role === "班長" || role === "係長") {
                 if (isInEditMode) {
                   // In edit mode: hide display, show edit interface
                   if (factoryDisplay) factoryDisplay.style.display = "none";
@@ -696,7 +813,7 @@ function loadPage(page) {
                 }
                 if (factoryReadonly) factoryReadonly.style.display = "none";
               } else {
-                // For non-班長 roles: always hide factory interfaces, show readonly text
+                // For roles without factory access: always hide factory interfaces, show readonly text
                 if (factoryDisplay) factoryDisplay.style.display = "none";
                 if (factoryEdit) factoryEdit.classList.add('hidden');
                 if (factoryReadonly) factoryReadonly.style.display = "inline";
@@ -1500,28 +1617,53 @@ async function loadApprovalData() {
         console.log('Initial user data from localStorage:', currentUserData);
         
         // If user data is missing factory information, fetch it from database
-        if (currentUserData.role === '班長' && (!currentUserData.工場 && !currentUserData.factory)) {
+        if ((currentUserData.role === '班長' || currentUserData.role === '係長') && (!currentUserData.工場 && !currentUserData.factory)) {
             console.log('Factory info missing, fetching from database...');
             currentUserData = await fetchCompleteUserData(currentUserData.username);
         }
         
         // Determine query based on user role and current tab
         let query = {};
+        
+        // Role-based visibility for 2-step approval system
         if (currentUserData.role === '班長') {
-            // Check both possible field names for factories
+            // 班長 can only see data for their assigned factories (first approval level)
             const userFactories = currentUserData.工場 || currentUserData.factory;
-            
-            console.log('User factories found:', userFactories);
+            console.log('班長 factories found:', userFactories);
             
             if (userFactories && userFactories.length > 0) {
-                // 班長 can only see data for their assigned factory
                 const factoryArray = Array.isArray(userFactories) ? userFactories : [userFactories];
                 query = { "工場": { $in: factoryArray } };
-                console.log('Applying factory filter query:', query);
+                console.log('Applying 班長 factory filter:', query);
             } else {
                 console.warn('班長 user has no assigned factories, showing no data');
-                query = { "工場": { $in: [] } }; // Show no data if no factories assigned
+                query = { "工場": { $in: [] } };
             }
+        } else if (currentUserData.role === '係長') {
+            // 係長 can only see data for their assigned factories (similar to 班長 but limited access)
+            const userFactories = currentUserData.工場 || currentUserData.factory;
+            console.log('係長 factories found:', userFactories);
+            
+            if (userFactories && userFactories.length > 0) {
+                const factoryArray = Array.isArray(userFactories) ? userFactories : [userFactories];
+                query = { "工場": { $in: factoryArray } };
+                console.log('Applying 係長 factory filter:', query);
+            } else {
+                console.warn('係長 user has no assigned factories, showing no data');
+                query = { "工場": { $in: [] } };
+            }
+        } else if (currentUserData.role === '課長') {
+            // 課長 can see all data (to monitor 班長 approvals and do second approval)
+            query = {}; // No filter - see everything
+            console.log('課長 can see all data');
+        } else if (['admin', '部長'].includes(currentUserData.role)) {
+            // Admin/部長 can see everything including history
+            query = {}; // No filter - see everything
+            console.log('Admin/部長 can see all data including history');
+        } else {
+            // Other roles have no access
+            query = { "_id": { $exists: false } }; // Show nothing
+            console.log('Role has no approval access');
         }
 
         console.log('Final query for', currentApprovalTab, ':', query);
@@ -1531,7 +1673,7 @@ async function loadApprovalData() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 dbName: "submittedDB",
-                collectionName: currentApprovalTab, // Use current tab as collection name
+                collectionName: currentApprovalTab,
                 query: query
             })
         });
@@ -1604,6 +1746,27 @@ function loadFactoryFilterOptions() {
 }
 
 /**
+ * Filter by status when clicking on stat cards
+ */
+window.filterByStatus = function(status) {
+    const statusFilter = document.getElementById('statusFilter');
+    
+    if (status === 'today') {
+        // Filter by today's date
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('dateFilter').value = today;
+        statusFilter.value = '';
+    } else {
+        // Clear date filter and set status filter
+        document.getElementById('dateFilter').value = '';
+        statusFilter.value = status;
+    }
+    
+    // Apply filters
+    applyApprovalFilters();
+};
+
+/**
  * Apply filters to approval data
  */
 function applyApprovalFilters() {
@@ -1614,10 +1777,15 @@ function applyApprovalFilters() {
 
     filteredApprovalData = allApprovalData.filter(item => {
         const factoryMatch = !factoryFilter || item.工場 === factoryFilter;
+        
+        // Updated status matching for 2-step approval
         const statusMatch = !statusFilter || 
             (statusFilter === 'pending' && (!item.approvalStatus || item.approvalStatus === 'pending')) ||
-            (statusFilter === 'approved' && item.approvalStatus === 'approved') ||
-            (statusFilter === 'correction_needed' && item.approvalStatus === 'correction_needed');
+            (statusFilter === 'hancho_approved' && item.approvalStatus === 'hancho_approved') ||
+            (statusFilter === 'fully_approved' && item.approvalStatus === 'fully_approved') ||
+            (statusFilter === 'correction_needed' && item.approvalStatus === 'correction_needed') ||
+            (statusFilter === 'correction_needed_from_kacho' && item.approvalStatus === 'correction_needed_from_kacho');
+            
         const dateMatch = !dateFilter || item.Date === dateFilter;
         const searchMatch = !searchTerm || 
             (item.品番 && item.品番.toLowerCase().includes(searchTerm)) ||
@@ -1633,17 +1801,21 @@ function applyApprovalFilters() {
 }
 
 /**
- * Update statistics cards
+ * Update statistics cards with clickable functionality
  */
 function updateStats() {
     const pending = allApprovalData.filter(item => !item.approvalStatus || item.approvalStatus === 'pending').length;
-    const approved = allApprovalData.filter(item => item.approvalStatus === 'approved').length;
-    const correction = allApprovalData.filter(item => item.approvalStatus === 'correction_needed').length;
+    const hanchoApproved = allApprovalData.filter(item => item.approvalStatus === 'hancho_approved').length;
+    const fullyApproved = allApprovalData.filter(item => item.approvalStatus === 'fully_approved').length;
+    const correction = allApprovalData.filter(item => 
+        item.approvalStatus === 'correction_needed' || item.approvalStatus === 'correction_needed_from_kacho'
+    ).length;
     const today = new Date().toISOString().split('T')[0];
     const todayTotal = allApprovalData.filter(item => item.Date === today).length;
 
     document.getElementById('pendingCount').textContent = pending;
-    document.getElementById('approvedCount').textContent = approved;
+    document.getElementById('hanchoApprovedCount').textContent = hanchoApproved;
+    document.getElementById('fullyApprovedCount').textContent = fullyApproved;
     document.getElementById('correctionCount').textContent = correction;
     document.getElementById('totalCount').textContent = todayTotal;
 }
@@ -1832,10 +2004,14 @@ function getSortArrow(column) {
 function getStatusInfo(item) {
     if (!item.approvalStatus || item.approvalStatus === 'pending') {
         return { text: '保留中', icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: 'bg-yellow-50' };
-    } else if (item.approvalStatus === 'approved') {
-        return { text: '承認済み', icon: 'ri-check-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
+    } else if (item.approvalStatus === 'hancho_approved') {
+        return { text: '班長承認済み', icon: 'ri-user-check-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: 'bg-blue-50' };
+    } else if (item.approvalStatus === 'fully_approved') {
+        return { text: '完全承認済み', icon: 'ri-check-double-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
     } else if (item.approvalStatus === 'correction_needed') {
         return { text: '修正要求', icon: 'ri-error-warning-line', badgeClass: 'bg-red-100 text-red-800', rowClass: 'bg-red-50' };
+    } else if (item.approvalStatus === 'correction_needed_from_kacho') {
+        return { text: '課長修正要求（班長対応）', icon: 'ri-error-warning-line', badgeClass: 'bg-orange-100 text-orange-800', rowClass: 'bg-orange-50' };
     }
     return { text: '不明', icon: 'ri-question-line', badgeClass: 'bg-gray-100 text-gray-800', rowClass: '' };
 }
@@ -2323,38 +2499,69 @@ async function loadMasterImage(品番, 背番号, containerId) {
  */
 function getApprovalStatusHTML(item) {
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
-    const canApprove = ['admin', '班長', '係長', '課長'].includes(currentUser.role);
     
-    let statusHTML = `<div class="flex items-center space-x-2 mb-3">`;
+    let statusHTML = `<div class="space-y-3">`;
+    
+    // Current status display
+    statusHTML += `<div class="flex items-center space-x-2">`;
     
     if (!item.approvalStatus || item.approvalStatus === 'pending') {
         statusHTML += `
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                <i class="ri-time-line mr-1"></i>承認待ち
+                <i class="ri-time-line mr-1"></i>保留中（班長承認待ち）
             </span>
         `;
         
-        if (canApprove) {
+        // 班長 can approve in first step
+        if (currentUser.role === '班長') {
             statusHTML += `
                 <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    承認
+                    班長承認
                 </button>
                 <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
                     修正要求
                 </button>
             `;
         }
-    } else if (item.approvalStatus === 'approved') {
+    } else if (item.approvalStatus === 'hancho_approved') {
         statusHTML += `
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                <i class="ri-check-line mr-1"></i>承認済み
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                <i class="ri-user-check-line mr-1"></i>班長承認済み（課長承認待ち）
             </span>
         `;
-        if (item.approvedBy) {
-            statusHTML += `<span class="text-xs text-gray-600">承認者: ${item.approvedBy}</span>`;
+        
+        // 課長, admin, 部長 can approve in second step
+        if (['課長', 'admin', '部長'].includes(currentUser.role)) {
+            statusHTML += `
+                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                    課長承認
+                </button>
+                <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                    修正要求
+                </button>
+            `;
         }
-        if (item.approvedAt) {
-            statusHTML += `<span class="text-xs text-gray-600">${new Date(item.approvedAt).toLocaleString('ja-JP')}</span>`;
+        
+        if (item.hanchoApprovedBy) {
+            statusHTML += `<div class="text-xs text-gray-600">班長承認: ${item.hanchoApprovedBy}</div>`;
+        }
+        if (item.hanchoApprovedAt) {
+            statusHTML += `<div class="text-xs text-gray-600">${new Date(item.hanchoApprovedAt).toLocaleString('ja-JP')}</div>`;
+        }
+    } else if (item.approvalStatus === 'fully_approved') {
+        statusHTML += `
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                <i class="ri-check-double-line mr-1"></i>完全承認済み
+            </span>
+        `;
+        
+        if (item.hanchoApprovedBy && item.kachoApprovedBy) {
+            statusHTML += `
+                <div class="text-xs text-gray-600 space-y-1">
+                    <div>班長承認: ${item.hanchoApprovedBy} (${new Date(item.hanchoApprovedAt).toLocaleString('ja-JP')})</div>
+                    <div>課長承認: ${item.kachoApprovedBy} (${new Date(item.kachoApprovedAt).toLocaleString('ja-JP')})</div>
+                </div>
+            `;
         }
     } else if (item.approvalStatus === 'correction_needed') {
         statusHTML += `
@@ -2362,8 +2569,33 @@ function getApprovalStatusHTML(item) {
                 <i class="ri-error-warning-line mr-1"></i>修正要求
             </span>
         `;
+        if (item.correctionBy) {
+            statusHTML += `<div class="text-xs text-gray-600">要求者: ${item.correctionBy}</div>`;
+        }
         if (item.correctionComment) {
             statusHTML += `<div class="mt-2 text-xs text-gray-600 bg-red-50 p-2 rounded">${item.correctionComment}</div>`;
+        }
+    } else if (item.approvalStatus === 'correction_needed_from_kacho') {
+        statusHTML += `
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                <i class="ri-error-warning-line mr-1"></i>課長修正要求（班長対応）
+            </span>
+        `;
+        
+        // 班長 can edit data and re-approve
+        if (currentUser.role === '班長') {
+            statusHTML += `
+                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                    修正完了・再承認
+                </button>
+            `;
+        }
+        
+        if (item.correctionBy) {
+            statusHTML += `<div class="text-xs text-gray-600">修正要求者: ${item.correctionBy}</div>`;
+        }
+        if (item.correctionComment) {
+            statusHTML += `<div class="mt-2 text-xs text-gray-600 bg-orange-50 p-2 rounded">${item.correctionComment}</div>`;
         }
     }
     
@@ -2377,10 +2609,8 @@ function getApprovalStatusHTML(item) {
                 <div class="space-y-1 max-h-32 overflow-y-auto">
                     ${item.approvalHistory.map(history => `
                         <div class="text-xs text-gray-600 bg-gray-50 p-2 rounded">
-                            <div class="flex justify-between">
-                                <span>${history.action} - ${history.user}</span>
-                                <span>${new Date(history.timestamp).toLocaleString('ja-JP')}</span>
-                            </div>
+                            <div class="font-medium">${history.action} - ${history.user}</div>
+                            <div>${new Date(history.timestamp).toLocaleString('ja-JP')}</div>
                             ${history.comment ? `<div class="mt-1">${history.comment}</div>` : ''}
                         </div>
                     `).join('')}
@@ -2388,6 +2618,8 @@ function getApprovalStatusHTML(item) {
             </div>
         `;
     }
+    
+    statusHTML += `</div>`;
     
     return statusHTML;
 }
@@ -2400,14 +2632,41 @@ window.closeApprovalModal = function() {
 };
 
 /**
- * Approve an item
+ * Approve an item (2-step approval process)
  */
 window.approveItem = async function(itemId) {
-    const comment = prompt("承認コメント (任意):");
-    if (comment === null) return; // User cancelled
-    
     try {
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const item = allApprovalData.find(d => d._id === itemId);
+        
+        // Get user's full name for display
+        const userFullName = await getUserFullName(currentUser.username);
+        
+        let newStatus, approvalField, approvalByField, actionText;
+        
+        // Determine next approval step based on current status and user role
+        if ((!item.approvalStatus || item.approvalStatus === 'pending') && currentUser.role === '班長') {
+            // First step: 班長 approval
+            newStatus = 'hancho_approved';
+            approvalField = 'hanchoApprovedBy';
+            approvalByField = 'hanchoApprovedAt';
+            actionText = '班長承認';
+        } else if (item.approvalStatus === 'hancho_approved' && ['課長', 'admin', '部長'].includes(currentUser.role)) {
+            // Second step: 課長 approval
+            newStatus = 'fully_approved';
+            approvalField = 'kachoApprovedBy';
+            approvalByField = 'kachoApprovedAt';
+            actionText = '課長承認';
+        } else if (item.approvalStatus === 'correction_needed_from_kacho' && currentUser.role === '班長') {
+            // Re-approval after 課長 correction request
+            newStatus = 'hancho_approved';
+            approvalField = 'hanchoApprovedBy';
+            approvalByField = 'hanchoApprovedAt';
+            actionText = '修正完了・再承認';
+        } else {
+            alert("承認権限がありません");
+            return;
+        }
         
         const response = await fetch(BASE_URL + "queries", {
             method: "POST",
@@ -2418,17 +2677,15 @@ window.approveItem = async function(itemId) {
                 query: { _id: itemId },
                 update: {
                     $set: {
-                        approvalStatus: 'approved',
-                        approvedBy: currentUser.username,
-                        approvedAt: new Date(),
-                        approvalComment: comment
+                        approvalStatus: newStatus,
+                        [approvalField]: userFullName,
+                        [approvalByField]: new Date()
                     },
                     $push: {
                         approvalHistory: {
-                            action: '承認',
-                            user: currentUser.username,
-                            timestamp: new Date(),
-                            comment: comment
+                            action: actionText,
+                            user: userFullName,
+                            timestamp: new Date()
                         }
                     }
                 }
@@ -2437,7 +2694,16 @@ window.approveItem = async function(itemId) {
         
         if (!response.ok) throw new Error('Failed to approve item');
         
-        alert("承認しました");
+        let stepMessage;
+        if (actionText === '修正完了・再承認') {
+            stepMessage = '修正完了・班長再承認（課長承認待ち）';
+        } else if (newStatus === 'hancho_approved') {
+            stepMessage = '班長承認完了（課長承認待ち）';
+        } else {
+            stepMessage = '課長承認完了（承認完了）';
+        }
+        
+        alert(stepMessage);
         closeApprovalModal();
         loadApprovalData();
         
@@ -2446,6 +2712,36 @@ window.approveItem = async function(itemId) {
         alert("承認に失敗しました");
     }
 };
+
+/**
+ * Get user's full name for display
+ */
+async function getUserFullName(username) {
+    try {
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "users",
+                query: { username: username },
+                projection: { firstName: 1, lastName: 1 }
+            })
+        });
+
+        if (response.ok) {
+            const users = await response.json();
+            if (users.length > 0) {
+                const user = users[0];
+                return `${user.lastName || ''} ${user.firstName || ''}`.trim() || username;
+            }
+        }
+        return username; // Fallback to username if full name not found
+    } catch (error) {
+        console.error('Error getting user full name:', error);
+        return username;
+    }
+}
 
 /**
  * Request correction for an item
@@ -2459,6 +2755,24 @@ window.requestCorrection = async function(itemId) {
     
     try {
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userFullName = await getUserFullName(currentUser.username);
+        const item = allApprovalData.find(d => d._id === itemId);
+        
+        let newStatus, targetRole;
+        
+        // Determine correction logic based on current status and user role
+        if (currentUser.role === '班長' && (!item.approvalStatus || item.approvalStatus === 'pending')) {
+            // Scenario 2: 班長 requests correction - goes back to submitter (original logic)
+            newStatus = 'correction_needed';
+            targetRole = 'submitter';
+        } else if (['課長', 'admin', '部長'].includes(currentUser.role) && item.approvalStatus === 'hancho_approved') {
+            // Scenario 1: 課長 requests correction after 班長 approval - goes back to 班長
+            newStatus = 'correction_needed_from_kacho';
+            targetRole = '班長';
+        } else {
+            alert("修正要求権限がありません");
+            return;
+        }
         
         const response = await fetch(BASE_URL + "queries", {
             method: "POST",
@@ -2469,17 +2783,19 @@ window.requestCorrection = async function(itemId) {
                 query: { _id: itemId },
                 update: {
                     $set: {
-                        approvalStatus: 'correction_needed',
-                        correctionBy: currentUser.username,
+                        approvalStatus: newStatus,
+                        correctionBy: userFullName,
                         correctionAt: new Date(),
-                        correctionComment: comment
+                        correctionComment: comment,
+                        correctionTarget: targetRole
                     },
                     $push: {
                         approvalHistory: {
                             action: '修正要求',
-                            user: currentUser.username,
+                            user: userFullName,
                             timestamp: new Date(),
-                            comment: comment
+                            comment: comment,
+                            target: targetRole
                         }
                     }
                 }
@@ -2488,7 +2804,10 @@ window.requestCorrection = async function(itemId) {
         
         if (!response.ok) throw new Error('Failed to request correction');
         
-        alert("修正要求を送信しました");
+        const targetMessage = targetRole === '班長' ? 
+            "修正要求を送信しました（班長による修正が必要）" : 
+            "修正要求を送信しました（提出者による修正が必要）";
+        alert(targetMessage);
         closeApprovalModal();
         loadApprovalData();
         
