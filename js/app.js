@@ -1494,15 +1494,37 @@ function updateTabStyles() {
  */
 async function loadApprovalData() {
     try {
-        const currentUserData = JSON.parse(localStorage.getItem("authUser") || "{}");
+        let currentUserData = JSON.parse(localStorage.getItem("authUser") || "{}");
+        
+        // Debug log to check user data structure
+        console.log('Initial user data from localStorage:', currentUserData);
+        
+        // If user data is missing factory information, fetch it from database
+        if (currentUserData.role === '班長' && (!currentUserData.工場 && !currentUserData.factory)) {
+            console.log('Factory info missing, fetching from database...');
+            currentUserData = await fetchCompleteUserData(currentUserData.username);
+        }
         
         // Determine query based on user role and current tab
         let query = {};
-        if (currentUserData.role === '班長' && currentUserData.factory) {
-            // 班長 can only see data for their assigned factory
-            const userFactories = Array.isArray(currentUserData.factory) ? currentUserData.factory : [currentUserData.factory];
-            query = { "工場": { $in: userFactories } };
+        if (currentUserData.role === '班長') {
+            // Check both possible field names for factories
+            const userFactories = currentUserData.工場 || currentUserData.factory;
+            
+            console.log('User factories found:', userFactories);
+            
+            if (userFactories && userFactories.length > 0) {
+                // 班長 can only see data for their assigned factory
+                const factoryArray = Array.isArray(userFactories) ? userFactories : [userFactories];
+                query = { "工場": { $in: factoryArray } };
+                console.log('Applying factory filter query:', query);
+            } else {
+                console.warn('班長 user has no assigned factories, showing no data');
+                query = { "工場": { $in: [] } }; // Show no data if no factories assigned
+            }
         }
+
+        console.log('Final query for', currentApprovalTab, ':', query);
 
         const response = await fetch(BASE_URL + "queries", {
             method: "POST",
@@ -1518,6 +1540,8 @@ async function loadApprovalData() {
         
         allApprovalData = await response.json();
         
+        console.log('Loaded approval data:', allApprovalData.length, 'items');
+        
         // Load factory filter options
         loadFactoryFilterOptions();
         
@@ -1528,6 +1552,43 @@ async function loadApprovalData() {
         console.error('Error loading approval data:', error);
         document.getElementById('approvalsTableContainer').innerHTML = 
             '<div class="p-8 text-center text-red-500">データの読み込みに失敗しました</div>';
+    }
+}
+
+/**
+ * Fetch complete user data including factory assignments
+ */
+async function fetchCompleteUserData(username) {
+    try {
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "users",
+                query: { username: username },
+                projection: { password: 0 }
+            })
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch user data');
+        
+        const users = await response.json();
+        if (users.length > 0) {
+            const completeUserData = users[0];
+            console.log('Fetched complete user data:', completeUserData);
+            
+            // Update localStorage with complete user data
+            localStorage.setItem("authUser", JSON.stringify(completeUserData));
+            
+            return completeUserData;
+        } else {
+            console.error('User not found in database');
+            return JSON.parse(localStorage.getItem("authUser") || "{}");
+        }
+    } catch (error) {
+        console.error('Error fetching complete user data:', error);
+        return JSON.parse(localStorage.getItem("authUser") || "{}");
     }
 }
 
