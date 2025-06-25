@@ -368,6 +368,9 @@ function loadPage(page) {
                 // For 班長: Hide display mode, show edit mode
                 if (factoryDisplay) factoryDisplay.style.display = "none";
                 if (factoryEdit) factoryEdit.classList.remove('hidden');
+                
+                // Ensure factory edit interface is properly populated
+                refreshFactoryEditInterface(userId);
               } else {
                 // For other roles: Keep display mode hidden, edit mode hidden
                 if (factoryDisplay) factoryDisplay.style.display = "none";
@@ -380,6 +383,33 @@ function loadPage(page) {
                 <button class="ml-2 text-gray-600 hover:underline" onclick="cancelEdit('${userId}')">Cancel</button>
               `;
             };
+            
+            // Function to refresh the factory edit interface with current data
+            function refreshFactoryEditInterface(userId) {
+              const hiddenInput = document.querySelector(`input.factory-data[user-id="${userId}"]`);
+              const selectedContainer = document.getElementById(`selectedFactories-${userId}`);
+              
+              if (!hiddenInput || !selectedContainer) return;
+              
+              let currentFactories = [];
+              try {
+                currentFactories = JSON.parse(hiddenInput.value || '[]');
+              } catch (e) {
+                currentFactories = [];
+              }
+              
+              // Clear and repopulate the selected factories container
+              selectedContainer.innerHTML = '';
+              currentFactories.forEach(factory => {
+                const tagHTML = `
+                  <span class="factory-tag bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center">
+                    ${factory}
+                    <button type="button" class="ml-1 text-blue-600 hover:text-blue-800" onclick="removeFactoryTag('${userId}', '${factory}')">×</button>
+                  </span>
+                `;
+                selectedContainer.insertAdjacentHTML('beforeend', tagHTML);
+              });
+            }
             
             window.cancelEdit = (userId) => {
               loadUserTable(); // simply re-fetch and render again
