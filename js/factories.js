@@ -334,47 +334,101 @@ async function loadDailyProduction(factory, date) {
 
         console.log('Daily production data loaded:', results);
 
-        dailyContainer.innerHTML = processes.map((proc, i) => {
-          const data = results[i];
-          
-          // Debug: Check for problematic data
-          data.forEach((item, index) => {
-            try {
-              JSON.stringify(item);
-            } catch (error) {
-              console.error(`Problematic item in ${proc.name} at index ${index}:`, item, error);
-            }
-          });
-        
-          const bgMap = {
-            kensa: "bg-yellow-50",
-            srs: "bg-gray-100",
-            press: "bg-green-50",
-            slit: "bg-blue-50"
-          };
-          const name = proc.name.toLowerCase();
-          const bgClass = bgMap[name] || "bg-white";
-        
-          return `
-          
-            <div class="${bgClass} p-4 rounded shadow">
-              <h3 class="font-semibold mb-2">${proc.name} Process (${data.length})</h3>
-              <ul class="divide-y divide-gray-200">
-                ${data.map(item => {
-                  const encodedData = safeEncodeItemData(item);
-                  return `
-                    <li class="py-2 cursor-pointer hover:bg-gray-100 rounded px-2"
-                        onclick='showSidebarFromElement(this)'
-                        data-item='${encodedData.encodedItem}'
-                        data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
-                      ${item.品番} - ${item.背番号}
-                    </li>
-                  `;
-                }).join("")}
-              </ul>
-            </div>
-          `;
-        }).join("");
+        dailyContainer.innerHTML = `
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            ${processes.map((proc, i) => {
+              const data = results[i];
+              
+              // Debug: Check for problematic data
+              data.forEach((item, index) => {
+                try {
+                  JSON.stringify(item);
+                } catch (error) {
+                  console.error(`Problematic item in ${proc.name} at index ${index}:`, item, error);
+                }
+              });
+
+              const bgClassMap = {
+                Kensa: "from-yellow-50 to-yellow-100 border-yellow-200",
+                Press: "from-green-50 to-green-100 border-green-200",
+                SRS: "from-gray-50 to-gray-100 border-gray-200",
+                Slit: "from-blue-50 to-blue-100 border-blue-200"
+              };
+              const bgClass = bgClassMap[proc.name] || "from-white to-gray-50 border-gray-200";
+
+              const iconMap = {
+                Kensa: "ri-search-eye-line text-yellow-600",
+                Press: "ri-hammer-line text-green-600",
+                SRS: "ri-scan-line text-gray-600",
+                Slit: "ri-scissors-cut-line text-blue-600"
+              };
+              const iconClass = iconMap[proc.name] || "ri-factory-line text-gray-600";
+
+              return `
+                <div class="bg-gradient-to-br ${bgClass} border-2 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+                  <!-- Header -->
+                  <div class="p-4 border-b border-white/50">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-3">
+                        <i class="${iconClass} text-2xl"></i>
+                        <div>
+                          <h3 class="font-semibold text-gray-800">${proc.name}</h3>
+                          <p class="text-sm text-gray-600">${data.length} records</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Content -->
+                  <div class="p-4">
+                    ${data.length === 0 ? `
+                      <div class="text-center py-8">
+                        <i class="ri-database-line text-3xl text-gray-400 mb-2 block"></i>
+                        <p class="text-gray-500 text-sm">No data for today</p>
+                      </div>
+                    ` : `
+                      <div class="space-y-2 max-h-64 overflow-y-auto">
+                        ${data.map(item => {
+                          const encodedData = safeEncodeItemData(item);
+                          const total = item.Total ?? item.Process_Quantity ?? 0;
+                          const totalNG = item.Total_NG ?? 0;
+                          const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(1) : '0.0';
+                          
+                          return `
+                            <div class="bg-white/80 backdrop-blur-sm rounded-lg p-3 cursor-pointer hover:bg-white/90 transition-colors border border-white/30"
+                                 onclick='showSidebarFromElement(this)'
+                                 data-item='${encodedData.encodedItem}'
+                                 data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
+                              <div class="flex items-center justify-between">
+                                <div class="flex-1 min-w-0">
+                                  <p class="font-medium text-gray-900 truncate">${item.品番}</p>
+                                  <p class="text-sm text-gray-600">${item.背番号} • ${item.Worker_Name || 'Unknown'}</p>
+                                </div>
+                                <div class="flex items-center gap-2 ml-3">
+                                  <div class="text-right">
+                                    <p class="text-sm font-medium text-gray-900">${total.toLocaleString()}</p>
+                                    <p class="text-xs ${totalNG > 0 ? 'text-red-600' : 'text-gray-500'}">NG: ${totalNG}</p>
+                                  </div>
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-700' :
+                                    parseFloat(defectRate) > 1 ? 'bg-yellow-100 text-yellow-700' :
+                                    'bg-green-100 text-green-700'
+                                  }">
+                                    ${defectRate}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          `;
+                        }).join("")}
+                      </div>
+                    `}
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `;
 
     } catch (err) {
         console.error("Error loading daily production:", err);
@@ -771,6 +825,14 @@ document.addEventListener("mousedown", function(event) {
  * @param {string} part - Part number filter
  * @param {string} serial - Serial number filter
  */
+// Pagination state for factory overview
+let factoryPaginationState = {
+  Daily: { Kensa: 1, Press: 1, SRS: 1, Slit: 1 },
+  Weekly: { Kensa: 1, Press: 1, SRS: 1, Slit: 1 },
+  Monthly: { Kensa: 1, Press: 1, SRS: 1, Slit: 1 }
+};
+const FACTORY_ITEMS_PER_PAGE = 10;
+
 async function loadProductionByPeriod(factory, from, to, part = "", serial = "") {
     const container = document.getElementById("dailyProduction");
     container.innerHTML = "Loading production data...";
@@ -840,23 +902,80 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
             state.column = column;
             state.direction = 1;
           }
+          // Reset pagination to first page when sorting
+          factoryPaginationState[section][processName] = 1;
           renderSections(); // re-render
+        };
+
+        // Pagination functions
+        window.changeFactoryPage = (section, processName, direction) => {
+          const currentPage = factoryPaginationState[section][processName];
+          const newPage = currentPage + direction;
+          if (newPage >= 1) {
+            factoryPaginationState[section][processName] = newPage;
+            renderSections();
+          }
+        };
+
+        window.goToFactoryPage = (section, processName, page) => {
+          factoryPaginationState[section][processName] = page;
+          renderSections();
         };
   
         function renderSections() {
+          // Store reference for search functionality
+          window.currentRenderFunction = renderSections;
+          
+          // Initialize pagination state if not exists
+          if (!factoryPaginationState.Daily) {
+            factoryPaginationState = {
+              Daily: { Kensa: 1, Press: 1, SRS: 1, Slit: 1 },
+              Weekly: { Kensa: 1, Press: 1, SRS: 1, Slit: 1 },
+              Monthly: { Kensa: 1, Press: 1, SRS: 1, Slit: 1 }
+            };
+          }
+          
           container.innerHTML = Object.entries(dataBySection).map(([label, results], index) => `
             <div class="mb-8">
               ${index > 0 ? '<hr class="my-6 border-t-2 border-gray-300">' : ''}
-              <h3 class="text-2xl font-semibold mb-4">${label} Production</h3>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-2xl font-semibold">${label} Production</h3>
+                <div class="flex items-center gap-4">
+                  <input type="text" 
+                         id="search${label}" 
+                         placeholder="Search..." 
+                         class="px-3 py-1 border rounded-md text-sm"
+                         onkeyup="handleFactorySearch('${label}')"
+                         value="">
+                </div>
+              </div>
+              <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 ${processes.map((proc, i) => {
                   const original = results[i];
                   if (!original?.length) return `
-                    <div class="bg-white p-4 rounded-xl shadow">${proc.name} Process (0)</div>
+                    <div class="bg-white p-6 rounded-xl shadow border">
+                      <div class="text-center py-8">
+                        <div class="text-gray-400 mb-2">
+                          <i class="ri-database-line text-4xl"></i>
+                        </div>
+                        <h4 class="font-semibold text-gray-600">${proc.name} Process</h4>
+                        <p class="text-gray-500 text-sm">No data available</p>
+                      </div>
+                    </div>
                   `;
 
                   const state = sortStates[label];
                   let sorted = [...original];
+
+                  // Apply search filter
+                  const searchTerm = document.getElementById(`search${label}`)?.value?.toLowerCase() || '';
+                  if (searchTerm) {
+                    sorted = sorted.filter(item => 
+                      (item.品番?.toLowerCase().includes(searchTerm)) ||
+                      (item.背番号?.toLowerCase().includes(searchTerm)) ||
+                      (item.Worker_Name?.toLowerCase().includes(searchTerm))
+                    );
+                  }
 
                   if (state.process === proc.name && state.column) {
                     sorted.sort((a, b) => {
@@ -866,12 +985,24 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                     });
                   }
 
+                  // Pagination calculations
+                  const currentPage = factoryPaginationState[label][proc.name];
+                  const totalItems = sorted.length;
+                  const totalPages = Math.ceil(totalItems / FACTORY_ITEMS_PER_PAGE);
+                  const startIndex = (currentPage - 1) * FACTORY_ITEMS_PER_PAGE;
+                  const endIndex = startIndex + FACTORY_ITEMS_PER_PAGE;
+                  const pageData = sorted.slice(startIndex, endIndex);
+
                   const arrow = col =>
                     state.process === proc.name && state.column === col
                       ? state.direction > 0 ? " ↑" : " ↓"
                       : "";
 
                   const summary = groupAndSummarize(sorted);
+
+                  // Store data globally for export functions
+                  if (!window.dailySectionData) window.dailySectionData = {};
+                  window.dailySectionData[`${label}_${proc.name}`] = sorted;
 
                   const bgClassMap = {
                     Kensa: "bg-yellow-50",
@@ -882,34 +1013,92 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                   const bgClass = bgClassMap[proc.name] || "bg-white";
 
                   return `
-                    <div class="bg-white p-4 rounded-xl shadow">
-                      <h4 class="font-semibold mb-2">${proc.name} Process (${sorted.length})</h4>
+                    <div class="bg-white rounded-xl shadow-md border overflow-hidden">
+                      <!-- Header -->
+                      <div class="bg-gradient-to-r ${bgClass} px-6 py-4 border-b">
+                        <div class="flex items-center justify-between">
+                          <div class="flex items-center gap-3">
+                            <div class="w-3 h-3 rounded-full ${
+                              proc.name === 'Kensa' ? 'bg-yellow-500' :
+                              proc.name === 'Press' ? 'bg-green-500' :
+                              proc.name === 'SRS' ? 'bg-gray-500' : 'bg-blue-500'
+                            }"></div>
+                            <h4 class="text-lg font-semibold">${proc.name} Process</h4>
+                          </div>
+                          <div class="text-sm text-gray-600">
+                            ${totalItems} records
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <!-- Table -->
                       <div class="overflow-x-auto">
-                        <table class="w-full text-sm min-w-[600px] mb-2">
-                          <thead>
-                            <tr class="border-b font-semibold text-left">
-                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', '品番')">品番${arrow("品番")}</th>
-                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', '背番号')">背番号${arrow("背番号")}</th>
-                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Worker_Name')">作業者${arrow("Worker_Name")}</th>
-                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Date')">日付${arrow("Date")}</th>
-                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Total')">Total${arrow("Total")}</th>
-                              <th class="cursor-pointer" onclick="handleSectionSort('${label}', '${proc.name}', 'Total_NG')">Total NG${arrow("Total_NG")}</th>
+                        <table class="w-full text-sm">
+                          <thead class="bg-gray-50 border-b">
+                            <tr>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                                  onclick="handleSectionSort('${label}', '${proc.name}', '品番')">
+                                品番${arrow("品番")}
+                              </th>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                                  onclick="handleSectionSort('${label}', '${proc.name}', '背番号')">
+                                背番号${arrow("背番号")}
+                              </th>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                                  onclick="handleSectionSort('${label}', '${proc.name}', 'Worker_Name')">
+                                作業者${arrow("Worker_Name")}
+                              </th>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                                  onclick="handleSectionSort('${label}', '${proc.name}', 'Date')">
+                                日付${arrow("Date")}
+                              </th>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                                  onclick="handleSectionSort('${label}', '${proc.name}', 'Total')">
+                                Total${arrow("Total")}
+                              </th>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                                  onclick="handleSectionSort('${label}', '${proc.name}', 'Total_NG')">
+                                Total NG${arrow("Total_NG")}
+                              </th>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700">
+                                不良率
+                              </th>
                             </tr>
                           </thead>
-                          <tbody>
-                            ${sorted.map(item => {
+                          <tbody class="divide-y divide-gray-200">
+                            ${pageData.length === 0 ? `
+                              <tr>
+                                <td colspan="7" class="px-4 py-8 text-center text-gray-500">
+                                  ${searchTerm ? 'No results found for your search' : 'No data available'}
+                                </td>
+                              </tr>
+                            ` : pageData.map((item, index) => {
                               const encodedData = safeEncodeItemData(item);
+                              const total = item.Total ?? item.Process_Quantity ?? 0;
+                              const totalNG = item.Total_NG ?? 0;
+                              const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(2) : '0.00';
+                              const isEvenRow = index % 2 === 0;
+                              
                               return `
-                                <tr class="cursor-pointer hover:bg-gray-100"
+                                <tr class="cursor-pointer hover:bg-blue-50 transition-colors ${isEvenRow ? 'bg-gray-50/50' : 'bg-white'}"
                                     onclick='showSidebarFromElement(this)'
                                     data-item='${encodedData.encodedItem}'
                                     data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
-                                  <td>${item.品番 ?? "-"}</td>
-                                  <td>${item.背番号 ?? "-"}</td>
-                                  <td>${item.Worker_Name ?? "-"}</td>
-                                  <td>${item.Date ?? "-"}</td>
-                                  <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
-                                  <td>${item.Total_NG ?? 0}</td>
+                                  <td class="px-4 py-3 font-medium text-gray-900">${item.品番 ?? "-"}</td>
+                                  <td class="px-4 py-3 text-gray-700">${item.背番号 ?? "-"}</td>
+                                  <td class="px-4 py-3 text-gray-700">${item.Worker_Name ?? "-"}</td>
+                                  <td class="px-4 py-3 text-gray-700">${item.Date ?? "-"}</td>
+                                  <td class="px-4 py-3 font-medium text-gray-900">${total.toLocaleString()}</td>
+                                  <td class="px-4 py-3 ${totalNG > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}">${totalNG}</td>
+                                  <td class="px-4 py-3">
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                      parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-800' :
+                                      parseFloat(defectRate) > 1 ? 'bg-yellow-100 text-yellow-800' :
+                                      'bg-green-100 text-green-800'
+                                    }">
+                                      ${defectRate}%
+                                    </span>
+                                  </td>
                                 </tr>
                               `;
                             }).join("")}
@@ -917,30 +1106,104 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                         </table>
                       </div>
 
-                      <div class="mt-4 overflow-x-auto">
-                        <h5 class="font-semibold mb-2">${label} Summary</h5>
-                        <table class="w-full text-sm border-t min-w-[500px]">
-                          <thead>
-                            <tr class="border-b font-semibold text-left">
-                              <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            ${summary.map(row => `
-                              <tr>
-                                <td>${row.品番}</td>
-                                <td>${row.背番号}</td>
-                                <td>${row.Total}</td>
-                                <td>${row.Total_NG}</td>
-                              </tr>
-                            `).join("")}
-                          </tbody>
-                        </table>
-                        <div class="flex gap-4 mt-2">
-                          <button onclick='exportToCSV(${JSON.stringify(summary)})' class="text-blue-600 underline text-sm">Export CSV</button>
-                          <button onclick='exportToPDFGrouped([{ name: "${proc.name}", summary: ${JSON.stringify(summary)} }], "${label} ${proc.name} Summary")' class="text-blue-600 underline text-sm">Export PDF</button>
+                      <!-- Pagination -->
+                      ${totalPages > 1 ? `
+                        <div class="px-6 py-4 bg-gray-50 border-t flex items-center justify-between">
+                          <div class="text-sm text-gray-700">
+                            ${totalItems === 0 ? '0件中 0-0件を表示' : 
+                              `${totalItems}件中 ${startIndex + 1}-${Math.min(endIndex, totalItems)}件を表示`}
+                          </div>
+                          <div class="flex items-center space-x-2">
+                            <button onclick="changeFactoryPage('${label}', '${proc.name}', -1)" 
+                                    ${currentPage === 1 ? 'disabled' : ''} 
+                                    class="px-3 py-1 border rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                              前へ
+                            </button>
+                            <div class="flex space-x-1" id="pageNumbers${label}${proc.name}">
+                              ${Array.from({length: Math.min(5, totalPages)}, (_, i) => {
+                                const startPage = Math.max(1, currentPage - 2);
+                                const pageNum = startPage + i;
+                                if (pageNum > totalPages) return '';
+                                return `
+                                  <button onclick="goToFactoryPage('${label}', '${proc.name}', ${pageNum})" 
+                                          class="px-3 py-1 border rounded text-sm ${pageNum === currentPage ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}">
+                                    ${pageNum}
+                                  </button>
+                                `;
+                              }).join('')}
+                            </div>
+                            <button onclick="changeFactoryPage('${label}', '${proc.name}', 1)" 
+                                    ${currentPage === totalPages ? 'disabled' : ''} 
+                                    class="px-3 py-1 border rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                              次へ
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      ` : ''}
+
+                      <!-- Summary Section -->
+                      ${summary.length > 0 ? `
+                        <div class="px-6 py-4 border-t bg-gray-50/50">
+                          <details class="group">
+                            <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                              <span>📊 ${label} Summary (${summary.length} items)</span>
+                              <span class="group-open:rotate-180 transition-transform">▼</span>
+                            </summary>
+                            <div class="mt-3 overflow-x-auto">
+                              <table class="w-full text-xs border">
+                                <thead class="bg-gray-100">
+                                  <tr>
+                                    <th class="px-3 py-2 text-left font-medium">品番</th>
+                                    <th class="px-3 py-2 text-left font-medium">背番号</th>
+                                    <th class="px-3 py-2 text-left font-medium">Total</th>
+                                    <th class="px-3 py-2 text-left font-medium">Total NG</th>
+                                    <th class="px-3 py-2 text-left font-medium">不良率</th>
+                                  </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200">
+                                  ${summary.map(row => {
+                                    const defectRate = row.Total > 0 ? ((row.Total_NG / row.Total) * 100).toFixed(2) : '0.00';
+                                    return `
+                                      <tr class="hover:bg-gray-50">
+                                        <td class="px-3 py-2">${row.品番}</td>
+                                        <td class="px-3 py-2">${row.背番号}</td>
+                                        <td class="px-3 py-2">${row.Total.toLocaleString()}</td>
+                                        <td class="px-3 py-2 ${row.Total_NG > 0 ? 'text-red-600' : ''}">${row.Total_NG}</td>
+                                        <td class="px-3 py-2">
+                                          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs ${
+                                            parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-700' :
+                                            parseFloat(defectRate) > 1 ? 'bg-yellow-100 text-yellow-700' :
+                                            'bg-green-100 text-green-700'
+                                          }">
+                                            ${defectRate}%
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    `;
+                                  }).join("")}
+                                </tbody>
+                              </table>
+                              <div class="flex gap-3 mt-3 pt-3 border-t">
+                                <button onclick='exportDailySectionData("${label}", "${proc.name}")' 
+                                        class="inline-flex items-center px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
+                                  <i class="ri-download-line mr-1"></i>
+                                  CSV
+                                </button>
+                                <button onclick='exportSummaryToCSV(${JSON.stringify(summary)}, "${label}_${proc.name}_Summary.csv")' 
+                                        class="inline-flex items-center px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors">
+                                  <i class="ri-download-line mr-1"></i>
+                                  Summary CSV
+                                </button>
+                                <button onclick='exportToPDFGrouped([{ name: "${proc.name}", summary: ${JSON.stringify(summary)} }], "${label} ${proc.name} Summary")' 
+                                        class="inline-flex items-center px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors">
+                                  <i class="ri-file-pdf-line mr-1"></i>
+                                  PDF
+                                </button>
+                              </div>
+                            </div>
+                          </details>
+                        </div>
+                      ` : ''}
                     </div>
                   `;
                 }).join("")}
@@ -954,6 +1217,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
    else {
         const processOrder = ["Kensa", "Press", "SRS", "Slit"];
         const summaryByProcess = [];
+        const fullDataByProcess = [];
   
         const resultsByProcess = await Promise.all(processes.map(proc =>
           fetch(BASE_URL + "queries", {
@@ -979,6 +1243,10 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
         };
   
         function renderFilteredTables() {
+          // Reset arrays to avoid duplicates
+          summaryByProcess.length = 0;
+          fullDataByProcess.length = 0;
+          
           container.innerHTML = processOrder.map((procLabel, index) => {
             const records = resultsByProcess[index];
             if (!records.length) return "";
@@ -994,6 +1262,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
 
             const summary = groupAndSummarize(sorted);
             summaryByProcess.push({ name: procLabel, summary });
+            fullDataByProcess.push({ name: procLabel, data: sorted });
 
             const arrow = col =>
               sortState.process === procLabel && sortState.column === col
@@ -1056,7 +1325,8 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                     </tbody>
                   </table>
                   <div class="flex gap-4">
-                    <button onclick='exportToCSV(${JSON.stringify(summary)})' class="text-blue-600 underline text-sm">Export CSV</button>
+                    <button onclick='exportToCSV(window.currentProcessData_${index},"${procLabel}_detailed.csv")' class="text-blue-600 underline text-sm">Export CSV</button>
+                    <button onclick='exportSummaryToCSV(${JSON.stringify(summary)},"${procLabel}_summary.csv")' class="text-blue-600 underline text-sm">Export Summary CSV</button>
                     <button onclick='exportToPDFGrouped([{ name: "${procLabel}", summary: ${JSON.stringify(summary)} }], "${procLabel} Summary")' class="text-blue-600 underline text-sm">Export PDF</button>
                   </div>
                 </div>
@@ -1093,11 +1363,19 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                 `;
               }).join("")}
               <div class="flex gap-4">
-                <button onclick='exportToCSVGrouped(${JSON.stringify(summaryByProcess)})' class="text-blue-600 underline text-sm">Export CSV</button>
-                <button onclick='exportToPDFGrouped(${JSON.stringify(summaryByProcess)})' class="text-blue-600 underline text-sm">Export PDF</button>
+                <button onclick='exportAllProcessesData()' class="text-blue-600 underline text-sm">Export CSV</button>
+                <button onclick='exportSummaryToCSVGrouped(window.currentSummaryData,"all_processes_summary.csv")' class="text-blue-600 underline text-sm">Export Summary CSV</button>
+                <button onclick='exportToPDFGrouped(window.currentSummaryData)' class="text-blue-600 underline text-sm">Export PDF</button>
               </div>
             </div>
           `;
+
+          // Store data in global variables for export functions
+          fullDataByProcess.forEach((proc, index) => {
+            window[`currentProcessData_${index}`] = proc.data;
+          });
+          window.currentSummaryData = summaryByProcess;
+          window.currentFullData = fullDataByProcess;
         }
   
         renderFilteredTables();
@@ -1151,14 +1429,76 @@ function groupAndSummarize(records) {
 }
 
 /**
- * Exports data to CSV file.
+ * Exports summary data to CSV file (for summary tables only).
  */
-function exportToCSV(data, filename = "export.csv") {
+function exportSummaryToCSV(data, filename = "summary.csv") {
     const headers = Object.keys(data[0]);
     const rows = data.map(row => headers.map(h => row[h] ?? "").join(","));
     const csv = [headers.join(","), ...rows].join("\n");
 
     const blob = new Blob([csv], { type: "text/csv" });
+    const link = document.createElement("a");
+    link.href = window.URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+/**
+ * Exports full MongoDB data to CSV file with all fields.
+ */
+function exportToCSV(data, filename = "export.csv") {
+    if (!data || data.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    // Get all possible headers from all records to ensure we don't miss any fields
+    const allHeaders = new Set();
+    
+    data.forEach(item => {
+        Object.keys(item).forEach(key => {
+            if (key === 'Counters' && item[key] && typeof item[key] === 'object') {
+                // Add individual counter fields
+                Object.keys(item[key]).forEach(counterKey => {
+                    allHeaders.add(`Counters.${counterKey}`);
+                });
+            } else if (key !== 'Counters') {
+                allHeaders.add(key);
+            }
+        });
+    });
+
+    const headers = Array.from(allHeaders).sort();
+    
+    // Convert data to CSV format, handling nested Counters object
+    const rows = data.map(row => {
+        return headers.map(header => {
+            if (header.startsWith('Counters.')) {
+                const counterKey = header.replace('Counters.', '');
+                return row.Counters?.[counterKey] ?? "";
+            } else {
+                let value = row[header];
+                if (value === null || value === undefined) {
+                    return "";
+                }
+                // Handle objects that aren't Counters (convert to JSON string)
+                if (typeof value === 'object' && header !== 'Counters') {
+                    return JSON.stringify(value);
+                }
+                // Escape commas and quotes in CSV
+                if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                    return `"${value.replace(/"/g, '""')}"`;
+                }
+                return value;
+            }
+        }).join(",");
+    });
+
+    const csv = [headers.join(","), ...rows].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = window.URL.createObjectURL(blob);
     link.download = filename;
@@ -1191,9 +1531,9 @@ async function exportToPDF(data, filename = "export.pdf") {
 
 
 /**
- * Exports grouped process summaries to CSV.
+ * Exports grouped process summaries to CSV (summary data only).
  */
-function exportToCSVGrouped(processSummaries, filename = "summary.csv") {
+function exportSummaryToCSVGrouped(processSummaries, filename = "summary.csv") {
     const rows = [];
   
     processSummaries.forEach(proc => {
@@ -1215,7 +1555,82 @@ function exportToCSVGrouped(processSummaries, filename = "summary.csv") {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }
+}
+
+/**
+ * Exports grouped process full data to CSV with all MongoDB fields.
+ */
+function exportToCSVGrouped(processData, filename = "export.csv") {
+    if (!processData || processData.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    const rows = [];
+    
+    // Get all possible headers from all processes and records
+    const allHeaders = new Set();
+    
+    processData.forEach(proc => {
+        if (proc.data && proc.data.length > 0) {
+            proc.data.forEach(item => {
+                Object.keys(item).forEach(key => {
+                    if (key === 'Counters' && item[key] && typeof item[key] === 'object') {
+                        Object.keys(item[key]).forEach(counterKey => {
+                            allHeaders.add(`Counters.${counterKey}`);
+                        });
+                    } else if (key !== 'Counters') {
+                        allHeaders.add(key);
+                    }
+                });
+            });
+        }
+    });
+
+    const headers = Array.from(allHeaders).sort();
+    
+    processData.forEach((proc, index) => {
+        if (proc.data && proc.data.length > 0) {
+            if (index > 0) {
+                rows.push([]); // blank line between processes
+            }
+            
+            rows.push([`${proc.name} Process Data`]);
+            rows.push(headers);
+            
+            proc.data.forEach(row => {
+                const csvRow = headers.map(header => {
+                    if (header.startsWith('Counters.')) {
+                        const counterKey = header.replace('Counters.', '');
+                        return row.Counters?.[counterKey] ?? "";
+                    } else {
+                        let value = row[header];
+                        if (value === null || value === undefined) {
+                            return "";
+                        }
+                        if (typeof value === 'object' && header !== 'Counters') {
+                            return JSON.stringify(value);
+                        }
+                        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                            return `"${value.replace(/"/g, '""')}"`;
+                        }
+                        return value;
+                    }
+                });
+                rows.push(csvRow);
+            });
+        }
+    });
+
+    const csv = rows.map(row => row.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
   
   /**
    * Exports grouped process summaries to PDF.
@@ -1421,4 +1836,348 @@ function safeEncodeItemData(item) {
             comment: item.Comment || ''
         };
     }
+}
+
+/**
+ * Handle search functionality for factory overview
+ */
+window.handleFactorySearch = function(section) {
+  // Reset pagination to first page when searching
+  Object.keys(factoryPaginationState[section]).forEach(process => {
+    factoryPaginationState[section][process] = 1;
+  });
+  
+  // Re-render the sections to apply search filter
+  const container = document.getElementById("dailyProduction");
+  if (container.innerHTML.includes(`${section} Production`)) {
+    // Find the current renderSections function and call it
+    if (window.currentRenderFunction) {
+      window.currentRenderFunction();
+    }
+  }
+};
+
+/**
+ * Helper function to export all processes data from global variables
+ */
+function exportAllProcessesData() {
+    if (window.currentFullData && window.currentFullData.length > 0) {
+        showExportOptionsModal(window.currentFullData, "all_processes_detailed.csv", 'grouped');
+    } else {
+        alert("No data available to export");
+    }
+}
+
+/**
+ * Helper function to export daily section data
+ */
+function exportDailySectionData(section, processName) {
+    const key = `${section}_${processName}`;
+    if (window.dailySectionData && window.dailySectionData[key]) {
+        showExportOptionsModal(window.dailySectionData[key], `${section}_${processName}_detailed.csv`, 'single');
+    } else {
+        alert("No data available to export");
+    }
+}
+
+/**
+ * Helper function to export single process data with options
+ */
+function exportSingleProcessData(processIndex, processName) {
+    const dataKey = `currentProcessData_${processIndex}`;
+    if (window[dataKey]) {
+        showExportOptionsModal(window[dataKey], `${processName}_detailed.csv`, 'single');
+    } else {
+        alert("No data available to export");
+    }
+}
+
+/**
+ * Shows export options modal for selecting and ordering headers
+ */
+function showExportOptionsModal(data, filename, exportType = 'single') {
+    if (!data || data.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    // Get all possible headers from the data
+    const allHeaders = new Set();
+    const dataArray = Array.isArray(data) ? data : [data];
+    
+    if (exportType === 'grouped') {
+        // For grouped data, get headers from all processes
+        data.forEach(proc => {
+            if (proc.data && proc.data.length > 0) {
+                proc.data.forEach(item => {
+                    Object.keys(item).forEach(key => {
+                        if (key === 'Counters' && item[key] && typeof item[key] === 'object') {
+                            Object.keys(item[key]).forEach(counterKey => {
+                                allHeaders.add(`Counters.${counterKey}`);
+                            });
+                        } else if (key !== 'Counters') {
+                            allHeaders.add(key);
+                        }
+                    });
+                });
+            }
+        });
+    } else {
+        // For single process data
+        dataArray.forEach(item => {
+            Object.keys(item).forEach(key => {
+                if (key === 'Counters' && item[key] && typeof item[key] === 'object') {
+                    Object.keys(item[key]).forEach(counterKey => {
+                        allHeaders.add(`Counters.${counterKey}`);
+                    });
+                } else if (key !== 'Counters') {
+                    allHeaders.add(key);
+                }
+            });
+        });
+    }
+
+    const headers = Array.from(allHeaders).sort();
+
+    // Create modal HTML
+    const modalHTML = `
+        <div id="exportOptionsModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">エクスポートオプション</h3>
+                    <p class="text-sm text-gray-600 mt-1">エクスポートする列を選択し、順序を設定してください</p>
+                </div>
+                
+                <div class="p-6 overflow-y-auto max-h-[60vh]">
+                    <div class="mb-4">
+                        <div class="flex gap-2 mb-3">
+                            <button id="selectAllBtn" class="text-blue-600 underline text-sm">すべて選択</button>
+                            <button id="deselectAllBtn" class="text-blue-600 underline text-sm">すべて解除</button>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">列の順序を設定:</label>
+                        <div id="headersList" class="space-y-2 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                            ${headers.map((header, index) => `
+                                <div class="header-item flex items-center p-2 bg-gray-50 rounded border" data-header="${header}">
+                                    <input type="checkbox" id="header_${index}" checked class="mr-3">
+                                    <span class="flex-1 text-sm">${header}</span>
+                                    <div class="flex gap-1">
+                                        <button class="move-up text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200" ${index === 0 ? 'disabled' : ''}>↑</button>
+                                        <button class="move-down text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200" ${index === headers.length - 1 ? 'disabled' : ''}>↓</button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+                    <button id="cancelExportBtn" class="px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
+                        キャンセル
+                    </button>
+                    <button id="executeExportBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                        エクスポート実行
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('exportOptionsModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to document
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    // Add event listeners
+    setupExportModalEventListeners(data, filename, exportType);
+}
+
+/**
+ * Sets up event listeners for the export options modal
+ */
+function setupExportModalEventListeners(data, filename, exportType) {
+    const modal = document.getElementById('exportOptionsModal');
+    const headersList = document.getElementById('headersList');
+
+    // Select/Deselect all buttons
+    document.getElementById('selectAllBtn').onclick = () => {
+        headersList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    };
+
+    document.getElementById('deselectAllBtn').onclick = () => {
+        headersList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    };
+
+    // Move up/down buttons
+    headersList.addEventListener('click', (e) => {
+        const item = e.target.closest('.header-item');
+        if (!item) return;
+
+        if (e.target.classList.contains('move-up')) {
+            const prev = item.previousElementSibling;
+            if (prev) {
+                item.parentNode.insertBefore(item, prev);
+                updateMoveButtons();
+            }
+        } else if (e.target.classList.contains('move-down')) {
+            const next = item.nextElementSibling;
+            if (next) {
+                item.parentNode.insertBefore(next, item);
+                updateMoveButtons();
+            }
+        }
+    });
+
+    function updateMoveButtons() {
+        const items = headersList.querySelectorAll('.header-item');
+        items.forEach((item, index) => {
+            const upBtn = item.querySelector('.move-up');
+            const downBtn = item.querySelector('.move-down');
+            upBtn.disabled = index === 0;
+            downBtn.disabled = index === items.length - 1;
+        });
+    }
+
+    // Cancel button
+    document.getElementById('cancelExportBtn').onclick = () => {
+        modal.remove();
+    };
+
+    // Execute export button
+    document.getElementById('executeExportBtn').onclick = () => {
+        const selectedHeaders = [];
+        const items = headersList.querySelectorAll('.header-item');
+        
+        items.forEach(item => {
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            if (checkbox.checked) {
+                selectedHeaders.push(item.dataset.header);
+            }
+        });
+
+        if (selectedHeaders.length === 0) {
+            alert('少なくとも1つの列を選択してください');
+            return;
+        }
+
+        modal.remove();
+
+        // Execute the export with selected headers
+        if (exportType === 'grouped') {
+            exportToCSVGroupedWithHeaders(data, selectedHeaders, filename);
+        } else {
+            exportToCSVWithHeaders(data, selectedHeaders, filename);
+        }
+    };
+
+    // Close modal when clicking outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+/**
+ * Exports data to CSV with custom selected headers and order
+ */
+function exportToCSVWithHeaders(data, selectedHeaders, filename = "export.csv") {
+    if (!data || data.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    // Convert data to CSV format with selected headers in specified order
+    const rows = data.map(row => {
+        return selectedHeaders.map(header => {
+            if (header.startsWith('Counters.')) {
+                const counterKey = header.replace('Counters.', '');
+                return row.Counters?.[counterKey] ?? "";
+            } else {
+                let value = row[header];
+                if (value === null || value === undefined) {
+                    return "";
+                }
+                // Handle objects that aren't Counters (convert to JSON string)
+                if (typeof value === 'object' && header !== 'Counters') {
+                    return JSON.stringify(value);
+                }
+                // Escape commas and quotes in CSV
+                if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                    return `"${value.replace(/"/g, '""')}"`;
+                }
+                return value;
+            }
+        }).join(",");
+    });
+
+    const csv = [selectedHeaders.join(","), ...rows].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = window.URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+}
+
+/**
+ * Exports grouped data to CSV with custom selected headers and order
+ */
+function exportToCSVGroupedWithHeaders(processData, selectedHeaders, filename = "export.csv") {
+    if (!processData || processData.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    const rows = [];
+    
+    processData.forEach((proc, index) => {
+        if (proc.data && proc.data.length > 0) {
+            if (index > 0) {
+                rows.push([]); // blank line between processes
+            }
+            
+            rows.push([`${proc.name} Process Data`]);
+            rows.push(selectedHeaders);
+            
+            proc.data.forEach(row => {
+                const csvRow = selectedHeaders.map(header => {
+                    if (header.startsWith('Counters.')) {
+                        const counterKey = header.replace('Counters.', '');
+                        return row.Counters?.[counterKey] ?? "";
+                    } else {
+                        let value = row[header];
+                        if (value === null || value === undefined) {
+                            return "";
+                        }
+                        if (typeof value === 'object' && header !== 'Counters') {
+                            return JSON.stringify(value);
+                        }
+                        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                            return `"${value.replace(/"/g, '""')}"`;
+                        }
+                        return value;
+                    }
+                });
+                rows.push(csvRow);
+            });
+        }
+    });
+
+    const csv = rows.map(row => row.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
