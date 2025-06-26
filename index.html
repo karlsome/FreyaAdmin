@@ -23,6 +23,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@1.0.30/encoding.min.js"></script>
+
+  <!-- Elfsight Website Translator -->
+  <script src="https://static.elfsight.com/platform/platform.js" async></script>
 </head>
 
 <body class="bg-gray-50">
@@ -53,10 +56,16 @@
               <i class="ri-menu-line"></i>
             </button>
             <input type="text" id="searchInput" class="w-full md:w-64 p-2 bg-gray-100 rounded-md" placeholder="Search..." />
-            <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
+            
+            <!-- Temporarily hided the language selector -->
+            <!-- <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
               <option value="en">English</option>
               <option value="ja">日本語</option>
-            </select>
+            </select> -->
+
+            
+            <!-- Elfsight Website Translator -->
+            <div class="elfsight-app-bd5185c9-6082-4434-ba10-79ddab428dff" data-elfsight-app-lazy></div>
           </div>
 
           <!-- Profile Dropdown -->
@@ -120,8 +129,6 @@
 
   menuBtn.addEventListener("click", toggleSidebar);
 </script>
-<!-- Elfsight Website Translator | Untitled Website Translator -->
-<script src="https://static.elfsight.com/platform/platform.js" async></script>
-<div class="elfsight-app-bd5185c9-6082-4434-ba10-79ddab428dff" data-elfsight-app-lazy></div>
+
 </body>
 </html>
