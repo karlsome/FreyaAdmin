@@ -382,7 +382,7 @@ function loadPage(page) {
             
             // Function to update selected factories
             window.updateSelectedFactories = function() {
-              const checkboxes = document.querySelector
+              const checkboxes = document.querySelectorAll('.factory-checkbox:checked');
               const selectedFactories = Array.from(checkboxes).map(cb => cb.value);
               document.getElementById("selectedFactories").value = JSON.stringify(selectedFactories);
               updateFactoryDisplay();
@@ -488,8 +488,8 @@ function loadPage(page) {
               const factoryDisplay = document.getElementById(`factoryDisplay-${userId}`);
               const factoryEdit = document.getElementById(`factoryEdit-${userId}`);
               
-              if (userRole === "班長") {
-                // For 班長: Hide display mode, show edit mode
+              if (userRole === "班長" || userRole === "係長") {
+                // For 班長 and 係長: Hide display mode, show edit mode
                 if (factoryDisplay) factoryDisplay.style.display = "none";
                 if (factoryEdit) factoryEdit.classList.remove('hidden');
                 
