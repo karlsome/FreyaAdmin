@@ -24,9 +24,6 @@
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@1.0.30/encoding.min.js"></script>
 
-  <!-- Japanese Font Support -->
-  <script src="js/font.js"></script>
-
   <!-- Elfsight Website Translator -->
   <script src="https://static.elfsight.com/platform/platform.js" async></script>
 </head>
@@ -99,11 +96,11 @@
 
   <!-- JS Scripts -->
   <script src="js/languages.js"></script>
+  <script src="js/font.js"></script>
   <script src="js/data.js"></script>
   <script src="js/charts.js"></script>
-  <script src="js/font.js"></script>
   <script src="js/app.js"></script>
-  <script src="js/navbar.js"></script>
+  <!-- <script src="js/navbar.js"></script> --> <!-- Temporarily disabled due to conflicts -->
   <script src="js/masterDB.js"></script>
   <script src="js/factories.js"></script>
   <script src="js/processes.js"></script>
@@ -116,23 +113,24 @@
 
   <!-- Sidebar Toggle -->
   <script>
+  // Get sidebar elements
   const sidebar = document.getElementById("sidebar");
   const menuBtn = document.getElementById("mobileMenuButton");
   const overlay = document.getElementById("sidebarOverlay");
 
-  function toggleSidebar() {
-    sidebar.classList.toggle("-translate-x-full");
-    overlay.classList.toggle("hidden");
-  }
-
-  function handleNavClick() {
-    // Only hide sidebar on mobile
-    if (window.innerWidth < 768) {
-      toggleSidebar();
+  // Define toggleSidebar function if not already available
+  if (typeof toggleSidebar !== 'function') {
+    function toggleSidebar() {
+      if (sidebar) sidebar.classList.toggle("-translate-x-full");
+      if (overlay) overlay.classList.toggle("hidden");
     }
+    window.toggleSidebar = toggleSidebar;
   }
 
-  menuBtn.addEventListener("click", toggleSidebar);
+  // Add event listener to mobile menu button
+  if (menuBtn) {
+    menuBtn.addEventListener("click", toggleSidebar);
+  }
 </script>
 
 </body>

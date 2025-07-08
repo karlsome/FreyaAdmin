@@ -6,6 +6,9 @@
 if (typeof window !== 'undefined') {
   window.roleAccess = window.roleAccess || {
     admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment"],
+    部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"],
+    課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"],
+    係長: ["dashboard", "factories", "approvals", "masterDB", "equipment"],
     班長: ["dashboard", "factories", "approvals", "masterDB"],
     member: ["dashboard"]
   };

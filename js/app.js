@@ -13,12 +13,27 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 const roleAccess = {
   admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment"],
-  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"], // Same as admin but no customerManagement
+  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement"], // Same as admin but no customerManagement
   課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"], // Same as 部長
   係長: ["dashboard", "factories", "approvals", "masterDB", "equipment"], // Same as 班長 but factory-limited
   班長: ["dashboard", "factories", "approvals", "masterDB"],
   member: ["dashboard"]
 };
+
+const navItemsConfig = {
+  dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
+  factories: { icon: "ri-building-line", label: "Factories" },
+  masterDB: { icon: "ri-settings-line", label: "Master 製品" },
+  processes: { icon: "ri-settings-line", label: "Processes" },
+  notifications: { icon: "ri-notification-line", label: "Notifications" },
+  analytics: { icon: "ri-line-chart-line", label: "Analytics" },
+  userManagement: { icon: "ri-user-settings-line", label: "User Management" },
+  approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
+  customerManagement: { icon: "ri-user-3-line", label: "Customer Management" },
+  equipment: { icon: "ri-tools-line", label: "Equipment" },
+};
+
+// Navigation functions are now handled in navbar.js to avoid duplicates
 
 function setupNavigation() {
   document.querySelectorAll(".nav-btn").forEach(button => {
@@ -34,19 +49,6 @@ function setupNavigation() {
     }
   });
 }
-
-const navItemsConfig = {
-  dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
-  factories: { icon: "ri-building-line", label: "Factories" },
-  masterDB: { icon: "ri-settings-line", label: "Master 製品" },
-  processes: { icon: "ri-settings-line", label: "Processes" },
-  notifications: { icon: "ri-notification-line", label: "Notifications" },
-  analytics: { icon: "ri-line-chart-line", label: "Analytics" },
-  userManagement: { icon: "ri-user-settings-line", label: "User Management" },
-  approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
-  customerManagement: { icon: "ri-user-3-line", label: "Customer Management" },
-  equipment: { icon: "ri-tools-line", label: "Equipment" },
-};
 
 function createNavItem(page) {
   const { icon, label, badge } = navItemsConfig[page] || {};
@@ -102,14 +104,23 @@ document.addEventListener("click", function (event) {
   }
 });
 
-
-
-
-
 function logout() {
   localStorage.removeItem("authUser");
   window.location.href = "login.html";
 }
+
+function toggleSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("sidebarOverlay");
+
+  if (sidebar && overlay) {
+    sidebar.classList.toggle("-translate-x-full");
+    overlay.classList.toggle("hidden");
+  }
+}
+
+// Make toggleSidebar globally available
+window.toggleSidebar = toggleSidebar;
 
 
 // This is a simple JavaScript file to handle the navigation and rendering of different pages in a web application.
@@ -841,7 +852,7 @@ function loadPage(page) {
           mainContent.innerHTML = `
             <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow">
               <h1 class="text-2xl font-semibold mb-6">Master User Admin Panel</h1>
-              <input type="text" id="searchInput" placeholder="Search by username, company, or email..." class="w-full p-2 border mb-4 rounded" />
+              <input type="text" id="customerSearchInput" placeholder="Search by username, company, or email..." class="w-full p-2 border mb-4 rounded" />
 
               <form id="createMasterUserForm" class="bg-white p-6 rounded shadow-md mb-6">
                 <h2 class="text-xl font-semibold mb-4">Create Master User</h2>
@@ -934,7 +945,7 @@ function loadPage(page) {
           }
 
           function renderMasterUserTable() {
-            const search = document.getElementById("searchInput").value.toLowerCase();
+            const search = document.getElementById("customerSearchInput").value.toLowerCase();
             let filtered = masterUsers.filter(u =>
               u.username.toLowerCase().includes(search) ||
               u.company.toLowerCase().includes(search) ||
@@ -1094,7 +1105,7 @@ function loadPage(page) {
             }
           };
 
-          document.getElementById("searchInput").addEventListener("input", renderMasterUserTable);
+          document.getElementById("customerSearchInput").addEventListener("input", renderMasterUserTable);
           fetchMasterUsers();
           break;
 
@@ -1577,19 +1588,20 @@ function loadPage(page) {
               <div id="equipmentContent" class="space-y-8"></div>
             </div>
           `;
-          // Add safety check for equipment functions
+          // Initialize equipment page
           if (typeof window.loadEquipmentData === 'function') {
-            loadEquipmentData();
+            window.loadEquipmentData();
           } else {
             console.error('loadEquipmentData function not available');
-            // Retry after a short delay
+            // Retry after a short delay to ensure equipment.js is fully loaded
             setTimeout(() => {
               if (typeof window.loadEquipmentData === 'function') {
-                loadEquipmentData();
+                window.loadEquipmentData();
               } else {
                 console.error('loadEquipmentData still not available after retry');
+                document.getElementById('equipmentContent').innerHTML = '<div class="text-center text-gray-500 py-8">Equipment functionality is loading... Please refresh the page if this persists.</div>';
               }
-            }, 100);
+            }, 200);
           }
           break;
 

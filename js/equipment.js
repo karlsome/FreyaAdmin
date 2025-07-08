@@ -9,10 +9,66 @@ let equipmentByFactory = {}; // New: equipment grouped by factory
 // Equipment table data storage
 let equipmentTableData = {};
 
+// Equipment sorting state
+let equipmentSortState = {};
+
+// Load equipment checkbox preferences from localStorage
+function loadEquipmentPreferences() {
+  const preferences = localStorage.getItem('equipmentFilterPreferences');
+  if (preferences) {
+    const saved = JSON.parse(preferences);
+    // Return only checkbox preferences, dates will be calculated fresh each time
+    return {
+      selectedEquipment: saved.selectedEquipment || []
+    };
+  } else {
+    // Default preferences
+    return {
+      selectedEquipment: [] // Empty means all selected by default
+    };
+  }
+}
+
+// Save equipment checkbox preferences to localStorage (dates not persisted)
+function saveEquipmentPreferences(selectedEquipment) {
+  const preferences = { selectedEquipment };
+  localStorage.setItem('equipmentFilterPreferences', JSON.stringify(preferences));
+}
+
+// Calculate business days (excluding weekends) for date range
+function getBusinessDayRange(daysCount = 7) {
+  const endDate = new Date();
+  const startDate = new Date();
+  
+  let businessDaysFound = 0;
+  let currentDate = new Date(endDate);
+  
+  // Include current day if it's a business day
+  if (currentDate.getDay() !== 0 && currentDate.getDay() !== 6) {
+    businessDaysFound = 1;
+  }
+  
+  // Go back in time until we find the required number of business days
+  while (businessDaysFound < daysCount) {
+    currentDate.setDate(currentDate.getDate() - 1);
+    
+    // Check if it's a weekday (Monday = 1, Sunday = 0)
+    const dayOfWeek = currentDate.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Not Sunday (0) or Saturday (6)
+      businessDaysFound++;
+    }
+  }
+  
+  return {
+    startDate: currentDate.toISOString().split('T')[0],
+    endDate: endDate.toISOString().split('T')[0]
+  };
+}
+
 // Load equipment data from pressDB
 async function loadEquipmentData() {
   try {
-    // Use the existing /queries route to get all pressDB data
+    // First, load basic equipment structure to set up filters
     const response = await fetch(`${BASE_URL}queries`, {
       method: 'POST',
       headers: {
@@ -21,16 +77,16 @@ async function loadEquipmentData() {
       body: JSON.stringify({
         dbName: 'submittedDB',
         collectionName: 'pressDB',
-        query: {} // Empty query to get all data
+        query: {},
+        projection: { 設備: 1, 工場: 1 } // Only get equipment and factory info
       })
     });
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch equipment data: ${response.status}`);
+      throw new Error(`Failed to fetch equipment structure: ${response.status}`);
     }
     
     const data = await response.json();
-    equipmentData = data;
     
     // Extract unique equipment and group by factory
     availableEquipment = [...new Set(data.map(item => item.設備).filter(Boolean))];
@@ -54,9 +110,9 @@ async function loadEquipmentData() {
     // Setup filters
     setupEquipmentFilters();
     
-    // Initial load with all data
-    filteredEquipmentData = equipmentData;
-    renderEquipmentAnalytics();
+    // Apply filters immediately to load filtered data
+    await applyEquipmentFilters();
+    
   } catch (error) {
     console.error('Error loading equipment data:', error);
     document.getElementById('equipmentContent').innerHTML = `
@@ -74,13 +130,18 @@ async function loadEquipmentData() {
 function setupEquipmentFilters() {
   const checkboxContainer = document.getElementById('equipmentCheckboxes');
   
-  // Set default date range (last 7 days)
-  const today = new Date();
-  const weekAgo = new Date();
-  weekAgo.setDate(today.getDate() - 7);
+  // Load saved preferences (checkboxes only)
+  const preferences = loadEquipmentPreferences();
+  const savedSelectedEquipment = preferences.selectedEquipment || [];
   
-  document.getElementById('equipmentStartDate').value = weekAgo.toISOString().split('T')[0];
-  document.getElementById('equipmentEndDate').value = today.toISOString().split('T')[0];
+  // Set date range to 7 business days (always fresh, not persisted)
+  const dateRange = getBusinessDayRange(7);
+  document.getElementById('equipmentStartDate').value = dateRange.startDate;
+  document.getElementById('equipmentEndDate').value = dateRange.endDate;
+  
+  // Add event listeners for date changes (no persistence, just for real-time filtering)
+  document.getElementById('equipmentStartDate').addEventListener('change', saveEquipmentCheckboxState);
+  document.getElementById('equipmentEndDate').addEventListener('change', saveEquipmentCheckboxState);
   
   // Create equipment checkboxes grouped by factory
   const factoriesHTML = Object.entries(equipmentByFactory).map(([factory, equipmentList]) => `
@@ -93,17 +154,33 @@ function setupEquipmentFilters() {
         </div>
       </div>
       <div class="space-y-1 max-h-32 overflow-y-auto">
-        ${equipmentList.map(equipment => `
-          <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded text-sm">
-            <input type="checkbox" value="${equipment}" checked class="equipment-checkbox" data-factory="${factory}">
-            <span>${equipment}</span>
-          </label>
-        `).join('')}
+        ${equipmentList.map(equipment => {
+          // Check if this equipment was previously selected, default to true if no preferences saved
+          const isChecked = savedSelectedEquipment.length === 0 || savedSelectedEquipment.includes(equipment);
+          return `
+            <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded text-sm">
+              <input type="checkbox" value="${equipment}" ${isChecked ? 'checked' : ''} class="equipment-checkbox" data-factory="${factory}" onchange="saveEquipmentCheckboxState()">
+              <span>${equipment}</span>
+            </label>
+          `;
+        }).join('')}
       </div>
     </div>
   `).join('');
   
   checkboxContainer.innerHTML = factoriesHTML;
+}
+
+// Save checkbox state when changed (dates not persisted)
+function saveEquipmentCheckboxState() {
+  const selectedEquipment = Array.from(document.querySelectorAll('.equipment-checkbox:checked'))
+    .map(cb => cb.value);
+  saveEquipmentPreferences(selectedEquipment);
+}
+
+// Legacy function - now just calls saveEquipmentCheckboxState
+function saveEquipmentState() {
+  saveEquipmentCheckboxState();
 }
 
 // Toggle all equipment checkboxes
@@ -112,6 +189,7 @@ function toggleAllEquipment(selectAll) {
   checkboxes.forEach(checkbox => {
     checkbox.checked = selectAll;
   });
+  saveEquipmentCheckboxState(); // Save checkbox state only
 }
 
 // Toggle equipment for a specific factory
@@ -120,6 +198,7 @@ function toggleFactoryEquipment(factory, selectAll) {
   checkboxes.forEach(checkbox => {
     checkbox.checked = selectAll;
   });
+  saveEquipmentCheckboxState(); // Save checkbox state only
 }
 
 // Apply filters to equipment data
@@ -320,13 +399,48 @@ function renderEquipmentSection(equipment, data, analytics) {
         <table class="w-full text-sm border-collapse border border-gray-300">
           <thead class="bg-gray-100">
             <tr>
-              <th class="border border-gray-300 px-3 py-2 text-left">Date</th>
-              <th class="border border-gray-300 px-3 py-2 text-left">Worker</th>
-              <th class="border border-gray-300 px-3 py-2 text-right">Shots</th>
-              <th class="border border-gray-300 px-3 py-2 text-right">Process Qty</th>
-              <th class="border border-gray-300 px-3 py-2 text-right">Defects</th>
-              <th class="border border-gray-300 px-3 py-2 text-right">Defect Rate</th>
-              <th class="border border-gray-300 px-3 py-2 text-left">Time</th>
+              <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Date')">
+                <div class="flex items-center justify-between">
+                  <span>Date</span>
+                  <span id="sort-Date-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
+              <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Worker_Name')">
+                <div class="flex items-center justify-between">
+                  <span>Worker</span>
+                  <span id="sort-Worker_Name-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
+              <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'ショット数')">
+                <div class="flex items-center justify-between">
+                  <span>Shots</span>
+                  <span id="sort-ショット数-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
+              <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Process_Quantity')">
+                <div class="flex items-center justify-between">
+                  <span>Process Qty</span>
+                  <span id="sort-Process_Quantity-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
+              <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Total_NG')">
+                <div class="flex items-center justify-between">
+                  <span>Defects</span>
+                  <span id="sort-Total_NG-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
+              <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'defectRate')">
+                <div class="flex items-center justify-between">
+                  <span>Defect Rate</span>
+                  <span id="sort-defectRate-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
+              <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Time_start')">
+                <div class="flex items-center justify-between">
+                  <span>Time</span>
+                  <span id="sort-Time_start-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
             </tr>
           </thead>
           <tbody id="tableBody-${equipmentId}">
@@ -482,7 +596,36 @@ async function exportEquipmentPDF() {
     
     // Get user information
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
-    const userName = currentUser.fullName || currentUser.username || "Unknown User";
+    
+    // Fetch user's full name from database
+    let displayName = "Unknown User";
+    try {
+      const userRes = await fetch(BASE_URL + "queries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "users",
+          query: { username: currentUser.username },
+          projection: { firstName: 1, lastName: 1, username: 1 }
+        })
+      });
+      
+      const userData = await userRes.json();
+      if (userData && userData.length > 0) {
+        const user = userData[0];
+        if (user.lastName && user.firstName) {
+          displayName = `${user.lastName} ${user.firstName}`;
+        } else {
+          displayName = user.username || "Unknown User";
+        }
+      } else {
+        displayName = currentUser.username || "Unknown User";
+      }
+    } catch (error) {
+      console.error("Failed to fetch user information:", error);
+      displayName = currentUser.username || "Unknown User";
+    }
     
     // Add title
     doc.setFontSize(18);
@@ -499,7 +642,7 @@ async function exportEquipmentPDF() {
     // Add generation timestamp and user info
     doc.setFontSize(10);
     doc.text(`作成日時: ${new Date().toLocaleString('ja-JP')}`, 20, 45);
-    doc.text(`作成者: ${userName}`, 20, 52);
+    doc.text(`作成者: ${displayName}`, 20, 52);
     
     // Add summary table with Japanese headers
     const japaneseHeaders = ['設備名', '工場', '総ショット数', '平均ショット数/日', '平均ショット数/時間', '平均稼働時間/日'];
@@ -676,7 +819,49 @@ function showNotification(message, type = 'info') {
 // Render table page for specific equipment
 function renderTablePage(equipment, data, page = 1, equipmentItemsPerPage = 10) {
   const equipmentId = equipment.replace(/[^a-zA-Z0-9]/g, '_');
-  const sortedData = data.sort((a, b) => new Date(b.Date) - new Date(a.Date));
+  
+  // Initialize sort state for this equipment if not exists (default: Date descending)
+  if (!equipmentSortState[equipmentId]) {
+    equipmentSortState[equipmentId] = { column: 'Date', direction: -1 };
+  }
+  
+  // Sort data based on current sort state
+  const sortState = equipmentSortState[equipmentId];
+  let sortedData = [...data];
+  
+  if (sortState.column) {
+    sortedData = sortedData.sort((a, b) => {
+      let aValue, bValue;
+      
+      if (sortState.column === 'Date') {
+        aValue = new Date(a.Date);
+        bValue = new Date(b.Date);
+      } else if (sortState.column === 'defectRate') {
+        const aRate = a.Process_Quantity > 0 ? (parseInt(a.Total_NG || 0) / parseInt(a.Process_Quantity)) : 0;
+        const bRate = b.Process_Quantity > 0 ? (parseInt(b.Total_NG || 0) / parseInt(b.Process_Quantity)) : 0;
+        aValue = aRate;
+        bValue = bRate;
+      } else if (sortState.column === 'ショット数' || sortState.column === 'Process_Quantity' || sortState.column === 'Total_NG') {
+        aValue = parseInt(a[sortState.column] || 0);
+        bValue = parseInt(b[sortState.column] || 0);
+      } else if (sortState.column === 'Time_start') {
+        aValue = a.Time_start || '';
+        bValue = b.Time_start || '';
+      } else {
+        aValue = a[sortState.column] || '';
+        bValue = b[sortState.column] || '';
+      }
+      
+      // Handle different data types
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return aValue.localeCompare(bValue) * sortState.direction;
+      } else if (aValue instanceof Date && bValue instanceof Date) {
+        return (aValue - bValue) * sortState.direction;
+      } else {
+        return (aValue - bValue) * sortState.direction;
+      }
+    });
+  }
   
   // Store data for this equipment
   equipmentTableData[equipmentId] = {
@@ -684,6 +869,9 @@ function renderTablePage(equipment, data, page = 1, equipmentItemsPerPage = 10) 
     currentPage: page,
     itemsPerPage: equipmentItemsPerPage
   };
+  
+  // Update sort indicators
+  updateSortIndicators(equipmentId, sortState.column, sortState.direction);
   
   const startIndex = (page - 1) * equipmentItemsPerPage;
   const endIndex = startIndex + equipmentItemsPerPage;
@@ -697,7 +885,7 @@ function renderTablePage(equipment, data, page = 1, equipmentItemsPerPage = 10) 
       const defectRate = item.Process_Quantity > 0 ? 
         ((parseInt(item.Total_NG || 0) / parseInt(item.Process_Quantity)) * 100).toFixed(2) : 0;
       return `
-        <tr class="hover:bg-gray-50">
+        <tr class="hover:bg-gray-50" onclick="showEquipmentSidebarFromElement(this)" data-row="${encodeURIComponent(JSON.stringify(item))}">
           <td class="border border-gray-300 px-3 py-2">${item.Date}</td>
           <td class="border border-gray-300 px-3 py-2">${item.Worker_Name || '-'}</td>
           <td class="border border-gray-300 px-3 py-2 text-right">${parseInt(item.ショット数 || 0).toLocaleString()}</td>
@@ -783,15 +971,557 @@ function changeItemsPerPage(equipmentId) {
   }
 }
 
-// Export functions for global access
-window.loadEquipmentData = loadEquipmentData;
-window.applyEquipmentFilters = applyEquipmentFilters;
-window.exportEquipmentPDF = exportEquipmentPDF;
-window.exportEquipmentData = exportEquipmentData;
-window.toggleAllEquipment = toggleAllEquipment;
-window.toggleFactoryEquipment = toggleFactoryEquipment;
-window.goToPage = goToPage;
-window.changeItemsPerPage = changeItemsPerPage;
+// Equipment Sidebar Functions
+function showEquipmentSidebarFromElement(el) {
+  const rowData = JSON.parse(decodeURIComponent(el.getAttribute("data-row")));
+  showEquipmentSidebar(rowData);
+}
+
+function ensureEquipmentSidebarExists() {
+  let sidebar = document.getElementById('equipmentSidebar');
+  if (!sidebar) {
+    sidebar = document.createElement('div');
+    sidebar.id = 'equipmentSidebar';
+    sidebar.className = 'fixed top-0 right-0 h-full w-96 bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-50 overflow-y-auto';
+    document.body.appendChild(sidebar);
+  }
+  return sidebar;
+}
+
+function showEquipmentSidebar(item) {
+  const sidebar = ensureEquipmentSidebarExists();
+  
+  // Calculate additional metrics
+  const shots = parseInt(item.ショット数 || 0);
+  const processQty = parseInt(item.Process_Quantity || 0);
+  const defects = parseInt(item.Total_NG || 0);
+  const defectRate = processQty > 0 ? ((defects / processQty) * 100).toFixed(2) : '0.00';
+  
+  // Calculate working time
+  let workingHours = 'N/A';
+  if (item.Time_start && item.Time_end) {
+    const start = new Date(`2000-01-01T${item.Time_start}`);
+    const end = new Date(`2000-01-01T${item.Time_end}`);
+    if (end > start) {
+      const hours = (end - start) / (1000 * 60 * 60);
+      workingHours = hours.toFixed(2) + ' 時間';
+    }
+  }
+  
+  // Calculate cycle time
+  const cycleTime = item.Cycle_Time ? `${item.Cycle_Time} 秒` : 'N/A';
+  
+  // Calculate shots per hour
+  let shotsPerHour = 'N/A';
+  if (shots > 0 && workingHours !== 'N/A') {
+    const hours = parseFloat(workingHours);
+    shotsPerHour = (shots / hours).toFixed(0);
+  }
+
+  sidebar.innerHTML = `
+    <div class="h-full flex flex-col">
+      <!-- Header -->
+      <div class="bg-blue-600 text-white p-4 flex justify-between items-center">
+        <h3 class="text-lg font-semibold">設備詳細</h3>
+        <button onclick="closeEquipmentSidebar()" class="text-white hover:text-gray-200">
+          <i class="ri-close-line text-xl"></i>
+        </button>
+      </div>
+      
+      <!-- Content -->
+      <div class="flex-1 p-4 space-y-6">
+        <!-- Basic Information -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+            <i class="ri-information-line mr-2 text-blue-600"></i>
+            基本情報
+          </h4>
+          <div class="grid grid-cols-1 gap-2 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">設備:</span>
+              <span class="font-medium">${item.設備 || '-'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">日付:</span>
+              <span class="font-medium">${item.Date || '-'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">作業者:</span>
+              <span class="font-medium">${item.Worker_Name || '-'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">工場:</span>
+              <span class="font-medium">${item.工場 || '-'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">品番:</span>
+              <span class="font-medium">${item.品番 || '-'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">背番号:</span>
+              <span class="font-medium">${item.背番号 || '-'}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Time Information -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+            <i class="ri-time-line mr-2 text-green-600"></i>
+            時間・スケジュール
+          </h4>
+          <div class="grid grid-cols-1 gap-2 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-600">開始時間:</span>
+              <span class="font-medium">${item.Time_start || '-'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">終了時間:</span>
+              <span class="font-medium">${item.Time_end || '-'}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">稼働時間:</span>
+              <span class="font-medium text-green-600">${workingHours}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">サイクルタイム:</span>
+              <span class="font-medium">${cycleTime}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Production Metrics -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+            <i class="ri-bar-chart-line mr-2 text-purple-600"></i>
+            生産指標
+          </h4>
+          <div class="grid grid-cols-1 gap-3">
+            <div class="bg-white p-3 rounded border">
+              <div class="flex justify-between items-center">
+                <span class="text-gray-600 text-sm">総ショット数</span>
+                <span class="text-2xl font-bold text-blue-600">${shots.toLocaleString()}</span>
+              </div>
+            </div>
+            <div class="bg-white p-3 rounded border">
+              <div class="flex justify-between items-center">
+                <span class="text-gray-600 text-sm">加工数量</span>
+                <span class="text-2xl font-bold text-green-600">${processQty.toLocaleString()}</span>
+              </div>
+            </div>
+            <div class="bg-white p-3 rounded border">
+              <div class="flex justify-between items-center">
+                <span class="text-gray-600 text-sm">時間当たりショット数</span>
+                <span class="text-xl font-bold text-purple-600">${shotsPerHour}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quality Metrics -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+            <i class="ri-error-warning-line mr-2 text-red-600"></i>
+            品質指標
+          </h4>
+          <div class="grid grid-cols-1 gap-3">
+            <div class="bg-white p-3 rounded border">
+              <div class="flex justify-between items-center">
+                <span class="text-gray-600 text-sm">総不良数</span>
+                <span class="text-2xl font-bold ${defects > 0 ? 'text-red-600' : 'text-green-600'}">${defects}</span>
+              </div>
+            </div>
+            <div class="bg-white p-3 rounded border">
+              <div class="flex justify-between items-center">
+                <span class="text-gray-600 text-sm">不良率</span>
+                <span class="text-xl font-bold ${parseFloat(defectRate) > 2 ? 'text-red-600' : 'text-green-600'}">${defectRate}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Defect Details -->
+        ${item.疵引不良 || item.加工不良 || item.その他 ? `
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+            <i class="ri-alert-line mr-2 text-orange-600"></i>
+            不良内訳
+          </h4>
+          <div class="space-y-2 text-sm">
+            ${item.疵引不良 ? `
+              <div class="flex justify-between bg-white p-2 rounded border">
+                <span class="text-gray-600">疵引不良:</span>
+                <span class="font-medium text-red-600">${item.疵引不良}</span>
+              </div>
+            ` : ''}
+            ${item.加工不良 ? `
+              <div class="flex justify-between bg-white p-2 rounded border">
+                <span class="text-gray-600">加工不良:</span>
+                <span class="font-medium text-red-600">${item.加工不良}</span>
+              </div>
+            ` : ''}
+            ${item.その他 ? `
+              <div class="flex justify-between bg-white p-2 rounded border">
+                <span class="text-gray-600">その他:</span>
+                <span class="font-medium text-red-600">${item.その他}</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Additional Data -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+            <i class="ri-database-line mr-2 text-gray-600"></i>
+            追加情報
+          </h4>
+          <div class="grid grid-cols-1 gap-2 text-sm">
+            ${item.製造ロット ? `
+              <div class="flex justify-between">
+                <span class="text-gray-600">製造ロット:</span>
+                <span class="font-medium">${item.製造ロット}</span>
+              </div>
+            ` : ''}
+            ${item.材料ロット ? `
+              <div class="flex justify-between">
+                <span class="text-gray-600">材料ロット:</span>
+                <span class="font-medium">${item.材料ロット}</span>
+              </div>
+            ` : ''}
+            ${item.Comment ? `
+              <div class="mt-2">
+                <span class="text-gray-600">コメント:</span>
+                <p class="font-medium mt-1 p-2 bg-white rounded border">${item.Comment}</p>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Master Image Section -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+            <i class="ri-image-line mr-2 text-indigo-600"></i>
+            画像
+          </h4>
+          <div class="space-y-3">
+            <!-- Master Image (正しい形状) -->
+            <div id="masterImageContainer-${item._id || Date.now()}">
+              <div>
+                <p class="font-semibold text-sm mb-1">正しい形状</p>
+                <div class="rounded shadow w-full max-h-60 bg-gray-100 flex items-center justify-center">
+                  <span class="text-gray-500">読み込み中...</span>
+                </div>
+              </div>
+            </div>
+            
+            ${item['初物チェック画像'] ? `
+              <div>
+                <label class="text-sm font-medium text-gray-700 mb-1 block">初物チェック画像</label>
+                <img src="${item['初物チェック画像']}" 
+                     alt="初物チェック" 
+                     class="w-full h-32 object-cover rounded border cursor-pointer hover:opacity-75 transition-opacity" 
+                     onclick="openEquipmentImageTab('${item['初物チェック画像']}', '初物チェック')">
+              </div>
+            ` : ''}
+            ${item['終物チェック画像'] ? `
+              <div>
+                <label class="text-sm font-medium text-gray-700 mb-1 block">終物チェック画像</label>
+                <img src="${item['終物チェック画像']}" 
+                     alt="終物チェック" 
+                     class="w-full h-32 object-cover rounded border cursor-pointer hover:opacity-75 transition-opacity" 
+                     onclick="openEquipmentImageTab('${item['終物チェック画像']}', '終物チェック')">
+              </div>
+            ` : ''}
+            ${item['材料ラベル画像'] ? `
+              <div>
+                <label class="text-sm font-medium text-gray-700 mb-1 block">材料ラベル画像</label>
+                <img src="${item['材料ラベル画像']}" 
+                     alt="材料ラベル" 
+                     class="w-full h-32 object-cover rounded border cursor-pointer hover:opacity-75 transition-opacity" 
+                     onclick="openEquipmentImageTab('${item['材料ラベル画像']}', '材料ラベル')">
+              </div>
+            ` : ''}
+            ${!item['初物チェック画像'] && !item['終物チェック画像'] && !item['材料ラベル画像'] ? `
+              <div class="text-center text-gray-500 py-4">
+                <i class="ri-image-off-line text-2xl mb-2"></i>
+                <p>画像がありません</p>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Load master image
+  loadEquipmentMasterImage(item.品番, item.背番号, item._id || Date.now());
+  
+  // Add click outside to close functionality
+  const handleClickOutside = (event) => {
+    if (!sidebar.contains(event.target)) {
+      closeEquipmentSidebar();
+    }
+  };
+  
+  // Store the handler so we can remove it later
+  sidebar.clickOutsideHandler = handleClickOutside;
+  
+  // Add event listener after a short delay to prevent immediate closing
+  setTimeout(() => {
+    document.addEventListener('click', handleClickOutside);
+  }, 100);
+  
+  // Show sidebar
+  setTimeout(() => {
+    sidebar.classList.remove('translate-x-full');
+  }, 10);
+}
+
+function closeEquipmentSidebar() {
+  const sidebar = document.getElementById('equipmentSidebar');
+  if (sidebar) {
+    sidebar.classList.add('translate-x-full');
+    
+    // Remove the click outside event listener
+    if (sidebar.clickOutsideHandler) {
+      document.removeEventListener('click', sidebar.clickOutsideHandler);
+    }
+    
+    setTimeout(() => {
+      sidebar.remove();
+    }, 300);
+  }
+}
+
+// Load master image for equipment
+async function loadEquipmentMasterImage(品番, 背番号, itemId) {
+  const container = document.getElementById(`masterImageContainer-${itemId}`);
+  
+  if (!container) return;
+  
+  try {
+    // First try to find by 品番
+    let query = { 品番: 品番 };
+    if (!品番 && 背番号) {
+      // If no 品番, try with 背番号
+      query = { 背番号: 背番号 };
+    }
+
+    const response = await fetch(`${BASE_URL}queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "masterDB",
+        query: query,
+        projection: { imageURL: 1, 品番: 1, 背番号: 1, 品名: 1 }
+      })
+    });
+
+    const results = await response.json();
+
+    if (results && results.length > 0 && results[0].imageURL) {
+      const masterData = results[0];
+      container.innerHTML = `
+        <div>
+          <p class="font-semibold text-sm mb-1">正しい形状</p>
+          <p class="text-xs text-gray-600 mb-2">品番: ${masterData.品番 || 'N/A'} | 背番号: ${masterData.背番号 || 'N/A'}</p>
+          <a href="#" onclick="openEquipmentImageTab('${masterData.imageURL}', '正しい形状'); return false;">
+            <img src="${masterData.imageURL}" alt="正しい形状" class="rounded shadow w-full max-h-60 object-contain sm:max-w-md mx-auto hover:opacity-90 cursor-zoom-in border-2 border-green-200" />
+          </a>
+        </div>
+      `;
+    } else {
+      // Try alternative search if first attempt failed
+      if (品番 && 背番号) {
+        // If we searched by 品番 first, try 背番号
+        const altResponse = await fetch(`${BASE_URL}queries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dbName: "Sasaki_Coating_MasterDB",
+            collectionName: "masterDB",
+            query: { 背番号: 背番号 },
+            projection: { imageURL: 1, 品番: 1, 背番号: 1, 品名: 1 }
+          })
+        });
+
+        const altResults = await altResponse.json();
+        
+        if (altResults && altResults.length > 0 && altResults[0].imageURL) {
+          const masterData = altResults[0];
+          container.innerHTML = `
+            <div>
+              <p class="font-semibold text-sm mb-1">正しい形状</p>
+              <p class="text-xs text-gray-600 mb-2">品番: ${masterData.品番 || 'N/A'} | 背番号: ${masterData.背番号 || 'N/A'}</p>
+              <a href="#" onclick="openEquipmentImageTab('${masterData.imageURL}', '正しい形状'); return false;">
+                <img src="${masterData.imageURL}" alt="正しい形状" class="rounded shadow w-full max-h-60 object-contain sm:max-w-md mx-auto hover:opacity-90 cursor-zoom-in border-2 border-green-200" />
+              </a>
+            </div>
+          `;
+        } else {
+          // No image found
+          container.innerHTML = `
+            <div>
+              <p class="font-semibold text-sm mb-1">正しい形状</p>
+              <div class="rounded shadow w-full max-h-60 bg-gray-100 flex items-center justify-center border-2 border-gray-300">
+                <span class="text-gray-500">画像が見つかりません</span>
+              </div>
+            </div>
+          `;
+        }
+      } else {
+        // No image found
+        container.innerHTML = `
+          <div>
+            <p class="font-semibold text-sm mb-1">正しい形状</p>
+            <div class="rounded shadow w-full max-h-60 bg-gray-100 flex items-center justify-center border-2 border-gray-300">
+              <span class="text-gray-500">画像が見つかりません</span>
+            </div>
+          </div>
+        `;
+      }
+    }
+  } catch (error) {
+    console.error("Error loading master image:", error);
+    container.innerHTML = `
+      <div>
+        <p class="font-semibold text-sm mb-1">正しい形状</p>
+        <div class="rounded shadow w-full max-h-60 bg-red-100 flex items-center justify-center border-2 border-red-300">
+          <span class="text-red-500">画像の読み込みに失敗しました</span>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function openEquipmentImageTab(imageUrl, title) {
+  const newTab = window.open('', '_blank');
+  newTab.document.write(`
+    <html>
+      <head>
+        <title>${title}</title>
+        <style>
+          body { 
+            margin: 0; 
+            padding: 20px; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            background-color: #f5f5f5; 
+          }
+          img { 
+            max-width: 100%; 
+            max-height: 100%; 
+            border: 1px solid #ccc; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
+          }
+          .title { 
+            position: absolute; 
+            top: 10px; 
+            left: 20px; 
+            font-family: Arial, sans-serif; 
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #333; 
+          }
+        </style>
+      </head>
+      <body>
+        <div class="title">${title}</div>
+        <img src="${imageUrl}" alt="${title}">
+      </body>
+    </html>
+  `);
+}
+
+// Sort equipment table by column
+function sortEquipmentTable(equipmentId, column) {
+  const tableData = equipmentTableData[equipmentId];
+  if (!tableData) return;
+  
+  // Initialize sort state for this equipment if not exists
+  if (!equipmentSortState[equipmentId]) {
+    equipmentSortState[equipmentId] = { column: null, direction: 1 };
+  }
+  
+  const sortState = equipmentSortState[equipmentId];
+  
+  // Toggle direction if same column, otherwise set to ascending
+  if (sortState.column === column) {
+    sortState.direction *= -1;
+  } else {
+    sortState.column = column;
+    sortState.direction = 1;
+  }
+  
+  // Sort the data
+  const sortedData = [...tableData.data].sort((a, b) => {
+    let aValue, bValue;
+    
+    if (column === 'Date') {
+      aValue = new Date(a.Date);
+      bValue = new Date(b.Date);
+    } else if (column === 'defectRate') {
+      // Calculate defect rate for sorting
+      const aRate = a.Process_Quantity > 0 ? (parseInt(a.Total_NG || 0) / parseInt(a.Process_Quantity)) : 0;
+      const bRate = b.Process_Quantity > 0 ? (parseInt(b.Total_NG || 0) / parseInt(b.Process_Quantity)) : 0;
+      aValue = aRate;
+      bValue = bRate;
+    } else if (column === 'ショット数' || column === 'Process_Quantity' || column === 'Total_NG') {
+      aValue = parseInt(a[column] || 0);
+      bValue = parseInt(b[column] || 0);
+    } else if (column === 'Time_start') {
+      aValue = a.Time_start || '';
+      bValue = b.Time_start || '';
+    } else {
+      aValue = a[column] || '';
+      bValue = b[column] || '';
+    }
+    
+    // Handle different data types
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return aValue.localeCompare(bValue) * sortState.direction;
+    } else if (aValue instanceof Date && bValue instanceof Date) {
+      return (aValue - bValue) * sortState.direction;
+    } else {
+      return (aValue - bValue) * sortState.direction;
+    }
+  });
+  
+  // Update the data in tableData
+  equipmentTableData[equipmentId].data = sortedData;
+  
+  // Update sort indicators
+  updateSortIndicators(equipmentId, column, sortState.direction);
+  
+  // Re-render the table with sorted data
+  const equipment = Object.keys(groupDataByEquipment(filteredEquipmentData))
+    .find(eq => eq.replace(/[^a-zA-Z0-9]/g, '_') === equipmentId);
+  if (equipment) {
+    renderTablePage(equipment, sortedData, 1, tableData.itemsPerPage);
+  }
+}
+
+// Update sort indicators in table headers
+function updateSortIndicators(equipmentId, activeColumn, direction) {
+  // Reset all indicators for this equipment
+  const sortIndicators = document.querySelectorAll(`[id^="sort-"][id$="-${equipmentId}"]`);
+  sortIndicators.forEach(indicator => {
+    indicator.textContent = '↕';
+    indicator.className = 'ml-1 text-gray-400';
+  });
+  
+  // Update active indicator
+  const activeIndicator = document.getElementById(`sort-${activeColumn}-${equipmentId}`);
+  if (activeIndicator) {
+    activeIndicator.textContent = direction === 1 ? '↑' : '↓';
+    activeIndicator.className = 'ml-1 text-blue-600';
+  }
+}
 
 // Generate chart directly in PDF using vector graphics
 function generateDirectChartInPDF(doc, equipment, data, startY) {
@@ -862,31 +1592,31 @@ function generateDirectChartInPDF(doc, equipment, data, startY) {
   }
   
   // Vertical grid lines
-  const barWidth = (chartWidth - 20) / dates.length;
+  const barWidth = (chartWidth - 30) / dates.length; // More space for thinner bars
   for (let i = 0; i <= dates.length; i++) {
-    const x = chartX + 10 + (i * barWidth);
+    const x = chartX + 15 + (i * barWidth);
     doc.line(x, chartY + 10, x, chartY + chartHeight - 10);
   }
   
-  // Draw bars (shots)
+  // Draw bars (shots) - thinner bars
   doc.setFillColor(59, 130, 246); // Blue color for shots
   shotData.forEach((shots, index) => {
     const barHeight = shots * shotsScale;
-    const barX = chartX + 12 + (index * barWidth);
+    const barX = chartX + 15 + (index * barWidth);
     const barY = chartY + chartHeight - 10 - barHeight;
-    const actualBarWidth = barWidth - 4;
+    const actualBarWidth = Math.max(barWidth * 0.6, 3); // Make bars thinner
     
     if (barHeight > 0) {
       doc.rect(barX, barY, actualBarWidth, barHeight, 'F');
     }
   });
   
-  // Draw line (working hours)
+  // Draw line (working hours) - thinner line
   doc.setDrawColor(16, 185, 129); // Green color for hours
-  doc.setLineWidth(2);
+  doc.setLineWidth(1.5); // Thinner line
   
   const hourPoints = hourData.map((hours, index) => {
-    const x = chartX + 12 + (index * barWidth) + barWidth / 2;
+    const x = chartX + 15 + (index * barWidth) + (barWidth * 0.6) / 2;
     const y = chartY + chartHeight - 10 - (hours * hoursScale);
     return { x, y };
   });
@@ -896,35 +1626,48 @@ function generateDirectChartInPDF(doc, equipment, data, startY) {
     doc.line(hourPoints[i].x, hourPoints[i].y, hourPoints[i + 1].x, hourPoints[i + 1].y);
   }
   
-  // Draw line points
+  // Draw line points - smaller circles
   doc.setFillColor(16, 185, 129);
   hourPoints.forEach(point => {
-    doc.circle(point.x, point.y, 1.5, 'F');
+    doc.circle(point.x, point.y, 1, 'F');
   });
   
-  // Draw Y-axis labels
+  // Draw Y-axis labels and titles
   doc.setFontSize(8);
   doc.setFont('NotoSansJP', 'normal');
   doc.setTextColor(75, 85, 99); // Gray text
   
   // Shots axis (left)
   for (let i = 0; i <= 4; i++) {
-    const value = (maxShots * i / 4).toFixed(0);
+    const value = Math.round(maxShots * i / 4);
     const y = chartY + chartHeight - 10 - (i * (chartHeight - 20) / 4);
-    doc.text(value, chartX + 2, y + 1, { align: 'right' });
+    doc.text(value.toString(), chartX + 8, y + 1, { align: 'right' });
   }
   
   // Hours axis (right)
   for (let i = 0; i <= 4; i++) {
     const value = (maxHours * i / 4).toFixed(1) + 'h';
     const y = chartY + chartHeight - 10 - (i * (chartHeight - 20) / 4);
-    doc.text(value, chartX + chartWidth - 2, y + 1, { align: 'left' });
+    doc.text(value, chartX + chartWidth - 8, y + 1, { align: 'left' });
   }
+  
+  // Add axis titles
+  doc.setFontSize(7);
+  doc.setTextColor(107, 114, 128);
+  
+  // Left Y-axis title (shots)
+  doc.text('ショット数', chartX - 2, chartY + 5, { align: 'right' });
+  
+  // Right Y-axis title (hours)
+  doc.text('稼働時間', chartX + chartWidth + 2, chartY + 5, { align: 'left' });
+  
+  // X-axis title
+  doc.text('日付', chartX + chartWidth / 2, chartY + chartHeight + 15, { align: 'center' });
   
   // Draw X-axis labels (dates)
   dates.forEach((date, index) => {
-    const x = chartX + 12 + (index * barWidth) + barWidth / 2;
-    const y = chartY + chartHeight + 5;
+    const x = chartX + 15 + (index * barWidth) + (barWidth * 0.6) / 2;
+    const y = chartY + chartHeight + 8; // Moved down to make room for axis title
     
     // Format date for display
     const formattedDate = new Date(date).toLocaleDateString('ja-JP', { 
@@ -936,7 +1679,7 @@ function generateDirectChartInPDF(doc, equipment, data, startY) {
   });
   
   // Draw legend
-  const legendY = chartY + chartHeight + 15;
+  const legendY = chartY + chartHeight + 20; // More space for axis title
   doc.setFontSize(9);
   
   // Shots legend
@@ -963,5 +1706,5 @@ function generateDirectChartInPDF(doc, equipment, data, startY) {
   doc.text(`平均ショット数/日: ${analytics.avgShotsPerDay}`, chartX + 60, summaryY);
   doc.text(`平均稼働時間/日: ${analytics.avgWorkingHoursPerDay}h`, chartX + 120, summaryY);
   
-  return startY + 120; // Return next Y position
+  return startY + 130; // Return next Y position (increased for axis title space)
 }
