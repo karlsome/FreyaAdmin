@@ -143,30 +143,50 @@ function setupEquipmentFilters() {
   document.getElementById('equipmentStartDate').addEventListener('change', saveEquipmentCheckboxState);
   document.getElementById('equipmentEndDate').addEventListener('change', saveEquipmentCheckboxState);
   
+  // Load saved expand/collapse states
+  const expandStates = JSON.parse(localStorage.getItem('factoryExpandStates') || '{}');
+  
   // Create equipment checkboxes grouped by factory
-  const factoriesHTML = Object.entries(equipmentByFactory).map(([factory, equipmentList]) => `
-    <div class="mb-4 border border-gray-200 rounded-lg p-3">
-      <div class="flex items-center justify-between mb-2">
-        <h4 class="font-semibold text-sm text-gray-700">${factory}</h4>
-        <div class="flex space-x-2">
-          <button onclick="toggleFactoryEquipment('${factory}', true)" class="text-xs text-blue-600 hover:text-blue-800">All</button>
-          <button onclick="toggleFactoryEquipment('${factory}', false)" class="text-xs text-blue-600 hover:text-blue-800">None</button>
+  const factoriesHTML = Object.entries(equipmentByFactory).map(([factory, equipmentList]) => {
+    // Default to expanded if no saved state
+    const isExpanded = expandStates[factory] !== false;
+    const iconClass = isExpanded ? 'rotate-0' : '-rotate-90';
+    const contentClass = isExpanded ? '' : 'hidden';
+    
+    return `
+    <div class="mb-4 border border-gray-200 rounded-lg bg-white shadow-sm">
+      <div class="p-3 border-b border-gray-100">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <button onclick="toggleFactorySection('${factory}')" class="flex items-center space-x-2 text-sm font-semibold text-gray-700 hover:text-gray-900">
+              <i id="factory-icon-${factory}" class="ri-arrow-down-s-line text-lg transform transition-transform duration-200 ${iconClass}"></i>
+              <span>${factory}</span>
+              <span class="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">${equipmentList.length}</span>
+            </button>
+          </div>
+          <div class="flex space-x-2">
+            <button onclick="toggleFactoryEquipment('${factory}', true)" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">All</button>
+            <button onclick="toggleFactoryEquipment('${factory}', false)" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">None</button>
+          </div>
         </div>
       </div>
-      <div class="space-y-1 max-h-32 overflow-y-auto">
-        ${equipmentList.map(equipment => {
-          // Check if this equipment was previously selected, default to true if no preferences saved
-          const isChecked = savedSelectedEquipment.length === 0 || savedSelectedEquipment.includes(equipment);
-          return `
-            <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded text-sm">
-              <input type="checkbox" value="${equipment}" ${isChecked ? 'checked' : ''} class="equipment-checkbox" data-factory="${factory}" onchange="saveEquipmentCheckboxState()">
-              <span>${equipment}</span>
-            </label>
-          `;
-        }).join('')}
+      <div id="factory-content-${factory}" class="p-3 transition-all duration-300 ${contentClass}">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          ${equipmentList.map(equipment => {
+            // Check if this equipment was previously selected, default to true if no preferences saved
+            const isChecked = savedSelectedEquipment.length === 0 || savedSelectedEquipment.includes(equipment);
+            return `
+              <label class="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded border border-gray-100 text-sm transition-colors">
+                <input type="checkbox" value="${equipment}" ${isChecked ? 'checked' : ''} class="equipment-checkbox text-blue-600 focus:ring-blue-500" data-factory="${factory}" onchange="saveEquipmentCheckboxState()">
+                <span class="flex-1 truncate">${equipment}</span>
+              </label>
+            `;
+          }).join('')}
+        </div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
   
   checkboxContainer.innerHTML = factoriesHTML;
 }
@@ -751,18 +771,36 @@ function exportEquipmentData(equipment) {
     return;
   }
   
-  // Create CSV data
-  const headers = ['Date', 'Worker', 'Shots', 'Process Qty', 'Defects', 'Defect Rate', 'Time Start', 'Time End'];
-  const csvData = equipmentData.map(item => [
-    item.Date,
-    item.Worker_Name || '',
-    item.ショット数 || '0',
-    item.Process_Quantity || '0',
-    item.Total_NG || '0',
-    item.Process_Quantity > 0 ? ((parseInt(item.Total_NG || 0) / parseInt(item.Process_Quantity)) * 100).toFixed(2) + '%' : '0%',
-    item.Time_start || '',
-    item.Time_end || ''
-  ]);
+  // Create CSV data with Japanese headers
+  const headers = ['日付', '作業者', 'ショット数', '加工数量', '不良数', '不良率', '開始時間', '終了時間', '勤務時間'];
+  const csvData = equipmentData.map(item => {
+    // Calculate work hours
+    let workHours = '';
+    if (item.Time_start && item.Time_end) {
+      try {
+        const start = new Date(`2000-01-01T${item.Time_start}`);
+        const end = new Date(`2000-01-01T${item.Time_end}`);
+        if (end > start) {
+          const hours = (end - start) / (1000 * 60 * 60);
+          workHours = hours.toFixed(2) + 'h';
+        }
+      } catch (error) {
+        workHours = '';
+      }
+    }
+    
+    return [
+      item.Date,
+      item.Worker_Name || '',
+      item.ショット数 || '0',
+      item.Process_Quantity || '0',
+      item.Total_NG || '0',
+      item.Process_Quantity > 0 ? ((parseInt(item.Total_NG || 0) / parseInt(item.Process_Quantity)) * 100).toFixed(2) + '%' : '0%',
+      item.Time_start || '',
+      item.Time_end || '',
+      workHours
+    ];
+  });
   
   // Create CSV content
   const csvContent = [headers, ...csvData]
@@ -1522,6 +1560,36 @@ function updateSortIndicators(equipmentId, activeColumn, direction) {
     activeIndicator.className = 'ml-1 text-blue-600';
   }
 }
+
+// Toggle factory section expand/collapse
+function toggleFactorySection(factory) {
+  const content = document.getElementById(`factory-content-${factory}`);
+  const icon = document.getElementById(`factory-icon-${factory}`);
+  
+  if (content && icon) {
+    const isExpanded = !content.classList.contains('hidden');
+    
+    if (isExpanded) {
+      // Collapse
+      content.classList.add('hidden');
+      icon.classList.remove('rotate-0');
+      icon.classList.add('-rotate-90');
+    } else {
+      // Expand
+      content.classList.remove('hidden');
+      icon.classList.remove('-rotate-90');
+      icon.classList.add('rotate-0');
+    }
+    
+    // Save expand/collapse state to localStorage
+    const expandStates = JSON.parse(localStorage.getItem('factoryExpandStates') || '{}');
+    expandStates[factory] = !isExpanded;
+    localStorage.setItem('factoryExpandStates', JSON.stringify(expandStates));
+  }
+}
+
+// Make function globally available
+window.toggleFactorySection = toggleFactorySection;
 
 // Generate chart directly in PDF using vector graphics
 function generateDirectChartInPDF(doc, equipment, data, startY) {
