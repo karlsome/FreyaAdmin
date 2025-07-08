@@ -5,7 +5,7 @@
 // Ensure navigation config is globally available
 if (typeof window !== 'undefined') {
   window.roleAccess = window.roleAccess || {
-    admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement"],
+    admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment"],
     班長: ["dashboard", "factories", "approvals", "masterDB"],
     member: ["dashboard"]
   };
@@ -19,7 +19,8 @@ if (typeof window !== 'undefined') {
     analytics: { icon: "ri-line-chart-line", label: "Analytics" },
     userManagement: { icon: "ri-user-settings-line", label: "User Management" },
     approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
-    customerManagement: { icon: "ri-user-3-line", label: "Customer Management" }
+    customerManagement: { icon: "ri-user-3-line", label: "Customer Management" },
+    equipment: { icon: "ri-tools-line", label: "Equipment" }
   };
 }
 

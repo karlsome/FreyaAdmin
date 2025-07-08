@@ -11,6 +11,16 @@ A comprehensive single-page application (SPA) for factory management and custome
 - Process monitoring and approvals
 - Monthly summary reports
 
+### 🔧 **Equipment Analytics**
+- Real-time equipment performance monitoring
+- Shot count tracking (per day/hour)
+- Working hours analysis
+- Equipment efficiency metrics
+- Date range filtering
+- Equipment-specific reports
+- PDF export functionality
+- Individual equipment data visualization
+
 ### 👥 **User Management** (Admin Only)
 - Create, edit, and manage users
 - Role-based access control (admin, 班長, member)

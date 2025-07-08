@@ -12,10 +12,10 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement"],
-  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB"], // Same as 部長
-  係長: ["dashboard", "factories", "approvals", "masterDB"], // Same as 班長 but factory-limited
+  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment"],
+  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"], // Same as 部長
+  係長: ["dashboard", "factories", "approvals", "masterDB", "equipment"], // Same as 班長 but factory-limited
   班長: ["dashboard", "factories", "approvals", "masterDB"],
   member: ["dashboard"]
 };
@@ -45,6 +45,7 @@ const navItemsConfig = {
   userManagement: { icon: "ri-user-settings-line", label: "User Management" },
   approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
   customerManagement: { icon: "ri-user-3-line", label: "Customer Management" },
+  equipment: { icon: "ri-tools-line", label: "Equipment" },
 };
 
 function createNavItem(page) {
@@ -1544,6 +1545,52 @@ function loadPage(page) {
 
           loadMasterDB();
           loadMasterFilters();
+          break;
+
+        case "equipment":
+          mainContent.innerHTML = `
+            <div class="bg-white p-6 rounded-xl shadow mb-6">
+              <h2 class="text-2xl font-semibold mb-4">Equipment Analytics</h2>
+              <div id="equipmentFilters" class="mb-6">
+                <div class="flex flex-wrap gap-4 mb-4">
+                  <div class="flex-1 min-w-48">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Date Range</label>
+                    <div class="flex gap-2">
+                      <input type="date" id="equipmentStartDate" class="p-2 border rounded-md">
+                      <input type="date" id="equipmentEndDate" class="p-2 border rounded-md">
+                    </div>
+                  </div>
+                  <div class="flex-1 min-w-48">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Equipment Filter (by Factory)</label>
+                    <div class="mb-2">
+                      <button onclick="toggleAllEquipment(true)" class="text-xs text-blue-600 hover:text-blue-800 mr-2">Select All</button>
+                      <button onclick="toggleAllEquipment(false)" class="text-xs text-blue-600 hover:text-blue-800">Deselect All</button>
+                    </div>
+                    <div id="equipmentCheckboxes" class="space-y-2 max-h-48 overflow-y-auto p-2 border rounded-md bg-gray-50"></div>
+                  </div>
+                  <div class="flex flex-col justify-end">
+                    <button onclick="applyEquipmentFilters()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">Apply Filters</button>
+                    <button onclick="exportEquipmentPDF()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 mt-2">Export PDF</button>
+                  </div>
+                </div>
+              </div>
+              <div id="equipmentContent" class="space-y-8"></div>
+            </div>
+          `;
+          // Add safety check for equipment functions
+          if (typeof window.loadEquipmentData === 'function') {
+            loadEquipmentData();
+          } else {
+            console.error('loadEquipmentData function not available');
+            // Retry after a short delay
+            setTimeout(() => {
+              if (typeof window.loadEquipmentData === 'function') {
+                loadEquipmentData();
+              } else {
+                console.error('loadEquipmentData still not available after retry');
+              }
+            }, 100);
+          }
           break;
 
         default:
