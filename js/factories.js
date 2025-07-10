@@ -1656,22 +1656,102 @@ function exportToCSV(data, filename = "export.csv") {
  * Exports data to PDF file.
  */
 async function exportToPDF(data, filename = "export.pdf") {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.setFontSize(12);
-    doc.text("Monthly Summary", 14, 15);
+    try {
+        // Check if jsPDF is available
+        if (!window.jspdf) {
+            alert('PDF export library not loaded. Please refresh the page and try again.');
+            return;
+        }
 
-    const headers = ["品番", "背番号", "Total", "Total NG"];
-    const rows = data.map(row => [row.品番, row.背番号, row.Total.toString(), row.Total_NG.toString()]);
+        // Show loading indicator
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.textContent = 'PDFエクスポートを準備中です、しばらくお待ちください...';
+        loadingIndicator.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white p-4 rounded shadow-lg z-[100]';
+        document.body.appendChild(loadingIndicator);
 
-    doc.autoTable({
-        startY: 20,
-        head: [headers],
-        body: rows,
-        styles: { fontSize: 10 }
-    });
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // Setup Japanese font
+        try {
+          if (typeof notoSansJPRegularBase64 === 'undefined' || (typeof notoSansJPRegularBase64 === 'string' && notoSansJPRegularBase64.startsWith("YOUR_"))) {
+            throw new Error("Noto Sans JP Regularフォントのbase64文字列が埋め込まれていないか、利用できません。");
+          }
+          doc.addFileToVFS('NotoSansJP-Regular.ttf', notoSansJPRegularBase64);
+          doc.addFont('NotoSansJP-Regular.ttf', 'NotoSansJP', 'normal');
 
-    doc.save(filename);
+          if (typeof notoSansJPBoldBase64 !== 'undefined' && (typeof notoSansJPBoldBase64 === 'string' && !notoSansJPBoldBase64.startsWith("YOUR_"))) {
+            doc.addFileToVFS('NotoSansJP-Bold.ttf', notoSansJPBoldBase64);
+            doc.addFont('NotoSansJP-Bold.ttf', 'NotoSansJP', 'bold');
+          }
+          doc.setFont('NotoSansJP');
+          console.log("Noto Sans JPフォントがPDF用に登録されました。");
+        } catch (fontError) {
+          console.error("Noto Sans JPフォントのPDFへの登録に失敗しました:", fontError);
+          console.log("PDFは標準フォントを使用します。");
+        }
+        
+        // Add title and metadata
+        doc.setFontSize(16);
+        doc.setFont('NotoSansJP', 'bold');
+        doc.text("工場概要レポート", 14, 15);
+        
+        // Add generation timestamp
+        doc.setFontSize(10);
+        doc.setFont('NotoSansJP', 'normal');
+        doc.text(`作成日時: ${new Date().toLocaleString('ja-JP')}`, 14, 25);
+
+        const headers = ["品番", "背番号", "Total", "Total NG", "Work Hours", "不良率"];
+        const rows = data.map(row => [
+            row.品番, 
+            row.背番号, 
+            row.Total.toString(), 
+            row.Total_NG.toString(),
+            row.WorkHours ? row.WorkHours.toFixed(1) : "0.0",
+            row.DefectRate ? row.DefectRate.toFixed(1) + "%" : "0.0%"
+        ]);
+
+        doc.autoTable({
+            startY: 35,
+            head: [headers],
+            body: rows,
+            styles: { 
+                fontSize: 10,
+                font: 'NotoSansJP',
+                fontStyle: 'normal'
+            },
+            headStyles: { 
+                fillColor: [59, 130, 246],
+                textColor: 255,
+                font: 'NotoSansJP',
+                fontStyle: 'bold'
+            },
+            alternateRowStyles: { fillColor: [245, 245, 245] }
+        });
+
+        doc.save(filename);
+        
+        // Remove loading indicator
+        document.body.removeChild(loadingIndicator);
+        
+        // Show success notification if available
+        if (typeof showNotification === 'function') {
+            showNotification('PDFエクスポートが完了しました！', 'success');
+        }
+        
+    } catch (error) {
+        console.error('Error generating PDF:', error);
+        // Remove loading indicator if it exists
+        const loadingIndicator = document.querySelector('.fixed.top-1\\/2.left-1\\/2');
+        if (loadingIndicator) {
+            document.body.removeChild(loadingIndicator);
+        }
+        if (typeof showNotification === 'function') {
+            showNotification('PDFの生成中にエラーが発生しました。再度お試しください。', 'error');
+        } else {
+            alert('PDFの生成中にエラーが発生しました。再度お試しください。');
+        }
+    }
 }
 
 
@@ -1781,33 +1861,126 @@ function exportToCSVGrouped(processData, filename = "export.csv") {
    * Exports grouped process summaries to PDF.
    */
   function exportToPDFGrouped(processSummaries, filename = "summary.pdf") {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.setFontSize(14);
-    let y = 15;
-  
-    processSummaries.forEach(proc => {
-      if (proc.summary.length === 0) return;
-  
-      doc.text(`${proc.name} Summary`, 14, y);
-      y += 6;
-  
-      const headers = ["品番", "背番号", "Total", "Total NG"];
-      const rows = proc.summary.map(r => [r.品番, r.背番号, r.Total.toString(), r.Total_NG.toString()]);
-  
-      doc.autoTable({
-        startY: y,
-        head: [headers],
-        body: rows,
-        theme: 'striped',
-        styles: { fontSize: 10 },
-        margin: { left: 14, right: 14 }
-      });
-  
-      y = doc.lastAutoTable.finalY + 10;
-    });
-  
-    doc.save(filename);
+    try {
+        // Check if jsPDF is available
+        if (!window.jspdf) {
+            alert('PDF export library not loaded. Please refresh the page and try again.');
+            return;
+        }
+
+        // Show loading indicator
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.textContent = 'PDFエクスポートを準備中です、しばらくお待ちください...';
+        loadingIndicator.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white p-4 rounded shadow-lg z-[100]';
+        document.body.appendChild(loadingIndicator);
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // Setup Japanese font
+        try {
+          if (typeof notoSansJPRegularBase64 === 'undefined' || (typeof notoSansJPRegularBase64 === 'string' && notoSansJPRegularBase64.startsWith("YOUR_"))) {
+            throw new Error("Noto Sans JP Regularフォントのbase64文字列が埋め込まれていないか、利用できません。");
+          }
+          doc.addFileToVFS('NotoSansJP-Regular.ttf', notoSansJPRegularBase64);
+          doc.addFont('NotoSansJP-Regular.ttf', 'NotoSansJP', 'normal');
+
+          if (typeof notoSansJPBoldBase64 !== 'undefined' && (typeof notoSansJPBoldBase64 === 'string' && !notoSansJPBoldBase64.startsWith("YOUR_"))) {
+            doc.addFileToVFS('NotoSansJP-Bold.ttf', notoSansJPBoldBase64);
+            doc.addFont('NotoSansJP-Bold.ttf', 'NotoSansJP', 'bold');
+          }
+          doc.setFont('NotoSansJP');
+          console.log("Noto Sans JPフォントがPDF用に登録されました。");
+        } catch (fontError) {
+          console.error("Noto Sans JPフォントのPDFへの登録に失敗しました:", fontError);
+          console.log("PDFは標準フォントを使用します。");
+        }
+        
+        // Add main title
+        doc.setFontSize(16);
+        doc.setFont('NotoSansJP', 'bold');
+        doc.text('工場概要 - プロセスサマリーレポート', 14, 15);
+        
+        // Add generation timestamp
+        doc.setFontSize(10);
+        doc.setFont('NotoSansJP', 'normal');
+        doc.text(`作成日時: ${new Date().toLocaleString('ja-JP')}`, 14, 25);
+        
+        let y = 35;
+      
+        processSummaries.forEach((proc, index) => {
+          if (proc.summary.length === 0) return;
+      
+          // Add section title
+          doc.setFontSize(14);
+          doc.setFont('NotoSansJP', 'bold');
+          doc.text(`${proc.name} Summary`, 14, y);
+          y += 8;
+      
+          const headers = ["品番", "背番号", "Total", "Total NG", "Total Work Hours", "Avg Work Hours", "不良率"];
+          const rows = proc.summary.map(r => [
+              r.品番, 
+              r.背番号, 
+              r.Total.toString(), 
+              r.Total_NG.toString(),
+              r.TotalWorkHours ? r.TotalWorkHours.toFixed(1) : "0.0",
+              r.AverageWorkHours ? r.AverageWorkHours.toFixed(1) : "0.0",
+              r.DefectRate ? r.DefectRate.toFixed(1) + "%" : "0.0%"
+          ]);
+      
+          doc.autoTable({
+            startY: y,
+            head: [headers],
+            body: rows,
+            theme: 'striped',
+            styles: { 
+                fontSize: 9,
+                font: 'NotoSansJP',
+                fontStyle: 'normal'
+            },
+            headStyles: { 
+                fillColor: [59, 130, 246],
+                textColor: 255,
+                font: 'NotoSansJP',
+                fontStyle: 'bold',
+                fontSize: 10
+            },
+            alternateRowStyles: { fillColor: [245, 245, 245] },
+            margin: { left: 14, right: 14 }
+          });
+      
+          y = doc.lastAutoTable.finalY + 15;
+          
+          // Add new page if needed and there are more processes
+          if (y > 250 && index < processSummaries.length - 1) {
+            doc.addPage();
+            y = 20;
+          }
+        });
+      
+        doc.save(filename);
+        
+        // Remove loading indicator
+        document.body.removeChild(loadingIndicator);
+        
+        // Show success notification if available
+        if (typeof showNotification === 'function') {
+            showNotification('PDFエクスポートが完了しました！', 'success');
+        }
+        
+    } catch (error) {
+        console.error('Error generating PDF:', error);
+        // Remove loading indicator if it exists
+        const loadingIndicator = document.querySelector('.fixed.top-1\\/2.left-1\\/2');
+        if (loadingIndicator) {
+            document.body.removeChild(loadingIndicator);
+        }
+        if (typeof showNotification === 'function') {
+            showNotification('PDFの生成中にエラーが発生しました。再度お試しください。', 'error');
+        } else {
+            alert('PDFの生成中にエラーが発生しました。再度お試しください。');
+        }
+    }
   }
 
 /**
