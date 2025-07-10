@@ -1022,12 +1022,23 @@ function ensureEquipmentSidebarExists() {
     sidebar.id = 'equipmentSidebar';
     sidebar.className = 'fixed top-0 right-0 h-full w-96 bg-white shadow-2xl transform translate-x-full transition-transform duration-300 ease-in-out z-50 overflow-y-auto';
     document.body.appendChild(sidebar);
+    
+    // Add backdrop
+    let backdrop = document.getElementById('equipmentSidebarBackdrop');
+    if (!backdrop) {
+      backdrop = document.createElement('div');
+      backdrop.id = 'equipmentSidebarBackdrop';
+      backdrop.className = 'fixed inset-0 bg-black bg-opacity-50 z-40 hidden';
+      backdrop.onclick = closeEquipmentSidebar;
+      document.body.appendChild(backdrop);
+    }
   }
   return sidebar;
 }
 
 function showEquipmentSidebar(item) {
   const sidebar = ensureEquipmentSidebarExists();
+  const backdrop = document.getElementById('equipmentSidebarBackdrop');
   
   // Calculate additional metrics
   const shots = parseInt(item.ショット数 || 0);
@@ -1295,42 +1306,33 @@ function showEquipmentSidebar(item) {
   // Load master image
   loadEquipmentMasterImage(item.品番, item.背番号, item._id || Date.now());
   
-  // Add click outside to close functionality
-  const handleClickOutside = (event) => {
-    if (!sidebar.contains(event.target)) {
-      closeEquipmentSidebar();
-    }
-  };
-  
-  // Store the handler so we can remove it later
-  sidebar.clickOutsideHandler = handleClickOutside;
-  
-  // Add event listener after a short delay to prevent immediate closing
-  setTimeout(() => {
-    document.addEventListener('click', handleClickOutside);
-  }, 100);
-  
-  // Show sidebar
-  setTimeout(() => {
-    sidebar.classList.remove('translate-x-full');
-  }, 10);
+  // Show sidebar and backdrop
+  sidebar.classList.remove('translate-x-full');
+  backdrop.classList.remove('hidden');
 }
 
 function closeEquipmentSidebar() {
   const sidebar = document.getElementById('equipmentSidebar');
+  const backdrop = document.getElementById('equipmentSidebarBackdrop');
+  
   if (sidebar) {
     sidebar.classList.add('translate-x-full');
-    
-    // Remove the click outside event listener
-    if (sidebar.clickOutsideHandler) {
-      document.removeEventListener('click', sidebar.clickOutsideHandler);
-    }
-    
-    setTimeout(() => {
-      sidebar.remove();
-    }, 300);
+  }
+  
+  if (backdrop) {
+    backdrop.classList.add('hidden');
   }
 }
+
+// Ensure sidebar closes when clicking outside (desktop and mobile)
+document.addEventListener("mousedown", function(event) {
+  const sidebar = document.getElementById("equipmentSidebar");
+  const backdrop = document.getElementById("equipmentSidebarBackdrop");
+  if (!sidebar || sidebar.classList.contains("translate-x-full")) return; // Sidebar not open
+  if (!sidebar.contains(event.target)) {
+    closeEquipmentSidebar();
+  }
+});
 
 // Load master image for equipment
 async function loadEquipmentMasterImage(品番, 背番号, itemId) {
