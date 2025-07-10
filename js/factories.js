@@ -1417,7 +1417,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                     </tbody>
                   </table>
                   <div class="flex gap-4">
-                    <button onclick='exportToCSV(window.currentProcessData_${index},"${procLabel}_detailed.csv")' class="text-blue-600 underline text-sm">Export CSV</button>
+                    <button onclick='exportSingleProcessData(${index},"${procLabel}")' class="text-blue-600 underline text-sm">Export CSV</button>
                     <button onclick='exportSummaryToCSV(${JSON.stringify(summary)},"${procLabel}_summary.csv")' class="text-blue-600 underline text-sm">Export Summary CSV</button>
                     <button onclick='exportToPDFGrouped([{ name: "${procLabel}", summary: ${JSON.stringify(summary)} }], "${procLabel} Summary")' class="text-blue-600 underline text-sm">Export PDF</button>
                   </div>
