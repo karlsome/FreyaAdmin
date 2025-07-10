@@ -167,6 +167,9 @@ async function loadFactoryPage(factoryName) {
             topDefects
         });
 
+        // Setup tag input event listeners after DOM is created
+        setTimeout(setupTagInputEventListeners, 100);
+
     } catch (error) {
         console.error("Error loading factory dashboard:", error);
         mainContent.innerHTML = `<p class="text-red-500">Failed to load data for ${factoryName}</p>`;
@@ -209,8 +212,9 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
                     <input type="text" 
                            id="filterPartNumber" 
                            class="outline-none border-none flex-1 min-w-24" 
-                           placeholder="例: GN200-A0400 (Enter to add)" 
+                           placeholder="例: GN200-A0400 (Enter or click outside to add)" 
                            onkeydown="handlePartNumberKeydown(event)"
+                           onblur="handlePartNumberBlur(event)"
                            style="background: transparent;" />
                 </div>
             </div>
@@ -224,8 +228,9 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
                     <input type="text" 
                            id="filterSerialNumber" 
                            class="outline-none border-none flex-1 min-w-24" 
-                           placeholder="例: DR042 (Enter to add)" 
+                           placeholder="例: DR042 (Enter or click outside to add)" 
                            onkeydown="handleSerialNumberKeydown(event)"
+                           onblur="handleSerialNumberBlur(event)"
                            style="background: transparent;" />
                 </div>
             </div>
@@ -1403,10 +1408,10 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                             <td class="working-hours">${totalWorkingHours === 'N/A' ? totalWorkingHours : totalWorkingHours + ' hrs'}</td>
                             <td class="working-hours">${avgWorkingHours === 'N/A' ? avgWorkingHours : avgWorkingHours + ' hrs'}</td>
                             <td>
-                              <span class="defect-rate-badge ${
-                                parseFloat(defectRate) > 2 ? 'defect-rate-high' :
-                                parseFloat(defectRate) > 1 ? 'defect-rate-medium' :
-                                'defect-rate-low'
+                              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs ${
+                                parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-700' :
+                                parseFloat(defectRate) > 1 ? 'bg-yellow-100 text-yellow-700' :
+                                'bg-green-100 text-green-700'
                               }">
                                 ${defectRate}%
                               </span>
@@ -1453,10 +1458,10 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                                 <td class="working-hours">${totalWorkingHours === 'N/A' ? totalWorkingHours : totalWorkingHours + ' hrs'}</td>
                                 <td class="working-hours">${avgWorkingHours === 'N/A' ? avgWorkingHours : avgWorkingHours + ' hrs'}</td>
                                 <td>
-                                  <span class="defect-rate-badge ${
-                                    parseFloat(defectRate) > 2 ? 'defect-rate-high' :
-                                    parseFloat(defectRate) > 1 ? 'defect-rate-medium' :
-                                    'defect-rate-low'
+                                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs ${
+                                    parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-700' :
+                                    parseFloat(defectRate) > 1 ? 'bg-yellow-100 text-yellow-700' :
+                                    'bg-green-100 text-green-700'
                                   }">
                                     ${defectRate}%
                                   </span>
@@ -1918,15 +1923,18 @@ function exportToCSVGrouped(processData, filename = "export.csv") {
           y += 8;
       
           const headers = ["品番", "背番号", "Total", "Total NG", "Total Work Hours", "Avg Work Hours", "不良率"];
-          const rows = proc.summary.map(r => [
-              r.品番, 
-              r.背番号, 
-              r.Total.toString(), 
-              r.Total_NG.toString(),
-              r.TotalWorkHours ? r.TotalWorkHours.toFixed(1) : "0.0",
-              r.AverageWorkHours ? r.AverageWorkHours.toFixed(1) : "0.0",
-              r.DefectRate ? r.DefectRate.toFixed(1) + "%" : "0.0%"
-          ]);
+          const rows = proc.summary.map(r => {
+              const defectRate = r.Total > 0 ? ((r.Total_NG / r.Total) * 100) : 0;
+              return [
+                  r.品番, 
+                  r.背番号, 
+                  r.Total.toString(), 
+                  r.Total_NG.toString(),
+                  r.totalWorkingHours ? r.totalWorkingHours.toFixed(2) : "0.00",
+                  r.avgWorkingHours ? r.avgWorkingHours.toFixed(2) : "0.00",
+                  defectRate.toFixed(1) + "%"
+              ];
+          });
       
           doc.autoTable({
             startY: y,
@@ -2503,6 +2511,14 @@ window.handlePartNumberKeydown = function(event) {
     }
 };
 
+// Add blur event handler for part number input
+window.handlePartNumberBlur = function(event) {
+    if (event.target.value.trim()) {
+        window.addPartNumberTag(event.target.value.trim());
+        event.target.value = '';
+    }
+};
+
 window.addPartNumberTag = function(value) {
     if (!partNumberTags.includes(value)) {
         partNumberTags.push(value);
@@ -2556,6 +2572,14 @@ window.handleSerialNumberKeydown = function(event) {
     }
 };
 
+// Add blur event handler for serial number input
+window.handleSerialNumberBlur = function(event) {
+    if (event.target.value.trim()) {
+        window.addSerialNumberTag(event.target.value.trim());
+        event.target.value = '';
+    }
+};
+
 window.addSerialNumberTag = function(value) {
     if (!serialNumberTags.includes(value)) {
         serialNumberTags.push(value);
@@ -2597,3 +2621,33 @@ window.focusSerialNumberInput = function() {
 function getSerialNumberTags() {
     return serialNumberTags;
 }
+
+// Function to setup blur event listeners for tag inputs
+function setupTagInputEventListeners() {
+    // Setup event listeners for part number input
+    const partNumberInput = document.getElementById('filterPartNumber');
+    if (partNumberInput) {
+        // Remove existing listeners to prevent duplicates
+        partNumberInput.removeEventListener('blur', window.handlePartNumberBlur);
+        partNumberInput.addEventListener('blur', window.handlePartNumberBlur);
+    }
+    
+    // Setup event listeners for serial number input  
+    const serialNumberInput = document.getElementById('filterSerialNumber');
+    if (serialNumberInput) {
+        // Remove existing listeners to prevent duplicates
+        serialNumberInput.removeEventListener('blur', window.handleSerialNumberBlur);
+        serialNumberInput.addEventListener('blur', window.handleSerialNumberBlur);
+    }
+}
+
+// Call setup function when DOM is ready and periodically to handle dynamic content
+document.addEventListener('DOMContentLoaded', setupTagInputEventListeners);
+
+// Also call it when filter inputs might be created (after a short delay)
+function setupTagInputsAfterDelay() {
+    setTimeout(setupTagInputEventListeners, 100);
+}
+
+// Export the setup function so it can be called from other places
+window.setupTagInputEventListeners = setupTagInputEventListeners;
