@@ -204,13 +204,31 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         <!-- 品番 -->
         <div>
             <label class="block text-sm font-medium mb-1" data-i18n="partNumber">Part Number</label>
-            <input type="text" id="filterPartNumber" class="p-2 border rounded w-48" placeholder="例: GN200-A0400" />
+            <div class="relative">
+                <div id="partNumberTags" class="min-h-[2.5rem] border rounded p-2 bg-white cursor-text flex flex-wrap gap-1 items-center" onclick="focusPartNumberInput()">
+                    <input type="text" 
+                           id="filterPartNumber" 
+                           class="outline-none border-none flex-1 min-w-24" 
+                           placeholder="例: GN200-A0400 (Enter to add)" 
+                           onkeydown="handlePartNumberKeydown(event)"
+                           style="background: transparent;" />
+                </div>
+            </div>
         </div>
 
         <!-- 背番号 -->
         <div>
             <label class="block text-sm font-medium mb-1" data-i18n="serialNumber">Serial Number</label>
-            <input type="text" id="filterSerialNumber" class="p-2 border rounded w-48" placeholder="例: DR042" />
+            <div class="relative">
+                <div id="serialNumberTags" class="min-h-[2.5rem] border rounded p-2 bg-white cursor-text flex flex-wrap gap-1 items-center" onclick="focusSerialNumberInput()">
+                    <input type="text" 
+                           id="filterSerialNumber" 
+                           class="outline-none border-none flex-1 min-w-24" 
+                           placeholder="例: DR042 (Enter to add)" 
+                           onkeydown="handleSerialNumberKeydown(event)"
+                           style="background: transparent;" />
+                </div>
+            </div>
         </div>
 
         <!-- Apply Filters -->
@@ -284,16 +302,16 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
     document.getElementById("applyFilterBtn").addEventListener("click", () => {
         const from = document.getElementById("filterFromDate").value;
         const to = document.getElementById("filterToDate").value;
-        const part = document.getElementById("filterPartNumber").value.trim();
-        const serial = document.getElementById("filterSerialNumber").value.trim();
-        loadProductionByPeriod(factoryName, from, to, part, serial);
+        const partNumbers = getPartNumberTags();
+        const serialNumbers = getSerialNumberTags();
+        loadProductionByPeriod(factoryName, from, to, partNumbers, serialNumbers);
     });
 
     // Load default data for today
     const today = new Date().toISOString().split("T")[0];
     document.getElementById("filterFromDate").value = today;
     document.getElementById("filterToDate").value = today;
-    loadProductionByPeriod(factoryName, today, today);
+    loadProductionByPeriod(factoryName, today, today, [], []);
 
     // Run translations
     applyLanguage();
@@ -833,7 +851,7 @@ let factoryPaginationState = {
 };
 const FACTORY_ITEMS_PER_PAGE = 10;
 
-async function loadProductionByPeriod(factory, from, to, part = "", serial = "") {
+async function loadProductionByPeriod(factory, from, to, partNumbers = [], serialNumbers = []) {
     const container = document.getElementById("dailyProduction");
     container.innerHTML = "Loading production data...";
   
@@ -854,8 +872,17 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
           $lte: new Date(end).toISOString().split("T")[0]
         }
       };
-      if (part) query["品番"] = part;
-      if (serial) query["背番号"] = serial;
+      
+      // Handle multiple part numbers
+      if (partNumbers && partNumbers.length > 0) {
+        query["品番"] = { $in: partNumbers };
+      }
+      
+      // Handle multiple serial numbers
+      if (serialNumbers && serialNumbers.length > 0) {
+        query["背番号"] = { $in: serialNumbers };
+      }
+      
       return query;
     };
   
@@ -1061,6 +1088,9 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                                 Total NG${arrow("Total_NG")}
                               </th>
                               <th class="px-4 py-3 text-left font-medium text-gray-700">
+                                稼働時間
+                              </th>
+                              <th class="px-4 py-3 text-left font-medium text-gray-700">
                                 不良率
                               </th>
                             </tr>
@@ -1068,7 +1098,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                           <tbody class="divide-y divide-gray-200">
                             ${pageData.length === 0 ? `
                               <tr>
-                                <td colspan="7" class="px-4 py-8 text-center text-gray-500">
+                                <td colspan="8" class="px-4 py-8 text-center text-gray-500">
                                   ${searchTerm ? 'No results found for your search' : 'No data available'}
                                 </td>
                               </tr>
@@ -1077,6 +1107,18 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                               const total = item.Total ?? item.Process_Quantity ?? 0;
                               const totalNG = item.Total_NG ?? 0;
                               const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(2) : '0.00';
+                              
+                              // Calculate working hours
+                              let workingHours = 'N/A';
+                              if (item.Time_start && item.Time_end) {
+                                const start = new Date(`2000-01-01T${item.Time_start}`);
+                                const end = new Date(`2000-01-01T${item.Time_end}`);
+                                if (end > start) {
+                                  const hours = (end - start) / (1000 * 60 * 60);
+                                  workingHours = hours.toFixed(2);
+                                }
+                              }
+                              
                               const isEvenRow = index % 2 === 0;
                               
                               return `
@@ -1090,6 +1132,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                                   <td class="px-4 py-3 text-gray-700">${item.Date ?? "-"}</td>
                                   <td class="px-4 py-3 font-medium text-gray-900">${total.toLocaleString()}</td>
                                   <td class="px-4 py-3 ${totalNG > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}">${totalNG}</td>
+                                  <td class="px-4 py-3 text-gray-700">${workingHours === 'N/A' ? workingHours : workingHours + ' hrs'}</td>
                                   <td class="px-4 py-3">
                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                                       parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-800' :
@@ -1157,18 +1200,24 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                                     <th class="px-3 py-2 text-left font-medium">背番号</th>
                                     <th class="px-3 py-2 text-left font-medium">Total</th>
                                     <th class="px-3 py-2 text-left font-medium">Total NG</th>
+                                    <th class="px-3 py-2 text-left font-medium">Total Work Hours</th>
+                                    <th class="px-3 py-2 text-left font-medium">Average Work Hours</th>
                                     <th class="px-3 py-2 text-left font-medium">不良率</th>
                                   </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-200">
                                   ${summary.map(row => {
                                     const defectRate = row.Total > 0 ? ((row.Total_NG / row.Total) * 100).toFixed(2) : '0.00';
+                                    const totalWorkingHours = row.totalWorkingHours ? row.totalWorkingHours.toFixed(2) : 'N/A';
+                                    const avgWorkingHours = row.avgWorkingHours ? row.avgWorkingHours.toFixed(2) : 'N/A';
                                     return `
                                       <tr class="hover:bg-gray-50">
                                         <td class="px-3 py-2">${row.品番}</td>
                                         <td class="px-3 py-2">${row.背番号}</td>
                                         <td class="px-3 py-2">${row.Total.toLocaleString()}</td>
                                         <td class="px-3 py-2 ${row.Total_NG > 0 ? 'text-red-600' : ''}">${row.Total_NG}</td>
+                                        <td class="px-3 py-2 working-hours">${totalWorkingHours === 'N/A' ? totalWorkingHours : totalWorkingHours + ' hrs'}</td>
+                                        <td class="px-3 py-2 working-hours">${avgWorkingHours === 'N/A' ? avgWorkingHours : avgWorkingHours + ' hrs'}</td>
                                         <td class="px-3 py-2">
                                           <span class="inline-flex items-center px-2 py-0.5 rounded text-xs ${
                                             parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-700' :
@@ -1282,11 +1331,28 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                         <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Date')">日付${arrow("Date")}</th>
                         <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total')">Total${arrow("Total")}</th>
                         <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total_NG')">Total NG${arrow("Total_NG")}</th>
+                        <th>Work Hours</th>
+                        <th>不良率</th>
                       </tr>
                     </thead>
                     <tbody>
                       ${sorted.map(item => {
                         const encodedData = safeEncodeItemData(item);
+                        const total = item.Total ?? item.Process_Quantity ?? 0;
+                        const totalNG = item.Total_NG ?? 0;
+                        const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(2) : '0.00';
+                        
+                        // Calculate working hours
+                        let workingHours = 'N/A';
+                        if (item.Time_start && item.Time_end) {
+                          const start = new Date(`2000-01-01T${item.Time_start}`);
+                          const end = new Date(`2000-01-01T${item.Time_end}`);
+                          if (end > start) {
+                            const hours = (end - start) / (1000 * 60 * 60);
+                            workingHours = hours.toFixed(2);
+                          }
+                        }
+                        
                         return `
                           <tr class="cursor-pointer hover:bg-gray-100"
                               onclick='showSidebarFromElement(this)'
@@ -1296,8 +1362,18 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                             <td>${item.背番号 ?? "-"}</td>
                             <td>${item.Worker_Name ?? "-"}</td>
                             <td>${item.Date ?? "-"}</td>
-                            <td>${item.Total ?? item.Process_Quantity ?? 0}</td>
-                            <td>${item.Total_NG ?? 0}</td>
+                            <td>${total}</td>
+                            <td class="${totalNG > 0 ? 'text-red-600 font-medium' : ''}">${totalNG}</td>
+                            <td class="working-hours">${workingHours === 'N/A' ? workingHours : workingHours + ' hrs'}</td>
+                            <td>
+                              <span class="defect-rate-badge ${
+                                parseFloat(defectRate) > 2 ? 'defect-rate-high' :
+                                parseFloat(defectRate) > 1 ? 'defect-rate-medium' :
+                                'defect-rate-low'
+                              }">
+                                ${defectRate}%
+                              </span>
+                            </td>
                           </tr>
                         `;
                       }).join("")}
@@ -1310,18 +1386,34 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                   <table class="w-full text-sm border-t min-w-[500px] mb-2">
                     <thead>
                       <tr class="border-b font-semibold text-left">
-                        <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th>
+                        <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th><th>Total Work Hours</th><th>Average Work Hours</th><th>不良率</th>
                       </tr>
                     </thead>
                     <tbody>
-                      ${summary.map(row => `
-                        <tr>
-                          <td>${row.品番}</td>
-                          <td>${row.背番号}</td>
-                          <td>${row.Total}</td>
-                          <td>${row.Total_NG}</td>
-                        </tr>
-                      `).join("")}
+                      ${summary.map(row => {
+                        const defectRate = row.Total > 0 ? ((row.Total_NG / row.Total) * 100).toFixed(2) : '0.00';
+                        const totalWorkingHours = row.totalWorkingHours ? row.totalWorkingHours.toFixed(2) : 'N/A';
+                        const avgWorkingHours = row.avgWorkingHours ? row.avgWorkingHours.toFixed(2) : 'N/A';
+                        return `
+                          <tr>
+                            <td>${row.品番}</td>
+                            <td>${row.背番号}</td>
+                            <td>${row.Total}</td>
+                            <td class="${row.Total_NG > 0 ? 'text-red-600' : ''}">${row.Total_NG}</td>
+                            <td class="working-hours">${totalWorkingHours === 'N/A' ? totalWorkingHours : totalWorkingHours + ' hrs'}</td>
+                            <td class="working-hours">${avgWorkingHours === 'N/A' ? avgWorkingHours : avgWorkingHours + ' hrs'}</td>
+                            <td>
+                              <span class="defect-rate-badge ${
+                                parseFloat(defectRate) > 2 ? 'defect-rate-high' :
+                                parseFloat(defectRate) > 1 ? 'defect-rate-medium' :
+                                'defect-rate-low'
+                              }">
+                                ${defectRate}%
+                              </span>
+                            </td>
+                          </tr>
+                        `;
+                      }).join("")}
                     </tbody>
                   </table>
                   <div class="flex gap-4">
@@ -1344,18 +1436,34 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
                       <table class="w-full text-sm min-w-[500px] mb-2">
                         <thead>
                           <tr class="border-b font-semibold text-left">
-                            <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th>
+                            <th>品番</th><th>背番号</th><th>Total</th><th>Total NG</th><th>Total Work Hours</th><th>Average Work Hours</th><th>不良率</th>
                           </tr>
                         </thead>
                         <tbody>
-                          ${proc.summary.map(row => `
-                            <tr>
-                              <td>${row.品番}</td>
-                              <td>${row.背番号}</td>
-                              <td>${row.Total}</td>
-                              <td>${row.Total_NG}</td>
-                            </tr>
-                          `).join("")}
+                          ${proc.summary.map(row => {
+                            const defectRate = row.Total > 0 ? ((row.Total_NG / row.Total) * 100).toFixed(2) : '0.00';
+                            const totalWorkingHours = row.totalWorkingHours ? row.totalWorkingHours.toFixed(2) : 'N/A';
+                            const avgWorkingHours = row.avgWorkingHours ? row.avgWorkingHours.toFixed(2) : 'N/A';
+                            return `
+                              <tr>
+                                <td>${row.品番}</td>
+                                <td>${row.背番号}</td>
+                                <td>${row.Total}</td>
+                                <td class="${row.Total_NG > 0 ? 'text-red-600' : ''}">${row.Total_NG}</td>
+                                <td class="working-hours">${totalWorkingHours === 'N/A' ? totalWorkingHours : totalWorkingHours + ' hrs'}</td>
+                                <td class="working-hours">${avgWorkingHours === 'N/A' ? avgWorkingHours : avgWorkingHours + ' hrs'}</td>
+                                <td>
+                                  <span class="defect-rate-badge ${
+                                    parseFloat(defectRate) > 2 ? 'defect-rate-high' :
+                                    parseFloat(defectRate) > 1 ? 'defect-rate-medium' :
+                                    'defect-rate-low'
+                                  }">
+                                    ${defectRate}%
+                                  </span>
+                                </td>
+                              </tr>
+                            `;
+                          }).join("")}
                         </tbody>
                       </table>
                     </div>
@@ -1390,7 +1498,7 @@ async function loadProductionByPeriod(factory, from, to, part = "", serial = "")
 /**
  * Builds a query object for filtering production data.
  */
-function getFilterQuery(factory, from, to, part, serial) {
+function getFilterQuery(factory, from, to, partNumbers = [], serialNumbers = []) {
   const query = {
     工場: factory,
     Date: {
@@ -1399,8 +1507,15 @@ function getFilterQuery(factory, from, to, part, serial) {
     }
   };
 
-  if (part) query["品番"] = part;
-  if (serial) query["背番号"] = serial;
+  // Handle multiple part numbers
+  if (partNumbers && partNumbers.length > 0) {
+    query["品番"] = { $in: partNumbers };
+  }
+  
+  // Handle multiple serial numbers
+  if (serialNumbers && serialNumbers.length > 0) {
+    query["背番号"] = { $in: serialNumbers };
+  }
 
   return query;
 }
@@ -1418,14 +1533,44 @@ function groupAndSummarize(records) {
                 品番: item.品番 || "不明",
                 背番号: item.背番号 || "不明",
                 Total: 0,
-                Total_NG: 0
+                Total_NG: 0,
+                workingHours: [],
+                count: 0
             };
         }
         grouped[key].Total += item.Total ?? item.Process_Quantity ?? 0;
         grouped[key].Total_NG += item.Total_NG ?? 0;
+        grouped[key].count += 1;
+        
+        // Calculate working hours for this item
+        if (item.Time_start && item.Time_end) {
+            const start = new Date(`2000-01-01T${item.Time_start}`);
+            const end = new Date(`2000-01-01T${item.Time_end}`);
+            if (end > start) {
+                const hours = (end - start) / (1000 * 60 * 60);
+                grouped[key].workingHours.push(hours);
+            }
+        }
     });
 
-    return Object.values(grouped);
+    // Calculate average working hours for each group
+    return Object.values(grouped).map(group => {
+        const totalWorkingHours = group.workingHours.length > 0 
+            ? group.workingHours.reduce((sum, h) => sum + h, 0)
+            : 0;
+        const avgWorkingHours = group.workingHours.length > 0 
+            ? totalWorkingHours / group.workingHours.length 
+            : null;
+        
+        return {
+            品番: group.品番,
+            背番号: group.背番号,
+            Total: group.Total,
+            Total_NG: group.Total_NG,
+            totalWorkingHours: totalWorkingHours,
+            avgWorkingHours: avgWorkingHours
+        };
+    });
 }
 
 /**
@@ -1664,18 +1809,6 @@ function exportToCSVGrouped(processData, filename = "export.csv") {
   
     doc.save(filename);
   }
-
-
-
-
-document.getElementById("applyFilterBtn").addEventListener("click", () => {
-    const from = document.getElementById("filterFromDate").value;
-    const to = document.getElementById("filterToDate").value;
-    const part = document.getElementById("filterPartNumber").value.trim();
-    const serial = document.getElementById("filterSerialNumber").value.trim();
-  
-    loadProductionByPeriod(currentFactory, from, to, part, serial);
-});
 
 /**
  * Loads and displays the master image from masterDB collection for comparison
@@ -2180,4 +2313,114 @@ function exportToCSVGroupedWithHeaders(processData, selectedHeaders, filename = 
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+// Tag input functionality for part numbers and serial numbers
+let partNumberTags = [];
+let serialNumberTags = [];
+
+// Part Number Tag Functions
+window.handlePartNumberKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addPartNumberTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && partNumberTags.length > 0) {
+        window.removePartNumberTag(partNumberTags.length - 1);
+    }
+};
+
+window.addPartNumberTag = function(value) {
+    if (!partNumberTags.includes(value)) {
+        partNumberTags.push(value);
+        renderPartNumberTags();
+    }
+};
+
+window.removePartNumberTag = function(index) {
+    partNumberTags.splice(index, 1);
+    renderPartNumberTags();
+};
+
+function renderPartNumberTags() {
+    const container = document.getElementById('partNumberTags');
+    if (!container) return;
+    
+    const input = container.querySelector('input');
+    
+    // Remove existing tags
+    container.querySelectorAll('.tag').forEach(tag => tag.remove());
+    
+    // Add tags before input
+    partNumberTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'tag inline-flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removePartNumberTag(${index})" class="hover:bg-blue-200 rounded px-1">×</button>
+        `;
+        container.insertBefore(tagElement, input);
+    });
+}
+
+window.focusPartNumberInput = function() {
+    const input = document.getElementById('filterPartNumber');
+    if (input) input.focus();
+};
+
+function getPartNumberTags() {
+    return partNumberTags;
+}
+
+// Serial Number Tag Functions  
+window.handleSerialNumberKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addSerialNumberTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && serialNumberTags.length > 0) {
+        window.removeSerialNumberTag(serialNumberTags.length - 1);
+    }
+};
+
+window.addSerialNumberTag = function(value) {
+    if (!serialNumberTags.includes(value)) {
+        serialNumberTags.push(value);
+        renderSerialNumberTags();
+    }
+};
+
+window.removeSerialNumberTag = function(index) {
+    serialNumberTags.splice(index, 1);
+    renderSerialNumberTags();
+};
+
+function renderSerialNumberTags() {
+    const container = document.getElementById('serialNumberTags');
+    if (!container) return;
+    
+    const input = container.querySelector('input');
+    
+    // Remove existing tags
+    container.querySelectorAll('.tag').forEach(tag => tag.remove());
+    
+    // Add tags before input
+    serialNumberTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'tag inline-flex items-center gap-1 bg-green-100 text-green-800 px-2 py-1 rounded text-sm';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removeSerialNumberTag(${index})" class="hover:bg-green-200 rounded px-1">×</button>
+        `;
+        container.insertBefore(tagElement, input);
+    });
+}
+
+window.focusSerialNumberInput = function() {
+    const input = document.getElementById('filterSerialNumber');
+    if (input) input.focus();
+};
+
+function getSerialNumberTags() {
+    return serialNumberTags;
 }
