@@ -425,6 +425,18 @@ function renderEquipmentSection(equipment, data, analytics) {
                   <span id="sort-Date-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
+              <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', '品番')">
+                <div class="flex items-center justify-between">
+                  <span>品番</span>
+                  <span id="sort-品番-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
+              <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', '背番号')">
+                <div class="flex items-center justify-between">
+                  <span>背番号</span>
+                  <span id="sort-背番号-${equipmentId}" class="ml-1 text-gray-400">↕</span>
+                </div>
+              </th>
               <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Worker_Name')">
                 <div class="flex items-center justify-between">
                   <span>Worker</span>
@@ -772,7 +784,7 @@ function exportEquipmentData(equipment) {
   }
   
   // Create CSV data with Japanese headers
-  const headers = ['日付', '作業者', 'ショット数', '加工数量', '不良数', '不良率', '開始時間', '終了時間', '勤務時間'];
+  const headers = ['日付', '品番', '背番号', '作業者', 'ショット数', '加工数量', '不良数', '不良率', '開始時間', '終了時間', '勤務時間'];
   const csvData = equipmentData.map(item => {
     // Calculate work hours
     let workHours = '';
@@ -791,6 +803,8 @@ function exportEquipmentData(equipment) {
     
     return [
       item.Date,
+      item.品番 || '',
+      item.背番号 || '',
       item.Worker_Name || '',
       item.ショット数 || '0',
       item.Process_Quantity || '0',
@@ -925,6 +939,8 @@ function renderTablePage(equipment, data, page = 1, equipmentItemsPerPage = 10) 
       return `
         <tr class="hover:bg-gray-50" onclick="showEquipmentSidebarFromElement(this)" data-row="${encodeURIComponent(JSON.stringify(item))}">
           <td class="border border-gray-300 px-3 py-2">${item.Date}</td>
+          <td class="border border-gray-300 px-3 py-2">${item.品番 || '-'}</td>
+          <td class="border border-gray-300 px-3 py-2">${item.背番号 || '-'}</td>
           <td class="border border-gray-300 px-3 py-2">${item.Worker_Name || '-'}</td>
           <td class="border border-gray-300 px-3 py-2 text-right">${parseInt(item.ショット数 || 0).toLocaleString()}</td>
           <td class="border border-gray-300 px-3 py-2 text-right">${parseInt(item.Process_Quantity || 0).toLocaleString()}</td>
