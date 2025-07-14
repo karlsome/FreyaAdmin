@@ -112,6 +112,34 @@ const translations = {
       
       // Equipment
       equipmentTitle: "Equipment Management",
+      equipmentFilter: "Equipment Filter (by Factory)",
+      dateRange: "Date Range",
+      applyFilters: "Apply Filters",
+      exportPDF: "Export PDF",
+      totalShots: "Total Shots",
+      avgShotsDay: "Avg Shots/Day", 
+      avgShotsHour: "Avg Shots/Hour",
+      workingHoursDay: "Working Hours/Day",
+      dailyPerformanceTrend: "Daily Performance Trend",
+      shots: "Shots",
+      workingHours: "Working Hours",
+      processQty: "Process Qty",
+      defects: "Defects",
+      date: "Date",
+      worker: "Worker",
+      time: "Time",
+      entries: "entries",
+      records: "records",
+      show: "Show",
+      noDataAvailable: "No data available for the selected filters",
+      tryAdjustingFilters: "Try adjusting your date range or equipment selection",
+      
+      // Dashboard/Factories metrics
+      totalNG: "Total NG",
+      normal: "Normal",
+      warning: "Warning",
+      highDefectRate: "High Defect Rate",
+      status: "Status",
       
       // Customer Management
       customerManagementTitle: "Customer Management",
@@ -135,6 +163,38 @@ const translations = {
       devices: "Devices",
       actions: "Actions",
       resetPassword: "Reset Password",
+      
+      // Page titles
+      dashboardTitle: "Dashboard",
+      factoriesTitle: "Factories",
+      processesTitle: "Processes",
+      notificationsTitle: "Notifications",
+      analyticsTitle: "Analytics",
+      approvalsTitle: "Approvals",
+      customerManagementTitle: "Customer Management",
+      
+      // Additional common terms
+      none: "None",
+      selectAll: "Select All",
+      deselectAll: "Deselect All",
+      loading: "Loading...",
+      loadingData: "Loading data...",
+      error: "Error",
+      success: "Success",
+      warning: "Warning",
+      information: "Information",
+      confirmation: "Confirmation",
+      yes: "Yes",
+      no: "No",
+      ok: "OK",
+      close: "Close",
+      back: "Back",
+      next: "Next",
+      previous: "Previous",
+      page: "Page",
+      of: "of",
+      first: "First",
+      last: "Last",
     },
     ja: {
       // Navigation
@@ -248,6 +308,34 @@ const translations = {
       
       // Equipment
       equipmentTitle: "設備管理",
+      equipmentFilter: "設備フィルター（工場別）",
+      dateRange: "期間指定",
+      applyFilters: "フィルターを適用",
+      exportPDF: "PDFエクスポート",
+      totalShots: "総ショット数",
+      avgShotsDay: "平均ショット/日",
+      avgShotsHour: "平均ショット/時間",
+      workingHoursDay: "実働時間/日",
+      dailyPerformanceTrend: "日次パフォーマンストレンド",
+      shots: "ショット",
+      workingHours: "実働時間",
+      processQty: "加工数",
+      defects: "不良数",
+      date: "日付",
+      worker: "作業者",
+      time: "時間",
+      entries: "件",
+      records: "レコード",
+      show: "表示",
+      noDataAvailable: "選択されたフィルターにデータがありません",
+      tryAdjustingFilters: "期間や設備の選択を調整してください",
+      
+      // Dashboard/Factories metrics
+      totalNG: "総不良数",
+      normal: "正常",
+      warning: "警告",
+      highDefectRate: "高不良率",
+      status: "ステータス",
       
       // Customer Management
       customerManagementTitle: "顧客管理",
@@ -271,6 +359,38 @@ const translations = {
       devices: "デバイス",
       actions: "アクション",
       resetPassword: "パスワードリセット",
+      
+      // Page titles
+      dashboardTitle: "ダッシュボード",
+      factoriesTitle: "工場一覧",
+      processesTitle: "工程",
+      notificationsTitle: "通知",
+      analyticsTitle: "分析",
+      approvalsTitle: "承認",
+      customerManagementTitle: "顧客管理",
+      
+      // Additional common terms
+      none: "なし",
+      selectAll: "全て選択",
+      deselectAll: "全て解除",
+      loading: "読み込み中...",
+      loadingData: "データを読み込み中...",
+      error: "エラー",
+      success: "成功",
+      warning: "警告",
+      information: "情報",
+      confirmation: "確認",
+      yes: "はい",
+      no: "いいえ",
+      ok: "OK",
+      close: "閉じる",
+      back: "戻る",
+      next: "次へ",
+      previous: "前へ",
+      page: "ページ",
+      of: "の",
+      first: "最初",
+      last: "最後",
     }
   };
 

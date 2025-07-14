@@ -165,8 +165,8 @@ function setupEquipmentFilters() {
             </button>
           </div>
           <div class="flex space-x-2">
-            <button onclick="toggleFactoryEquipment('${factory}', true)" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">All</button>
-            <button onclick="toggleFactoryEquipment('${factory}', false)" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50">None</button>
+            <button onclick="toggleFactoryEquipment('${factory}', true)" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50" data-i18n="all">All</button>
+            <button onclick="toggleFactoryEquipment('${factory}', false)" class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50" data-i18n="none">None</button>
           </div>
         </div>
       </div>
@@ -189,6 +189,11 @@ function setupEquipmentFilters() {
   }).join('');
   
   checkboxContainer.innerHTML = factoriesHTML;
+  
+  // Apply translations to the newly rendered content
+  if (typeof translateDynamicContent === 'function') {
+    translateDynamicContent(checkboxContainer);
+  }
 }
 
 // Save checkbox state when changed (dates not persisted)
@@ -263,6 +268,11 @@ async function applyEquipmentFilters() {
     
     filteredEquipmentData = await response.json();
     renderEquipmentAnalytics();
+  
+  // Apply translations immediately after rendering
+  if (typeof translateDynamicContent === 'function') {
+    translateDynamicContent();
+  }
     
   } catch (error) {
     console.error('Error applying filters:', error);
@@ -278,8 +288,8 @@ function renderEquipmentAnalytics() {
     contentContainer.innerHTML = `
       <div class="text-gray-500 text-center p-8 bg-gray-50 rounded-lg">
         <i class="ri-database-2-line text-4xl mb-4"></i>
-        <p class="text-lg">No data available for the selected filters.</p>
-        <p class="text-sm">Try adjusting your date range or equipment selection.</p>
+        <p class="text-lg" data-i18n="noDataAvailable">No data available for the selected filters.</p>
+        <p class="text-sm" data-i18n="tryAdjustingFilters">Try adjusting your date range or equipment selection.</p>
       </div>
     `;
     return;
@@ -303,6 +313,11 @@ function renderEquipmentAnalytics() {
       // Initialize pagination for tables
       renderTablePage(equipment, data, 1, 10); // Default: page 1, 10 items per page
     });
+    
+    // Apply translations to the newly rendered content
+    if (typeof translateDynamicContent === 'function') {
+      translateDynamicContent();
+    }
   }, 100);
 }
 
@@ -363,7 +378,7 @@ function renderEquipmentSection(equipment, data, analytics) {
           ${equipment}
         </h3>
         <div class="flex items-center space-x-2">
-          <span class="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">${data.length} records</span>
+          <span class="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">${data.length} <span data-i18n="records">records</span></span>
           <button onclick="exportEquipmentData('${equipment}')" class="text-blue-600 hover:text-blue-800 text-sm">
             <i class="ri-download-line"></i> Export
           </button>
@@ -373,22 +388,22 @@ function renderEquipmentSection(equipment, data, analytics) {
       <!-- Analytics Cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
-          <h4 class="text-sm font-medium text-blue-800 mb-2">Total Shots</h4>
+          <h4 class="text-sm font-medium text-blue-800 mb-2" data-i18n="totalShots">Total Shots</h4>
           <p class="text-2xl font-bold text-blue-900">${analytics.totalShots.toLocaleString()}</p>
           <p class="text-xs text-blue-600">週合計shot数</p>
         </div>
         <div class="bg-green-50 p-4 rounded-lg border border-green-200">
-          <h4 class="text-sm font-medium text-green-800 mb-2">Avg Shots/Day</h4>
+          <h4 class="text-sm font-medium text-green-800 mb-2" data-i18n="avgShotsDay">Avg Shots/Day</h4>
           <p class="text-2xl font-bold text-green-900">${analytics.avgShotsPerDay}</p>
           <p class="text-xs text-green-600">平均shot/Day</p>
         </div>
         <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
-          <h4 class="text-sm font-medium text-purple-800 mb-2">Avg Shots/Hour</h4>
+          <h4 class="text-sm font-medium text-purple-800 mb-2" data-i18n="avgShotsHour">Avg Shots/Hour</h4>
           <p class="text-2xl font-bold text-purple-900">${analytics.avgShotsPerHour}</p>
           <p class="text-xs text-purple-600">平均shot/Hour</p>
         </div>
         <div class="bg-orange-50 p-4 rounded-lg border border-orange-200">
-          <h4 class="text-sm font-medium text-orange-800 mb-2">Working Hours/Day</h4>
+          <h4 class="text-sm font-medium text-orange-800 mb-2" data-i18n="workingHoursDay">Working Hours/Day</h4>
           <p class="text-2xl font-bold text-orange-900">${analytics.avgWorkingHoursPerDay}</p>
           <p class="text-xs text-orange-600">実働時間/Day</p>
         </div>
@@ -396,20 +411,20 @@ function renderEquipmentSection(equipment, data, analytics) {
       
       <!-- Chart Section -->
       <div class="mb-6">
-        <h4 class="text-lg font-semibold mb-3">Daily Performance Trend</h4>
+        <h4 class="text-lg font-semibold mb-3" data-i18n="dailyPerformanceTrend">Daily Performance Trend</h4>
         <div id="chart-${equipmentId}" class="h-64 bg-gray-50 rounded-lg border"></div>
       </div>
       
       <!-- Table Controls -->
       <div class="flex justify-between items-center mb-4">
         <div class="flex items-center space-x-2">
-          <label class="text-sm text-gray-600">Show:</label>
+          <label class="text-sm text-gray-600" data-i18n="show">Show:</label>
           <select id="itemsPerPage-${equipmentId}" onchange="changeItemsPerPage('${equipmentId}')" class="p-1 border rounded text-sm">
             <option value="10">10</option>
             <option value="50">50</option>
             <option value="100">100</option>
           </select>
-          <span class="text-sm text-gray-600">entries</span>
+          <span class="text-sm text-gray-600" data-i18n="entries">entries</span>
         </div>
         <div id="pagination-${equipmentId}" class="flex items-center space-x-2"></div>
       </div>
@@ -421,7 +436,7 @@ function renderEquipmentSection(equipment, data, analytics) {
             <tr>
               <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Date')">
                 <div class="flex items-center justify-between">
-                  <span>Date</span>
+                  <span data-i18n="date">Date</span>
                   <span id="sort-Date-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
@@ -439,37 +454,37 @@ function renderEquipmentSection(equipment, data, analytics) {
               </th>
               <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Worker_Name')">
                 <div class="flex items-center justify-between">
-                  <span>Worker</span>
+                  <span data-i18n="worker">Worker</span>
                   <span id="sort-Worker_Name-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
               <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'ショット数')">
                 <div class="flex items-center justify-between">
-                  <span>Shots</span>
+                  <span data-i18n="shots">Shots</span>
                   <span id="sort-ショット数-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
               <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Process_Quantity')">
                 <div class="flex items-center justify-between">
-                  <span>Process Qty</span>
+                  <span data-i18n="processQty">Process Qty</span>
                   <span id="sort-Process_Quantity-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
               <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Total_NG')">
                 <div class="flex items-center justify-between">
-                  <span>Defects</span>
+                  <span data-i18n="defects">Defects</span>
                   <span id="sort-Total_NG-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
               <th class="border border-gray-300 px-3 py-2 text-right cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'defectRate')">
                 <div class="flex items-center justify-between">
-                  <span>Defect Rate</span>
+                  <span data-i18n="defectRate">Defect Rate</span>
                   <span id="sort-defectRate-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
               <th class="border border-gray-300 px-3 py-2 text-left cursor-pointer hover:bg-gray-200 select-none" onclick="sortEquipmentTable('${equipmentId}', 'Time_start')">
                 <div class="flex items-center justify-between">
-                  <span>Time</span>
+                  <span data-i18n="time">Time</span>
                   <span id="sort-Time_start-${equipmentId}" class="ml-1 text-gray-400">↕</span>
                 </div>
               </th>
@@ -528,7 +543,7 @@ function initializeEquipmentChart(equipment, data) {
       axisPointer: { type: 'cross' }
     },
     legend: {
-      data: ['Shots', 'Working Hours'],
+      data: [window.t ? window.t('shots') : 'Shots', window.t ? window.t('workingHours') : 'Working Hours'],
       bottom: 0
     },
     grid: {
@@ -548,26 +563,26 @@ function initializeEquipmentChart(equipment, data) {
     yAxis: [
       {
         type: 'value',
-        name: 'Shots',
+        name: window.t ? window.t('shots') : 'Shots',
         position: 'left',
         axisLabel: { formatter: '{value}' }
       },
       {
         type: 'value',
-        name: 'Hours',
+        name: window.t ? window.t('workingHours') : 'Working Hours',
         position: 'right',
         axisLabel: { formatter: '{value}h' }
       }
     ],
     series: [
       {
-        name: 'Shots',
+        name: window.t ? window.t('shots') : 'Shots',
         type: 'bar',
         data: shotData,
         itemStyle: { color: '#3B82F6' }
       },
       {
-        name: 'Working Hours',
+        name: window.t ? window.t('workingHours') : 'Working Hours',
         type: 'line',
         yAxisIndex: 1,
         data: hourData,

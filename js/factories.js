@@ -34,13 +34,13 @@ async function renderFactoryCards() {
   
         // Determine status
         let statusColor = "green";
-        let statusText = "Normal";
+        let statusText = window.t ? window.t("normal") : "Normal";
         if (defectRate >= DEFECT_RATE_THRESHOLDS.high) {
           statusColor = "red";
-          statusText = "High Defect Rate";
+          statusText = window.t ? window.t("highDefectRate") : "High Defect Rate";
         } else if (defectRate >= DEFECT_RATE_THRESHOLDS.warning) {
           statusColor = "yellow";
-          statusText = "Warning";
+          statusText = window.t ? window.t("warning") : "Warning";
         }
   
         const statusStyle = {
@@ -56,9 +56,9 @@ async function renderFactoryCards() {
             ${isClickable ? `onclick="loadFactoryPage('${factory}')"` : ""}
           >
             <h4 class="text-lg font-bold mb-2">${factory}</h4>
-            <p class="text-sm">Total: <strong>${total}</strong></p>
-            <p class="text-sm">Total NG: <strong>${totalNG}</strong></p>
-            <p class="text-sm">Defect Rate: 
+            <p class="text-sm"><span data-i18n="total">Total</span>: <strong>${total}</strong></p>
+            <p class="text-sm"><span data-i18n="totalNG">Total NG</span>: <strong>${totalNG}</strong></p>
+            <p class="text-sm"><span data-i18n="defectRate">Defect Rate</span>: 
               <strong class="${statusColor === 'red' ? 'text-red-600' : statusColor === 'yellow' ? 'text-yellow-600' : 'text-green-600'}">
                 ${defectRate}%
               </strong>
