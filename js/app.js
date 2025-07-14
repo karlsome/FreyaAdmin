@@ -16,7 +16,7 @@ const roleAccess = {
   部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement"], // Same as admin but no customerManagement
   課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"], // Same as 部長
   係長: ["dashboard", "factories", "approvals", "masterDB", "equipment"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "approvals", "masterDB"],
+  班長: ["dashboard", "factories", "approvals", "masterDB", "equipment"],
   member: ["dashboard"]
 };
 
