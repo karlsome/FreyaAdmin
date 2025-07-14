@@ -28,23 +28,31 @@
   <div class="text-center mb-6">
     <img src="src/logo.png" alt="Freya Logo" class="mx-auto mb-2" style="width: 560px;" />
     <h1 class="text-xl font-bold text-gray-800">Freya Admin v2.0</h1>
+    
+    <!-- Language Selector -->
+    <div class="mt-4">
+      <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+      </select>
+    </div>
   </div>
 
   <!-- Login Form -->
   <div class="bg-white p-8 rounded shadow-md w-full max-w-sm">
-    <h2 class="text-2xl font-bold mb-6 text-center">Login</h2>
+    <h2 class="text-2xl font-bold mb-6 text-center" data-i18n="loginTitle">Login</h2>
     <div class="mb-4">
-      <label class="block text-sm font-medium mb-1">Username</label>
-      <input type="text" id="username" class="w-full border p-2 rounded" placeholder="Enter username" />
+      <label class="block text-sm font-medium mb-1" data-i18n="username">Username</label>
+      <input type="text" id="username" class="w-full border p-2 rounded" data-i18n-placeholder="enterUsername" placeholder="Enter username" />
     </div>
     <div class="mb-6">
-      <label class="block text-sm font-medium mb-1">Password</label>
-      <input type="password" id="password" class="w-full border p-2 rounded" placeholder="Enter password" />
+      <label class="block text-sm font-medium mb-1" data-i18n="password">Password</label>
+      <input type="password" id="password" class="w-full border p-2 rounded" data-i18n-placeholder="enterPassword" placeholder="Enter password" />
     </div>
-    <button onclick="login()" class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700">
+    <button onclick="login()" class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700" data-i18n="loginTitle">
       Login
     </button>
-    <p id="loginError" class="text-red-500 text-sm mt-4 hidden">Invalid credentials</p>
+    <p id="loginError" class="text-red-500 text-sm mt-4 hidden" data-i18n="invalidCredentials">Invalid credentials</p>
   </div>
 
   <script>
@@ -66,16 +74,17 @@
           localStorage.setItem("authUser", JSON.stringify(data));
           window.location.href = "index.html";
         } else {
-          errorMsg.textContent = data.error || "Login failed";
+          errorMsg.textContent = data.error || t("loginFailed");
           errorMsg.classList.remove("hidden");
         }
       } catch (err) {
-        errorMsg.textContent = "Network error.";
+        errorMsg.textContent = t("networkError");
         errorMsg.classList.remove("hidden");
       }
     }
   </script>
 
+<script src="js/languages.js"></script>
 <script src="js/charts.js"></script>
 
 

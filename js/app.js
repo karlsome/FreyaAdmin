@@ -21,16 +21,16 @@ const roleAccess = {
 };
 
 const navItemsConfig = {
-  dashboard: { icon: "ri-dashboard-line", label: "Dashboard" },
-  factories: { icon: "ri-building-line", label: "Factories" },
-  masterDB: { icon: "ri-settings-line", label: "Master 製品" },
-  processes: { icon: "ri-settings-line", label: "Processes" },
-  notifications: { icon: "ri-notification-line", label: "Notifications" },
-  analytics: { icon: "ri-line-chart-line", label: "Analytics" },
-  userManagement: { icon: "ri-user-settings-line", label: "User Management" },
-  approvals: { icon: "ri-checkbox-line", label: "Approvals", badge: "12" },
-  customerManagement: { icon: "ri-user-3-line", label: "Customer Management" },
-  equipment: { icon: "ri-tools-line", label: "Equipment" },
+  dashboard: { icon: "ri-dashboard-line", label: "dashboard" },
+  factories: { icon: "ri-building-line", label: "factories" },
+  masterDB: { icon: "ri-settings-line", label: "masterDB" },
+  processes: { icon: "ri-settings-line", label: "processes" },
+  notifications: { icon: "ri-notification-line", label: "notifications" },
+  analytics: { icon: "ri-line-chart-line", label: "analytics" },
+  userManagement: { icon: "ri-user-settings-line", label: "userManagement" },
+  approvals: { icon: "ri-checkbox-line", label: "approvals", badge: "12" },
+  customerManagement: { icon: "ri-user-3-line", label: "customerManagement" },
+  equipment: { icon: "ri-tools-line", label: "equipment" },
 };
 
 // Navigation functions are now handled in navbar.js to avoid duplicates
@@ -141,43 +141,53 @@ function loadPage(page) {
         case "dashboard":
         mainContent.innerHTML = `
             <div class="bg-white p-6 rounded-xl shadow mb-6">
-                <h2 class="text-2xl font-semibold mb-4">Factory Overview</h2>
+                <h2 class="text-2xl font-semibold mb-4" data-i18n="factoryOverview">Factory Overview</h2>
                 <div id="factoryCards" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
             </div>
         `;
         renderFactoryCards();
+        if (typeof applyLanguageEnhanced === 'function') {
+          applyLanguageEnhanced();
+        } else if (typeof applyLanguage === 'function') {
+          applyLanguage();
+        }
         break;
 
         case "analytics":
             mainContent.innerHTML = `
-                <h2 class="text-2xl font-semibold">Defect Rate Analytics</h2>
+                <h2 class="text-2xl font-semibold" data-i18n="defectRateAnalytics">Defect Rate Analytics</h2>
                 <div id="analyticsChart" class="h-80"></div>
                 <div id="analyticsChart1" style="width: 100%; height: 400px;"></div>
                 <div id="analyticsChart2" style="width: 100%; height: 400px;"></div>
             `;
             fetchFactoryDefects();
+            if (typeof applyLanguageEnhanced === 'function') {
+              applyLanguageEnhanced();
+            } else if (typeof applyLanguage === 'function') {
+              applyLanguage();
+            }
             break;        case "approvals":
             mainContent.innerHTML = `
-                <h2 class="text-2xl font-semibold mb-6">データ承認システム</h2>
+                <h2 class="text-2xl font-semibold mb-6" data-i18n="approvalsTitle">Data Approval System</h2>
                 
                 <!-- Process Tabs -->
                 <div class="border-b border-gray-200 mb-6">
                     <nav class="-mb-px flex space-x-8">
                         <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap active" 
-                                data-tab="kensaDB" onclick="switchApprovalTab('kensaDB')">
-                            検査 (Kensa)
+                                data-tab="kensaDB" onclick="switchApprovalTab('kensaDB')" data-i18n="kensa">
+                            Inspection (Kensa)
                         </button>
                         <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap" 
-                                data-tab="pressDB" onclick="switchApprovalTab('pressDB')">
-                            プレス (Press)
+                                data-tab="pressDB" onclick="switchApprovalTab('pressDB')" data-i18n="press">
+                            Press
                         </button>
                         <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap" 
                                 data-tab="SRSDB" onclick="switchApprovalTab('SRSDB')">
                             SRS
                         </button>
                         <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap" 
-                                data-tab="slitDB" onclick="switchApprovalTab('slitDB')">
-                            スリット (Slit)
+                                data-tab="slitDB" onclick="switchApprovalTab('slitDB')" data-i18n="slit">
+                            Slit
                         </button>
                     </nav>
                 </div>
@@ -187,36 +197,36 @@ function loadPage(page) {
                     <!-- Stats Cards -->
                     <div class="grid grid-cols-${role === '班長' ? '6' : '5'} gap-4 mb-6">
                         <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
-                            <h3 class="text-sm font-medium text-yellow-800">保留中</h3>
+                            <h3 class="text-sm font-medium text-yellow-800" data-i18n="pending">Pending</h3>
                             <p class="text-2xl font-bold text-yellow-900" id="pendingCount">0</p>
-                            <p class="text-xs text-yellow-600">班長承認待ち</p>
+                            <p class="text-xs text-yellow-600" data-i18n="pendingApproval">Pending Hancho Approval</p>
                         </div>
                         <div class="bg-blue-50 p-4 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors" onclick="filterByStatus('hancho_approved')">
-                            <h3 class="text-sm font-medium text-blue-800">班長承認済み</h3>
+                            <h3 class="text-sm font-medium text-blue-800" data-i18n="hanchoApproved">Hancho Approved</h3>
                             <p class="text-2xl font-bold text-blue-900" id="hanchoApprovedCount">0</p>
-                            <p class="text-xs text-blue-600">課長承認待ち</p>
+                            <p class="text-xs text-blue-600" data-i18n="waitingKacho">Waiting for Kacho Approval</p>
                         </div>
                         <div class="bg-green-50 p-4 rounded-lg border border-green-200 cursor-pointer hover:bg-green-100 transition-colors" onclick="filterByStatus('fully_approved')">
-                            <h3 class="text-sm font-medium text-green-800">完全承認済み</h3>
+                            <h3 class="text-sm font-medium text-green-800" data-i18n="fullyApproved">Fully Approved</h3>
                             <p class="text-2xl font-bold text-green-900" id="fullyApprovedCount">0</p>
-                            <p class="text-xs text-green-600">課長承認完了</p>
+                            <p class="text-xs text-green-600" data-i18n="kachoApprovalComplete">Kacho Approval Complete</p>
                         </div>
                         <div class="bg-red-50 p-4 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors" onclick="filterByStatus('correction_needed')">
-                            <h3 class="text-sm font-medium text-red-800">修正要求</h3>
+                            <h3 class="text-sm font-medium text-red-800" data-i18n="correctionNeeded">Correction Needed</h3>
                             <p class="text-2xl font-bold text-red-900" id="correctionCount">0</p>
-                            <p class="text-xs text-red-600">要修正・再提出</p>
+                            <p class="text-xs text-red-600" data-i18n="needsCorrection">Needs Correction & Resubmission</p>
                         </div>
                         ${role === '班長' ? `
                         <div class="bg-orange-50 p-4 rounded-lg border border-orange-200 cursor-pointer hover:bg-orange-100 transition-colors" onclick="filterByStatus('correction_needed_from_kacho')">
-                            <h3 class="text-sm font-medium text-orange-800">課長修正要求</h3>
+                            <h3 class="text-sm font-medium text-orange-800" data-i18n="kachoRequest">Kacho Correction Request</h3>
                             <p class="text-2xl font-bold text-orange-900" id="kachoRequestCount">0</p>
-                            <p class="text-xs text-orange-600">班長対応必要</p>
+                            <p class="text-xs text-orange-600" data-i18n="hanchoAction">Hancho Action Required</p>
                         </div>
                         ` : ''}
                         <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors" onclick="filterByStatus('today')">
-                            <h3 class="text-sm font-medium text-gray-800">今日の総数</h3>
+                            <h3 class="text-sm font-medium text-gray-800" data-i18n="todayTotal">Today's Total</h3>
                             <p class="text-2xl font-bold text-gray-900" id="totalCount">0</p>
-                            <p class="text-xs text-gray-600">本日提出分</p>
+                            <p class="text-xs text-gray-600" data-i18n="submittedToday">Submitted Today</p>
                         </div>
                     </div>
 
@@ -275,11 +285,16 @@ function loadPage(page) {
                 </div>
             `;
             initializeApprovalSystem();
+            if (typeof applyLanguageEnhanced === 'function') {
+              applyLanguageEnhanced();
+            } else if (typeof applyLanguage === 'function') {
+              applyLanguage();
+            }
             break;
 
           case "userManagement":
               if (!["admin", "部長", "課長"].includes(role)) {
-                  mainContent.innerHTML = `<p class="text-red-600 font-semibold">Access Denied</p>`;
+                  mainContent.innerHTML = `<p class="text-red-600 font-semibold" data-i18n="accessDenied">Access Denied</p>`;
                   return;
               }
           
@@ -287,21 +302,21 @@ function loadPage(page) {
              <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow space-y-6">
               <!-- Search and Button -->
               <div class="flex justify-between items-center">
-                <input type="text" id="userSearchInput" placeholder="Search users..." class="w-1/2 p-2 border rounded" />
-                <button id="toggleCreateUserForm" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Create New User</button>
+                <input type="text" id="userSearchInput" data-i18n-placeholder="searchUsers" placeholder="Search users..." class="w-1/2 p-2 border rounded" />
+                <button id="toggleCreateUserForm" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" data-i18n="createNewUser">Create New User</button>
               </div>
 
               <!-- Create User Form in Separate Card -->
               <div id="createUserFormWrapper" class="hidden">
                 <div class="bg-gray-50 border border-gray-200 p-6 rounded shadow">
                   <form id="createUserForm" class="grid grid-cols-2 gap-4">
-                    <input required placeholder="First Name" id="firstName" class="border p-2 rounded" />
-                    <input required placeholder="Last Name" id="lastName" class="border p-2 rounded" />
-                    <input required type="email" placeholder="Email" id="email" class="border p-2 rounded" />
-                    <input required placeholder="Username" id="username" class="border p-2 rounded" />
-                    <input required type="password" placeholder="Password" id="password" class="border p-2 rounded" />
+                    <input required data-i18n-placeholder="firstName" placeholder="First Name" id="firstName" class="border p-2 rounded" />
+                    <input required data-i18n-placeholder="lastName" placeholder="Last Name" id="lastName" class="border p-2 rounded" />
+                    <input required type="email" data-i18n-placeholder="email" placeholder="Email" id="email" class="border p-2 rounded" />
+                    <input required data-i18n-placeholder="username" placeholder="Username" id="username" class="border p-2 rounded" />
+                    <input required type="password" data-i18n-placeholder="password" placeholder="Password" id="password" class="border p-2 rounded" />
                     <select id="role" class="border p-2 rounded" required onchange="toggleFactorySelection()">
-                      <option value="">Select Role</option>
+                      <option value="" data-i18n="selectRole">Select Role</option>
                       <option value="admin">admin</option>
                       <option value="部長">部長</option>
                       <option value="課長">課長</option>
@@ -312,14 +327,14 @@ function loadPage(page) {
                     
                     <!-- Factory Selection (shown only for 班長 and 係長) -->
                     <div id="factorySelectionContainer" class="col-span-2 hidden">
-                      <label class="block text-sm font-medium text-gray-700 mb-2">工場 Selection</label>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factorySelection">Factory Selection</label>
                       <div class="grid grid-cols-3 gap-2" id="factoryCheckboxes">
                         <!-- Will be populated with factory options -->
                       </div>
                       <input type="hidden" id="selectedFactories" name="factories" />
                     </div>
                     
-                    <button type="submit" class="col-span-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                    <button type="submit" class="col-span-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" data-i18n="submit">
                       Submit
                     </button>
                   </form>
@@ -327,7 +342,7 @@ function loadPage(page) {
               </div>
 
               <!-- User Table -->
-              <div id="userTableContainer">Loading users...</div>
+              <div id="userTableContainer" data-i18n="loadingUsers">Loading users...</div>
             </div>
             `;
           
@@ -741,9 +756,9 @@ function loadPage(page) {
                             </td>
                           `).join("")}
                           <td class="px-4 py-2" id="actions-${u._id}">
-                            <button class="text-blue-600 hover:underline" onclick="startEditingUser('${u._id}')">Edit</button>
-                            <button class="ml-2 text-yellow-600 hover:underline" onclick="resetPassword('${u._id}')">Reset Password</button>
-                            <button class="ml-2 text-red-600 hover:underline" onclick="deleteUser('${u._id}')">Delete</button>
+                            <button class="text-blue-600 hover:underline" onclick="startEditingUser('${u._id}')" data-i18n="edit">Edit</button>
+                            <button class="ml-2 text-yellow-600 hover:underline" onclick="resetPassword('${u._id}')" data-i18n="resetPassword">Reset Password</button>
+                            <button class="ml-2 text-red-600 hover:underline" onclick="deleteUser('${u._id}')" data-i18n="delete">Delete</button>
                           </td>
                         </tr>`;
                     }).join("")}
@@ -752,6 +767,11 @@ function loadPage(page) {
               `;
 
               document.getElementById("userTableContainer").innerHTML = tableHTML;
+              
+              // Apply translations to the newly rendered table
+              if (typeof translateDynamicContent === 'function') {
+                translateDynamicContent(document.getElementById("userTableContainer"));
+              }
             }
 
             // Factory tag management functions
@@ -841,45 +861,50 @@ function loadPage(page) {
             
             loadUserTable();
           
+          if (typeof applyLanguageEnhanced === 'function') {
+            applyLanguageEnhanced();
+          } else if (typeof applyLanguage === 'function') {
+            applyLanguage();
+          }
               break;
 
         case "customerManagement":
           if (role !== "admin") {
-            mainContent.innerHTML = `<p class="text-red-600 font-semibold">Access Denied</p>`;
+            mainContent.innerHTML = `<p class="text-red-600 font-semibold" data-i18n="accessDenied">Access Denied</p>`;
             return;
           }
 
           mainContent.innerHTML = `
             <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow">
-              <h1 class="text-2xl font-semibold mb-6">Master User Admin Panel</h1>
-              <input type="text" id="customerSearchInput" placeholder="Search by username, company, or email..." class="w-full p-2 border mb-4 rounded" />
+              <h1 class="text-2xl font-semibold mb-6" data-i18n="masterUserAdminPanel">Master User Admin Panel</h1>
+              <input type="text" id="customerSearchInput" data-i18n-placeholder="searchByUsernameCompanyEmail" placeholder="Search by username, company, or email..." class="w-full p-2 border mb-4 rounded" />
 
               <form id="createMasterUserForm" class="bg-white p-6 rounded shadow-md mb-6">
-                <h2 class="text-xl font-semibold mb-4">Create Master User</h2>
+                <h2 class="text-xl font-semibold mb-4" data-i18n="createMasterUser">Create Master User</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <input id="masterUsername" placeholder="Username" class="p-2 border rounded" />
-                  <input type="password" id="masterPassword" placeholder="Password" class="p-2 border rounded" />
-                  <input id="masterCompany" placeholder="Company Name" class="p-2 border rounded" />
-                  <input type="email" id="masterEmail" placeholder="Email" class="p-2 border rounded" />
+                  <input id="masterUsername" data-i18n-placeholder="username" placeholder="Username" class="p-2 border rounded" />
+                  <input type="password" id="masterPassword" data-i18n-placeholder="password" placeholder="Password" class="p-2 border rounded" />
+                  <input id="masterCompany" data-i18n-placeholder="companyName" placeholder="Company Name" class="p-2 border rounded" />
+                  <input type="email" id="masterEmail" data-i18n-placeholder="email" placeholder="Email" class="p-2 border rounded" />
                   <input type="date" id="masterValidUntil" class="p-2 border rounded" />
-                  <input id="masterDbName" placeholder="Database Name" class="p-2 border rounded" />
+                  <input id="masterDbName" data-i18n-placeholder="databaseName" placeholder="Database Name" class="p-2 border rounded" />
                 </div>
-                <h3 class="text-md font-semibold mt-4 mb-2">Devices (optional)</h3>
+                <h3 class="text-md font-semibold mt-4 mb-2" data-i18n="devicesOptional">Devices (optional)</h3>
                 <div id="deviceListCreate" class="mb-4"></div>
-                <button type="button" onclick="addDeviceRow(document.getElementById('deviceListCreate'))" class="text-blue-600 text-sm mb-4">+ Add Device</button>
-                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded w-full">Create Master User</button>
+                <button type="button" onclick="addDeviceRow(document.getElementById('deviceListCreate'))" class="text-blue-600 text-sm mb-4" data-i18n="addDevice">+ Add Device</button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded w-full" data-i18n="createMasterUser">Create Master User</button>
               </form>
 
               <table class="w-full text-sm border">
                 <thead class="bg-gray-200">
                   <tr>
-                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('username')">Username</th>
-                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('company')">Company</th>
-                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('email')">Email</th>
-                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('validUntil')">Valid Until</th>
-                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('dbName')">Database</th>
-                    <th class="px-3 py-2">Devices</th>
-                    <th class="px-3 py-2">Actions</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('username')" data-i18n="username">Username</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('company')" data-i18n="companyName">Company</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('email')" data-i18n="email">Email</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('validUntil')" data-i18n="validUntil">Valid Until</th>
+                    <th class="px-3 py-2 cursor-pointer" onclick="sortMasterUserTable('dbName')" data-i18n="database">Database</th>
+                    <th class="px-3 py-2" data-i18n="devices">Devices</th>
+                    <th class="px-3 py-2" data-i18n="actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="masterUsersTable"></tbody>
@@ -982,12 +1007,17 @@ function loadPage(page) {
                   <td class="px-3 py-2">${u.dbName}</td>
                   <td class="px-3 py-2">${(u.devices || []).length}</td>
                   <td class="px-3 py-2">
-                    <button class="text-blue-600 mr-2" onclick='openEditModal(${JSON.stringify(u)})'>Edit</button>
-                    <button class="text-red-600" onclick='deleteMasterUser("${u._id}")'>Delete</button>
+                    <button class="text-blue-600 mr-2" onclick='openEditModal(${JSON.stringify(u)})' data-i18n="edit">Edit</button>
+                    <button class="text-red-600" onclick='deleteMasterUser("${u._id}")' data-i18n="delete">Delete</button>
                   </td>
                 </tr>
               `;
             }).join("");
+            
+            // Apply translations to the newly rendered table
+            if (typeof translateDynamicContent === 'function') {
+              translateDynamicContent(tbody);
+            }
           }
 
           window.openEditModal = function(user) {
@@ -1107,26 +1137,36 @@ function loadPage(page) {
 
           document.getElementById("customerSearchInput").addEventListener("input", renderMasterUserTable);
           fetchMasterUsers();
+          if (typeof applyLanguageEnhanced === 'function') {
+            applyLanguageEnhanced();
+          } else if (typeof applyLanguage === 'function') {
+            applyLanguage();
+          }
           break;
 
         case "factories":
           mainContent.innerHTML = `
               <div class="bg-white p-6 rounded-xl shadow mb-6">
-                  <h2 class="text-2xl font-semibold mb-4">Factory List</h2>
+                  <h2 class="text-2xl font-semibold mb-4" data-i18n="factoryListTitle">Factory List</h2>
                   <div id="factoryList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
               </div>
           `;
           renderFactoryList();
+          if (typeof applyLanguageEnhanced === 'function') {
+            applyLanguageEnhanced();
+          } else if (typeof applyLanguage === 'function') {
+            applyLanguage();
+          }
           break;
 
         case "masterDB":
           mainContent.innerHTML = `
             <!-- Header Section -->
             <div class="flex justify-between items-center mb-6">
-              <h2 class="text-xl font-semibold text-gray-800">Master 製品管理</h2>
+              <h2 class="text-xl font-semibold text-gray-800" data-i18n="masterProductManagement">Master Product Management</h2>
               <div class="flex items-center space-x-3">
                 <button id="refreshMasterBtn" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm">
-                  <i class="ri-refresh-line mr-1"></i>更新
+                  <i class="ri-refresh-line mr-1"></i><span data-i18n="refresh">Refresh</span>
                 </button>
               </div>
             </div>
@@ -1135,11 +1175,11 @@ function loadPage(page) {
             <div class="bg-white p-4 rounded-lg shadow-sm mb-6 border">
               <div class="flex items-center space-x-4">
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">CSVファイル</label>
+                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="csvFile">CSV File</label>
                   <input type="file" id="csvUploadInput" accept=".csv" class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
                 </div>
                 <button class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm" onclick="handleMasterCSVUpload()">
-                  <i class="ri-upload-line mr-1"></i>アップロード & プレビュー
+                  <i class="ri-upload-line mr-1"></i><span data-i18n="uploadPreview">Upload & Preview</span>
                 </button>
               </div>
               <div id="csvPreviewContainer" class="mt-4"></div>
@@ -1149,32 +1189,32 @@ function loadPage(page) {
             <div class="bg-white p-4 rounded-lg shadow-sm mb-6 border">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1">工場</label>
+                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="factory">Factory</label>
                   <select id="filterFactory" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">すべて</option>
+                    <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1">R/L</label>
+                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="rl">R/L</label>
                   <select id="filterRL" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">すべて</option>
+                    <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1">色</label>
+                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="color">Color</label>
                   <select id="filterColor" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">すべて</option>
+                    <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1">加工設備</label>
+                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="processEquipment">Processing Equipment</label>
                   <select id="filterProcess" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">すべて</option>
+                    <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div class="md:col-span-2">
-                  <label class="block text-xs font-medium text-gray-700 mb-1">検索</label>
-                  <input type="text" id="masterSearchInput" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="品番、モデル、背番号、品名で検索..." />
+                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="search">Search</label>
+                  <input type="text" id="masterSearchInput" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" data-i18n-placeholder="searchPlaceholderMaster" placeholder="Search by part number, model, serial number, product name..." />
                 </div>
               </div>
             </div>
@@ -1556,12 +1596,17 @@ function loadPage(page) {
 
           loadMasterDB();
           loadMasterFilters();
+          if (typeof applyLanguageEnhanced === 'function') {
+            applyLanguageEnhanced();
+          } else if (typeof applyLanguage === 'function') {
+            applyLanguage();
+          }
           break;
 
         case "equipment":
           mainContent.innerHTML = `
             <div class="bg-white p-6 rounded-xl shadow mb-6">
-              <h2 class="text-2xl font-semibold mb-4">Equipment Analytics</h2>
+              <h2 class="text-2xl font-semibold mb-4" data-i18n="equipmentTitle">Equipment Management</h2>
               <div id="equipmentFilters" class="mb-6">
                 <div class="flex flex-wrap gap-4 mb-4">
                   <div class="flex-1 min-w-48">
@@ -1603,10 +1648,20 @@ function loadPage(page) {
               }
             }, 200);
           }
+          if (typeof applyLanguageEnhanced === 'function') {
+            applyLanguageEnhanced();
+          } else if (typeof applyLanguage === 'function') {
+            applyLanguage();
+          }
           break;
 
         default:
             mainContent.innerHTML = `<h2 class="text-xl font-semibold">Page Not Found</h2>`;
+            if (typeof applyLanguageEnhanced === 'function') {
+              applyLanguageEnhanced();
+            } else if (typeof applyLanguage === 'function') {
+              applyLanguage();
+            }
             break;
     }
 }

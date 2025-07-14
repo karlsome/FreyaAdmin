@@ -58,15 +58,15 @@
             <input type="text" id="searchInput" class="w-full md:w-64 p-2 bg-gray-100 rounded-md" placeholder="Search..." />
             
             <!-- Temporarily hided the language selector -->
-            <!-- <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
+            <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
               <option value="en">English</option>
               <option value="ja">日本語</option>
-            </select> -->
+            </select>
 
             
             <!-- Elfsight Website Translator -->
-            <div class="elfsight-app-bd5185c9-6082-4434-ba10-79ddab428dff" data-elfsight-app-lazy></div>
-          </div>
+            <!-- <div class="elfsight-app-bd5185c9-6082-4434-ba10-79ddab428dff" data-elfsight-app-lazy></div>
+          </div> -->
 
           <!-- Profile Dropdown -->
           <div class="relative" id="profileMenu">
@@ -76,10 +76,10 @@
 
             <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-white border rounded shadow-lg z-50">
               <div class="px-4 py-2 text-sm text-gray-700">
-                Role: <span id="userRole">admin</span>
+                <span data-i18n="role">Role</span>: <span id="userRole">admin</span>
               </div>
               <div class="border-t"></div>
-              <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100">
+              <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100" data-i18n="logout">
                 Logout
               </button>
             </div>
