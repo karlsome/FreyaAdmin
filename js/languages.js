@@ -173,6 +173,17 @@ const translations = {
       approvalsTitle: "Approvals",
       customerManagementTitle: "Customer Management",
       
+      // Approval View Modes
+      tableView: "Table View (Individual Approval)",
+      listView: "List View (Batch Approval)",
+      viewMode: "View Mode:",
+      batchApproveSelected: "Batch Approve Selected",
+      batchRejectSelected: "Batch Reject Selected",
+      selected: "selected",
+      dataUpdate: "🔄 Data Update",
+      allFactories: "All Factories",
+      allStatus: "All Status",
+      
       // Additional common terms
       none: "None",
       selectAll: "Select All",
@@ -368,6 +379,17 @@ const translations = {
       analyticsTitle: "分析",
       approvalsTitle: "承認",
       customerManagementTitle: "顧客管理",
+      
+      // Approval View Modes
+      tableView: "テーブルビュー（個別承認）",
+      listView: "リストビュー（一括承認）",
+      viewMode: "表示モード:",
+      batchApproveSelected: "選択項目を一括承認",
+      batchRejectSelected: "選択項目を一括却下",
+      selected: "選択中",
+      dataUpdate: "🔄 データ更新",
+      allFactories: "全工場",
+      allStatus: "全ステータス",
       
       // Additional common terms
       none: "なし",

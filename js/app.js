@@ -174,10 +174,10 @@ function loadPage(page) {
                 <!-- View Options Dropdown -->
                 <div class="mb-6 flex justify-between items-center">
                     <div class="flex items-center space-x-4">
-                        <label for="viewModeSelect" class="text-sm font-medium text-gray-700">View Mode:</label>
+                        <label for="viewModeSelect" class="text-sm font-medium text-gray-700" data-i18n="viewMode">View Mode:</label>
                         <select id="viewModeSelect" class="p-2 border rounded bg-white">
-                            <option value="table">Table View (Individual Approval)</option>
-                            <option value="list">List View (Batch Approval)</option>
+                            <option value="table" data-i18n="tableView">Table View (Individual Approval)</option>
+                            <option value="list" data-i18n="listView">List View (Batch Approval)</option>
                         </select>
                     </div>
                 </div>
@@ -244,14 +244,14 @@ function loadPage(page) {
 
                     <!-- Controls -->
                     <div class="flex flex-wrap gap-4 mb-6">
-                        <button id="refreshBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                        <button id="refreshBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600" data-i18n="dataUpdate">
                             🔄 データ更新
                         </button>
                         <select id="factoryFilter" class="p-2 border rounded">
-                            <option value="">All 工場</option>
+                            <option value="" data-i18n="allFactories">All 工場</option>
                         </select>
                         <select id="statusFilter" class="p-2 border rounded">
-                            <option value="">All Status</option>
+                            <option value="" data-i18n="allStatus">All Status</option>
                             <option value="pending">保留中 (班長承認待ち)</option>
                             <option value="hancho_approved">班長承認済み (課長承認待ち)</option>
                             <option value="fully_approved">完全承認済み</option>
@@ -270,14 +270,14 @@ function loadPage(page) {
                     <!-- List View Controls (hidden by default) -->
                     <div id="listViewControls" class="hidden mb-6">
                         <div class="flex flex-wrap gap-4 items-center">
-                            <button id="batchApproveBtn" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            <button id="batchApproveBtn" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled data-i18n="batchApproveSelected">
                                 Batch Approve Selected
                             </button>
-                            <button id="batchRejectBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            <button id="batchRejectBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled data-i18n="batchRejectSelected">
                                 Batch Reject Selected
                             </button>
                             <div class="ml-auto">
-                                <span id="selectedCount" class="text-sm text-gray-600">0 selected</span>
+                                <span id="selectedCount" class="text-sm text-gray-600">0 <span data-i18n="selected">selected</span></span>
                             </div>
                         </div>
                     </div>
@@ -1912,7 +1912,7 @@ function loadFactoryFilterOptions() {
     const factoryFilter = document.getElementById('factoryFilter');
     const factories = [...new Set(allApprovalData.map(item => item.工場))].filter(Boolean);
     
-    factoryFilter.innerHTML = '<option value="">All 工場</option>' + 
+    factoryFilter.innerHTML = '<option value="" data-i18n="allFactories">All Factories</option>' + 
         factories.map(factory => `<option value="${factory}">${factory}</option>`).join('');
 }
 
@@ -3122,31 +3122,6 @@ function renderApprovalList() {
     // Create comprehensive table structure
     const listHTML = `
         <div class="bg-white border rounded-lg overflow-hidden">
-            <!-- Header Controls -->
-            <div class="bg-gray-50 p-4 border-b">
-                <div class="flex items-center space-x-4 text-sm">
-                    <span class="font-medium text-gray-700">Sort by:</span>
-                    <button class="px-3 py-1 rounded ${approvalSortState.column === 'Time_start' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('Time_start')">
-                        Time ${getSortArrow('Time_start')}
-                    </button>
-                    <button class="px-3 py-1 rounded ${approvalSortState.column === '工場' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('工場')">
-                        工場 ${getSortArrow('工場')}
-                    </button>
-                    <button class="px-3 py-1 rounded ${approvalSortState.column === '品番' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('品番')">
-                        品番 ${getSortArrow('品番')}
-                    </button>
-                    <button class="px-3 py-1 rounded ${approvalSortState.column === 'Worker_Name' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('Worker_Name')">
-                        作業者 ${getSortArrow('Worker_Name')}
-                    </button>
-                    <button class="px-3 py-1 rounded ${approvalSortState.column === getQuantityField(currentApprovalTab) ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('${getQuantityField(currentApprovalTab)}')">
-                        数量 ${getSortArrow(getQuantityField(currentApprovalTab))}
-                    </button>
-                    <button class="px-3 py-1 rounded ${approvalSortState.column === 'approvalStatus' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('approvalStatus')">
-                        状態 ${getSortArrow('approvalStatus')}
-                    </button>
-                </div>
-            </div>
-
             <!-- Excel-like table -->
             <div class="overflow-x-auto">
                 <table class="w-full text-xs border-collapse">
@@ -3155,13 +3130,32 @@ function renderApprovalList() {
                             <th class="border p-2 w-8">
                                 <input type="checkbox" id="selectAllListItems" class="rounded" onchange="toggleSelectAll(this)">
                             </th>
-                            <th class="border p-2 text-left font-medium text-gray-700 bg-yellow-50">Status</th>
-                            ${allFields.map(field => `
-                                <th class="border p-2 text-left font-medium text-gray-700 min-w-24 ${field.isGrouped ? 'bg-blue-50' : ''}" title="${field.description || field.name}">
-                                    ${field.displayName}
-                                    ${field.isGrouped ? `<br><span class="text-xs text-blue-600">(${field.group})</span>` : ''}
-                                </th>
-                            `).join('')}
+                            <th class="border p-2 text-left font-medium text-gray-700 bg-yellow-50 cursor-pointer hover:bg-yellow-100" onclick="sortApprovalTable('approvalStatus')">
+                                Status${getSortArrow('approvalStatus')}
+                            </th>
+                            ${allFields.map(field => {
+                                const fieldKey = field.name.includes('.') ? field.name.split('.')[1] : field.name;
+                                const isClickable = ['Date', 'Time_start', 'Time_end', '工場', '品番', '背番号', 'Worker_Name', '設備'].includes(field.name) || 
+                                                  field.name.includes('加工数') || field.name.includes('不良') || field.name.includes('NG');
+                                
+                                if (isClickable) {
+                                    return `
+                                        <th class="border p-2 text-left font-medium text-gray-700 min-w-24 cursor-pointer hover:bg-gray-100 ${field.isGrouped ? 'bg-blue-50 hover:bg-blue-100' : ''}" 
+                                            onclick="sortApprovalTable('${field.name}')" 
+                                            title="${field.description || field.name}">
+                                            ${field.displayName}${getSortArrow(field.name)}
+                                            ${field.isGrouped ? `<br><span class="text-xs text-blue-600">(${field.group})</span>` : ''}
+                                        </th>
+                                    `;
+                                } else {
+                                    return `
+                                        <th class="border p-2 text-left font-medium text-gray-700 min-w-24 ${field.isGrouped ? 'bg-blue-50' : ''}" title="${field.description || field.name}">
+                                            ${field.displayName}
+                                            ${field.isGrouped ? `<br><span class="text-xs text-blue-600">(${field.group})</span>` : ''}
+                                        </th>
+                                    `;
+                                }
+                            }).join('')}
                         </tr>
                     </thead>
                     <tbody>
@@ -3324,7 +3318,13 @@ function createListRow(item, index, allFields) {
     
     // Checkbox column
     rowHtml += '<td class="border p-2 text-center" onclick="event.stopPropagation();">';
-    rowHtml += '<input type="checkbox" class="list-checkbox rounded" data-item-id="' + item._id + '" onchange="updateBatchButtons()">';
+    
+    // Check if item should be disabled for current user role
+    const isDisabled = shouldDisableCheckbox(item, currentUser.role);
+    const disabledAttr = isDisabled ? ' disabled' : '';
+    const disabledClass = isDisabled ? ' opacity-50 cursor-not-allowed' : '';
+    
+    rowHtml += '<input type="checkbox" class="list-checkbox rounded' + disabledClass + '" data-item-id="' + item._id + '" onchange="updateBatchButtons()"' + disabledAttr + '>';
     rowHtml += '</td>';
     
     // Status column
@@ -3377,6 +3377,34 @@ function createListRow(item, index, allFields) {
     rowHtml += '</tr>';
     
     return rowHtml;
+}
+
+/**
+ * Check if checkbox should be disabled for current user and item status
+ */
+function shouldDisableCheckbox(item, userRole) {
+    const status = item.approvalStatus;
+    
+    // If user is 班長 (hancho)
+    if (userRole === '班長') {
+        // Disable if already hancho approved, fully approved, or rejected
+        if (status === 'hancho_approved' || 
+            status === 'fully_approved' || 
+            status === 'rejected' ||
+            status === 'correction_needed_from_kacho') {
+            return true;
+        }
+    }
+    
+    // If user is 課長 or higher
+    if (['課長', '部長', 'admin'].includes(userRole)) {
+        // Disable if fully approved or rejected (final states)
+        if (status === 'fully_approved' || status === 'rejected') {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 /**
@@ -3437,7 +3465,7 @@ function addListEventListeners() {
  * Toggle select all functionality
  */
 window.toggleSelectAll = function(selectAllCheckbox) {
-    const checkboxes = document.querySelectorAll('.list-checkbox');
+    const checkboxes = document.querySelectorAll('.list-checkbox:not(:disabled)');
     checkboxes.forEach(checkbox => {
         checkbox.checked = selectAllCheckbox.checked;
     });
@@ -3448,7 +3476,7 @@ window.toggleSelectAll = function(selectAllCheckbox) {
  * Update batch button states based on selected items
  */
 function updateBatchButtons() {
-    const checkboxes = document.querySelectorAll('.list-checkbox:checked');
+    const checkboxes = document.querySelectorAll('.list-checkbox:checked:not(:disabled)');
     const approveBtn = document.getElementById('batchApproveBtn');
     const rejectBtn = document.getElementById('batchRejectBtn');
     const selectedCount = document.getElementById('selectedCount');
@@ -3458,7 +3486,7 @@ function updateBatchButtons() {
 
     approveBtn.disabled = !isEnabled;
     rejectBtn.disabled = !isEnabled;
-    selectedCount.textContent = selectedLength + " selected";
+    selectedCount.textContent = selectedLength + " " + (window.t ? window.t('selected') : 'selected');
 }
 
 /**
@@ -3602,7 +3630,7 @@ function addCardEventListeners() {
  * Update batch button states based on selected items
  */
 function updateBatchButtons() {
-    const checkboxes = document.querySelectorAll('.list-checkbox:checked');
+    const checkboxes = document.querySelectorAll('.list-checkbox:checked:not(:disabled)');
     const approveBtn = document.getElementById('batchApproveBtn');
     const rejectBtn = document.getElementById('batchRejectBtn');
     const selectedCount = document.getElementById('selectedCount');
@@ -3612,14 +3640,14 @@ function updateBatchButtons() {
 
     approveBtn.disabled = !isEnabled;
     rejectBtn.disabled = !isEnabled;
-    selectedCount.textContent = selectedLength + " selected";
+    selectedCount.textContent = selectedLength + " " + (window.t ? window.t('selected') : 'selected');
 }
 
 /**
  * Handle batch approval
  */
 async function handleBatchApproval() {
-    const selectedItems = Array.from(document.querySelectorAll('.list-checkbox:checked'))
+    const selectedItems = Array.from(document.querySelectorAll('.list-checkbox:checked:not(:disabled)'))
         .map(checkbox => checkbox.dataset.itemId);
 
     console.log('Debug: Selected items for batch approval:', selectedItems);
@@ -3720,7 +3748,7 @@ async function handleBatchApproval() {
  * Handle batch reject
  */
 async function handleBatchReject() {
-    const selectedItems = Array.from(document.querySelectorAll('.list-checkbox:checked'))
+    const selectedItems = Array.from(document.querySelectorAll('.list-checkbox:checked:not(:disabled)'))
         .map(checkbox => checkbox.dataset.itemId);
 
     if (selectedItems.length === 0) {
