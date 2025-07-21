@@ -11,6 +11,7 @@ if (roleDisplay) {
 const role = currentUser.role || "guest"; // Default to guest if no role is found
 
 
+
 const roleAccess = {
   admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment"],
   部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement"], // Same as admin but no customerManagement
@@ -170,6 +171,17 @@ function loadPage(page) {
             mainContent.innerHTML = `
                 <h2 class="text-2xl font-semibold mb-6" data-i18n="approvalsTitle">Data Approval System</h2>
                 
+                <!-- View Options Dropdown -->
+                <div class="mb-6 flex justify-between items-center">
+                    <div class="flex items-center space-x-4">
+                        <label for="viewModeSelect" class="text-sm font-medium text-gray-700">View Mode:</label>
+                        <select id="viewModeSelect" class="p-2 border rounded bg-white">
+                            <option value="table">Table View (Individual Approval)</option>
+                            <option value="list">List View (Batch Approval)</option>
+                        </select>
+                    </div>
+                </div>
+                
                 <!-- Process Tabs -->
                 <div class="border-b border-gray-200 mb-6">
                     <nav class="-mb-px flex space-x-8">
@@ -255,9 +267,37 @@ function loadPage(page) {
                         </select>
                     </div>
 
-                    <!-- Table Container -->
+                    <!-- List View Controls (hidden by default) -->
+                    <div id="listViewControls" class="hidden mb-6">
+                        <div class="flex flex-wrap gap-4 items-center">
+                            <button id="batchApproveBtn" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                Batch Approve Selected
+                            </button>
+                            <button id="batchRejectBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                Batch Reject Selected
+                            </button>
+                            <div class="ml-auto">
+                                <span id="selectedCount" class="text-sm text-gray-600">0 selected</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Table Container (default view) -->
                     <div class="bg-white rounded-lg shadow border" id="approvalsTableContainer">
                         <div class="p-8 text-center text-gray-500">データを読み込み中...</div>
+                    </div>
+
+                    <!-- List Container (hidden by default) -->
+                    <div id="approvalsListContainer" class="hidden">
+                        <div class="p-8 text-center text-gray-500">データを読み込み中...</div>
+                    </div>
+
+                    <!-- Summary Report (for card view) -->
+                    <div id="summaryReport" class="hidden mt-6 bg-gray-50 p-6 rounded-lg border">
+                        <h3 class="text-lg font-semibold mb-4">Summary Report</h3>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="summaryStats">
+                            <!-- Will be populated dynamically -->
+                        </div>
                     </div>
 
                     <!-- Pagination -->
@@ -285,6 +325,16 @@ function loadPage(page) {
                 </div>
             `;
             initializeApprovalSystem();
+            // Initialize view mode listener with persistence
+            const savedViewMode = localStorage.getItem('approvalViewMode') || 'table';
+            document.getElementById('viewModeSelect').value = savedViewMode;
+            toggleViewMode(savedViewMode);
+            
+            document.getElementById('viewModeSelect').addEventListener('change', function() {
+                const viewMode = this.value;
+                localStorage.setItem('approvalViewMode', viewMode);
+                toggleViewMode(viewMode);
+            });
             if (typeof applyLanguageEnhanced === 'function') {
               applyLanguageEnhanced();
             } else if (typeof applyLanguage === 'function') {
@@ -1954,6 +2004,14 @@ function updateStats() {
 function renderApprovalTable() {
     const container = document.getElementById('approvalsTableContainer');
     
+    // Check if we're in list view mode
+    const viewMode = document.getElementById('viewModeSelect').value;
+    if (viewMode === 'list') {
+        renderApprovalList();
+        generateSummaryReport();
+        return;
+    }
+    
     if (filteredApprovalData.length === 0) {
         container.innerHTML = '<div class="p-8 text-center text-gray-500">データがありません</div>';
         updatePagination(0);
@@ -2115,7 +2173,14 @@ window.sortApprovalTable = function(column) {
         return 0;
     });
 
-    renderApprovalTable();
+    // Render appropriate view based on current mode
+    const viewMode = document.getElementById('viewModeSelect').value;
+    if (viewMode === 'list') {
+        renderApprovalList();
+        generateSummaryReport();
+    } else {
+        renderApprovalTable();
+    }
 };
 
 /**
@@ -2982,4 +3047,848 @@ function addInputChangeListeners() {
 // Call this function after the modal is opened
 // addInputChangeListeners();
 
+// ============================================
+// NEW VIEW MODE FUNCTIONALITY
+// ============================================
 
+/**
+ * Toggle between table and list view modes
+ */
+function toggleViewMode(viewMode) {
+    const tableContainer = document.getElementById('approvalsTableContainer');
+    const listContainer = document.getElementById('approvalsListContainer');
+    const listControls = document.getElementById('listViewControls');
+    const summaryReport = document.getElementById('summaryReport');
+    const pagination = document.querySelector('.flex.items-center.justify-between.mt-6');
+
+    if (viewMode === 'list') {
+        // Show list view
+        tableContainer.classList.add('hidden');
+        listContainer.classList.remove('hidden');
+        listControls.classList.remove('hidden');
+        summaryReport.classList.remove('hidden');
+        pagination.classList.add('hidden');
+        
+        // Initialize list view
+        initializeListView();
+        renderApprovalList();
+        generateSummaryReport();
+    } else {
+        // Show table view (default)
+        tableContainer.classList.remove('hidden');
+        listContainer.classList.add('hidden');
+        listControls.classList.add('hidden');
+        summaryReport.classList.add('hidden');
+        pagination.classList.remove('hidden');
+        
+        // Render table view
+        renderApprovalTable();
+    }
+}
+
+/**
+ * Initialize list view event listeners
+ */
+function initializeListView() {
+    // Batch approval buttons
+    document.getElementById('batchApproveBtn').addEventListener('click', handleBatchApproval);
+    document.getElementById('batchRejectBtn').addEventListener('click', handleBatchReject);
+}
+
+/**
+ * Render approval data as structured list
+ */
+function renderApprovalList() {
+    const container = document.getElementById('approvalsListContainer');
+    
+    if (filteredApprovalData.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-gray-500">データがありません</div>';
+        return;
+    }
+
+    // Sort by Time_start for list view (default) unless another sort is active
+    let sortedData = [...filteredApprovalData];
+    if (!approvalSortState.column) {
+        sortedData.sort((a, b) => {
+            const timeA = a.Time_start || '00:00';
+            const timeB = b.Time_start || '00:00';
+            return timeA.localeCompare(timeB);
+        });
+    }
+
+    // Get all possible fields for the current tab
+    const allFields = getAllFieldsForTab(currentApprovalTab, sortedData);
+
+    // Create comprehensive table structure
+    const listHTML = `
+        <div class="bg-white border rounded-lg overflow-hidden">
+            <!-- Header Controls -->
+            <div class="bg-gray-50 p-4 border-b">
+                <div class="flex items-center space-x-4 text-sm">
+                    <span class="font-medium text-gray-700">Sort by:</span>
+                    <button class="px-3 py-1 rounded ${approvalSortState.column === 'Time_start' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('Time_start')">
+                        Time ${getSortArrow('Time_start')}
+                    </button>
+                    <button class="px-3 py-1 rounded ${approvalSortState.column === '工場' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('工場')">
+                        工場 ${getSortArrow('工場')}
+                    </button>
+                    <button class="px-3 py-1 rounded ${approvalSortState.column === '品番' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('品番')">
+                        品番 ${getSortArrow('品番')}
+                    </button>
+                    <button class="px-3 py-1 rounded ${approvalSortState.column === 'Worker_Name' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('Worker_Name')">
+                        作業者 ${getSortArrow('Worker_Name')}
+                    </button>
+                    <button class="px-3 py-1 rounded ${approvalSortState.column === getQuantityField(currentApprovalTab) ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('${getQuantityField(currentApprovalTab)}')">
+                        数量 ${getSortArrow(getQuantityField(currentApprovalTab))}
+                    </button>
+                    <button class="px-3 py-1 rounded ${approvalSortState.column === 'approvalStatus' ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'}" onclick="sortApprovalTable('approvalStatus')">
+                        状態 ${getSortArrow('approvalStatus')}
+                    </button>
+                </div>
+            </div>
+
+            <!-- Excel-like table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs border-collapse">
+                    <thead class="bg-gray-100 sticky top-0 z-10">
+                        <tr>
+                            <th class="border p-2 w-8">
+                                <input type="checkbox" id="selectAllListItems" class="rounded" onchange="toggleSelectAll(this)">
+                            </th>
+                            <th class="border p-2 text-left font-medium text-gray-700 bg-yellow-50">Status</th>
+                            ${allFields.map(field => `
+                                <th class="border p-2 text-left font-medium text-gray-700 min-w-24 ${field.isGrouped ? 'bg-blue-50' : ''}" title="${field.description || field.name}">
+                                    ${field.displayName}
+                                    ${field.isGrouped ? `<br><span class="text-xs text-blue-600">(${field.group})</span>` : ''}
+                                </th>
+                            `).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sortedData.map((item, index) => createListRow(item, index, allFields)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = listHTML;
+
+    // Add event listeners for list interactions
+    addListEventListeners();
+}
+
+/**
+ * Get all possible fields for the current tab
+ */
+function getAllFieldsForTab(tabName, data) {
+    const fields = [];
+    
+    // Basic fields (always shown)
+    const basicFields = [
+        { name: 'Date', displayName: '日付', group: null },
+        { name: 'Time_start', displayName: '開始時間', group: null },
+        { name: 'Time_end', displayName: '終了時間', group: null },
+        { name: '工場', displayName: '工場', group: null },
+        { name: '品番', displayName: '品番', group: null },
+        { name: '背番号', displayName: '背番号', group: null },
+        { name: 'Worker_Name', displayName: '作業者', group: null },
+        { name: '設備', displayName: '設備', group: null }
+    ];
+
+    // Add basic fields that exist in data
+    basicFields.forEach(field => {
+        if (data.some(item => item[field.name] !== undefined && item[field.name] !== null && item[field.name] !== '')) {
+            fields.push(field);
+        }
+    });
+
+    // Process-specific fields
+    const processFields = [];
+    
+    if (tabName === 'kensaDB') {
+        processFields.push(
+            { name: 'Process_Quantity', displayName: '処理数', group: null },
+            { name: 'Remaining_Quantity', displayName: '残り数', group: null },
+            { name: 'Total', displayName: 'Total', group: null },
+            { name: 'Total_NG', displayName: 'Total NG', group: null },
+            { name: '製造ロット', displayName: '製造ロット', group: null }
+        );
+
+        // Add counter fields
+        const sampleItem = data.find(item => item.Counters);
+        if (sampleItem && sampleItem.Counters) {
+            Object.keys(sampleItem.Counters).forEach(counter => {
+                processFields.push({
+                    name: `Counters.${counter}`,
+                    displayName: counter,
+                    group: 'Counters',
+                    isGrouped: true
+                });
+            });
+        }
+    } else if (tabName === 'pressDB') {
+        processFields.push(
+            { name: 'Total', displayName: 'Total', group: null },
+            { name: 'Total_NG', displayName: 'Total NG', group: null },
+            { name: '材料ロット', displayName: '材料ロット', group: null },
+            { name: 'Cycle_Time', displayName: 'サイクル時間', group: null },
+            { name: 'ショット数', displayName: 'ショット数', group: null },
+            { name: '疵引処理数', displayName: '疵引処理数', group: 'NG Details', isGrouped: true },
+            { name: '疵引不良', displayName: '疵引不良', group: 'NG Details', isGrouped: true },
+            { name: '加工不良', displayName: '加工不良', group: 'NG Details', isGrouped: true },
+            { name: 'その他', displayName: 'その他', group: 'NG Details', isGrouped: true }
+        );
+    } else if (tabName === 'SRSDB') {
+        processFields.push(
+            { name: 'Total', displayName: 'Total', group: null },
+            { name: 'SRS_Total_NG', displayName: 'SRS Total NG', group: null },
+            { name: 'くっつき・めくれ', displayName: 'くっつき・めくれ', group: 'SRS Details', isGrouped: true },
+            { name: 'シワ', displayName: 'シワ', group: 'SRS Details', isGrouped: true },
+            { name: '転写位置ズレ', displayName: '転写位置ズレ', group: 'SRS Details', isGrouped: true },
+            { name: '転写不良', displayName: '転写不良', group: 'SRS Details', isGrouped: true },
+            { name: '文字欠け', displayName: '文字欠け', group: 'SRS Details', isGrouped: true }
+        );
+    } else if (tabName === 'slitDB') {
+        processFields.push(
+            { name: 'Total', displayName: 'Total', group: null },
+            { name: 'Total_NG', displayName: 'Total NG', group: null },
+            { name: '疵引不良', displayName: '疵引不良', group: 'NG Details', isGrouped: true },
+            { name: '加工不良', displayName: '加工不良', group: 'NG Details', isGrouped: true },
+            { name: 'その他', displayName: 'その他', group: 'NG Details', isGrouped: true }
+        );
+    }
+
+    // Add process fields that exist in data
+    processFields.forEach(field => {
+        if (field.name.includes('.')) {
+            // Handle nested fields like Counters.counter-1
+            const [parent, child] = field.name.split('.');
+            if (data.some(item => item[parent] && item[parent][child] !== undefined)) {
+                fields.push(field);
+            }
+        } else {
+            if (data.some(item => item[field.name] !== undefined && item[field.name] !== null && item[field.name] !== '')) {
+                fields.push(field);
+            }
+        }
+    });
+
+    // Add image fields
+    const imageFields = [];
+    const sampleItem = data[0];
+    if (sampleItem) {
+        Object.keys(sampleItem).forEach(key => {
+            if (key.includes('画像') && sampleItem[key]) {
+                imageFields.push({
+                    name: key,
+                    displayName: key.replace('画像', ' Image'),
+                    group: 'Images',
+                    isGrouped: true,
+                    isImage: true
+                });
+            }
+        });
+    }
+
+    fields.push(...imageFields);
+
+    // Add common fields at the end
+    const endFields = [
+        { name: 'Spare', displayName: 'Spare', group: null },
+        { name: 'Comment', displayName: 'Comment', group: null }
+    ];
+
+    endFields.forEach(field => {
+        if (data.some(item => item[field.name] !== undefined && item[field.name] !== null && item[field.name] !== '')) {
+            fields.push(field);
+        }
+    });
+
+    return fields;
+}
+
+/**
+ * Create individual list row
+ */
+function createListRow(item, index, allFields) {
+    const statusInfo = getStatusInfo(item);
+    
+    // Check for obvious wrong data
+    const hasWrongData = detectWrongData(item);
+    const wrongDataClass = hasWrongData ? 'bg-red-100 border-red-300' : '';
+    
+    const rowClass = 'hover:bg-gray-50 ' + statusInfo.rowClass + ' ' + wrongDataClass + ' ' + (index % 2 === 0 ? 'bg-gray-25' : '');
+    
+    let rowHtml = '<tr class="' + rowClass + '" onclick="openApprovalDetail(\'' + item._id + '\')" style="cursor: pointer;">';
+    
+    // Checkbox column
+    rowHtml += '<td class="border p-2 text-center" onclick="event.stopPropagation();">';
+    rowHtml += '<input type="checkbox" class="list-checkbox rounded" data-item-id="' + item._id + '" onchange="updateBatchButtons()">';
+    rowHtml += '</td>';
+    
+    // Status column
+    rowHtml += '<td class="border p-2">';
+    rowHtml += '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ' + statusInfo.badgeClass + '">';
+    rowHtml += '<i class="' + statusInfo.icon + ' mr-1"></i>';
+    rowHtml += statusInfo.text;
+    if (hasWrongData) {
+        rowHtml += ' ⚠️';
+    }
+    rowHtml += '</span>';
+    rowHtml += '</td>';
+    
+    // Data columns
+    allFields.forEach(field => {
+        let value = '';
+        let cellClass = 'border p-2 text-sm';
+        
+        if (field.name.includes('.')) {
+            // Handle nested fields like Counters.counter-1
+            const [parent, child] = field.name.split('.');
+            value = item[parent] && item[parent][child] !== undefined ? item[parent][child] : '';
+        } else {
+            value = item[field.name] !== undefined ? item[field.name] : '';
+        }
+
+        // Special formatting
+        if (field.isImage && value) {
+            value = '✅ OK';
+            cellClass += ' text-green-600 font-medium text-center';
+        } else if (field.name.includes('不良') && value > 0) {
+            cellClass += ' text-red-600 font-medium';
+        } else if (field.name.includes('NG') && value > 0) {
+            cellClass += ' text-red-600 font-medium';
+        } else if (typeof value === 'number' && value > 0) {
+            value = value.toLocaleString();
+        } else if (typeof value === 'number' && value < 0) {
+            // Highlight negative numbers
+            cellClass += ' text-red-600 font-medium bg-red-50';
+        }
+
+        // Highlight grouped fields
+        if (field.isGrouped) {
+            cellClass += ' bg-blue-25';
+        }
+
+        rowHtml += '<td class="' + cellClass + '" title="' + field.displayName + ': ' + value + '">' + (value || '-') + '</td>';
+    });
+    
+    rowHtml += '</tr>';
+    
+    return rowHtml;
+}
+
+/**
+ * Detect obvious wrong data in an item
+ */
+function detectWrongData(item) {
+    const issues = [];
+    
+    // Check for time start equals time end
+    const startTimeFields = ['Time_start', '開始時刻', 'start_time'];
+    const endTimeFields = ['Time_end', '終了時刻', 'end_time'];
+    
+    for (const startField of startTimeFields) {
+        for (const endField of endTimeFields) {
+            if (item[startField] && item[endField] && item[startField] === item[endField]) {
+                issues.push("Time start equals time end: " + item[startField]);
+            }
+        }
+    }
+    
+    // Check for negative quantities
+    const quantityFields = ['Total', 'Process_Quantity', '数量', 'quantity', 'total'];
+    for (const field of quantityFields) {
+        if (item[field] && typeof item[field] === 'number' && item[field] < 0) {
+            issues.push("Negative quantity: " + field + " = " + item[field]);
+        }
+    }
+    
+    // Check counters for negative values
+    if (item.Counters) {
+        Object.entries(item.Counters).forEach(([key, value]) => {
+            if (typeof value === 'number' && value < 0) {
+                issues.push("Negative counter: " + key + " = " + value);
+            }
+        });
+    }
+    
+    // Log detected issues for debugging
+    if (issues.length > 0) {
+        console.log("Wrong data detected in item " + item._id + ":", issues);
+    }
+    
+    return issues.length > 0;
+}
+
+/**
+ * Add event listeners for list interactions
+ */
+function addListEventListeners() {
+    // Update batch button states when checkboxes change
+    const checkboxes = document.querySelectorAll('.list-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', updateBatchButtons);
+    });
+}
+
+/**
+ * Toggle select all functionality
+ */
+window.toggleSelectAll = function(selectAllCheckbox) {
+    const checkboxes = document.querySelectorAll('.list-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+    });
+    updateBatchButtons();
+};
+
+/**
+ * Update batch button states based on selected items
+ */
+function updateBatchButtons() {
+    const checkboxes = document.querySelectorAll('.list-checkbox:checked');
+    const approveBtn = document.getElementById('batchApproveBtn');
+    const rejectBtn = document.getElementById('batchRejectBtn');
+    const selectedCount = document.getElementById('selectedCount');
+
+    const selectedLength = checkboxes.length;
+    const isEnabled = selectedLength > 0;
+
+    approveBtn.disabled = !isEnabled;
+    rejectBtn.disabled = !isEnabled;
+    selectedCount.textContent = selectedLength + " selected";
+}
+
+/**
+ * Create organized field data for card display
+ */
+function createFieldData(item) {
+    const fieldGroups = [];
+    
+    // Basic fields (ungrouped)
+    const basicFields = [
+        { key: 'Date', label: '日付' },
+        { key: '設備', label: '設備' },
+        { key: 'Process_Quantity', label: '処理数' },
+        { key: 'Remaining_Quantity', label: '残り数' },
+        { key: 'Total', label: 'Total' },
+        { key: 'Spare', label: 'Spare' },
+        { key: 'Cycle_Time', label: 'サイクル時間' },
+        { key: '製造ロット', label: '製造ロット' },
+        { key: '材料ロット', label: '材料ロット' },
+        { key: 'ショット数', label: 'ショット数' }
+    ];
+
+    const basicGroup = {
+        groupName: null,
+        fields: basicFields
+            .filter(field => item[field.key] !== undefined && item[field.key] !== null && item[field.key] !== '')
+            .map(field => ({
+                label: field.label,
+                value: item[field.key],
+                isImage: false,
+                isNegative: false
+            }))
+    };
+
+    if (basicGroup.fields.length > 0) {
+        fieldGroups.push(basicGroup);
+    }
+
+    // Counters group (for kensaDB)
+    if (item.Counters && typeof item.Counters === 'object') {
+        const counterFields = Object.entries(item.Counters)
+            .filter(([key, value]) => value > 0)
+            .map(([key, value]) => ({
+                label: key,
+                value: value,
+                isImage: false,
+                isNegative: true
+            }));
+
+        if (counterFields.length > 0) {
+            fieldGroups.push({
+                groupName: 'Counters',
+                fields: counterFields
+            });
+        }
+    }
+
+    // NG fields group (for pressDB, slitDB)
+    const ngFields = [
+        { key: '疵引不良', label: '疵引不良' },
+        { key: '加工不良', label: '加工不良' },
+        { key: 'その他', label: 'その他' },
+        { key: '疵引処理数', label: '疵引処理数' }
+    ];
+
+    const ngGroup = {
+        groupName: 'NG Details',
+        fields: ngFields
+            .filter(field => item[field.key] !== undefined && item[field.key] !== null && item[field.key] !== '')
+            .map(field => ({
+                label: field.label,
+                value: item[field.key],
+                isImage: false,
+                isNegative: field.key.includes('不良') && item[field.key] > 0
+            }))
+    };
+
+    if (ngGroup.fields.length > 0) {
+        fieldGroups.push(ngGroup);
+    }
+
+    // SRS specific fields (for SRSDB)
+    if (currentApprovalTab === 'SRSDB') {
+        const srsFields = [
+            { key: 'くっつき・めくれ', label: 'くっつき・めくれ' },
+            { key: 'シワ', label: 'シワ' },
+            { key: '転写位置ズレ', label: '転写位置ズレ' },
+            { key: '転写不良', label: '転写不良' },
+            { key: '文字欠け', label: '文字欠け' }
+        ];
+
+        const srsGroup = {
+            groupName: 'SRS Details',
+            fields: srsFields
+                .filter(field => item[field.key] !== undefined && item[field.key] !== null && item[field.key] !== '')
+                .map(field => ({
+                    label: field.label,
+                    value: item[field.key],
+                    isImage: false,
+                    isNegative: item[field.key] > 0
+                }))
+        };
+
+        if (srsGroup.fields.length > 0) {
+            fieldGroups.push(srsGroup);
+        }
+    }
+
+    // Images group
+    const imageFields = Object.keys(item)
+        .filter(key => key.includes('画像') && item[key])
+        .map(key => ({
+            label: key,
+            value: 'Available',
+            isImage: true,
+            isNegative: false
+        }));
+
+    if (imageFields.length > 0) {
+        fieldGroups.push({
+            groupName: 'Images',
+            fields: imageFields
+        });
+    }
+
+    return fieldGroups;
+}
+
+/**
+ * Add event listeners for card interactions
+ */
+function addCardEventListeners() {
+    // Update batch button states when checkboxes change
+    const checkboxes = document.querySelectorAll('.card-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', updateBatchButtons);
+    });
+}
+
+/**
+ * Update batch button states based on selected items
+ */
+function updateBatchButtons() {
+    const checkboxes = document.querySelectorAll('.list-checkbox:checked');
+    const approveBtn = document.getElementById('batchApproveBtn');
+    const rejectBtn = document.getElementById('batchRejectBtn');
+    const selectedCount = document.getElementById('selectedCount');
+
+    const selectedLength = checkboxes.length;
+    const isEnabled = selectedLength > 0;
+
+    approveBtn.disabled = !isEnabled;
+    rejectBtn.disabled = !isEnabled;
+    selectedCount.textContent = selectedLength + " selected";
+}
+
+/**
+ * Handle batch approval
+ */
+async function handleBatchApproval() {
+    const selectedItems = Array.from(document.querySelectorAll('.list-checkbox:checked'))
+        .map(checkbox => checkbox.dataset.itemId);
+
+    console.log('Debug: Selected items for batch approval:', selectedItems);
+
+    if (selectedItems.length === 0) {
+        alert('承認するアイテムを選択してください');
+        return;
+    }
+
+    if (!confirm(selectedItems.length + "件のアイテムを一括承認しますか？")) {
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        console.log('Debug: Current user:', currentUser);
+        
+        const userFullName = await getUserFullName(currentUser.username);
+        console.log('Debug: User full name:', userFullName);
+        
+        const promises = selectedItems.map(async (itemId) => {
+            const item = allApprovalData.find(d => d._id === itemId);
+            console.log('Debug: Processing item ' + itemId + ':', item);
+            
+            if (!item) {
+                throw new Error('Item ' + itemId + ': データが見つかりません');
+            }
+            
+            // Check approval permissions and determine status
+            let newStatus, approvalField, approvalByField, actionText;
+            
+            console.log('Debug: Item ' + itemId + ' - Current status: ' + item.approvalStatus + ', User role: ' + currentUser.role);
+            
+            if ((!item.approvalStatus || item.approvalStatus === 'pending') && currentUser.role === '班長') {
+                newStatus = 'hancho_approved';
+                approvalField = 'hanchoApprovedBy';
+                approvalByField = 'hanchoApprovedAt';
+                actionText = '班長承認';
+            } else if (item.approvalStatus === 'hancho_approved' && ['課長', 'admin', '部長'].includes(currentUser.role)) {
+                newStatus = 'fully_approved';
+                approvalField = 'kachoApprovedBy';
+                approvalByField = 'kachoApprovedAt';
+                actionText = '課長承認';
+            } else if (item.approvalStatus === 'correction_needed_from_kacho' && currentUser.role === '班長') {
+                newStatus = 'hancho_approved';
+                approvalField = 'hanchoApprovedBy';
+                approvalByField = 'hanchoApprovedAt';
+                actionText = '修正完了・再承認';
+            } else {
+                throw new Error('Item ' + itemId + ': 承認権限がありません (Status: ' + item.approvalStatus + ', Role: ' + currentUser.role + ')');
+            }
+
+            console.log('Debug: Item ' + itemId + ' - New status: ' + newStatus + ', Action: ' + actionText);
+
+            return fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: currentApprovalTab,
+                    query: { _id: itemId },
+                    update: {
+                        $set: {
+                            approvalStatus: newStatus,
+                            [approvalField]: userFullName,
+                            [approvalByField]: new Date()
+                        },
+                        $push: {
+                            approvalHistory: {
+                                action: actionText,
+                                user: userFullName,
+                                timestamp: new Date(),
+                                batchOperation: true
+                            }
+                        }
+                    }
+                })
+            });
+        });
+
+        const results = await Promise.all(promises);
+        console.log('Debug: Batch approval results:', results);
+        
+        alert(selectedItems.length + '件のアイテムを一括承認しました');
+        
+        // Clear selections and reload data
+        document.querySelectorAll('.list-checkbox:checked').forEach(checkbox => checkbox.checked = false);
+        updateBatchButtons();
+        loadApprovalData();
+        
+    } catch (error) {
+        console.error('Batch approval error:', error);
+        alert('一括承認に失敗しました: ' + error.message);
+    }
+}
+
+/**
+ * Handle batch reject
+ */
+async function handleBatchReject() {
+    const selectedItems = Array.from(document.querySelectorAll('.list-checkbox:checked'))
+        .map(checkbox => checkbox.dataset.itemId);
+
+    if (selectedItems.length === 0) {
+        alert('却下するアイテムを選択してください');
+        return;
+    }
+
+    const comment = prompt("却下理由を入力してください:");
+    if (!comment || comment.trim() === "") {
+        alert("却下理由を入力してください");
+        return;
+    }
+
+    if (!confirm(selectedItems.length + '件のアイテムを一括却下しますか？')) {
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userFullName = await getUserFullName(currentUser.username);
+        
+        const promises = selectedItems.map(async (itemId) => {
+            const item = allApprovalData.find(d => d._id === itemId);
+            
+            let newStatus, targetRole;
+            
+            if (currentUser.role === '班長' && (!item.approvalStatus || item.approvalStatus === 'pending')) {
+                newStatus = 'correction_needed';
+                targetRole = 'submitter';
+            } else if (['課長', 'admin', '部長'].includes(currentUser.role) && item.approvalStatus === 'hancho_approved') {
+                newStatus = 'correction_needed_from_kacho';
+                targetRole = '班長';
+            } else {
+                throw new Error('Item ' + itemId + ': 却下権限がありません');
+            }
+
+            return fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: currentApprovalTab,
+                    query: { _id: itemId },
+                    update: {
+                        $set: {
+                            approvalStatus: newStatus,
+                            correctionBy: userFullName,
+                            correctionAt: new Date(),
+                            correctionComment: comment,
+                            correctionTarget: targetRole
+                        },
+                        $push: {
+                            approvalHistory: {
+                                action: '修正要求',
+                                user: userFullName,
+                                timestamp: new Date(),
+                                comment: comment,
+                                target: targetRole,
+                                batchOperation: true
+                            }
+                        }
+                    }
+                })
+            });
+        });
+
+        await Promise.all(promises);
+        
+        alert(selectedItems.length + '件のアイテムを一括却下しました');
+        
+        // Clear selections and reload data
+        document.querySelectorAll('.list-checkbox:checked').forEach(checkbox => checkbox.checked = false);
+        updateBatchButtons();
+        loadApprovalData();
+        
+    } catch (error) {
+        console.error('Batch reject error:', error);
+        alert('一括却下に失敗しました: ' + error.message);
+    }
+}
+
+/**
+ * Generate summary report for card view
+ */
+function generateSummaryReport() {
+    if (filteredApprovalData.length === 0) {
+        document.getElementById('summaryStats').innerHTML = '<div class="col-span-4 text-center text-gray-500">データがありません</div>';
+        return;
+    }
+
+    // Calculate time range
+    const timeStarts = filteredApprovalData
+        .map(item => item.Time_start)
+        .filter(time => time)
+        .sort();
+    
+    const timeEnds = filteredApprovalData
+        .map(item => item.Time_end)
+        .filter(time => time)
+        .sort();
+
+    const earliestStart = timeStarts[0] || '00:00';
+    const latestEnd = timeEnds[timeEnds.length - 1] || '23:59';
+
+    // Calculate time difference in hours
+    const startTime = new Date(`2000-01-01T${earliestStart}:00`);
+    const endTime = new Date(`2000-01-01T${latestEnd}:00`);
+    let totalHours = (endTime - startTime) / (1000 * 60 * 60);
+    if (totalHours < 0) totalHours += 24; // Handle day overflow
+
+    // Calculate statistics
+    const quantityField = getQuantityField(currentApprovalTab);
+    const ngField = getNGField(currentApprovalTab);
+    
+    const totalQuantity = filteredApprovalData.reduce((sum, item) => sum + (item[quantityField] || 0), 0);
+    const totalNG = filteredApprovalData.reduce((sum, item) => sum + (item[ngField] || 0), 0);
+    const totalShots = filteredApprovalData.reduce((sum, item) => sum + (item.ショット数 || 0), 0);
+    
+    const defectRate = totalQuantity > 0 ? ((totalNG / totalQuantity) * 100).toFixed(2) : '0.00';
+    const shotsPerHour = totalHours > 0 ? (totalShots / totalHours).toFixed(1) : '0.0';
+    const shotsPerDay = totalShots;
+    const efficiency = totalQuantity > 0 ? (((totalQuantity - totalNG) / totalQuantity) * 100).toFixed(2) : '100.00';
+
+    // Calculate downtime (simplified - could be enhanced)
+    const workingData = filteredApprovalData.filter(item => item.Time_start && item.Time_end);
+    const totalWorkTime = workingData.reduce((sum, item) => {
+        const start = new Date(`2000-01-01T${item.Time_start}:00`);
+        const end = new Date(`2000-01-01T${item.Time_end}:00`);
+        let duration = (end - start) / (1000 * 60 * 60);
+        if (duration < 0) duration += 24;
+        return sum + duration;
+    }, 0);
+    const downtime = Math.max(0, totalHours - totalWorkTime).toFixed(1);
+
+    const summaryHTML = `
+        <div class="text-center">
+            <div class="text-2xl font-bold text-blue-600">${shotsPerHour}</div>
+            <div class="text-sm text-gray-600">ショット/時間</div>
+        </div>
+        <div class="text-center">
+            <div class="text-2xl font-bold text-green-600">${shotsPerDay}</div>
+            <div class="text-sm text-gray-600">ショット/日</div>
+        </div>
+        <div class="text-center">
+            <div class="text-2xl font-bold text-purple-600">${efficiency}%</div>
+            <div class="text-sm text-gray-600">効率</div>
+        </div>
+        <div class="text-center">
+            <div class="text-2xl font-bold ${parseFloat(defectRate) > 0 ? 'text-red-600' : 'text-gray-600'}">${defectRate}%</div>
+            <div class="text-sm text-gray-600">不良率</div>
+        </div>
+        <div class="text-center">
+            <div class="text-2xl font-bold text-orange-600">${downtime}h</div>
+            <div class="text-sm text-gray-600">ダウンタイム</div>
+        </div>
+        <div class="text-center">
+            <div class="text-2xl font-bold text-gray-600">${totalHours.toFixed(1)}h</div>
+            <div class="text-sm text-gray-600">稼働時間</div>
+        </div>
+        <div class="text-center">
+            <div class="text-2xl font-bold text-indigo-600">${earliestStart}</div>
+            <div class="text-sm text-gray-600">開始時刻</div>
+        </div>
+        <div class="text-center">
+            <div class="text-2xl font-bold text-indigo-600">${latestEnd}</div>
+            <div class="text-sm text-gray-600">終了時刻</div>
+        </div>
+    `;
+
+    document.getElementById('summaryStats').innerHTML = summaryHTML;
+}
