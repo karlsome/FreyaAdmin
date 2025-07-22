@@ -1700,13 +1700,20 @@ function loadPage(page) {
             let fieldsToShow = [];
             
             if (masterData.length > 0) {
-              // Use existing data structure
+              // Use existing data structure but ensure boardData is always included for masterDB only
               const sampleRecord = masterData[0];
-              fieldsToShow = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
+              const existingFields = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
+              
+              // Always include boardData if it's not already in the existing fields, but only for masterDB
+              if (currentMasterTab === 'masterDB' && !existingFields.includes('boardData')) {
+                existingFields.push('boardData');
+              }
+              
+              fieldsToShow = existingFields;
             } else {
               // Default fields based on tab
               if (currentMasterTab === 'masterDB') {
-                fieldsToShow = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料'];
+                fieldsToShow = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料', 'boardData'];
               } else {
                 fieldsToShow = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料'];
               }
@@ -1714,13 +1721,26 @@ function loadPage(page) {
 
             fieldsToShow.forEach(field => {
               const fieldDiv = document.createElement('div');
-              fieldDiv.innerHTML = `
-                <label class="block text-sm font-medium text-gray-700 mb-1">${field}</label>
-                <input type="text" 
-                       name="${field}" 
-                       class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                       placeholder="${field}を入力..." />
-              `;
+              
+              // Special handling for boardData field (string input)
+              if (field === 'boardData') {
+                fieldDiv.innerHTML = `
+                  <label class="block text-sm font-medium text-gray-700 mb-1">${field}</label>
+                  <input type="text" 
+                         name="${field}" 
+                         class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="カンマ区切りで入力してください（例：950A,Cピラー(ア),RH）" />
+                  <p class="text-xs text-gray-500 mt-1">カンマ区切りの文字列として保存されます。</p>
+                `;
+              } else {
+                fieldDiv.innerHTML = `
+                  <label class="block text-sm font-medium text-gray-700 mb-1">${field}</label>
+                  <input type="text" 
+                         name="${field}" 
+                         class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                         placeholder="${field}を入力..." />
+                `;
+              }
               container.appendChild(fieldDiv);
             });
           }
@@ -1747,13 +1767,20 @@ function loadPage(page) {
               // Get all possible fields from existing data structure
               let allFields = [];
               if (masterData.length > 0) {
-                // Use existing data structure to get all fields
+                // Use existing data structure but ensure boardData is always included for masterDB only
                 const sampleRecord = masterData[0];
-                allFields = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
+                const existingFields = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
+                
+                // Always include boardData if it's not already in the existing fields, but only for masterDB
+                if (currentMasterTab === 'masterDB' && !existingFields.includes('boardData')) {
+                  existingFields.push('boardData');
+                }
+                
+                allFields = existingFields;
               } else {
                 // Default fields based on tab if no existing data
                 if (currentMasterTab === 'masterDB') {
-                  allFields = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料'];
+                  allFields = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料', 'boardData'];
                 } else {
                   allFields = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料'];
                 }
