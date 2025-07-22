@@ -1215,6 +1215,9 @@ function loadPage(page) {
             <div class="flex justify-between items-center mb-6">
               <h2 class="text-xl font-semibold text-gray-800" data-i18n="masterProductManagement">Master Product Management</h2>
               <div class="flex items-center space-x-3">
+                <button id="addNewRecordBtn" class="px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm">
+                  <i class="ri-add-line mr-1"></i><span data-i18n="addNewRecord">Add New Record</span>
+                </button>
                 <button id="refreshMasterBtn" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm">
                   <i class="ri-refresh-line mr-1"></i><span data-i18n="refresh">Refresh</span>
                 </button>
@@ -1377,6 +1380,56 @@ function loadPage(page) {
                   <button id="masterNextPageBtn" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm" disabled>
                     次へ <i class="ri-arrow-right-line ml-1"></i>
                   </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Add New Record Modal -->
+            <div id="addRecordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+              <div class="flex items-center justify-center min-h-screen p-4">
+                <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                  <div class="p-6">
+                    <div class="flex justify-between items-center mb-4">
+                      <h3 class="text-lg font-semibold text-gray-900" id="modalTitle">Add New Record</h3>
+                      <button onclick="closeAddRecordModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="ri-close-line text-xl"></i>
+                      </button>
+                    </div>
+                    
+                    <form id="addRecordForm">
+                      <!-- Image Upload Section -->
+                      <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">製品画像</label>
+                        <div id="newRecordImagePreview" class="mb-3">
+                          <div class="w-full h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
+                            <div class="text-center">
+                              <i class="ri-image-line text-gray-400 text-2xl mb-2"></i>
+                              <p class="text-gray-500 text-sm">画像がありません</p>
+                            </div>
+                          </div>
+                        </div>
+                        <button type="button" onclick="document.getElementById('newRecordImageInput').click()" class="px-3 py-2 bg-blue-500 text-white rounded text-sm hover:bg-blue-600">
+                          <i class="ri-upload-line mr-1"></i>画像をアップロード
+                        </button>
+                        <input type="file" id="newRecordImageInput" accept="image/*" class="hidden" />
+                      </div>
+
+                      <!-- Dynamic Fields Container -->
+                      <div id="dynamicFieldsContainer" class="space-y-4 mb-6">
+                        <!-- Dynamic input fields will be generated here -->
+                      </div>
+
+                      <!-- Action Buttons -->
+                      <div class="flex justify-end space-x-3">
+                        <button type="button" onclick="closeAddRecordModal()" class="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50">
+                          キャンセル
+                        </button>
+                        <button type="submit" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                          <i class="ri-save-line mr-1"></i>保存
+                        </button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1600,11 +1653,179 @@ function loadPage(page) {
             showMasterSidebar(data);
           };
 
+          // Add New Record Modal Functions
+          let newRecordImageFile = null;
+
+          window.openAddRecordModal = function() {
+            const modal = document.getElementById('addRecordModal');
+            const modalTitle = document.getElementById('modalTitle');
+            
+            // Update modal title based on current tab
+            modalTitle.textContent = currentMasterTab === 'masterDB' ? '新規レコード追加 - 内装品 DB' : '新規レコード追加 - 材料 DB';
+            
+            // Generate dynamic fields based on current data structure
+            generateDynamicFields();
+            
+            // Reset form
+            document.getElementById('addRecordForm').reset();
+            resetImagePreview();
+            newRecordImageFile = null;
+            
+            modal.classList.remove('hidden');
+          };
+
+          window.closeAddRecordModal = function() {
+            const modal = document.getElementById('addRecordModal');
+            modal.classList.add('hidden');
+            newRecordImageFile = null;
+          };
+
+          function generateDynamicFields() {
+            const container = document.getElementById('dynamicFieldsContainer');
+            container.innerHTML = '';
+
+            // Get field structure from existing data or create basic structure
+            let fieldsToShow = [];
+            
+            if (masterData.length > 0) {
+              // Use existing data structure
+              const sampleRecord = masterData[0];
+              fieldsToShow = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
+            } else {
+              // Default fields based on tab
+              if (currentMasterTab === 'masterDB') {
+                fieldsToShow = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料'];
+              } else {
+                fieldsToShow = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料'];
+              }
+            }
+
+            fieldsToShow.forEach(field => {
+              const fieldDiv = document.createElement('div');
+              fieldDiv.innerHTML = `
+                <label class="block text-sm font-medium text-gray-700 mb-1">${field}</label>
+                <input type="text" 
+                       name="${field}" 
+                       class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                       placeholder="${field}を入力..." />
+              `;
+              container.appendChild(fieldDiv);
+            });
+          }
+
+          function resetImagePreview() {
+            const preview = document.getElementById('newRecordImagePreview');
+            preview.innerHTML = `
+              <div class="w-full h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
+                <div class="text-center">
+                  <i class="ri-image-line text-gray-400 text-2xl mb-2"></i>
+                  <p class="text-gray-500 text-sm">画像がありません</p>
+                </div>
+              </div>
+            `;
+          }
+
+          async function submitNewRecord(formData) {
+            try {
+              // Prepare record data with ALL fields from the current data structure
+              const recordData = {};
+              
+              // Get all possible fields from existing data structure
+              let allFields = [];
+              if (masterData.length > 0) {
+                // Use existing data structure to get all fields
+                const sampleRecord = masterData[0];
+                allFields = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
+              } else {
+                // Default fields based on tab if no existing data
+                if (currentMasterTab === 'masterDB') {
+                  allFields = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料'];
+                } else {
+                  allFields = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料'];
+                }
+              }
+
+              // Initialize all fields with empty strings
+              allFields.forEach(field => {
+                recordData[field] = "";
+              });
+
+              // Fill in the data from form elements (overwrite empty strings with actual values)
+              const formElements = document.getElementById('addRecordForm').elements;
+              for (let element of formElements) {
+                if (element.name && allFields.includes(element.name)) {
+                  recordData[element.name] = element.value.trim();
+                }
+              }
+
+              console.log("Record data being inserted:", recordData);
+
+              // Insert record to database using the existing queries endpoint
+              const insertRes = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dbName: "Sasaki_Coating_MasterDB",
+                  collectionName: currentMasterTab,
+                  insertData: recordData
+                })
+              });
+
+              const insertResult = await insertRes.json();
+              
+              if (!insertRes.ok || !insertResult.insertedId) {
+                throw new Error(insertResult.error || "Failed to insert record");
+              }
+
+              // Get the inserted record ID
+              const recordId = insertResult.insertedId;
+
+              // Upload image if exists and update the record
+              if (newRecordImageFile && recordId) {
+                const reader = new FileReader();
+                const base64Promise = new Promise((resolve) => {
+                  reader.onloadend = () => resolve(reader.result.split(",")[1]);
+                  reader.readAsDataURL(newRecordImageFile);
+                });
+                
+                const base64 = await base64Promise;
+                const username = currentUser?.username || "unknown";
+                
+                const imageRes = await fetch(BASE_URL + "uploadMasterImage", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    base64,
+                    label: "main",
+                    recordId: recordId,
+                    username,
+                    collectionName: currentMasterTab
+                  })
+                });
+                
+                const imageResult = await imageRes.json();
+                if (!imageRes.ok) {
+                  console.warn("Image upload failed:", imageResult.error);
+                  // Don't fail the entire operation if image upload fails
+                }
+              }
+
+              alert("新規レコードが正常に追加されました！");
+              closeAddRecordModal();
+              loadMasterDB(); // Refresh data
+              
+            } catch (error) {
+              console.error("Error adding new record:", error);
+              alert("レコードの追加に失敗しました: " + error.message);
+            }
+          }
+
           // Event listeners
           document.getElementById('refreshMasterBtn').addEventListener('click', () => {
             loadMasterDB();
             loadMasterFilters();
           });
+          document.getElementById('addNewRecordBtn').addEventListener('click', openAddRecordModal);
           document.getElementById('masterItemsPerPageSelect').addEventListener('change', function() {
             masterItemsPerPage = parseInt(this.value);
             currentMasterPage = 1;
@@ -1612,6 +1833,51 @@ function loadPage(page) {
           });
           document.getElementById('masterPrevPageBtn').addEventListener('click', () => changeMasterPage(-1));
           document.getElementById('masterNextPageBtn').addEventListener('click', () => changeMasterPage(1));
+
+          // Add Record Modal Event Listeners
+          document.getElementById('newRecordImageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+              newRecordImageFile = file;
+              const reader = new FileReader();
+              reader.onload = function(e) {
+                const preview = document.getElementById('newRecordImagePreview');
+                preview.innerHTML = `
+                  <img src="${e.target.result}" alt="Preview" class="w-full h-32 object-contain rounded border bg-gray-50" />
+                `;
+              };
+              reader.readAsDataURL(file);
+            }
+          });
+
+          document.getElementById('addRecordForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Basic validation - check if at least one field is filled
+            const formElements = document.getElementById('addRecordForm').elements;
+            let hasData = false;
+            
+            for (let element of formElements) {
+              if (element.name && element.value.trim()) {
+                hasData = true;
+                break;
+              }
+            }
+            
+            if (!hasData) {
+              alert("少なくとも1つのフィールドに入力してください。");
+              return;
+            }
+            
+            submitNewRecord();
+          });
+
+          // Close modal on background click
+          document.getElementById('addRecordModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+              closeAddRecordModal();
+            }
+          });
 
           // Filtering logic
           document.getElementById("masterSearchInput").addEventListener("input", applyMasterFilters);
