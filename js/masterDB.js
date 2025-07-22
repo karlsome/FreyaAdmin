@@ -67,13 +67,17 @@ async function confirmMasterInsert() {
 
   if (!records?.length) return alert("No data to insert");
 
+  // Get current tab to determine which collection to insert into
+  const collectionName = window.currentMasterTab || 'masterDB';
+
   let successCount = 0;
   let failCount = 0;
 
   for (const record of records) {
     try {
       const payload = {
-        data: record
+        data: record,
+        collectionName: collectionName // Add collection name to payload
       };
 
       if (role === "admin" && username) {
@@ -140,7 +144,7 @@ function showMasterSidebar(data) {
     : `<p class="text-gray-500 mb-2">No image uploaded.</p>`;
 
   container.innerHTML = `
-    <h3 class="text-xl font-bold mb-4">${data["品番"] ?? "Details"}</h3>
+    <h3 class="text-xl font-bold mb-4">${data["品番"] || data["品名"] || data["材料品番"] || "Details"}</h3>
     <div class="mb-4" id="masterImageSection">
       <h4 class="text-lg font-semibold">製品画像</h4>
       ${imageHTML}
@@ -189,10 +193,18 @@ function showMasterSidebar(data) {
     });
 
     try {
+      // Get current tab to determine which collection to update
+      const collectionName = window.currentMasterTab || 'masterDB';
+      
       const res = await fetch(BASE_URL + "updateMasterRecord", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recordId, updates: updated, username })
+        body: JSON.stringify({ 
+          recordId, 
+          updates: updated, 
+          username,
+          collectionName: collectionName // Add collection name
+        })
       });
 
       const result = await res.json();
@@ -217,6 +229,9 @@ document.getElementById("masterImageUploadInput").addEventListener("change", asy
       const base64 = reader.result.split(",")[1];
 
       try {
+        // Get current tab to determine which collection to update
+        const collectionName = window.currentMasterTab || 'masterDB';
+        
         const res = await fetch(BASE_URL + "uploadMasterImage", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -224,7 +239,8 @@ document.getElementById("masterImageUploadInput").addEventListener("change", asy
             base64,
             label: "main",
             recordId,
-            username
+            username,
+            collectionName: collectionName // Add collection name
           })
         });
 
@@ -274,6 +290,9 @@ async function triggerMasterImageUpload(recordId) {
       const snapshot = await imageRef.put(file);
       const downloadURL = await snapshot.ref.getDownloadURL();
 
+      // Get current tab to determine which collection to update
+      const collectionName = window.currentMasterTab || 'masterDB';
+
       // Save to masterDB record
       await fetch(BASE_URL + "/updateMasterRecord", {
         method: "POST",
@@ -281,7 +300,8 @@ async function triggerMasterImageUpload(recordId) {
         body: JSON.stringify({
           recordId,
           username: currentUser.username,
-          updates: { imageURL: downloadURL }
+          updates: { imageURL: downloadURL },
+          collectionName: collectionName // Add collection name
         })
       });
 

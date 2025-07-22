@@ -1221,145 +1221,161 @@ function loadPage(page) {
               </div>
             </div>
 
+            <!-- Tab Navigation -->
+            <div class="bg-white rounded-lg shadow-sm border mb-6">
+              <div class="border-b border-gray-200">
+                <nav class="flex space-x-8 px-6" aria-label="Tabs">
+                  <button id="masterDBTab" class="master-tab-btn py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('masterDB')">
+                    内装品 DB
+                  </button>
+                  <button id="materialDBTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('materialDB')">
+                    材料 DB
+                  </button>
+                </nav>
+              </div>
+            </div>
+
             <!-- CSV Upload Section -->
-            <div class="bg-white p-4 rounded-lg shadow-sm mb-6 border">
+            <div class="bg-white p-6 rounded-lg shadow-sm mb-6 border">
               <div class="flex items-center space-x-4">
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="csvFile">CSV File</label>
-                  <input type="file" id="csvUploadInput" accept=".csv" class="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                  <label class="block text-base font-medium text-gray-700 mb-3" data-i18n="csvFile">CSV File</label>
+                  <input type="file" id="csvUploadInput" accept=".csv" class="text-base file:mr-4 file:py-3 file:px-6 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:font-medium" />
                 </div>
-                <button class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm" onclick="handleMasterCSVUpload()">
-                  <i class="ri-upload-line mr-1"></i><span data-i18n="uploadPreview">Upload & Preview</span>
+                <button class="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-base font-medium" onclick="handleMasterCSVUpload()">
+                  <i class="ri-upload-line mr-2"></i><span data-i18n="uploadPreview">Upload & Preview</span>
                 </button>
               </div>
-              <div id="csvPreviewContainer" class="mt-4"></div>
+              <div id="csvPreviewContainer" class="mt-6"></div>
             </div>
 
             <!-- Filters Section -->
-            <div class="bg-white p-4 rounded-lg shadow-sm mb-6 border">
+            <div class="bg-white p-6 rounded-lg shadow-sm mb-6 border">
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="factory">Factory</label>
-                  <select id="filterFactory" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Factory / 工程</label>
+                  <select id="filterFactory" class="w-full p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
                     <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="rl">R/L</label>
-                  <select id="filterRL" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="rl">R/L</label>
+                  <select id="filterRL" class="w-full p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
                     <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="color">Color</label>
-                  <select id="filterColor" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="color">Color</label>
+                  <select id="filterColor" class="w-full p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
                     <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div>
-                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="processEquipment">Processing Equipment</label>
-                  <select id="filterProcess" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Equipment / 材料</label>
+                  <select id="filterProcess" class="w-full p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
                     <option value="" data-i18n="all">All</option>
                   </select>
                 </div>
                 <div class="md:col-span-2">
-                  <label class="block text-xs font-medium text-gray-700 mb-1" data-i18n="search">Search</label>
-                  <input type="text" id="masterSearchInput" class="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" data-i18n-placeholder="searchPlaceholderMaster" placeholder="Search by part number, model, serial number, product name..." />
+                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="search">Search</label>
+                  <input type="text" id="masterSearchInput" class="w-full p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500" data-i18n-placeholder="searchPlaceholderMaster" placeholder="Search by part number, model, serial number, product name..." />
                 </div>
               </div>
             </div>
 
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-              <div class="bg-white p-4 rounded-lg shadow-sm border">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-2 bg-blue-100 rounded-lg">
-                    <i class="ri-database-line text-blue-600"></i>
+                  <div class="p-3 bg-blue-100 rounded-lg">
+                    <i class="ri-database-line text-blue-600 text-xl"></i>
                   </div>
-                  <div class="ml-3">
+                  <div class="ml-4">
                     <p class="text-sm font-medium text-gray-600">総件数</p>
-                    <p class="text-2xl font-bold text-gray-900" id="totalMasterCount">0</p>
+                    <p class="text-3xl font-bold text-gray-900" id="totalMasterCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-4 rounded-lg shadow-sm border">
+              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-2 bg-green-100 rounded-lg">
-                    <i class="ri-image-line text-green-600"></i>
+                  <div class="p-3 bg-green-100 rounded-lg">
+                    <i class="ri-image-line text-green-600 text-xl"></i>
                   </div>
-                  <div class="ml-3">
+                  <div class="ml-4">
                     <p class="text-sm font-medium text-gray-600">画像あり</p>
-                    <p class="text-2xl font-bold text-gray-900" id="withImageCount">0</p>
+                    <p class="text-3xl font-bold text-gray-900" id="withImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-4 rounded-lg shadow-sm border">
+              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-2 bg-yellow-100 rounded-lg">
-                    <i class="ri-image-off-line text-yellow-600"></i>
+                  <div class="p-3 bg-yellow-100 rounded-lg">
+                    <i class="ri-image-off-line text-yellow-600 text-xl"></i>
                   </div>
-                  <div class="ml-3">
+                  <div class="ml-4">
                     <p class="text-sm font-medium text-gray-600">画像なし</p>
-                    <p class="text-2xl font-bold text-gray-900" id="withoutImageCount">0</p>
+                    <p class="text-3xl font-bold text-gray-900" id="withoutImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-4 rounded-lg shadow-sm border">
+              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-2 bg-purple-100 rounded-lg">
-                    <i class="ri-filter-line text-purple-600"></i>
+                  <div class="p-3 bg-purple-100 rounded-lg">
+                    <i class="ri-filter-line text-purple-600 text-xl"></i>
                   </div>
-                  <div class="ml-3">
+                  <div class="ml-4">
                     <p class="text-sm font-medium text-gray-600">表示中</p>
-                    <p class="text-2xl font-bold text-gray-900" id="filteredCount">0</p>
+                    <p class="text-3xl font-bold text-gray-900" id="filteredCount">0</p>
                   </div>
                 </div>
               </div>
             </div>
 
             <!-- Table Controls -->
-            <div class="bg-white p-4 rounded-lg shadow-sm border mb-4">
+            <div class="bg-white p-5 rounded-lg shadow-sm border mb-4">
               <div class="flex justify-between items-center">
-                <div class="flex items-center space-x-3">
-                  <label class="text-sm font-medium text-gray-700">表示件数:</label>
-                  <select id="masterItemsPerPageSelect" class="p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <div class="flex items-center space-x-4">
+                  <label class="text-base font-medium text-gray-700">表示件数:</label>
+                  <select id="masterItemsPerPageSelect" class="p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
                     <option value="10">10件</option>
                     <option value="25" selected>25件</option>
                     <option value="50">50件</option>
                     <option value="100">100件</option>
                   </select>
                 </div>
-                <div class="text-sm text-gray-600" id="masterPageInfo">
+                <div class="text-base text-gray-600 font-medium" id="masterPageInfo">
                   0件中 0-0件を表示
                 </div>
               </div>
             </div>
 
             <!-- Table Container -->
-            <div class="bg-white rounded-lg shadow-sm border">
-              <div id="masterTableContainer" class="min-h-[400px] flex items-center justify-center">
-                <div class="text-center">
-                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-                  <p class="text-gray-500">データを読み込み中...</p>
+            <div class="bg-white rounded-lg shadow-sm border overflow-hidden">
+              <div id="masterTableContainer" class="min-h-[600px]">
+                <div class="flex items-center justify-center h-96">
+                  <div class="text-center">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                    <p class="text-gray-500 text-lg">データを読み込み中...</p>
+                  </div>
                 </div>
               </div>
             </div>
 
             <!-- Pagination -->
-            <div class="bg-white p-4 rounded-lg shadow-sm border mt-4">
+            <div class="bg-white p-5 rounded-lg shadow-sm border mt-4">
               <div class="flex justify-between items-center">
-                <div class="text-sm text-gray-600" id="masterPaginationInfo">
+                <div class="text-base text-gray-600 font-medium" id="masterPaginationInfo">
                   0件中 0-0件を表示
                 </div>
-                <div class="flex items-center space-x-2">
-                  <button id="masterPrevPageBtn" class="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                    <i class="ri-arrow-left-line"></i> 前へ
+                <div class="flex items-center space-x-3">
+                  <button id="masterPrevPageBtn" class="px-4 py-3 border border-gray-300 rounded-lg text-base hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed font-medium" disabled>
+                    <i class="ri-arrow-left-line mr-1"></i> 前へ
                   </button>
-                  <div id="masterPageNumbers" class="flex space-x-1">
+                  <div id="masterPageNumbers" class="flex space-x-2">
                     <!-- Page numbers will be inserted here -->
                   </div>
-                  <button id="masterNextPageBtn" class="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                    次へ <i class="ri-arrow-right-line"></i>
+                  <button id="masterNextPageBtn" class="px-4 py-3 border border-gray-300 rounded-lg text-base hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed font-medium" disabled>
+                    次へ <i class="ri-arrow-right-line ml-1"></i>
                   </button>
                 </div>
               </div>
@@ -1371,15 +1387,17 @@ function loadPage(page) {
           let masterSortState = { column: null, direction: 1 };
           let currentMasterPage = 1;
           let masterItemsPerPage = 25;
+          let currentMasterTab = 'masterDB'; // Track current tab
 
           async function loadMasterDB() {
             try {
+              const collectionName = currentMasterTab; // Use current tab as collection name
               const res = await fetch(BASE_URL + "queries", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   dbName: "Sasaki_Coating_MasterDB",
-                  collectionName: "masterDB",
+                  collectionName: collectionName,
                   query: {},
                   projection: {}
                 })
@@ -1393,6 +1411,27 @@ function loadPage(page) {
               console.error("Failed to load masterDB:", err);
               document.getElementById("masterTableContainer").innerHTML = `<div class="text-center py-8"><p class="text-red-500">データの読み込みに失敗しました</p></div>`;
             }
+          }
+
+          // Tab switching function
+          window.switchMasterTab = function(tabName) {
+            currentMasterTab = tabName;
+            window.currentMasterTab = currentMasterTab; // Update global variable
+            updateMasterTabStyles();
+            currentMasterPage = 1; // Reset to first page
+            loadMasterDB();
+            loadMasterFilters();
+          };
+
+          // Update tab button styles
+          function updateMasterTabStyles() {
+            document.querySelectorAll('.master-tab-btn').forEach(btn => {
+              if (btn.id === currentMasterTab + 'Tab') {
+                btn.className = 'master-tab-btn py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm whitespace-nowrap';
+              } else {
+                btn.className = 'master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap';
+              }
+            });
           }
 
           function updateMasterStats() {
@@ -1410,9 +1449,12 @@ function loadPage(page) {
           function renderMasterTable() {
             if (!filteredMasterData.length) {
               document.getElementById("masterTableContainer").innerHTML = `
-                <div class="text-center py-8">
-                  <i class="ri-database-line text-4xl text-gray-400 mb-2"></i>
-                  <p class="text-gray-500">データが見つかりません</p>
+                <div class="flex items-center justify-center h-96">
+                  <div class="text-center">
+                    <i class="ri-database-line text-6xl text-gray-400 mb-4"></i>
+                    <p class="text-gray-500 text-xl font-medium">データが見つかりません</p>
+                    <p class="text-gray-400 mt-2">フィルターを調整するか、新しいデータを追加してください</p>
+                  </div>
                 </div>
               `;
               updateMasterPagination(0);
@@ -1423,16 +1465,14 @@ function loadPage(page) {
             const endIndex = startIndex + masterItemsPerPage;
             const pageData = filteredMasterData.slice(startIndex, endIndex);
 
+            // Dynamically determine headers from the first data item
+            const firstItem = pageData[0] || filteredMasterData[0];
+            if (!firstItem) return;
+
+            // Get all fields except _id and imageURL, then add imageURL at the end
+            const dataFields = Object.keys(firstItem).filter(k => k !== "_id" && k !== "imageURL");
             const headers = [
-              { key: "品番", label: "品番" },
-              { key: "モデル", label: "モデル" },
-              { key: "背番号", label: "背番号" },
-              { key: "品名", label: "品名" },
-              { key: "形状", label: "形状" },
-              { key: "R/L", label: "R/L" },
-              { key: "色", label: "色" },
-              { key: "工場", label: "工場" },
-              { key: "加工設備", label: "加工設備" },
+              ...dataFields.map(field => ({ key: field, label: field })),
               { key: "imageURL", label: "画像" }
             ];
 
@@ -1443,32 +1483,31 @@ function loadPage(page) {
 
             const tableHTML = `
               <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="w-full text-sm min-w-full">
                   <thead class="bg-gray-50 border-b">
                     <tr>
                       ${headers.map(h => `
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100 ${h.key === 'imageURL' ? 'w-20' : ''}" onclick="handleMasterSort('${h.key}')">
-                          ${h.label}${getSortArrow(h.key)}
+                        <th class="px-3 py-2 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors ${h.key === 'imageURL' ? 'w-20' : 'min-w-[100px]'}" onclick="handleMasterSort('${h.key}')">
+                          <div class="flex items-center space-x-1">
+                            <span>${h.label}</span>
+                            <span class="text-xs">${getSortArrow(h.key)}</span>
+                          </div>
                         </th>
                       `).join('')}
                     </tr>
                   </thead>
-                  <tbody>
-                    ${pageData.map(row => `
-                      <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick='showMasterSidebarFromRow(this)' data-row='${encodeURIComponent(JSON.stringify(row))}'>
-                        <td class="px-4 py-3 font-medium text-blue-600">${row["品番"] || ""}</td>
-                        <td class="px-4 py-3">${row["モデル"] || ""}</td>
-                        <td class="px-4 py-3">${row["背番号"] || ""}</td>
-                        <td class="px-4 py-3">${row["品名"] || ""}</td>
-                        <td class="px-4 py-3">${row["形状"] || ""}</td>
-                        <td class="px-4 py-3">${row["R/L"] || ""}</td>
-                        <td class="px-4 py-3">${row["色"] || ""}</td>
-                        <td class="px-4 py-3">${row["工場"] || ""}</td>
-                        <td class="px-4 py-3">${row["加工設備"] || ""}</td>
-                        <td class="px-4 py-3">
+                  <tbody class="bg-white divide-y divide-gray-200">
+                    ${pageData.map((row, index) => `
+                      <tr class="hover:bg-gray-50 cursor-pointer transition-colors" onclick='showMasterSidebarFromRow(this)' data-row='${encodeURIComponent(JSON.stringify(row))}'>
+                        ${dataFields.map(field => {
+                          const value = row[field] || "-";
+                          const isMainField = field === "品番" || field === "品名" || field === "材料品番" || field === "材料";
+                          return `<td class="px-3 py-2 text-sm ${isMainField ? 'font-medium text-blue-600 hover:text-blue-800' : 'text-gray-900'}">${value}</td>`;
+                        }).join('')}
+                        <td class="px-3 py-2 text-sm">
                           ${row.imageURL 
                             ? '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800"><i class="ri-image-line mr-1"></i>あり</span>'
-                            : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800"><i class="ri-image-off-line mr-1"></i>なし</span>'
+                            : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600"><i class="ri-image-off-line mr-1"></i>なし</span>'
                           }
                         </td>
                       </tr>
@@ -1513,7 +1552,7 @@ function loadPage(page) {
 
             for (let i = startPage; i <= endPage; i++) {
               const pageBtn = document.createElement('button');
-              pageBtn.className = `px-3 py-2 text-sm rounded-lg ${i === currentMasterPage ? 'bg-blue-500 text-white' : 'border border-gray-300 hover:bg-gray-50'}`;
+              pageBtn.className = `px-4 py-3 text-base rounded-lg font-medium transition-colors ${i === currentMasterPage ? 'bg-blue-500 text-white shadow-sm' : 'border border-gray-300 hover:bg-gray-50 text-gray-700'}`;
               pageBtn.textContent = i;
               pageBtn.onclick = () => goToMasterPage(i);
               pageNumbers.appendChild(pageBtn);
@@ -1562,7 +1601,10 @@ function loadPage(page) {
           };
 
           // Event listeners
-          document.getElementById('refreshMasterBtn').addEventListener('click', loadMasterDB);
+          document.getElementById('refreshMasterBtn').addEventListener('click', () => {
+            loadMasterDB();
+            loadMasterFilters();
+          });
           document.getElementById('masterItemsPerPageSelect').addEventListener('change', function() {
             masterItemsPerPage = parseInt(this.value);
             currentMasterPage = 1;
@@ -1585,13 +1627,35 @@ function loadPage(page) {
             const process = document.getElementById("filterProcess").value;
 
             filteredMasterData = masterData.filter(item => {
-              const keywordMatch = ["品番", "モデル", "背番号", "品名", "工場", "加工設備"]
-                .some(key => (item[key] || "").toLowerCase().includes(keyword));
+              // Dynamic keyword search - search through all text fields
+              const searchableFields = Object.keys(item).filter(k => 
+                k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
+              );
+              const keywordMatch = !keyword || searchableFields.some(key => 
+                (item[key] || "").toLowerCase().includes(keyword)
+              );
 
-              const factoryMatch = !factory || item["工場"] === factory;
-              const rlMatch = !rl || item["R/L"] === rl;
-              const colorMatch = !color || item["色"] === color;
-              const processMatch = !process || item["加工設備"] === process;
+              // Dynamic filtering based on available fields
+              let factoryMatch = true;
+              let rlMatch = true;
+              let colorMatch = true;
+              let processMatch = true;
+
+              if (factory) {
+                factoryMatch = item["工場"] === factory || item["次工程"] === factory;
+              }
+              
+              if (rl) {
+                rlMatch = item["R/L"] === rl;
+              }
+              
+              if (color) {
+                colorMatch = item["色"] === color;
+              }
+              
+              if (process) {
+                processMatch = item["加工設備"] === process || item["材料"] === process;
+              }
 
               return keywordMatch && factoryMatch && rlMatch && colorMatch && processMatch;
             });
@@ -1602,22 +1666,42 @@ function loadPage(page) {
           }
 
           async function loadMasterFilters() {
-            const fields = ["工場", "R/L", "色", "加工設備"];
-            const dropdownMap = {
+            // Clear existing options (except "All")
+            ["filterFactory", "filterRL", "filterColor", "filterProcess"].forEach(id => {
+              const select = document.getElementById(id);
+              if (select) {
+                select.innerHTML = '<option value="" data-i18n="all">All</option>';
+              }
+            });
+
+            if (!masterData.length) return;
+
+            // Dynamically determine which fields to use for filters based on the data structure
+            const firstItem = masterData[0];
+            const availableFields = Object.keys(firstItem).filter(k => k !== "_id" && k !== "imageURL");
+            
+            // Define field mapping for common filter categories
+            const filterMapping = {
               "工場": "filterFactory",
-              "R/L": "filterRL",
+              "R/L": "filterRL", 
               "色": "filterColor",
-              "加工設備": "filterProcess"
+              "加工設備": "filterProcess",
+              "次工程": "filterFactory", // For materialDB, map 次工程 to factory filter
+              "材料": "filterProcess"    // For materialDB, map 材料 to process filter
             };
 
-            for (const field of fields) {
+            // Find fields that match our filter categories
+            const fieldsToFilter = availableFields.filter(field => filterMapping[field]);
+
+            for (const field of fieldsToFilter) {
               try {
+                const collectionName = currentMasterTab;
                 const res = await fetch(BASE_URL + "queries", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
                     dbName: "Sasaki_Coating_MasterDB",
-                    collectionName: "masterDB",
+                    collectionName: collectionName,
                     aggregation: [
                       { $group: { _id: `$${field}` } },
                       { $sort: { _id: 1 } }
@@ -1626,11 +1710,12 @@ function loadPage(page) {
                 });
 
                 const values = await res.json();
-                const select = document.getElementById(dropdownMap[field]);
+                const selectId = filterMapping[field];
+                const select = document.getElementById(selectId);
 
                 if (select && values.length) {
                   values.forEach(v => {
-                    if (v._id) {
+                    if (v._id && v._id.trim()) {
                       const option = document.createElement("option");
                       option.value = v._id;
                       option.textContent = v._id;
@@ -1646,6 +1731,10 @@ function loadPage(page) {
 
           loadMasterDB();
           loadMasterFilters();
+          
+          // Make currentMasterTab globally accessible
+          window.currentMasterTab = currentMasterTab;
+          
           if (typeof applyLanguageEnhanced === 'function') {
             applyLanguageEnhanced();
           } else if (typeof applyLanguage === 'function') {
