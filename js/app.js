@@ -1332,18 +1332,18 @@ function loadPage(page) {
             </div>
 
             <!-- Table Controls -->
-            <div class="bg-white p-5 rounded-lg shadow-sm border mb-4">
+            <div class="bg-white p-4 rounded-lg shadow-sm border mb-4">
               <div class="flex justify-between items-center">
-                <div class="flex items-center space-x-4">
-                  <label class="text-base font-medium text-gray-700">表示件数:</label>
-                  <select id="masterItemsPerPageSelect" class="p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                <div class="flex items-center space-x-2">
+                  <label class="text-sm text-gray-600">表示件数:</label>
+                  <select id="masterItemsPerPageSelect" class="p-1 border rounded text-sm">
                     <option value="10">10件</option>
                     <option value="25" selected>25件</option>
                     <option value="50">50件</option>
                     <option value="100">100件</option>
                   </select>
                 </div>
-                <div class="text-base text-gray-600 font-medium" id="masterPageInfo">
+                <div class="text-sm text-gray-600" id="masterPageInfo">
                   0件中 0-0件を表示
                 </div>
               </div>
@@ -1362,19 +1362,19 @@ function loadPage(page) {
             </div>
 
             <!-- Pagination -->
-            <div class="bg-white p-5 rounded-lg shadow-sm border mt-4">
+            <div class="bg-white p-4 rounded-lg shadow-sm border mt-4">
               <div class="flex justify-between items-center">
-                <div class="text-base text-gray-600 font-medium" id="masterPaginationInfo">
+                <div class="text-sm text-gray-600" id="masterPaginationInfo">
                   0件中 0-0件を表示
                 </div>
-                <div class="flex items-center space-x-3">
-                  <button id="masterPrevPageBtn" class="px-4 py-3 border border-gray-300 rounded-lg text-base hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed font-medium" disabled>
+                <div class="flex items-center space-x-2">
+                  <button id="masterPrevPageBtn" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm" disabled>
                     <i class="ri-arrow-left-line mr-1"></i> 前へ
                   </button>
                   <div id="masterPageNumbers" class="flex space-x-2">
                     <!-- Page numbers will be inserted here -->
                   </div>
-                  <button id="masterNextPageBtn" class="px-4 py-3 border border-gray-300 rounded-lg text-base hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed font-medium" disabled>
+                  <button id="masterNextPageBtn" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm" disabled>
                     次へ <i class="ri-arrow-right-line ml-1"></i>
                   </button>
                 </div>
@@ -1552,7 +1552,7 @@ function loadPage(page) {
 
             for (let i = startPage; i <= endPage; i++) {
               const pageBtn = document.createElement('button');
-              pageBtn.className = `px-4 py-3 text-base rounded-lg font-medium transition-colors ${i === currentMasterPage ? 'bg-blue-500 text-white shadow-sm' : 'border border-gray-300 hover:bg-gray-50 text-gray-700'}`;
+              pageBtn.className = `px-3 py-1 text-sm rounded transition-colors ${i === currentMasterPage ? 'bg-blue-600 text-white' : 'border hover:bg-gray-100'}`;
               pageBtn.textContent = i;
               pageBtn.onclick = () => goToMasterPage(i);
               pageNumbers.appendChild(pageBtn);
