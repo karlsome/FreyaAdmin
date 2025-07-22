@@ -1390,7 +1390,7 @@ function loadPage(page) {
                 <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                   <div class="p-6">
                     <div class="flex justify-between items-center mb-4">
-                      <h3 class="text-lg font-semibold text-gray-900" id="modalTitle">Add New Record</h3>
+                      <h3 class="text-lg font-semibold text-gray-900" id="modalTitle" data-i18n="addNewRecordModal">Add New Record</h3>
                       <button onclick="closeAddRecordModal()" class="text-gray-400 hover:text-gray-600">
                         <i class="ri-close-line text-xl"></i>
                       </button>
@@ -1399,17 +1399,17 @@ function loadPage(page) {
                     <form id="addRecordForm">
                       <!-- Image Upload Section -->
                       <div class="mb-6">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">製品画像</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="productImage">製品画像</label>
                         <div id="newRecordImagePreview" class="mb-3">
                           <div class="w-full h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
                             <div class="text-center">
                               <i class="ri-image-line text-gray-400 text-2xl mb-2"></i>
-                              <p class="text-gray-500 text-sm">画像がありません</p>
+                              <p class="text-gray-500 text-sm" data-i18n="noImageAvailable">画像がありません</p>
                             </div>
                           </div>
                         </div>
                         <button type="button" onclick="document.getElementById('newRecordImageInput').click()" class="px-3 py-2 bg-blue-500 text-white rounded text-sm hover:bg-blue-600">
-                          <i class="ri-upload-line mr-1"></i>画像をアップロード
+                          <i class="ri-upload-line mr-1"></i><span data-i18n="uploadImage">画像をアップロード</span>
                         </button>
                         <input type="file" id="newRecordImageInput" accept="image/*" class="hidden" />
                       </div>
@@ -1421,11 +1421,11 @@ function loadPage(page) {
 
                       <!-- Action Buttons -->
                       <div class="flex justify-end space-x-3">
-                        <button type="button" onclick="closeAddRecordModal()" class="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50">
+                        <button type="button" onclick="closeAddRecordModal()" class="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50" data-i18n="cancel">
                           キャンセル
                         </button>
                         <button type="submit" class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
-                          <i class="ri-save-line mr-1"></i>保存
+                          <i class="ri-save-line mr-1"></i><span data-i18n="save">保存</span>
                         </button>
                       </div>
                     </form>
@@ -1660,8 +1660,13 @@ function loadPage(page) {
             const modal = document.getElementById('addRecordModal');
             const modalTitle = document.getElementById('modalTitle');
             
+            // Get current language from localStorage or use fallback
+            const currentLang = localStorage.getItem("lang") || "en";
+            
             // Update modal title based on current tab
-            modalTitle.textContent = currentMasterTab === 'masterDB' ? '新規レコード追加 - 内装品 DB' : '新規レコード追加 - 材料 DB';
+            const baseTitle = translations[currentLang]?.addNewRecordModal || "新規レコード追加";
+            const tabSuffix = currentMasterTab === 'masterDB' ? ' - 内装品 DB' : ' - 材料 DB';
+            modalTitle.textContent = baseTitle + tabSuffix;
             
             // Generate dynamic fields based on current data structure
             generateDynamicFields();
@@ -1672,6 +1677,13 @@ function loadPage(page) {
             newRecordImageFile = null;
             
             modal.classList.remove('hidden');
+            
+            // Apply language translations to the modal
+            if (typeof applyLanguageEnhanced === 'function') {
+              applyLanguageEnhanced();
+            } else if (typeof applyLanguage === 'function') {
+              applyLanguage();
+            }
           };
 
           window.closeAddRecordModal = function() {
@@ -1715,11 +1727,13 @@ function loadPage(page) {
 
           function resetImagePreview() {
             const preview = document.getElementById('newRecordImagePreview');
+            const currentLang = localStorage.getItem("lang") || "en";
+            const noImageText = translations[currentLang]?.noImageAvailable || "画像がありません";
             preview.innerHTML = `
               <div class="w-full h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
                 <div class="text-center">
                   <i class="ri-image-line text-gray-400 text-2xl mb-2"></i>
-                  <p class="text-gray-500 text-sm">画像がありません</p>
+                  <p class="text-gray-500 text-sm">${noImageText}</p>
                 </div>
               </div>
             `;
@@ -1810,13 +1824,17 @@ function loadPage(page) {
                 }
               }
 
-              alert("新規レコードが正常に追加されました！");
+              const currentLang = localStorage.getItem("lang") || "en";
+              const successMessage = translations[currentLang]?.recordAddedSuccessfully || "新規レコードが正常に追加されました！";
+              alert(successMessage);
               closeAddRecordModal();
               loadMasterDB(); // Refresh data
               
             } catch (error) {
               console.error("Error adding new record:", error);
-              alert("レコードの追加に失敗しました: " + error.message);
+              const currentLang = localStorage.getItem("lang") || "en";
+              const errorMessage = translations[currentLang]?.failedToAddRecord || "レコードの追加に失敗しました: ";
+              alert(errorMessage + error.message);
             }
           }
 
@@ -1865,7 +1883,9 @@ function loadPage(page) {
             }
             
             if (!hasData) {
-              alert("少なくとも1つのフィールドに入力してください。");
+              const currentLang = localStorage.getItem("lang") || "en";
+              const alertMessage = translations[currentLang]?.pleaseEnterAtLeastOneField || "少なくとも1つのフィールドに入力してください。";
+              alert(alertMessage);
               return;
             }
             

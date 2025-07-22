@@ -109,6 +109,16 @@ const translations = {
       defectRate: "Defect Rate",
       exportCSV: "Export CSV",
       exportPDF: "Export PDF",
+      addNewRecord: "Add New Record",
+      addNewRecordModal: "Add New Record",
+      productImage: "Product Image",
+      noImageAvailable: "No image available",
+      uploadImage: "Upload Image",
+      cancel: "Cancel",
+      save: "Save",
+      pleaseEnterAtLeastOneField: "Please enter at least one field.",
+      recordAddedSuccessfully: "New record added successfully!",
+      failedToAddRecord: "Failed to add record: ",
       
       // Equipment
       equipmentTitle: "Equipment Management",
@@ -316,6 +326,16 @@ const translations = {
       defectRate: "不良率",
       exportCSV: "CSVでエクスポート",
       exportPDF: "PDFでエクスポート",
+      addNewRecord: "新規レコード追加",
+      addNewRecordModal: "新規レコード追加",
+      productImage: "製品画像",
+      noImageAvailable: "画像がありません",
+      uploadImage: "画像をアップロード",
+      cancel: "キャンセル",
+      save: "保存",
+      pleaseEnterAtLeastOneField: "少なくとも1つのフィールドに入力してください。",
+      recordAddedSuccessfully: "新規レコードが正常に追加されました！",
+      failedToAddRecord: "レコードの追加に失敗しました: ",
       
       // Equipment
       equipmentTitle: "設備管理",
