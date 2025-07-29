@@ -52,9 +52,27 @@ async function getFactoryLocation(factoryName) {
         const data = await res.json();
         if (data.length > 0) {
             const factory = data[0];
+            let coordinates = null;
+            
+            // First priority: use geotag from database (most accurate)
+            if (factory.geotag) {
+                const geotagParts = factory.geotag.split(',');
+                if (geotagParts.length === 2) {
+                    coordinates = {
+                        lat: parseFloat(geotagParts[0].trim()),
+                        lon: parseFloat(geotagParts[1].trim())
+                    };
+                }
+            }
+            // Second priority: use coordinates field
+            else if (factory.coordinates) {
+                coordinates = factory.coordinates;
+            }
+            
             return {
                 location: factory.location,
-                coordinates: factory.coordinates || null
+                coordinates: coordinates,
+                source: factory.geotag ? 'geotag' : (factory.coordinates ? 'coordinates' : 'none')
             };
         }
         return null;
@@ -103,7 +121,7 @@ async function getCoordinatesFromAddress(address) {
  */
 async function getWeatherData(lat, lon) {
     try {
-        const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m&timezone=Asia/Tokyo`);
+        const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code&timezone=Asia/Tokyo`);
         const data = await response.json();
         
         if (data.current) {
@@ -128,12 +146,29 @@ async function getWeatherData(lat, lon) {
             const dailyCycle = Math.sin((hour * Math.PI) / 12) * 50;
             const simulatedCO2 = Math.round(baseCO2 + dailyCycle);
             
-            return {
+            const weatherResult = {
                 temperature: Math.round(data.current.temperature_2m * 10) / 10,
                 humidity: Math.round(data.current.relative_humidity_2m),
                 co2: simulatedCO2,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                // Additional data for debugging
+                apparentTemperature: data.current.apparent_temperature ? Math.round(data.current.apparent_temperature * 10) / 10 : null,
+                isDay: data.current.is_day,
+                weatherCode: data.current.weather_code,
+                apiTimestamp: data.current.time,
+                coordinates: `${lat}, ${lon}`
             };
+            
+            console.log(`Weather API Response for ${lat}, ${lon}:`, {
+                rawTemperature: data.current.temperature_2m,
+                processedTemperature: weatherResult.temperature,
+                apiTime: data.current.time,
+                localTime: new Date().toISOString(),
+                isDay: weatherResult.isDay,
+                weatherCode: weatherResult.weatherCode
+            });
+            
+            return weatherResult;
         }
         return null;
     } catch (error) {
@@ -168,10 +203,11 @@ async function getEnvironmentalData(factoryName) {
         
         let coordinates = locationData.coordinates;
         
-        // If coordinates are not in database, try geocoding
+        // If coordinates are not available and no geotag, try geocoding as last resort
         if (!coordinates && locationData.location) {
-            console.log(`No coordinates in database for ${factoryName}, trying geocoding...`);
+            console.log(`No coordinates or geotag in database for ${factoryName}, trying geocoding as fallback...`);
             coordinates = await getCoordinatesFromAddress(locationData.location);
+            locationData.source = 'geocoded';
         }
         
         if (!coordinates) {
@@ -179,7 +215,7 @@ async function getEnvironmentalData(factoryName) {
             return getDefaultEnvironmentalData();
         }
         
-        console.log(`Coordinates for ${factoryName}: ${coordinates.lat}, ${coordinates.lon}`);
+        console.log(`Using coordinates for ${factoryName}: ${coordinates.lat}, ${coordinates.lon} (source: ${locationData.source})`);
         
         const weatherData = await getWeatherData(coordinates.lat, coordinates.lon);
         if (!weatherData) {
@@ -187,7 +223,9 @@ async function getEnvironmentalData(factoryName) {
             return getDefaultEnvironmentalData();
         }
         
-        console.log(`Weather data for ${factoryName}:`, weatherData);
+        // Mark the data source for better tracking
+        weatherData.coordinateSource = locationData.source;
+        console.log(`Weather data for ${factoryName} (${locationData.source}):`, weatherData);
         
         // Cache the data
         environmentalDataCache.set(cacheKey, weatherData);
@@ -365,49 +403,57 @@ async function initializeSampleFactoryData() {
             "工場": "第一工場", 
             "location": "19 Obutocho, Seki, Gifu 501-3210", 
             "phone": "",
-            "coordinates": { "lat": 35.4964, "lon": 136.9092 } // Seki, Gifu coordinates
+            "geotag": "35.4964, 136.9092", // Precise geotag for Seki, Gifu
+            "coordinates": { "lat": 35.4964, "lon": 136.9092 }
         },
         { 
             "工場": "第二工場", 
             "location": "33-1 Babadashi, Seki, Gifu 501-3969", 
             "phone": "",
-            "coordinates": { "lat": 35.5124, "lon": 136.8956 } // Seki, Gifu coordinates
+            "geotag": "35.5124, 136.8956", // Precise geotag for Seki, Gifu
+            "coordinates": { "lat": 35.5124, "lon": 136.8956 }
         },
         { 
             "工場": "肥田瀬", 
             "location": "1757 Hidase, Seki, Gifu 501-3911", 
             "phone": "",
-            "coordinates": { "lat": 35.4845, "lon": 136.8734 } // Hidase, Seki coordinates
+            "geotag": "35.4845, 136.8734", // Precise geotag for Hidase, Seki
+            "coordinates": { "lat": 35.4845, "lon": 136.8734 }
         },
         { 
             "工場": "天徳", 
             "location": "1-chōme-3-18 Tentokuchō, Seki, Gifu 501-3915", 
             "phone": "",
-            "coordinates": { "lat": 35.4923, "lon": 136.8912 } // Tentoku, Seki coordinates
+            "geotag": "35.4923, 136.8912", // Precise geotag for Tentoku, Seki
+            "coordinates": { "lat": 35.4923, "lon": 136.8912 }
         },
         { 
             "工場": "倉知", 
             "location": "2511-1 Kurachi, Seki, Gifu 501-3936", 
             "phone": "",
-            "coordinates": { "lat": 35.4789, "lon": 136.8667 } // Kurachi, Seki coordinates
+            "geotag": "35.4789, 136.8667", // Precise geotag for Kurachi, Seki
+            "coordinates": { "lat": 35.4789, "lon": 136.8667 }
         },
         { 
             "工場": "小瀬", 
             "location": "1284-8 Oze, Seki, Gifu 501-3265", 
             "phone": "",
-            "coordinates": { "lat": 35.5234, "lon": 136.9234 } // Oze, Seki coordinates
+            "geotag": "35.48814199621467, 136.8854813107706", // Your exact geotag coordinates
+            "coordinates": { "lat": 35.48814199621467, "lon": 136.8854813107706 }
         },
         { 
             "工場": "SCNA", 
             "location": "6330 Corporate Dr, Indianapolis, IN 46278, USA", 
             "phone": "",
-            "coordinates": { "lat": 39.8701, "lon": -86.2656 } // Indianapolis coordinates
+            "geotag": "39.870167521601694, -86.26558440258438", // Exact geotag from user
+            "coordinates": { "lat": 39.8701, "lon": -86.2656 }
         },
         { 
             "工場": "NFH", 
             "location": "4-chōme-4-2 Funakoshiminami, Aki Ward, Hiroshima, 736-0082", 
             "phone": "",
-            "coordinates": { "lat": 34.3853, "lon": 132.5048 } // Hiroshima coordinates
+            "geotag": "34.3853, 132.5048", // Precise geotag for Hiroshima
+            "coordinates": { "lat": 34.3853, "lon": 132.5048 }
         }
     ];
 
@@ -461,14 +507,25 @@ async function initializeSampleFactoryData() {
         } else {
             console.log(`Found ${existingData.length} existing factories`);
             
-            // Update existing factories with coordinates if they don't have them
+            // Update existing factories with coordinates and geotags if they don't have them
             for (const sampleFactory of sampleFactories) {
                 const existingFactory = existingData.find(f => f.工場 === sampleFactory.工場);
                 
-                if (existingFactory && !existingFactory.coordinates) {
-                    console.log(`Adding coordinates to ${sampleFactory.工場}`);
+                if (existingFactory && (!existingFactory.coordinates || !existingFactory.geotag)) {
+                    console.log(`Adding coordinates and geotag to ${sampleFactory.工場}`);
                     
                     try {
+                        const updateData = {};
+                        if (!existingFactory.coordinates) {
+                            updateData.coordinates = sampleFactory.coordinates;
+                        }
+                        if (!existingFactory.geotag) {
+                            updateData.geotag = sampleFactory.geotag;
+                        }
+                        if (!existingFactory.location || existingFactory.location !== sampleFactory.location) {
+                            updateData.location = sampleFactory.location;
+                        }
+                        
                         const updateRes = await fetch(BASE_URL + "queries", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
@@ -477,21 +534,18 @@ async function initializeSampleFactoryData() {
                                 collectionName: "factoryDB",
                                 query: { _id: existingFactory._id },
                                 update: {
-                                    $set: {
-                                        coordinates: sampleFactory.coordinates,
-                                        location: sampleFactory.location // Update location too if needed
-                                    }
+                                    $set: updateData
                                 }
                             })
                         });
                         
                         if (updateRes.ok) {
-                            console.log(`Updated coordinates for ${sampleFactory.工場}`);
+                            console.log(`Updated geotag and coordinates for ${sampleFactory.工場}`);
                         } else {
-                            console.warn(`Failed to update coordinates for ${sampleFactory.工場}`);
+                            console.warn(`Failed to update geotag for ${sampleFactory.工場}`);
                         }
                     } catch (updateError) {
-                        console.warn(`Error updating coordinates for ${sampleFactory.工場}:`, updateError);
+                        console.warn(`Error updating geotag for ${sampleFactory.工場}:`, updateError);
                     }
                 }
             }
@@ -546,6 +600,157 @@ async function updateFactoryCoordinates() {
 
 // Make update function available globally for debugging
 window.updateFactoryCoordinates = updateFactoryCoordinates;
+
+/**
+ * Debug function to test weather API with specific coordinates
+ */
+async function testWeatherAPI(lat, lon, location = '') {
+    console.log(`Testing weather API for coordinates: ${lat}, ${lon} (${location})`);
+    
+    try {
+        const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m&timezone=Asia/Tokyo`);
+        const data = await response.json();
+        
+        console.log('Raw API response:', data);
+        
+        if (data.current) {
+            const weatherInfo = {
+                temperature: Math.round(data.current.temperature_2m * 10) / 10,
+                humidity: Math.round(data.current.relative_humidity_2m),
+                timestamp: data.current.time,
+                coordinates: `${lat}, ${lon}`
+            };
+            console.log('Processed weather data:', weatherInfo);
+            return weatherInfo;
+        } else {
+            console.error('No current weather data available');
+            return null;
+        }
+    } catch (error) {
+        console.error('Error testing weather API:', error);
+        return null;
+    }
+}
+
+/**
+ * Compare temperatures from different sources
+ */
+async function compareTemperatureSources() {
+    console.log('=== Temperature Comparison for 小瀬 ===');
+    
+    // Test with your exact geotag coordinates
+    const exactCoords = { lat: 35.48814199621467, lon: 136.8854813107706 };
+    console.log('Testing with exact geotag coordinates...');
+    const exactTemp = await testWeatherAPI(exactCoords.lat, exactCoords.lon, 'Exact Geotag');
+    
+    // Test with our current system coordinates
+    const systemCoords = { lat: 35.5234, lon: 136.9234 };
+    console.log('Testing with current system coordinates...');
+    const systemTemp = await testWeatherAPI(systemCoords.lat, systemCoords.lon, 'Current System');
+    
+    // Test with Seki city center
+    const sekiCenter = { lat: 35.4964, lon: 136.9092 };
+    console.log('Testing with Seki city center...');
+    const sekiTemp = await testWeatherAPI(sekiCenter.lat, sekiCenter.lon, 'Seki Center');
+    
+    console.log('=== COMPARISON RESULTS ===');
+    console.log(`Exact Geotag (${exactCoords.lat}, ${exactCoords.lon}): ${exactTemp?.temperature}°C`);
+    console.log(`System Coords (${systemCoords.lat}, ${systemCoords.lon}): ${systemTemp?.temperature}°C`);
+    console.log(`Seki Center (${sekiCenter.lat}, ${sekiCenter.lon}): ${sekiTemp?.temperature}°C`);
+    
+    return { exactTemp, systemTemp, sekiTemp };
+}
+
+/**
+ * Test multiple weather APIs for comparison
+ */
+async function testMultipleWeatherAPIs(lat, lon) {
+    console.log(`Testing multiple weather APIs for: ${lat}, ${lon}`);
+    const results = {};
+    
+    // Test Open-Meteo (current)
+    try {
+        const openMeteoResponse = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m&timezone=Asia/Tokyo`);
+        const openMeteoData = await openMeteoResponse.json();
+        if (openMeteoData.current) {
+            results.openMeteo = {
+                temperature: Math.round(openMeteoData.current.temperature_2m * 10) / 10,
+                humidity: Math.round(openMeteoData.current.relative_humidity_2m),
+                source: 'Open-Meteo'
+            };
+        }
+    } catch (error) {
+        console.error('Open-Meteo API error:', error);
+    }
+    
+    // Test OpenWeatherMap (requires API key, but let's try the free endpoint)
+    try {
+        const owmResponse = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=demo&units=metric`);
+        if (owmResponse.ok) {
+            const owmData = await owmResponse.json();
+            results.openWeatherMap = {
+                temperature: Math.round(owmData.main.temp * 10) / 10,
+                humidity: owmData.main.humidity,
+                source: 'OpenWeatherMap'
+            };
+        }
+    } catch (error) {
+        console.log('OpenWeatherMap requires API key, skipping...');
+    }
+    
+    // Test WeatherAPI (free tier)
+    try {
+        const weatherApiResponse = await fetch(`https://api.weatherapi.com/v1/current.json?key=demo&q=${lat},${lon}`);
+        if (weatherApiResponse.ok) {
+            const weatherApiData = await weatherApiResponse.json();
+            results.weatherAPI = {
+                temperature: weatherApiData.current.temp_c,
+                humidity: weatherApiData.current.humidity,
+                source: 'WeatherAPI'
+            };
+        }
+    } catch (error) {
+        console.log('WeatherAPI requires API key, skipping...');
+    }
+    
+    console.log('Weather API Comparison Results:', results);
+    return results;
+}
+
+/**
+ * Enhanced temperature accuracy test
+ */
+async function enhancedTemperatureTest() {
+    const exactLat = 35.48814199621467;
+    const exactLon = 136.8854813107706;
+    
+    console.log('=== ENHANCED TEMPERATURE ACCURACY TEST ===');
+    console.log(`Testing coordinates: ${exactLat}, ${exactLon} (小瀬 exact location)`);
+    
+    // Test current time vs different times
+    console.log('Testing current conditions...');
+    const currentWeather = await testWeatherAPI(exactLat, exactLon, '小瀬 Current');
+    
+    // Test multiple APIs
+    console.log('Testing multiple weather sources...');
+    const multiApiResults = await testMultipleWeatherAPIs(exactLat, exactLon);
+    
+    // Check what time zone and conditions we're getting
+    console.log('Checking detailed conditions...');
+    try {
+        const detailedResponse = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${exactLat}&longitude=${exactLon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,snowfall,weather_code,cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,wind_direction_10m,wind_gusts_10m&timezone=Asia/Tokyo&forecast_days=1`);
+        const detailedData = await detailedResponse.json();
+        console.log('Detailed weather conditions:', detailedData);
+    } catch (error) {
+        console.error('Error getting detailed conditions:', error);
+    }
+    
+    return { currentWeather, multiApiResults };
+}
+
+// Make enhanced test available globally
+window.testMultipleWeatherAPIs = testMultipleWeatherAPIs;
+window.enhancedTemperatureTest = enhancedTemperatureTest;
 
 /**
  * Renders the dashboard cards for each factory, showing total, NG, and defect rate.
@@ -670,7 +875,10 @@ async function renderFactoryCards() {
               
               ${envData.isDefault ? 
                 `<div class="text-xs text-gray-500 mt-2 text-center" data-i18n="simulatedData">※ 模擬データ</div>` : 
-                `<div class="text-xs text-gray-500 mt-2 text-center"><span data-i18n="lastUpdated">更新</span>: ${new Date(envData.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</div>`
+                `<div class="text-xs text-gray-500 mt-2 text-center">
+                  <span data-i18n="lastUpdated">更新</span>: ${new Date(envData.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                  ${envData.coordinateSource ? ` • ${envData.coordinateSource === 'geotag' ? '🎯' : envData.coordinateSource === 'coordinates' ? '📍' : '🌐'}` : ''}
+                </div>`
               }
             </div>
           </div>
