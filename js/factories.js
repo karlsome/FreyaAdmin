@@ -861,18 +861,18 @@ function showSensorHistoryModal(deviceId, factoryName) {
         const historyContainer = document.getElementById('historyContainer');
         const paginationContainer = document.getElementById('paginationContainer');
         
-        historyContainer.innerHTML = '<div class="text-center py-4"><i class="ri-loader-4-line animate-spin text-xl"></i> 読み込み中...</div>';
+        historyContainer.innerHTML = `<div class="text-center py-4"><i class="ri-loader-4-line animate-spin text-xl"></i> <span data-i18n="loading">読み込み中...</span></div>`;
         
         try {
             const data = await getSensorHistory(deviceId, page);
             
             if (data.error) {
-                historyContainer.innerHTML = `<div class="text-center py-4 text-red-600">エラー: ${data.error}</div>`;
+                historyContainer.innerHTML = `<div class="text-center py-4 text-red-600"><span data-i18n="error">エラー</span>: ${data.error}</div>`;
                 return;
             }
             
             if (data.history.length === 0) {
-                historyContainer.innerHTML = '<div class="text-center py-4 text-gray-500">履歴データがありません</div>';
+                historyContainer.innerHTML = `<div class="text-center py-4 text-gray-500" data-i18n="noDataAvailable">履歴データがありません</div>`;
                 return;
             }
             
@@ -895,7 +895,7 @@ function showSensorHistoryModal(deviceId, factoryName) {
                                         <i class="ri-temp-hot-line text-orange-600 mr-1"></i>
                                     </div>
                                     <div class="text-sm font-bold ${getTempStatusColor(record.temperature)}">${record.temperature}°C</div>
-                                    <div class="text-xs text-gray-600">温度</div>
+                                    <div class="text-xs text-gray-600" data-i18n="temperature">温度</div>
                                 </div>
                                 
                                 <div class="text-center p-2 bg-blue-50 rounded">
@@ -903,7 +903,7 @@ function showSensorHistoryModal(deviceId, factoryName) {
                                         <i class="ri-drop-line text-blue-600 mr-1"></i>
                                     </div>
                                     <div class="text-sm font-bold text-blue-600">${record.humidity}%</div>
-                                    <div class="text-xs text-gray-600">湿度</div>
+                                    <div class="text-xs text-gray-600" data-i18n="humidity">湿度</div>
                                 </div>
                             </div>
                         </div>
@@ -917,13 +917,14 @@ function showSensorHistoryModal(deviceId, factoryName) {
                 paginationContainer.innerHTML = `
                     <div class="flex items-center justify-between mt-4 pt-4 border-t">
                         <div class="text-sm text-gray-600">
-                            ${pagination.totalRecords}件中 ${(pagination.currentPage - 1) * 10 + 1}-${Math.min(pagination.currentPage * 10, pagination.totalRecords)}件
+                            ${pagination.totalRecords}<span data-i18n="items">件中</span> ${(pagination.currentPage - 1) * 10 + 1}-${Math.min(pagination.currentPage * 10, pagination.totalRecords)}<span data-i18n="records">件</span>
                         </div>
                         <div class="flex space-x-2">
                             <button 
                                 onclick="loadHistoryPage(${pagination.currentPage - 1})"
                                 ${!pagination.hasPrevious ? 'disabled' : ''}
                                 class="px-3 py-1 text-sm border rounded ${pagination.hasPrevious ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}"
+                                data-i18n="previous"
                             >
                                 前へ
                             </button>
@@ -934,6 +935,7 @@ function showSensorHistoryModal(deviceId, factoryName) {
                                 onclick="loadHistoryPage(${pagination.currentPage + 1})"
                                 ${!pagination.hasNext ? 'disabled' : ''}
                                 class="px-3 py-1 text-sm border rounded ${pagination.hasNext ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}"
+                                data-i18n="next"
                             >
                                 次へ
                             </button>
@@ -946,8 +948,14 @@ function showSensorHistoryModal(deviceId, factoryName) {
             
             currentPage = page;
             
+            // Apply translations to the new content
+            if (window.translateDynamicContent) {
+                window.translateDynamicContent(historyContainer);
+                window.translateDynamicContent(paginationContainer);
+            }
+            
         } catch (error) {
-            historyContainer.innerHTML = `<div class="text-center py-4 text-red-600">エラーが発生しました: ${error.message}</div>`;
+            historyContainer.innerHTML = `<div class="text-center py-4 text-red-600"><span data-i18n="failedToLoad">エラーが発生しました</span>: ${error.message}</div>`;
         }
     }
     
@@ -959,7 +967,7 @@ function showSensorHistoryModal(deviceId, factoryName) {
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-center">
                     <div>
-                        <h3 class="text-lg font-semibold">センサー履歴</h3>
+                        <h3 class="text-lg font-semibold" data-i18n="sensorHistory">センサー履歴</h3>
                         <p class="text-sm text-gray-600">${factoryName} - ${deviceId}</p>
                     </div>
                     <button onclick="closeSensorHistoryModal()" class="text-gray-400 hover:text-gray-600">
@@ -1012,8 +1020,8 @@ async function showFactorySensorHistoryModal(factoryName) {
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-center">
                     <div>
-                        <h3 class="text-lg font-semibold">温度履歴</h3>
-                        <p class="text-sm text-gray-600">${factoryName} - 全センサー</p>
+                        <h3 class="text-lg font-semibold" data-i18n="temperatureHistory">温度履歴</h3>
+                        <p class="text-sm text-gray-600">${factoryName} - <span data-i18n="allSensors">全センサー</span></p>
                     </div>
                     <button onclick="closeFactorySensorHistoryModal()" class="text-gray-400 hover:text-gray-600">
                         <i class="ri-close-line text-xl"></i>
@@ -1024,13 +1032,18 @@ async function showFactorySensorHistoryModal(factoryName) {
             <div class="p-6">
                 <div class="text-center py-4">
                     <i class="ri-loader-4-line animate-spin text-xl"></i>
-                    <p class="text-gray-500 mt-2">センサーデータを読み込み中...</p>
+                    <p class="text-gray-500 mt-2" data-i18n="loadingSensorData">センサーデータを読み込み中...</p>
                 </div>
             </div>
         </div>
     `;
     
     document.body.appendChild(modal);
+    
+    // Apply translations to initial content
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
     
     try {
         // Get unique sensors for this factory from last 30 days
@@ -1071,9 +1084,14 @@ async function showFactorySensorHistoryModal(factoryName) {
             modal.querySelector('.p-6').innerHTML = `
                 <div class="text-center py-8">
                     <i class="ri-sensor-line text-4xl text-gray-300 mb-4"></i>
-                    <p class="text-gray-500">過去30日間にセンサーデータがありません</p>
+                    <p class="text-gray-500" data-i18n="noDataLast30Days">過去30日間にセンサーデータがありません</p>
                 </div>
             `;
+            
+            // Apply translations to the new content
+            if (window.translateDynamicContent) {
+                window.translateDynamicContent(modal.querySelector('.p-6'));
+            }
             return;
         }
         
@@ -1084,11 +1102,11 @@ async function showFactorySensorHistoryModal(factoryName) {
                          onclick="event.stopPropagation(); closeFactorySensorHistoryModal(); showSensorHistoryModal('${sensor._id}', '${factoryName}')">
                         <div class="flex justify-between items-start mb-3">
                             <div>
-                                <h4 class="font-semibold text-gray-900">センサー</h4>
+                                <h4 class="font-semibold text-gray-900" data-i18n="sensor">センサー</h4>
                                 <p class="text-xs text-gray-500 font-mono">${sensor._id}</p>
                             </div>
                             <span class="px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-medium">
-                                ${sensor.count}件
+                                ${sensor.count}<span data-i18n="records">件</span>
                             </span>
                         </div>
                         
@@ -1096,31 +1114,41 @@ async function showFactorySensorHistoryModal(factoryName) {
                             <div class="text-sm font-bold text-gray-700">
                                 ${parseFloat(sensor.latestReading.Temperature.replace('°C', '').trim())}°C
                             </div>
-                            <div class="text-xs text-gray-500 mt-1">最新温度</div>
+                            <div class="text-xs text-gray-500 mt-1" data-i18n="latestTemperature">最新温度</div>
                         </div>
                         
                         <div class="text-xs text-blue-600 text-center mt-3">
                             <i class="ri-history-line mr-1"></i>
-                            クリックして詳細履歴表示
+                            <span data-i18n="clickForHistory">クリックして詳細履歴表示</span>
                         </div>
                     </div>
                 `).join('')}
             </div>
             
-            <div class="mt-6 text-xs text-gray-500 text-center">
+            <div class="mt-6 text-xs text-gray-500 text-center" data-i18n="last30Days">
                 過去30日間のセンサーデータ
             </div>
         `;
+        
+        // Apply translations to the new content
+        if (window.translateDynamicContent) {
+            window.translateDynamicContent(modal.querySelector('.p-6'));
+        }
         
     } catch (error) {
         console.error('Error loading factory sensor data:', error);
         modal.querySelector('.p-6').innerHTML = `
             <div class="text-center py-8">
                 <i class="ri-error-warning-line text-4xl text-red-300 mb-4"></i>
-                <p class="text-red-500">データの読み込みに失敗しました</p>
+                <p class="text-red-500" data-i18n="failedToLoad">データの読み込みに失敗しました</p>
                 <p class="text-sm text-gray-500 mt-2">${error.message}</p>
             </div>
         `;
+        
+        // Apply translations to the error content
+        if (window.translateDynamicContent) {
+            window.translateDynamicContent(modal.querySelector('.p-6'));
+        }
     }
 }
 
@@ -1180,7 +1208,7 @@ function showSensorModal(factoryName, sensorData) {
         <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-center">
-                    <h3 class="text-lg font-semibold">${factoryName} - 物理センサー詳細</h3>
+                    <h3 class="text-lg font-semibold">${factoryName} - <span data-i18n="sensorDetails">物理センサー詳細</span></h3>
                     <button onclick="closeSensorModal()" class="text-gray-400 hover:text-gray-600">
                         <i class="ri-close-line text-xl"></i>
                     </button>
@@ -1191,26 +1219,26 @@ function showSensorModal(factoryName, sensorData) {
                 ${sensorData.sensors.length === 0 ? `
                     <div class="text-center py-8">
                         <i class="ri-sensor-line text-4xl text-gray-300 mb-4"></i>
-                        <p class="text-gray-500">このファクトリーにはセンサーデータがありません</p>
+                        <p class="text-gray-500" data-i18n="noSensorData">このファクトリーにはセンサーデータがありません</p>
                     </div>
                 ` : `
                     <!-- Summary Stats -->
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                         <div class="bg-blue-50 p-4 rounded-lg text-center">
                             <div class="text-2xl font-bold text-blue-600">${sensorData.sensorCount}</div>
-                            <div class="text-sm text-blue-600">アクティブセンサー</div>
+                            <div class="text-sm text-blue-600" data-i18n="activeSensors">アクティブセンサー</div>
                         </div>
                         <div class="bg-red-50 p-4 rounded-lg text-center">
                             <div class="text-2xl font-bold text-red-600">
                                 ${sensorData.highestTemp ? sensorData.highestTemp + '°C' : 'N/A'}
                             </div>
-                            <div class="text-sm text-red-600">最高温度</div>
+                            <div class="text-sm text-red-600" data-i18n="highestTemp">最高温度</div>
                         </div>
                         <div class="bg-green-50 p-4 rounded-lg text-center">
                             <div class="text-2xl font-bold text-green-600">
                                 ${sensorData.averageHumidity ? sensorData.averageHumidity + '%' : 'N/A'}
                             </div>
-                            <div class="text-sm text-green-600">平均湿度</div>
+                            <div class="text-sm text-green-600" data-i18n="averageHumidity">平均湿度</div>
                         </div>
                     </div>
                     
@@ -1221,7 +1249,7 @@ function showSensorModal(factoryName, sensorData) {
                                  onclick="showSensorHistoryModal('${sensor.deviceId}', '${factoryName}')">
                                 <div class="flex justify-between items-start mb-3">
                                     <div>
-                                        <h4 class="font-semibold text-gray-900">センサー</h4>
+                                        <h4 class="font-semibold text-gray-900" data-i18n="sensor">センサー</h4>
                                         <p class="text-xs text-gray-500 font-mono">${sensor.deviceId}</p>
                                     </div>
                                     <span class="px-2 py-1 rounded-full text-xs font-medium ${getSensorStatusColor(sensor.status)}">
@@ -1235,7 +1263,7 @@ function showSensorModal(factoryName, sensorData) {
                                             <i class="ri-temp-hot-line text-orange-600 mr-1"></i>
                                         </div>
                                         <div class="text-lg font-bold text-orange-600">${sensor.temperature}°C</div>
-                                        <div class="text-xs text-gray-600">温度</div>
+                                        <div class="text-xs text-gray-600" data-i18n="temperature">温度</div>
                                     </div>
                                     
                                     <div class="text-center p-3 bg-blue-50 rounded">
@@ -1243,24 +1271,24 @@ function showSensorModal(factoryName, sensorData) {
                                             <i class="ri-drop-line text-blue-600 mr-1"></i>
                                         </div>
                                         <div class="text-lg font-bold text-blue-600">${sensor.humidity}%</div>
-                                        <div class="text-xs text-gray-600">湿度</div>
+                                        <div class="text-xs text-gray-600" data-i18n="humidity">湿度</div>
                                     </div>
                                 </div>
                                 
                                 <div class="text-xs text-gray-500 text-center">
                                     <i class="ri-time-line mr-1"></i>
-                                    最終更新: ${formatTime(sensor.lastUpdate)}
+                                    <span data-i18n="lastUpdate">最終更新</span>: ${formatTime(sensor.lastUpdate)}
                                 </div>
                                 
                                 <div class="text-xs text-blue-600 text-center mt-2">
                                     <i class="ri-history-line mr-1"></i>
-                                    クリックして履歴表示
+                                    <span data-i18n="clickForHistory">クリックして詳細履歴表示</span>
                                 </div>
                             </div>
                         `).join('')}
                     </div>
                     
-                    <div class="mt-6 text-xs text-gray-500 text-center">
+                    <div class="mt-6 text-xs text-gray-500 text-center" data-i18n="dataUpdatesEvery15Min">
                         センサーデータは15分間隔で更新されます
                     </div>
                 `}
@@ -1269,6 +1297,11 @@ function showSensorModal(factoryName, sensorData) {
     `;
     
     document.body.appendChild(modal);
+    
+    // Apply translations to the new content
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
 }
 
 /**
@@ -1723,8 +1756,8 @@ async function renderFactoryCards() {
               ${sensorData.hasCurrentDateData ? `
                 <div class="border-t pt-3 mt-3">
                   <div class="flex items-center justify-between mb-2">
-                    <h6 class="text-xs font-semibold text-gray-700">物理センサー</h6>
-                    <span class="text-xs text-gray-500">${sensorData.sensorCount}台</span>
+                    <h6 class="text-xs font-semibold text-gray-700" data-i18n="physicalSensors">物理センサー</h6>
+                    <span class="text-xs text-gray-500">${sensorData.sensorCount}<span data-i18n="sensorCount">台</span></span>
                   </div>
                   
                   <div 
@@ -1733,7 +1766,7 @@ async function renderFactoryCards() {
                   >
                     <div class="grid grid-cols-2 gap-3 text-xs">
                       <div class="text-center p-2 rounded ${sensorTempStatus ? sensorTempStatus.bgColor : 'bg-gray-100'}" 
-                           title="${sensorTempStatus ? sensorTempStatus.message : ''} (適正範囲: 18-26°C)">
+                           title="${sensorTempStatus ? sensorTempStatus.message : ''} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('temperatureRange') : '18-26°C'})">
                         <div class="flex items-center justify-center mb-1">
                           <i class="ri-temp-hot-line mr-1"></i>
                           ${sensorTempStatus && sensorTempStatus.status !== 'normal' ? `<i class="${sensorTempStatus.icon} text-xs ml-1"></i>` : ''}
@@ -1741,7 +1774,7 @@ async function renderFactoryCards() {
                         <div class="font-semibold ${sensorTempStatus ? sensorTempStatus.color : 'text-gray-600'}">
                           ${sensorData.highestTemp !== null ? sensorData.highestTemp + '°C' : 'N/A'}
                         </div>
-                        <div class="text-gray-500">最高温度</div>
+                        <div class="text-gray-500" data-i18n="highestTemp">最高温度</div>
                       </div>
                       
                       <div class="text-center p-2 rounded bg-blue-50">
@@ -1751,18 +1784,18 @@ async function renderFactoryCards() {
                         <div class="font-semibold text-blue-600">
                           ${sensorData.averageHumidity !== null ? sensorData.averageHumidity + '%' : 'N/A'}
                         </div>
-                        <div class="text-gray-500">平均湿度</div>
+                        <div class="text-gray-500" data-i18n="averageHumidity">平均湿度</div>
                       </div>
                     </div>
                     
                     <div class="text-center mt-2">
                       <i class="ri-eye-line text-gray-400"></i>
-                      <span class="text-xs text-gray-500 ml-1">詳細表示</span>
+                      <span class="text-xs text-gray-500 ml-1" data-i18n="viewDetails">詳細表示</span>
                     </div>
                   </div>
                   
                   <div class="text-xs text-gray-500 text-center mt-1">
-                    最終更新: ${new Date(sensorData.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                    <span data-i18n="lastUpdate">最終更新</span>: ${new Date(sensorData.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
               ` : hasHistoricalData ? `
@@ -1775,8 +1808,8 @@ async function renderFactoryCards() {
                       <div class="flex items-center justify-center text-blue-600 mb-1">
                         <i class="ri-history-line text-lg mr-2"></i>
                       </div>
-                      <div class="text-sm font-medium text-blue-600">温度履歴</div>
-                      <div class="text-xs text-gray-500 mt-1">本日のデータなし - 履歴を表示</div>
+                      <div class="text-sm font-medium text-blue-600" data-i18n="temperatureHistory">温度履歴</div>
+                      <div class="text-xs text-gray-500 mt-1" data-i18n="noCurrentData">本日のデータなし - 履歴を表示</div>
                     </button>
                   </div>
                 </div>
@@ -1784,7 +1817,7 @@ async function renderFactoryCards() {
                 <div class="border-t pt-3 mt-3">
                   <div class="text-center p-3 text-gray-400">
                     <i class="ri-sensor-line text-lg mb-1 block"></i>
-                    <div class="text-xs">センサーデータなし</div>
+                    <div class="text-xs" data-i18n="noSensorData">センサーデータなし</div>
                   </div>
                 </div>
               `}
