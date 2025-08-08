@@ -30,9 +30,165 @@ const ENVIRONMENTAL_THRESHOLDS = {
 const environmentalDataCache = new Map();
 const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 
+// Cache for sensor data
+const sensorDataCache = new Map();
+const SENSOR_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes for sensor data
+
 // Rate limiting for API calls
 const apiCallTimestamps = new Map();
 const API_RATE_LIMIT = 60 * 1000; // 1 minute between calls per factory
+
+/**
+ * Fetch physical sensor data from tempHumidityDB
+ */
+async function getSensorData(factoryName) {
+    const cacheKey = `sensor_${factoryName}`;
+    const cached = sensorDataCache.get(cacheKey);
+    
+    // Check if cached data is still valid
+    if (cached && (Date.now() - cached.timestamp) < SENSOR_CACHE_DURATION) {
+        console.log(`Using cached sensor data for ${factoryName}`);
+        return cached;
+    }
+    
+    console.log(`Fetching fresh sensor data for ${factoryName}`);
+    
+    try {
+        // Get today's date
+        const today = new Date().toISOString().split("T")[0];
+        
+        const res = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "submittedDB",
+                collectionName: "tempHumidityDB",
+                query: { 
+                    工場: factoryName,
+                    Date: today
+                },
+                sort: { Time: -1 }, // Get latest data first
+                limit: 50 // Get recent readings for multiple sensors
+            })
+        });
+        
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        
+        const sensorReadings = await res.json();
+        
+        if (!sensorReadings || sensorReadings.length === 0) {
+            console.log(`No sensor data found for ${factoryName} on ${today}`);
+            return {
+                sensors: [],
+                highestTemp: null,
+                averageTemp: null,
+                averageHumidity: null,
+                hasCurrentDateData: false,
+                timestamp: Date.now()
+            };
+        }
+        
+        // Group by device (sensor) and get the latest reading for each
+        const sensorMap = new Map();
+        
+        sensorReadings.forEach(reading => {
+            const deviceId = reading.device;
+            if (!sensorMap.has(deviceId) || 
+                new Date(`${reading.Date} ${reading.Time}`) > 
+                new Date(`${sensorMap.get(deviceId).Date} ${sensorMap.get(deviceId).Time}`)) {
+                sensorMap.set(deviceId, reading);
+            }
+        });
+        
+        const sensors = Array.from(sensorMap.values()).map(reading => ({
+            deviceId: reading.device,
+            temperature: parseFloat(reading.Temperature.replace('°C', '').trim()),
+            humidity: parseFloat(reading.Humidity.replace('%', '').trim()),
+            status: reading.sensorStatus || 'OK',
+            lastUpdate: `${reading.Date} ${reading.Time}`,
+            factory: reading.工場
+        }));
+        
+        // Calculate highest temperature and average humidity
+        const temperatures = sensors.map(s => s.temperature).filter(t => !isNaN(t));
+        const humidities = sensors.map(s => s.humidity).filter(h => !isNaN(h));
+        const highestTemp = temperatures.length > 0 ? Math.max(...temperatures) : null;
+        const averageTemp = temperatures.length > 0 ? 
+            Math.round(temperatures.reduce((a, b) => a + b, 0) / temperatures.length * 10) / 10 : null;
+        const averageHumidity = humidities.length > 0 ? 
+            Math.round(humidities.reduce((a, b) => a + b, 0) / humidities.length * 10) / 10 : null;
+        
+        const result = {
+            sensors,
+            highestTemp,
+            averageTemp,
+            averageHumidity,
+            sensorCount: sensors.length,
+            hasCurrentDateData: sensors.length > 0,
+            timestamp: Date.now()
+        };
+        
+        // Cache the data
+        sensorDataCache.set(cacheKey, result);
+        console.log(`Sensor data for ${factoryName}:`, result);
+        return result;
+        
+    } catch (error) {
+        console.error(`Error getting sensor data for ${factoryName}:`, error);
+        return {
+            sensors: [],
+            highestTemp: null,
+            averageTemp: null,
+            averageHumidity: null,
+            sensorCount: 0,
+            hasCurrentDateData: false,
+            timestamp: Date.now(),
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Check if factory has any historical sensor data (for showing history button)
+ */
+async function hasHistoricalSensorData(factoryName) {
+    try {
+        // Check for any sensor data in the last 30 days
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        
+        const res = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "submittedDB",
+                collectionName: "tempHumidityDB",
+                query: { 
+                    工場: factoryName,
+                    Date: {
+                        $gte: startDate.toISOString().split("T")[0],
+                        $lte: endDate.toISOString().split("T")[0]
+                    }
+                },
+                limit: 1 // Just need to check if any data exists
+            })
+        });
+        
+        if (!res.ok) {
+            return false;
+        }
+        
+        const data = await res.json();
+        return data && data.length > 0;
+        
+    } catch (error) {
+        console.error(`Error checking historical sensor data for ${factoryName}:`, error);
+        return false;
+    }
+}
 
 /**
  * Fetch factory location and coordinates from database
@@ -370,11 +526,12 @@ async function refreshEnvironmentalData(factoryName) {
         
         // Clear cached data for this factory
         environmentalDataCache.delete(factoryName);
+        sensorDataCache.delete(`sensor_${factoryName}`);
         
         // Refresh the factory cards
         await renderFactoryCards();
         
-        console.log(`Environmental data refreshed for ${factoryName}`);
+        console.log(`Environmental and sensor data refreshed for ${factoryName}`);
         
         // Remove spinning animation
         setTimeout(() => {
@@ -559,6 +716,577 @@ async function initializeSampleFactoryData() {
 }
 
 /**
+ * Fetch sensor history for a specific device
+ */
+async function getSensorHistory(deviceId, page = 1, limit = 10) {
+    console.log(`Fetching history for sensor ${deviceId}, page ${page}`);
+    
+    try {
+        // Calculate date range (last 30 days)
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        
+        const res = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "submittedDB",
+                collectionName: "tempHumidityDB",
+                query: { 
+                    device: deviceId,
+                    Date: {
+                        $gte: startDate.toISOString().split("T")[0],
+                        $lte: endDate.toISOString().split("T")[0]
+                    }
+                },
+                sort: { Date: -1, Time: -1 }, // Latest first
+                skip: (page - 1) * limit,
+                limit: limit
+            })
+        });
+        
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        
+        const history = await res.json();
+        
+        // Sort by datetime (newest first) to ensure proper ordering
+        // since MongoDB string sort on Time field might not work as expected
+        history.sort((a, b) => {
+            const dateTimeA = new Date(`${a.Date} ${a.Time}`);
+            const dateTimeB = new Date(`${b.Date} ${b.Time}`);
+            return dateTimeB - dateTimeA; // Newest first
+        });
+        
+        // Get total count for pagination
+        const countRes = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "submittedDB",
+                collectionName: "tempHumidityDB",
+                query: { 
+                    device: deviceId,
+                    Date: {
+                        $gte: startDate.toISOString().split("T")[0],
+                        $lte: endDate.toISOString().split("T")[0]
+                    }
+                },
+                count: true
+            })
+        });
+        
+        const countData = await countRes.json();
+        const totalCount = countData.count || history.length;
+        
+        return {
+            history: history.map(record => ({
+                date: record.Date,
+                time: record.Time,
+                temperature: parseFloat(record.Temperature.replace('°C', '').trim()),
+                humidity: parseFloat(record.Humidity.replace('%', '').trim()),
+                status: record.sensorStatus || 'OK',
+                factory: record.工場
+            })),
+            pagination: {
+                currentPage: page,
+                totalPages: Math.ceil(totalCount / limit),
+                totalRecords: totalCount,
+                hasNext: page < Math.ceil(totalCount / limit),
+                hasPrevious: page > 1
+            }
+        };
+        
+    } catch (error) {
+        console.error(`Error getting sensor history for ${deviceId}:`, error);
+        return {
+            history: [],
+            pagination: {
+                currentPage: 1,
+                totalPages: 0,
+                totalRecords: 0,
+                hasNext: false,
+                hasPrevious: false
+            },
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Show sensor history modal
+ */
+/**
+ * Show sensor history modal
+ */
+function showSensorHistoryModal(deviceId, factoryName) {
+    const modal = document.createElement('div');
+    modal.id = 'sensorHistoryModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    
+    let currentPage = 1;
+    
+    const formatDateTime = (date, time) => {
+        try {
+            const datetime = new Date(`${date} ${time}`);
+            return datetime.toLocaleString('ja-JP', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        } catch {
+            return `${date} ${time}`;
+        }
+    };
+    
+    const getSensorStatusColor = (status) => {
+        switch (status?.toLowerCase()) {
+            case 'ok': return 'text-green-600 bg-green-100';
+            case 'warning': return 'text-yellow-600 bg-yellow-100';
+            case 'error': 
+            case 'failure': return 'text-red-600 bg-red-100';
+            default: return 'text-gray-600 bg-gray-100';
+        }
+    };
+    
+    const getTempStatusColor = (temp) => {
+        const status = getEnvironmentalStatus(temp, 'temperature');
+        return status.color;
+    };
+    
+    async function loadHistoryPage(page) {
+        const historyContainer = document.getElementById('historyContainer');
+        const paginationContainer = document.getElementById('paginationContainer');
+        
+        historyContainer.innerHTML = '<div class="text-center py-4"><i class="ri-loader-4-line animate-spin text-xl"></i> 読み込み中...</div>';
+        
+        try {
+            const data = await getSensorHistory(deviceId, page);
+            
+            if (data.error) {
+                historyContainer.innerHTML = `<div class="text-center py-4 text-red-600">エラー: ${data.error}</div>`;
+                return;
+            }
+            
+            if (data.history.length === 0) {
+                historyContainer.innerHTML = '<div class="text-center py-4 text-gray-500">履歴データがありません</div>';
+                return;
+            }
+            
+            historyContainer.innerHTML = `
+                <div class="space-y-2">
+                    ${data.history.map((record, index) => `
+                        <div class="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="text-sm font-medium text-gray-900">
+                                    ${formatDateTime(record.date, record.time)}
+                                </div>
+                                <span class="px-2 py-1 rounded-full text-xs font-medium ${getSensorStatusColor(record.status)}">
+                                    ${record.status}
+                                </span>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="text-center p-2 bg-orange-50 rounded">
+                                    <div class="flex items-center justify-center mb-1">
+                                        <i class="ri-temp-hot-line text-orange-600 mr-1"></i>
+                                    </div>
+                                    <div class="text-sm font-bold ${getTempStatusColor(record.temperature)}">${record.temperature}°C</div>
+                                    <div class="text-xs text-gray-600">温度</div>
+                                </div>
+                                
+                                <div class="text-center p-2 bg-blue-50 rounded">
+                                    <div class="flex items-center justify-center mb-1">
+                                        <i class="ri-drop-line text-blue-600 mr-1"></i>
+                                    </div>
+                                    <div class="text-sm font-bold text-blue-600">${record.humidity}%</div>
+                                    <div class="text-xs text-gray-600">湿度</div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            
+            // Update pagination
+            const { pagination } = data;
+            if (pagination.totalPages > 1) {
+                paginationContainer.innerHTML = `
+                    <div class="flex items-center justify-between mt-4 pt-4 border-t">
+                        <div class="text-sm text-gray-600">
+                            ${pagination.totalRecords}件中 ${(pagination.currentPage - 1) * 10 + 1}-${Math.min(pagination.currentPage * 10, pagination.totalRecords)}件
+                        </div>
+                        <div class="flex space-x-2">
+                            <button 
+                                onclick="loadHistoryPage(${pagination.currentPage - 1})"
+                                ${!pagination.hasPrevious ? 'disabled' : ''}
+                                class="px-3 py-1 text-sm border rounded ${pagination.hasPrevious ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}"
+                            >
+                                前へ
+                            </button>
+                            <span class="px-3 py-1 text-sm">
+                                ${pagination.currentPage} / ${pagination.totalPages}
+                            </span>
+                            <button 
+                                onclick="loadHistoryPage(${pagination.currentPage + 1})"
+                                ${!pagination.hasNext ? 'disabled' : ''}
+                                class="px-3 py-1 text-sm border rounded ${pagination.hasNext ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}"
+                            >
+                                次へ
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                paginationContainer.innerHTML = '';
+            }
+            
+            currentPage = page;
+            
+        } catch (error) {
+            historyContainer.innerHTML = `<div class="text-center py-4 text-red-600">エラーが発生しました: ${error.message}</div>`;
+        }
+    }
+    
+    // Make loadHistoryPage available globally for pagination buttons
+    window.loadHistoryPage = loadHistoryPage;
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="text-lg font-semibold">センサー履歴</h3>
+                        <p class="text-sm text-gray-600">${factoryName} - ${deviceId}</p>
+                    </div>
+                    <button onclick="closeSensorHistoryModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6 overflow-y-auto" style="max-height: calc(90vh - 120px);">
+                <div id="historyContainer">
+                    <!-- History will be loaded here -->
+                </div>
+                <div id="paginationContainer">
+                    <!-- Pagination will be loaded here -->
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Load first page
+    loadHistoryPage(1);
+}
+
+/**
+ * Close sensor history modal
+ */
+window.closeSensorHistoryModal = function() {
+    const modal = document.getElementById('sensorHistoryModal');
+    if (modal) {
+        modal.remove();
+    }
+    // Clean up global function
+    if (window.loadHistoryPage) {
+        delete window.loadHistoryPage;
+    }
+};
+
+/**
+ * Show factory sensor history modal (for all sensors in factory)
+ */
+async function showFactorySensorHistoryModal(factoryName) {
+    const modal = document.createElement('div');
+    modal.id = 'factorySensorHistoryModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="text-lg font-semibold">温度履歴</h3>
+                        <p class="text-sm text-gray-600">${factoryName} - 全センサー</p>
+                    </div>
+                    <button onclick="closeFactorySensorHistoryModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6">
+                <div class="text-center py-4">
+                    <i class="ri-loader-4-line animate-spin text-xl"></i>
+                    <p class="text-gray-500 mt-2">センサーデータを読み込み中...</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    try {
+        // Get unique sensors for this factory from last 30 days
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        
+        const res = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "submittedDB",
+                collectionName: "tempHumidityDB",
+                aggregation: [
+                    {
+                        $match: {
+                            工場: factoryName,
+                            Date: {
+                                $gte: startDate.toISOString().split("T")[0],
+                                $lte: endDate.toISOString().split("T")[0]
+                            }
+                        }
+                    },
+                    {
+                        $group: {
+                            _id: "$device",
+                            latestReading: { $last: "$$ROOT" },
+                            count: { $sum: 1 }
+                        }
+                    }
+                ]
+            })
+        });
+        
+        const sensors = await res.json();
+        
+        if (!sensors || sensors.length === 0) {
+            modal.querySelector('.p-6').innerHTML = `
+                <div class="text-center py-8">
+                    <i class="ri-sensor-line text-4xl text-gray-300 mb-4"></i>
+                    <p class="text-gray-500">過去30日間にセンサーデータがありません</p>
+                </div>
+            `;
+            return;
+        }
+        
+        modal.querySelector('.p-6').innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                ${sensors.map(sensor => `
+                    <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
+                         onclick="event.stopPropagation(); closeFactorySensorHistoryModal(); showSensorHistoryModal('${sensor._id}', '${factoryName}')">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <h4 class="font-semibold text-gray-900">センサー</h4>
+                                <p class="text-xs text-gray-500 font-mono">${sensor._id}</p>
+                            </div>
+                            <span class="px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-medium">
+                                ${sensor.count}件
+                            </span>
+                        </div>
+                        
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <div class="text-sm font-bold text-gray-700">
+                                ${parseFloat(sensor.latestReading.Temperature.replace('°C', '').trim())}°C
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">最新温度</div>
+                        </div>
+                        
+                        <div class="text-xs text-blue-600 text-center mt-3">
+                            <i class="ri-history-line mr-1"></i>
+                            クリックして詳細履歴表示
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            
+            <div class="mt-6 text-xs text-gray-500 text-center">
+                過去30日間のセンサーデータ
+            </div>
+        `;
+        
+    } catch (error) {
+        console.error('Error loading factory sensor data:', error);
+        modal.querySelector('.p-6').innerHTML = `
+            <div class="text-center py-8">
+                <i class="ri-error-warning-line text-4xl text-red-300 mb-4"></i>
+                <p class="text-red-500">データの読み込みに失敗しました</p>
+                <p class="text-sm text-gray-500 mt-2">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Close factory sensor history modal
+ */
+window.closeFactorySensorHistoryModal = function() {
+    const modal = document.getElementById('factorySensorHistoryModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+window.showSensorModalForFactory = async function(factoryName) {
+    try {
+        const sensorData = await getSensorData(factoryName);
+        showSensorModal(factoryName, sensorData);
+    } catch (error) {
+        console.error('Error showing sensor modal:', error);
+        alert('センサーデータの取得に失敗しました');
+    }
+};
+
+/**
+ * Show detailed sensor modal
+ */
+function showSensorModal(factoryName, sensorData) {
+    const modal = document.createElement('div');
+    modal.id = 'sensorModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    
+    const formatTime = (datetime) => {
+        try {
+            const date = new Date(datetime);
+            return date.toLocaleString('ja-JP', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        } catch {
+            return datetime;
+        }
+    };
+    
+    const getSensorStatusColor = (status) => {
+        switch (status?.toLowerCase()) {
+            case 'ok': return 'text-green-600 bg-green-100';
+            case 'warning': return 'text-yellow-600 bg-yellow-100';
+            case 'error': return 'text-red-600 bg-red-100';
+            case 'failure': return 'text-red-600 bg-red-100';
+            default: return 'text-gray-600 bg-gray-100';
+        }
+    };
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-lg font-semibold">${factoryName} - 物理センサー詳細</h3>
+                    <button onclick="closeSensorModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6 overflow-y-auto" style="max-height: calc(90vh - 120px);">
+                ${sensorData.sensors.length === 0 ? `
+                    <div class="text-center py-8">
+                        <i class="ri-sensor-line text-4xl text-gray-300 mb-4"></i>
+                        <p class="text-gray-500">このファクトリーにはセンサーデータがありません</p>
+                    </div>
+                ` : `
+                    <!-- Summary Stats -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div class="bg-blue-50 p-4 rounded-lg text-center">
+                            <div class="text-2xl font-bold text-blue-600">${sensorData.sensorCount}</div>
+                            <div class="text-sm text-blue-600">アクティブセンサー</div>
+                        </div>
+                        <div class="bg-red-50 p-4 rounded-lg text-center">
+                            <div class="text-2xl font-bold text-red-600">
+                                ${sensorData.highestTemp ? sensorData.highestTemp + '°C' : 'N/A'}
+                            </div>
+                            <div class="text-sm text-red-600">最高温度</div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg text-center">
+                            <div class="text-2xl font-bold text-green-600">
+                                ${sensorData.averageHumidity ? sensorData.averageHumidity + '%' : 'N/A'}
+                            </div>
+                            <div class="text-sm text-green-600">平均湿度</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Sensor List -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${sensorData.sensors.map(sensor => `
+                            <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
+                                 onclick="showSensorHistoryModal('${sensor.deviceId}', '${factoryName}')">
+                                <div class="flex justify-between items-start mb-3">
+                                    <div>
+                                        <h4 class="font-semibold text-gray-900">センサー</h4>
+                                        <p class="text-xs text-gray-500 font-mono">${sensor.deviceId}</p>
+                                    </div>
+                                    <span class="px-2 py-1 rounded-full text-xs font-medium ${getSensorStatusColor(sensor.status)}">
+                                        ${sensor.status}
+                                    </span>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 gap-4 mb-3">
+                                    <div class="text-center p-3 bg-orange-50 rounded">
+                                        <div class="flex items-center justify-center mb-1">
+                                            <i class="ri-temp-hot-line text-orange-600 mr-1"></i>
+                                        </div>
+                                        <div class="text-lg font-bold text-orange-600">${sensor.temperature}°C</div>
+                                        <div class="text-xs text-gray-600">温度</div>
+                                    </div>
+                                    
+                                    <div class="text-center p-3 bg-blue-50 rounded">
+                                        <div class="flex items-center justify-center mb-1">
+                                            <i class="ri-drop-line text-blue-600 mr-1"></i>
+                                        </div>
+                                        <div class="text-lg font-bold text-blue-600">${sensor.humidity}%</div>
+                                        <div class="text-xs text-gray-600">湿度</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="text-xs text-gray-500 text-center">
+                                    <i class="ri-time-line mr-1"></i>
+                                    最終更新: ${formatTime(sensor.lastUpdate)}
+                                </div>
+                                
+                                <div class="text-xs text-blue-600 text-center mt-2">
+                                    <i class="ri-history-line mr-1"></i>
+                                    クリックして履歴表示
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-6 text-xs text-gray-500 text-center">
+                        センサーデータは15分間隔で更新されます
+                    </div>
+                `}
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+/**
+ * Close sensor modal
+ */
+window.closeSensorModal = function() {
+    const modal = document.getElementById('sensorModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+/**
+ * Show detailed sensor modal (window function)
+ */
+window.showSensorModal = showSensorModal;
+
+/**
  * Test function for environmental data (for debugging)
  */
 async function testEnvironmentalData() {
@@ -566,8 +1294,10 @@ async function testEnvironmentalData() {
     
     const testFactory = "第一工場";
     const envData = await getEnvironmentalData(testFactory);
+    const sensorData = await getSensorData(testFactory);
     
     console.log(`Environmental data for ${testFactory}:`, envData);
+    console.log(`Sensor data for ${testFactory}:`, sensorData);
     
     const tempStatus = getEnvironmentalStatus(envData.temperature, 'temperature');
     const humidityStatus = getEnvironmentalStatus(envData.humidity, 'humidity');
@@ -576,8 +1306,107 @@ async function testEnvironmentalData() {
     console.log("Status checks:", { tempStatus, humidityStatus, co2Status });
 }
 
-// Make test function available globally for debugging
+/**
+ * Test function for sensor data specifically
+ */
+async function testSensorData() {
+    console.log("Testing sensor data functionality...");
+    
+    const factoryNames = ["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"];
+    
+    for (const factory of factoryNames) {
+        const sensorData = await getSensorData(factory);
+        console.log(`Sensor data for ${factory}:`, sensorData);
+        
+        if (sensorData.sensorCount > 0) {
+            console.log(`  - ${sensorData.sensorCount} sensors`);
+            console.log(`  - Highest temp: ${sensorData.highestTemp}°C`);
+            console.log(`  - Average humidity: ${sensorData.averageHumidity}%`);
+        }
+    }
+}
+
+/**
+ * Test function for sensor history
+ */
+async function testSensorHistory() {
+    console.log("Testing sensor history functionality...");
+    
+    // Test with a sample device ID
+    const testDeviceId = "84:1F:E8:1A:D1:44";
+    
+    try {
+        const historyData = await getSensorHistory(testDeviceId, 1);
+        console.log(`History data for ${testDeviceId}:`, historyData);
+        
+        if (historyData.history.length > 0) {
+            console.log(`  - ${historyData.history.length} records found`);
+            console.log(`  - Pagination: ${historyData.pagination.currentPage}/${historyData.pagination.totalPages}`);
+        }
+    } catch (error) {
+        console.error("Error testing sensor history:", error);
+    }
+}
+
+// Make test functions available globally for debugging
 window.testEnvironmentalData = testEnvironmentalData;
+window.testSensorData = testSensorData;
+
+/**
+ * Test function for current date sensor logic
+ */
+async function testCurrentDateSensorLogic() {
+    console.log("=== Testing Current Date Sensor Logic ===");
+    console.log(`Today's date: ${new Date().toISOString().split("T")[0]}`);
+    
+    const testFactories = ["第一工場", "第二工場", "肥田瀬"];
+    
+    for (const factory of testFactories) {
+        console.log(`\n--- Testing ${factory} ---`);
+        
+        try {
+            const sensorData = await getSensorData(factory);
+            const hasHistorical = await hasHistoricalSensorData(factory);
+            
+            console.log(`Sensor data for ${factory}:`, {
+                sensorCount: sensorData.sensorCount,
+                hasCurrentDateData: sensorData.hasCurrentDateData,
+                highestTemp: sensorData.highestTemp,
+                averageHumidity: sensorData.averageHumidity,
+                hasHistoricalData: hasHistorical
+            });
+            
+            if (sensorData.hasCurrentDateData) {
+                console.log(`✅ ${factory} has current date data - will show sensor display`);
+            } else if (hasHistorical) {
+                console.log(`⏱️ ${factory} has no current data but has historical - will show history button`);
+            } else {
+                console.log(`❌ ${factory} has no sensor data at all - will show 'no sensors' message`);
+            }
+            
+            if (sensorData.sensors.length > 0) {
+                console.log(`Sample sensor readings from ${factory}:`, 
+                    sensorData.sensors.slice(0, 2).map(s => ({
+                        device: s.deviceId,
+                        temp: s.temperature,
+                        humidity: s.humidity,
+                        lastUpdate: s.lastUpdate
+                    }))
+                );
+            }
+            
+        } catch (error) {
+            console.error(`Error testing ${factory}:`, error);
+        }
+    }
+}
+
+// Make test functions available globally for debugging
+window.testEnvironmentalData = testEnvironmentalData;
+window.testSensorData = testSensorData;
+window.testSensorHistory = testSensorHistory;
+window.showFactorySensorHistoryModal = showFactorySensorHistoryModal;
+window.testCurrentDateSensorLogic = testCurrentDateSensorLogic;
 
 /**
  * Manually update factory coordinates in database (for debugging/admin use)
@@ -780,8 +1609,12 @@ async function renderFactoryCards() {
   
         const data = await res.json();
         
-        // Fetch environmental data
-        const envData = await getEnvironmentalData(factory);
+        // Fetch environmental data and sensor data
+        const [envData, sensorData, hasHistoricalData] = await Promise.all([
+          getEnvironmentalData(factory),
+          getSensorData(factory),
+          hasHistoricalSensorData(factory)
+        ]);
   
         const total = data.reduce((sum, item) => sum + (item.Process_Quantity ?? 0), 0);
         const totalNG = data.reduce((sum, item) => sum + (item.Total_NG ?? 0), 0);
@@ -808,6 +1641,10 @@ async function renderFactoryCards() {
         const tempStatus = getEnvironmentalStatus(envData.temperature, 'temperature');
         const humidityStatus = getEnvironmentalStatus(envData.humidity, 'humidity');
         const co2Status = getEnvironmentalStatus(envData.co2, 'co2');
+        
+        // Get sensor temperature status if sensors exist
+        const sensorTempStatus = sensorData.highestTemp !== null ? 
+          getEnvironmentalStatus(sensorData.highestTemp, 'temperature') : null;
   
         const isClickable = role !== "member"; // All roles except member can click
         return `
@@ -832,7 +1669,7 @@ async function renderFactoryCards() {
             </div>
 
             <!-- Environmental Data -->
-            <div class="space-y-2">
+            <div class="space-y-3">
               <div class="flex items-center justify-between">
                 <h5 class="text-sm font-semibold text-gray-700" data-i18n="environmentalData">環境データ</h5>
                 <button 
@@ -844,6 +1681,7 @@ async function renderFactoryCards() {
                 </button>
               </div>
               
+              <!-- Weather-based Environmental Data -->
               <div class="grid grid-cols-3 gap-2 text-xs">
                 <div class="text-center p-2 rounded ${tempStatus.bgColor}" title="${tempStatus.message} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('temperatureRange') : '18-26°C'})">
                   <div class="flex items-center justify-center mb-1">
@@ -851,7 +1689,7 @@ async function renderFactoryCards() {
                     ${tempStatus.status !== 'normal' ? `<i class="${tempStatus.icon} text-xs ml-1"></i>` : ''}
                   </div>
                   <div class="font-semibold ${tempStatus.color}">${envData.temperature}°C</div>
-                  <div class="text-gray-600" data-i18n="temperature">温度</div>
+                  <div class="text-gray-600" data-i18n="temperature">気温</div>
                 </div>
                 
                 <div class="text-center p-2 rounded ${humidityStatus.bgColor}" title="${humidityStatus.message} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('humidityRange') : '40-60%'})">
@@ -860,7 +1698,7 @@ async function renderFactoryCards() {
                     ${humidityStatus.status !== 'normal' ? `<i class="${humidityStatus.icon} text-xs ml-1"></i>` : ''}
                   </div>
                   <div class="font-semibold ${humidityStatus.color}">${envData.humidity}%</div>
-                  <div class="text-gray-600" data-i18n="humidity">湿度</div>
+                  <div class="text-gray-600" data-i18n="humidity">外気湿度</div>
                 </div>
                 
                 <div class="text-center p-2 rounded ${co2Status.bgColor}" title="${co2Status.message} (${window.t ? window.t('co2Standard') : '<1000ppm'})">
@@ -874,12 +1712,82 @@ async function renderFactoryCards() {
               </div>
               
               ${envData.isDefault ? 
-                `<div class="text-xs text-gray-500 mt-2 text-center" data-i18n="simulatedData">※ 模擬データ</div>` : 
-                `<div class="text-xs text-gray-500 mt-2 text-center">
+                `<div class="text-xs text-gray-500 text-center">※ 環境データ（模擬）</div>` : 
+                `<div class="text-xs text-gray-500 text-center">
                   <span data-i18n="lastUpdated">更新</span>: ${new Date(envData.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
                   ${envData.coordinateSource ? ` • ${envData.coordinateSource === 'geotag' ? '🎯' : envData.coordinateSource === 'coordinates' ? '📍' : '🌐'}` : ''}
                 </div>`
               }
+              
+              <!-- Physical Sensor Data -->
+              ${sensorData.hasCurrentDateData ? `
+                <div class="border-t pt-3 mt-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <h6 class="text-xs font-semibold text-gray-700">物理センサー</h6>
+                    <span class="text-xs text-gray-500">${sensorData.sensorCount}台</span>
+                  </div>
+                  
+                  <div 
+                    class="cursor-pointer p-2 rounded border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all"
+                    onclick="event.stopPropagation(); showSensorModalForFactory('${factory}')"
+                  >
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                      <div class="text-center p-2 rounded ${sensorTempStatus ? sensorTempStatus.bgColor : 'bg-gray-100'}" 
+                           title="${sensorTempStatus ? sensorTempStatus.message : ''} (適正範囲: 18-26°C)">
+                        <div class="flex items-center justify-center mb-1">
+                          <i class="ri-temp-hot-line mr-1"></i>
+                          ${sensorTempStatus && sensorTempStatus.status !== 'normal' ? `<i class="${sensorTempStatus.icon} text-xs ml-1"></i>` : ''}
+                        </div>
+                        <div class="font-semibold ${sensorTempStatus ? sensorTempStatus.color : 'text-gray-600'}">
+                          ${sensorData.highestTemp !== null ? sensorData.highestTemp + '°C' : 'N/A'}
+                        </div>
+                        <div class="text-gray-500">最高温度</div>
+                      </div>
+                      
+                      <div class="text-center p-2 rounded bg-blue-50">
+                        <div class="flex items-center justify-center mb-1">
+                          <i class="ri-drop-line mr-1"></i>
+                        </div>
+                        <div class="font-semibold text-blue-600">
+                          ${sensorData.averageHumidity !== null ? sensorData.averageHumidity + '%' : 'N/A'}
+                        </div>
+                        <div class="text-gray-500">平均湿度</div>
+                      </div>
+                    </div>
+                    
+                    <div class="text-center mt-2">
+                      <i class="ri-eye-line text-gray-400"></i>
+                      <span class="text-xs text-gray-500 ml-1">詳細表示</span>
+                    </div>
+                  </div>
+                  
+                  <div class="text-xs text-gray-500 text-center mt-1">
+                    最終更新: ${new Date(sensorData.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              ` : hasHistoricalData ? `
+                <div class="border-t pt-3 mt-3">
+                  <div class="text-center">
+                    <button 
+                      class="w-full p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all cursor-pointer"
+                      onclick="event.stopPropagation(); showFactorySensorHistoryModal('${factory}')"
+                    >
+                      <div class="flex items-center justify-center text-blue-600 mb-1">
+                        <i class="ri-history-line text-lg mr-2"></i>
+                      </div>
+                      <div class="text-sm font-medium text-blue-600">温度履歴</div>
+                      <div class="text-xs text-gray-500 mt-1">本日のデータなし - 履歴を表示</div>
+                    </button>
+                  </div>
+                </div>
+              ` : `
+                <div class="border-t pt-3 mt-3">
+                  <div class="text-center p-3 text-gray-400">
+                    <i class="ri-sensor-line text-lg mb-1 block"></i>
+                    <div class="text-xs">センサーデータなし</div>
+                  </div>
+                </div>
+              `}
             </div>
           </div>
         `;

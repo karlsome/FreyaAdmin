@@ -50,6 +50,19 @@
     transition: transform 0.2s ease;
 }
 
+.refresh-btn.spinning {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .refresh-btn:hover {
     transform: rotate(180deg);
 }
@@ -142,4 +155,67 @@
 .defect-rate-high {
     background-color: #fee2e2;
     color: #991b1b;
+}
+
+/* Sensor display styling */
+.sensor-display {
+    transition: all 0.2s ease;
+}
+
+.sensor-display:hover {
+    transform: translateY(-2px);
+}
+
+.sensor-card {
+    transition: all 0.2s ease;
+}
+
+.sensor-card:hover {
+    border-color: #3b82f6;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Modal improvements */
+.sensor-modal {
+    backdrop-filter: blur(4px);
+}
+
+/* Sensor status indicators */
+.sensor-status-ok {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.sensor-status-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
+.sensor-status-error {
+    background-color: #fee2e2;
+    color: #991b1b;
+}
+
+/* Loading animation for sensor history */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+/* Sensor history modal improvements */
+.sensor-history-card {
+    transition: all 0.2s ease;
+}
+
+.sensor-history-card:hover {
+    background-color: #f9fafb;
+    border-color: #3b82f6;
 }
