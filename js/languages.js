@@ -269,6 +269,13 @@ const translations = {
       previous: "Previous",
       next: "Next",
       dataUpdatesEvery15Min: "Sensor data is updated every 15 minutes",
+      
+      // WBGT (Wet Bulb Globe Temperature)
+      wbgt: "WBGT",
+      extremeHeat: "Extreme Heat",
+      dangerousHeat: "Dangerous Heat", 
+      heatCaution: "Heat Caution",
+      safe: "Safe",
     },
     ja: {
       // Navigation
@@ -539,6 +546,13 @@ const translations = {
       previous: "前へ",
       next: "次へ",
       dataUpdatesEvery15Min: "センサーデータは15分間隔で更新されます",
+      
+      // WBGT (湿球黒球温度)
+      wbgt: "WBGT",
+      extremeHeat: "極度高温",
+      dangerousHeat: "高温危険",
+      heatCaution: "高温注意", 
+      safe: "安全",
     }
   };
 

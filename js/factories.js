@@ -85,6 +85,7 @@ async function getSensorData(factoryName) {
                 highestTemp: null,
                 averageTemp: null,
                 averageHumidity: null,
+                wbgt: null,
                 hasCurrentDateData: false,
                 timestamp: Date.now()
             };
@@ -120,11 +121,25 @@ async function getSensorData(factoryName) {
         const averageHumidity = humidities.length > 0 ? 
             Math.round(humidities.reduce((a, b) => a + b, 0) / humidities.length * 10) / 10 : null;
         
+        // Calculate WBGT for each sensor and find the highest WBGT value
+        // This represents the most critical heat stress condition in the factory
+        let wbgtValue = null;
+        if (sensors.length > 0) {
+            const wbgtValues = sensors.map(sensor => 
+                calculateWBGT(sensor.temperature, sensor.humidity)
+            ).filter(wbgt => wbgt !== null);
+            
+            if (wbgtValues.length > 0) {
+                wbgtValue = Math.max(...wbgtValues); // Use the highest WBGT as it represents the worst case
+            }
+        }
+        
         const result = {
             sensors,
             highestTemp,
             averageTemp,
             averageHumidity,
+            wbgt: wbgtValue,
             sensorCount: sensors.length,
             hasCurrentDateData: sensors.length > 0,
             timestamp: Date.now()
@@ -142,6 +157,7 @@ async function getSensorData(factoryName) {
             highestTemp: null,
             averageTemp: null,
             averageHumidity: null,
+            wbgt: null,
             sensorCount: 0,
             hasCurrentDateData: false,
             timestamp: Date.now(),
@@ -421,6 +437,95 @@ function getDefaultEnvironmentalData() {
         timestamp: Date.now(),
         isDefault: true
     };
+}
+
+/**
+ * Calculate WBGT (Wet Bulb Globe Temperature) from temperature and humidity
+ * This is an indoor WBGT calculation using actual physical sensor readings
+ * Formula: WBGT = 0.7 × Twb + 0.3 × Tdb (for indoor environments without solar radiation)
+ * Where Twb = wet bulb temperature, Tdb = dry bulb temperature
+ */
+function calculateWBGT(temperature, humidity) {
+    try {
+        if (temperature === null || humidity === null || isNaN(temperature) || isNaN(humidity)) {
+            return null;
+        }
+        
+        const T = parseFloat(temperature); // Dry bulb temperature (°C)
+        const RH = parseFloat(humidity); // Relative humidity (%)
+        
+        // Validate inputs
+        if (T < -50 || T > 60 || RH < 0 || RH > 100) {
+            return null;
+        }
+        
+        // Calculate wet bulb temperature using Stull approximation (2011)
+        // This is a more accurate formula for psychrometric calculations
+        const Tw = T * Math.atan(0.151977 * Math.sqrt(RH + 8.313659)) +
+                   Math.atan(T + RH) -
+                   Math.atan(RH - 1.676331) +
+                   0.00391838 * Math.pow(RH, 1.5) * Math.atan(0.023101 * RH) -
+                   4.686035;
+        
+        // For indoor environments (no solar radiation): WBGT = 0.7 × Twb + 0.3 × Tdb
+        const WBGT = 0.7 * Tw + 0.3 * T;
+        
+        return Math.round(WBGT * 10) / 10; // Round to 1 decimal place
+        
+    } catch (error) {
+        console.error('Error calculating WBGT:', error);
+        return null;
+    }
+}
+
+/**
+ * Get WBGT status and color coding based on occupational health guidelines
+ */
+function getWBGTStatus(wbgt) {
+    if (wbgt === null || isNaN(wbgt)) {
+        return { 
+            status: 'unknown', 
+            color: 'text-gray-600', 
+            bgColor: 'bg-gray-100',
+            icon: 'ri-question-line',
+            message: 'N/A'
+        };
+    }
+    
+    // WBGT thresholds for occupational health (°C)
+    if (wbgt >= 32) {
+        return { 
+            status: 'extreme', 
+            color: 'text-red-700', 
+            bgColor: 'bg-red-200',
+            icon: 'ri-alert-fill',
+            message: window.t ? window.t('extremeHeat') : '極度高温'
+        };
+    } else if (wbgt >= 28) {
+        return { 
+            status: 'danger', 
+            color: 'text-red-600', 
+            bgColor: 'bg-red-100',
+            icon: 'ri-error-warning-fill',
+            message: window.t ? window.t('dangerousHeat') : '高温危険'
+        };
+    } else if (wbgt >= 25) {
+        return { 
+            status: 'caution', 
+            color: 'text-yellow-600', 
+            bgColor: 'bg-yellow-100',
+            icon: 'ri-alert-line',
+            message: window.t ? window.t('heatCaution') : '高温注意'
+        };
+    } else {
+        return { 
+            status: 'safe', 
+            color: 'text-green-600', 
+            bgColor: 'bg-green-100',
+            icon: 'ri-check-line',
+            message: window.t ? window.t('safe') : '安全'
+        };
+    }
 }
 
 /**
@@ -1764,7 +1869,7 @@ async function renderFactoryCards() {
                     class="cursor-pointer p-2 rounded border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all"
                     onclick="event.stopPropagation(); showSensorModalForFactory('${factory}')"
                   >
-                    <div class="grid grid-cols-2 gap-3 text-xs">
+                    <div class="grid grid-cols-3 gap-2 text-xs">
                       <div class="text-center p-2 rounded ${sensorTempStatus ? sensorTempStatus.bgColor : 'bg-gray-100'}" 
                            title="${sensorTempStatus ? sensorTempStatus.message : ''} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('temperatureRange') : '18-26°C'})">
                         <div class="flex items-center justify-center mb-1">
@@ -1785,6 +1890,18 @@ async function renderFactoryCards() {
                           ${sensorData.averageHumidity !== null ? sensorData.averageHumidity + '%' : 'N/A'}
                         </div>
                         <div class="text-gray-500" data-i18n="averageHumidity">平均湿度</div>
+                      </div>
+                      
+                      <div class="text-center p-2 rounded ${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).bgColor : 'bg-gray-100'}"
+                           title="${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).message : 'N/A'} (WBGT: Wet Bulb Globe Temperature)">
+                        <div class="flex items-center justify-center mb-1">
+                          <i class="ri-temp-cold-line mr-1"></i>
+                          ${sensorData.wbgt !== null && getWBGTStatus(sensorData.wbgt).status !== 'safe' ? `<i class="${getWBGTStatus(sensorData.wbgt).icon} text-xs ml-1"></i>` : ''}
+                        </div>
+                        <div class="font-semibold ${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).color : 'text-gray-600'}">
+                          ${sensorData.wbgt !== null ? sensorData.wbgt + '°C' : 'N/A'}
+                        </div>
+                        <div class="text-gray-500" data-i18n="wbgt">WBGT</div>
                       </div>
                     </div>
                     
