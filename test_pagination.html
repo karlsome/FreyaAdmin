@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>センサー履歴ページネーションテスト</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto p-6">
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <h1 class="text-2xl font-bold text-gray-900 mb-6">センサー履歴ページネーションテスト</h1>
+            
+            <!-- Controls -->
+            <div class="mb-6 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">センサーID</label>
+                        <input type="text" id="deviceId" value="84:1F:E8:1A:D1:44" 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">工場名</label>
+                        <input type="text" id="factoryName" value="第二工場" 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">表示件数</label>
+                        <select id="itemsPerPage" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="10">10件</option>
+                            <option value="15" selected>15件</option>
+                            <option value="25">25件</option>
+                            <option value="50">50件</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="flex space-x-3">
+                    <button onclick="testSensorPagination()" 
+                            class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600">
+                        センサー履歴を読み込み
+                    </button>
+                    <button onclick="testModalPagination()" 
+                            class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600">
+                        モーダルで表示
+                    </button>
+                    <button onclick="testBulkApprovalPagination()" 
+                            class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600">
+                        承認データテスト
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Results -->
+            <div class="space-y-4">
+                <div id="loadingIndicator" class="hidden text-center py-8">
+                    <i class="ri-loader-4-line animate-spin text-3xl text-blue-500 mb-4"></i>
+                    <div class="text-gray-600">データを読み込み中...</div>
+                </div>
+                
+                <div id="errorMessage" class="hidden bg-red-50 border border-red-200 rounded-md p-4">
+                    <div class="flex">
+                        <i class="ri-error-warning-line text-red-400 mt-0.5 mr-3"></i>
+                        <div>
+                            <h3 class="text-sm font-medium text-red-800">エラーが発生しました</h3>
+                            <div id="errorDetails" class="text-sm text-red-700 mt-1"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="resultsContainer" class="space-y-4"></div>
+                <div id="paginationContainer" class="border-t pt-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include the pagination utilities -->
+    <script>
+        // Mock BASE_URL for testing
+        window.BASE_URL = 'http://localhost:3000/';
+        
+        let currentPaginationManager = null;
+        
+        // Test sensor pagination
+        async function testSensorPagination() {
+            const deviceId = document.getElementById('deviceId').value;
+            const factoryName = document.getElementById('factoryName').value;
+            const limit = parseInt(document.getElementById('itemsPerPage').value);
+            
+            if (!deviceId) {
+                showError('センサーIDを入力してください');
+                return;
+            }
+            
+            // Initialize pagination manager
+            currentPaginationManager = new PaginationManager({
+                defaultPageSize: limit,
+                onDataLoad: (result) => {
+                    displaySensorData(result.data, result.pagination);
+                    displayPagination(result.pagination);
+                },
+                onError: (error) => {
+                    showError(error.message);
+                },
+                onLoadingStart: () => {
+                    showLoading();
+                },
+                onLoadingEnd: () => {
+                    hideLoading();
+                }
+            });
+            
+            // Make pagination manager globally available
+            window.paginationManager = currentPaginationManager;
+            
+            try {
+                await currentPaginationManager.loadData({
+                    useSpecializedApi: 'sensor-history',
+                    deviceId: deviceId,
+                    factoryName: factoryName || null,
+                    page: 1,
+                    limit: limit
+                });
+            } catch (error) {
+                showError(`API呼び出しエラー: ${error.message}`);
+            }
+        }
+        
+        // Test modal pagination (simulate existing modal)
+        function testModalPagination() {
+            const deviceId = document.getElementById('deviceId').value;
+            const factoryName = document.getElementById('factoryName').value;
+            
+            if (!deviceId) {
+                showError('センサーIDを入力してください');
+                return;
+            }
+            
+            // This would call the existing showSensorHistoryModal function
+            if (typeof showSensorHistoryModal === 'function') {
+                showSensorHistoryModal(deviceId, factoryName);
+            } else {
+                alert('showSensorHistoryModal関数が見つかりません。factories.jsを読み込んでください。');
+            }
+        }
+        
+        // Test approval data pagination
+        async function testBulkApprovalPagination() {
+            // This would test the approval pagination system
+            const approvalManager = new PaginationManager({
+                defaultPageSize: 15,
+                onDataLoad: (result) => {
+                    displayApprovalData(result.data, result.pagination);
+                    displayPagination(result.pagination);
+                },
+                onError: (error) => {
+                    showError(error.message);
+                },
+                onLoadingStart: () => {
+                    showLoading();
+                },
+                onLoadingEnd: () => {
+                    hideLoading();
+                }
+            });
+            
+            window.paginationManager = approvalManager;
+            
+            try {
+                await approvalManager.loadData({
+                    useSpecializedApi: 'approval-paginate',
+                    collectionName: 'kensaDB',
+                    query: { Date: new Date().toISOString().split('T')[0] },
+                    userRole: 'admin',
+                    page: 1,
+                    limit: 15
+                });
+            } catch (error) {
+                showError(`承認データAPI呼び出しエラー: ${error.message}`);
+            }
+        }
+        
+        function displaySensorData(data, pagination) {
+            const container = document.getElementById('resultsContainer');
+            
+            if (data.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <i class="ri-database-line text-3xl mb-2 opacity-50"></i>
+                        <div>データがありません</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            const html = `
+                <div class="bg-white rounded-lg border">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900">
+                            センサーデータ (${pagination.totalRecords}件中 ${pagination.startIndex}-${pagination.endIndex}件を表示)
+                        </h3>
+                    </div>
+                    <div class="p-6 space-y-3">
+                        ${data.map((record, index) => `
+                            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                                <div class="flex justify-between items-start mb-3">
+                                    <div class="text-sm font-medium text-gray-900">
+                                        ${record.date} ${record.time}
+                                    </div>
+                                    <span class="px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(record.status)}">
+                                        ${record.status}
+                                    </span>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div class="text-center p-3 bg-gradient-to-br from-orange-50 to-red-50 rounded-lg">
+                                        <div class="flex items-center justify-center mb-2">
+                                            <i class="ri-temp-hot-line text-orange-600 text-lg mr-1"></i>
+                                            <span class="text-xs text-orange-700 font-medium">温度</span>
+                                        </div>
+                                        <div class="text-lg font-bold text-orange-600">${record.temperature}°C</div>
+                                    </div>
+                                    
+                                    <div class="text-center p-3 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg">
+                                        <div class="flex items-center justify-center mb-2">
+                                            <i class="ri-drop-line text-blue-600 text-lg mr-1"></i>
+                                            <span class="text-xs text-blue-700 font-medium">湿度</span>
+                                        </div>
+                                        <div class="text-lg font-bold text-blue-600">${record.humidity}%</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-2 text-xs text-gray-500">
+                                    工場: ${record.factory} | デバイス: ${record.device}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+        }
+        
+        function displayApprovalData(data, pagination) {
+            const container = document.getElementById('resultsContainer');
+            
+            if (data.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <i class="ri-inbox-line text-3xl mb-2 opacity-50"></i>
+                        <div>承認データがありません</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            const html = `
+                <div class="bg-white rounded-lg border">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900">
+                            承認データ (${pagination.totalRecords}件中 ${pagination.startIndex}-${pagination.endIndex}件を表示)
+                        </h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    <th class="px-4 py-3 text-left font-medium text-gray-700">日付</th>
+                                    <th class="px-4 py-3 text-left font-medium text-gray-700">工場</th>
+                                    <th class="px-4 py-3 text-left font-medium text-gray-700">品番</th>
+                                    <th class="px-4 py-3 text-left font-medium text-gray-700">背番号</th>
+                                    <th class="px-4 py-3 text-left font-medium text-gray-700">作業者</th>
+                                    <th class="px-4 py-3 text-left font-medium text-gray-700">状態</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${data.map(item => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-4 py-3 text-gray-900">${item.Date || '-'}</td>
+                                        <td class="px-4 py-3 text-gray-900">${item.工場 || '-'}</td>
+                                        <td class="px-4 py-3 font-medium text-gray-900">${item.品番 || '-'}</td>
+                                        <td class="px-4 py-3 text-gray-900">${item.背番号 || '-'}</td>
+                                        <td class="px-4 py-3 text-gray-900">${item.Worker_Name || '-'}</td>
+                                        <td class="px-4 py-3">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getApprovalStatusColor(item.approvalStatus)}">
+                                                ${item.approvalStatus || 'pending'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+        }
+        
+        function displayPagination(pagination) {
+            const container = document.getElementById('paginationContainer');
+            
+            if (currentPaginationManager) {
+                container.innerHTML = currentPaginationManager.generatePaginationHTML({
+                    showPageNumbers: true,
+                    showFirstLast: true,
+                    showInfo: true
+                });
+            }
+        }
+        
+        function getStatusColor(status) {
+            switch (status?.toLowerCase()) {
+                case 'ok': return 'text-green-600 bg-green-100';
+                case 'warning': return 'text-yellow-600 bg-yellow-100';
+                case 'error': 
+                case 'failure': return 'text-red-600 bg-red-100';
+                default: return 'text-gray-600 bg-gray-100';
+            }
+        }
+        
+        function getApprovalStatusColor(status) {
+            switch (status) {
+                case 'fully_approved': return 'text-green-600 bg-green-100';
+                case 'hancho_approved': return 'text-blue-600 bg-blue-100';
+                case 'correction_needed': return 'text-red-600 bg-red-100';
+                case 'pending':
+                default: return 'text-yellow-600 bg-yellow-100';
+            }
+        }
+        
+        function showLoading() {
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+            document.getElementById('resultsContainer').innerHTML = '';
+            document.getElementById('paginationContainer').innerHTML = '';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loadingIndicator').classList.add('hidden');
+        }
+        
+        function showError(message) {
+            document.getElementById('errorMessage').classList.remove('hidden');
+            document.getElementById('errorDetails').textContent = message;
+            document.getElementById('resultsContainer').innerHTML = '';
+            document.getElementById('paginationContainer').innerHTML = '';
+        }
+        
+        // PaginationManager class (embedded for testing)
+        class PaginationManager {
+            constructor(options = {}) {
+                this.apiBaseUrl = options.apiBaseUrl || (window.BASE_URL || '') + 'api/paginate';
+                this.defaultPageSize = options.defaultPageSize || 15;
+                this.maxPageSize = options.maxPageSize || 100;
+                this.currentPage = 1;
+                this.totalPages = 0;
+                this.totalRecords = 0;
+                this.isLoading = false;
+                this.lastQuery = null;
+                
+                // Callbacks
+                this.onDataLoad = options.onDataLoad || (() => {});
+                this.onError = options.onError || ((error) => console.error('Pagination error:', error));
+                this.onLoadingStart = options.onLoadingStart || (() => {});
+                this.onLoadingEnd = options.onLoadingEnd || (() => {});
+            }
+            
+            async loadData(queryOptions) {
+                if (this.isLoading) return;
+
+                const {
+                    dbName,
+                    collectionName,
+                    query = {},
+                    sort = {},
+                    page = 1,
+                    limit = this.defaultPageSize,
+                    aggregation = null,
+                    projection = null,
+                    useSpecializedApi = null
+                } = queryOptions;
+
+                this.isLoading = true;
+                this.onLoadingStart();
+
+                try {
+                    let apiUrl = this.apiBaseUrl;
+                    let requestBody = {
+                        dbName,
+                        collectionName,
+                        query,
+                        sort,
+                        page: parseInt(page),
+                        limit: Math.min(parseInt(limit), this.maxPageSize),
+                        aggregation,
+                        projection
+                    };
+
+                    // Use specialized APIs if specified
+                    if (useSpecializedApi) {
+                        apiUrl = `${window.BASE_URL || ''}api/${useSpecializedApi}`;
+                        if (useSpecializedApi === 'sensor-history') {
+                            requestBody = {
+                                deviceId: queryOptions.deviceId,
+                                page: parseInt(page),
+                                limit: Math.min(parseInt(limit), this.maxPageSize),
+                                startDate: queryOptions.startDate || null,
+                                endDate: queryOptions.endDate || null,
+                                factoryName: queryOptions.factoryName || null
+                            };
+                        } else if (useSpecializedApi === 'approval-paginate') {
+                            requestBody = {
+                                collectionName,
+                                page: parseInt(page),
+                                limit: Math.min(parseInt(limit), this.maxPageSize),
+                                filters: query,
+                                userRole: queryOptions.userRole || 'member',
+                                factoryAccess: queryOptions.factoryAccess || []
+                            };
+                        }
+                    }
+
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        throw new Error(result.error || 'Failed to load data');
+                    }
+
+                    // Update pagination state
+                    this.currentPage = result.pagination.currentPage;
+                    this.totalPages = result.pagination.totalPages;
+                    this.totalRecords = result.pagination.totalRecords;
+                    this.lastQuery = queryOptions;
+
+                    // Call data callback
+                    this.onDataLoad({
+                        data: result.data,
+                        pagination: result.pagination,
+                        query: result.query || queryOptions.query
+                    });
+
+                    return result;
+
+                } catch (error) {
+                    this.onError(error);
+                    throw error;
+                } finally {
+                    this.isLoading = false;
+                    this.onLoadingEnd();
+                }
+            }
+            
+            async goToPage(page) {
+                if (!this.lastQuery) {
+                    console.warn('No previous query found. Use loadData() first.');
+                    return;
+                }
+
+                return await this.loadData({
+                    ...this.lastQuery,
+                    page: page
+                });
+            }
+
+            async nextPage() {
+                if (this.currentPage < this.totalPages) {
+                    return await this.goToPage(this.currentPage + 1);
+                }
+            }
+
+            async previousPage() {
+                if (this.currentPage > 1) {
+                    return await this.goToPage(this.currentPage - 1);
+                }
+            }
+
+            async firstPage() {
+                if (this.currentPage > 1) {
+                    return await this.goToPage(1);
+                }
+            }
+
+            async lastPage() {
+                if (this.currentPage < this.totalPages) {
+                    return await this.goToPage(this.totalPages);
+                }
+            }
+            
+            generatePaginationHTML(options = {}) {
+                const {
+                    showPageNumbers = true,
+                    showFirstLast = true,
+                    showInfo = true,
+                    containerClass = '',
+                    buttonClass = 'px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 hover:border-gray-300',
+                    activeButtonClass = 'px-3 py-2 text-sm border rounded-lg bg-blue-500 text-white border-blue-500',
+                    disabledButtonClass = 'px-3 py-2 text-sm border rounded-lg opacity-50 cursor-not-allowed',
+                    infoClass = 'text-sm text-gray-600'
+                } = options;
+
+                if (this.totalPages <= 1) {
+                    if (showInfo && this.totalRecords > 0) {
+                        return `
+                            <div class="mt-4 pt-4 border-t border-gray-200 text-center">
+                                <div class="${infoClass}">
+                                    <span class="font-medium">${this.totalRecords}</span> 件のデータを表示中
+                                </div>
+                            </div>
+                        `;
+                    }
+                    return '';
+                }
+
+                const pagination = {
+                    currentPage: this.currentPage,
+                    totalPages: this.totalPages,
+                    totalRecords: this.totalRecords,
+                    startIndex: (this.currentPage - 1) * this.defaultPageSize + 1,
+                    endIndex: Math.min(this.currentPage * this.defaultPageSize, this.totalRecords),
+                    hasNext: this.currentPage < this.totalPages,
+                    hasPrevious: this.currentPage > 1
+                };
+
+                let html = `<div class="mt-6 pt-4 border-t border-gray-200 ${containerClass}">`;
+
+                if (showInfo) {
+                    html += `
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="${infoClass}">
+                                <span class="font-medium">${pagination.totalRecords}</span> 件中 
+                                <span class="font-medium">${pagination.startIndex}-${pagination.endIndex}</span> 件を表示
+                            </div>
+                            <div class="${infoClass}">
+                                ページ <span class="font-medium">${pagination.currentPage}</span> / <span class="font-medium">${pagination.totalPages}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `<div class="flex items-center justify-center space-x-2">`;
+
+                // First page button
+                if (showFirstLast) {
+                    html += `
+                        <button 
+                            onclick="paginationManager.firstPage()"
+                            ${pagination.currentPage === 1 ? 'disabled' : ''}
+                            class="${pagination.currentPage === 1 ? disabledButtonClass : buttonClass}"
+                            title="最初のページ"
+                        >
+                            <i class="ri-skip-back-line"></i>
+                        </button>
+                    `;
+                }
+
+                // Previous button
+                html += `
+                    <button 
+                        onclick="paginationManager.previousPage()"
+                        ${!pagination.hasPrevious ? 'disabled' : ''}
+                        class="${pagination.hasPrevious ? buttonClass : disabledButtonClass}"
+                    >
+                        前へ
+                    </button>
+                `;
+
+                // Page numbers
+                if (showPageNumbers) {
+                    html += this.generatePageNumbers(pagination.currentPage, pagination.totalPages, buttonClass, activeButtonClass);
+                }
+
+                // Next button
+                html += `
+                    <button 
+                        onclick="paginationManager.nextPage()"
+                        ${!pagination.hasNext ? 'disabled' : ''}
+                        class="${pagination.hasNext ? buttonClass : disabledButtonClass}"
+                    >
+                        次へ
+                    </button>
+                `;
+
+                // Last page button
+                if (showFirstLast) {
+                    html += `
+                        <button 
+                            onclick="paginationManager.lastPage()"
+                            ${pagination.currentPage === pagination.totalPages ? 'disabled' : ''}
+                            class="${pagination.currentPage === pagination.totalPages ? disabledButtonClass : buttonClass}"
+                            title="最後のページ"
+                        >
+                            <i class="ri-skip-forward-line"></i>
+                        </button>
+                    `;
+                }
+
+                html += `</div></div>`;
+                
+                return html;
+            }
+            
+            generatePageNumbers(currentPage, totalPages, buttonClass, activeButtonClass) {
+                if (totalPages <= 7) {
+                    return Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .map(page => `
+                            <button 
+                                onclick="paginationManager.goToPage(${page})"
+                                class="${page === currentPage ? activeButtonClass : buttonClass}"
+                            >
+                                ${page}
+                            </button>
+                        `).join('');
+                } else {
+                    let pages = [];
+                    
+                    if (currentPage <= 4) {
+                        pages = [1, 2, 3, 4, 5, '...', totalPages];
+                    } else if (currentPage >= totalPages - 3) {
+                        pages = [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+                    } else {
+                        pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+                    }
+                    
+                    return pages.map(page => {
+                        if (page === '...') {
+                            return '<span class="px-3 py-2 text-sm text-gray-400">...</span>';
+                        }
+                        return `
+                            <button 
+                                onclick="paginationManager.goToPage(${page})"
+                                class="${page === currentPage ? activeButtonClass : buttonClass}"
+                            >
+                                ${page}
+                            </button>
+                        `;
+                    }).join('');
+                }
+            }
+        }
+        
+        window.PaginationManager = PaginationManager;
+    </script>
+</body>
+</html>
