@@ -4002,7 +4002,39 @@ window.closeApprovalModal = function() {
 window.approveItem = async function(itemId) {
     try {
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
-        const item = allApprovalData.find(d => d._id === itemId);
+        
+        // First try to find item in current page data, otherwise fetch from server
+        let item = filteredApprovalData.find(d => d._id === itemId);
+        
+        if (!item) {
+            console.log('🔍 Item not found in current page, fetching from server...');
+            // Fetch item from server
+            const response = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: currentApprovalTab,
+                    query: { _id: itemId }
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch item details');
+            }
+            
+            const items = await response.json();
+            if (!items || items.length === 0) {
+                throw new Error('Item not found');
+            }
+            
+            item = items[0];
+            console.log('✅ Item fetched from server:', item._id);
+        }
+        
+        if (!item) {
+            throw new Error('Item not found');
+        }
         
         // Get user's full name for display
         const userFullName = await getUserFullName(currentUser.username);
@@ -4070,7 +4102,14 @@ window.approveItem = async function(itemId) {
         
         alert(stepMessage);
         closeApprovalModal();
-        loadApprovalData();
+        
+        // Reload current view data
+        const viewMode = document.getElementById('viewModeSelect')?.value;
+        if (viewMode === 'list') {
+            await renderApprovalList();
+        } else {
+            await loadApprovalTableData();
+        }
         
     } catch (error) {
         console.error('Error approving item:', error);
@@ -4121,7 +4160,39 @@ window.requestCorrection = async function(itemId) {
     try {
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
         const userFullName = await getUserFullName(currentUser.username);
-        const item = allApprovalData.find(d => d._id === itemId);
+        
+        // First try to find item in current page data, otherwise fetch from server
+        let item = filteredApprovalData.find(d => d._id === itemId);
+        
+        if (!item) {
+            console.log('🔍 Item not found in current page, fetching from server...');
+            // Fetch item from server
+            const response = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: currentApprovalTab,
+                    query: { _id: itemId }
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch item details');
+            }
+            
+            const items = await response.json();
+            if (!items || items.length === 0) {
+                throw new Error('Item not found');
+            }
+            
+            item = items[0];
+            console.log('✅ Item fetched from server:', item._id);
+        }
+        
+        if (!item) {
+            throw new Error('Item not found');
+        }
         
         let newStatus, targetRole;
         
@@ -4174,7 +4245,14 @@ window.requestCorrection = async function(itemId) {
             "修正要求を送信しました（提出者による修正が必要）";
         alert(targetMessage);
         closeApprovalModal();
-        loadApprovalData();
+        
+        // Reload current view data
+        const viewMode = document.getElementById('viewModeSelect')?.value;
+        if (viewMode === 'list') {
+            await renderApprovalList();
+        } else {
+            await loadApprovalTableData();
+        }
         
     } catch (error) {
         console.error('Error requesting correction:', error);
