@@ -5310,7 +5310,35 @@ async function handleBatchApproval() {
         console.log('Debug: User full name:', userFullName);
         
         const promises = selectedItems.map(async (itemId) => {
-            const item = allApprovalData.find(d => d._id === itemId);
+            // First try to find item in current page data, otherwise fetch from server
+            let item = filteredApprovalData.find(d => d._id === itemId);
+            
+            if (!item) {
+                console.log('🔍 Item ' + itemId + ' not found in current page, fetching from server...');
+                // Fetch item from server
+                const response = await fetch(BASE_URL + "queries", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        dbName: "submittedDB",
+                        collectionName: currentApprovalTab,
+                        query: { _id: itemId }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Item ' + itemId + ': サーバーからの取得に失敗しました');
+                }
+                
+                const items = await response.json();
+                if (!items || items.length === 0) {
+                    throw new Error('Item ' + itemId + ': データが見つかりません');
+                }
+                
+                item = items[0];
+                console.log('✅ Item ' + itemId + ' fetched from server');
+            }
+            
             console.log('Debug: Processing item ' + itemId + ':', item);
             
             if (!item) {
@@ -5377,7 +5405,9 @@ async function handleBatchApproval() {
         // Clear selections and reload data
         document.querySelectorAll('.list-checkbox:checked').forEach(checkbox => checkbox.checked = false);
         updateBatchButtons();
-        loadApprovalData();
+        
+        // Reload current view data
+        await renderApprovalList();
         
     } catch (error) {
         console.error('Batch approval error:', error);
@@ -5412,7 +5442,38 @@ async function handleBatchReject() {
         const userFullName = await getUserFullName(currentUser.username);
         
         const promises = selectedItems.map(async (itemId) => {
-            const item = allApprovalData.find(d => d._id === itemId);
+            // First try to find item in current page data, otherwise fetch from server
+            let item = filteredApprovalData.find(d => d._id === itemId);
+            
+            if (!item) {
+                console.log('🔍 Item ' + itemId + ' not found in current page, fetching from server...');
+                // Fetch item from server
+                const response = await fetch(BASE_URL + "queries", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        dbName: "submittedDB",
+                        collectionName: currentApprovalTab,
+                        query: { _id: itemId }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Item ' + itemId + ': サーバーからの取得に失敗しました');
+                }
+                
+                const items = await response.json();
+                if (!items || items.length === 0) {
+                    throw new Error('Item ' + itemId + ': データが見つかりません');
+                }
+                
+                item = items[0];
+                console.log('✅ Item ' + itemId + ' fetched from server');
+            }
+            
+            if (!item) {
+                throw new Error('Item ' + itemId + ': データが見つかりません');
+            }
             
             let newStatus, targetRole;
             
@@ -5463,7 +5524,9 @@ async function handleBatchReject() {
         // Clear selections and reload data
         document.querySelectorAll('.list-checkbox:checked').forEach(checkbox => checkbox.checked = false);
         updateBatchButtons();
-        loadApprovalData();
+        
+        // Reload current view data
+        await renderApprovalList();
         
     } catch (error) {
         console.error('Batch reject error:', error);
