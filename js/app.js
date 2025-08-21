@@ -276,7 +276,7 @@ function loadPage(page) {
                             🔄 データ更新
                         </button>
                         <select id="factoryFilter" class="p-2 border rounded">
-                            <option value="" data-i18n="allFactories">All 工場</option>
+                            <option value="" data-i18n="allFactories">All Factories</option>
                         </select>
                         <select id="statusFilter" class="p-2 border rounded">
                             <option value="" data-i18n="allStatus">All Status</option>
