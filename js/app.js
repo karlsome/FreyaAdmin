@@ -207,6 +207,34 @@ function loadPage(page) {
                 <!-- Tab Content Container -->
                 <div id="approvalTabContent">
                     <!-- Stats Cards -->
+                    <!-- Data Range Toggle -->
+                    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
+                        <div class="flex items-center space-x-4">
+                            <div class="bg-white rounded-lg border border-gray-200 p-1 flex items-center">
+                                <button 
+                                    id="currentDateModeBtn" 
+                                    class="px-3 py-2 text-sm font-medium rounded-md transition-colors bg-blue-500 text-white"
+                                    onclick="toggleDataRange('current')"
+                                >
+                                    <i class="ri-calendar-line mr-1"></i>
+                                    <span data-i18n="currentDateOnly">Current Date Only</span>
+                                </button>
+                                <button 
+                                    id="allDataModeBtn" 
+                                    class="px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100"
+                                    onclick="toggleDataRange('all')"
+                                >
+                                    <i class="ri-database-2-line mr-1"></i>
+                                    <span data-i18n="allHistoricalData">All Historical Data</span>
+                                </button>
+                            </div>
+                            <div id="dataRangeIndicator" class="text-sm text-gray-600">
+                                <i class="ri-calendar-check-line mr-1 text-blue-500"></i>
+                                <span data-i18n="showingCurrentDate">Showing current date data</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="grid grid-cols-${role === '班長' ? '6' : '5'} gap-4 mb-6">
                         <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
                             <h3 class="text-sm font-medium text-yellow-800" data-i18n="pending">Pending</h3>
@@ -248,7 +276,7 @@ function loadPage(page) {
                             🔄 データ更新
                         </button>
                         <select id="factoryFilter" class="p-2 border rounded">
-                            <option value="" data-i18n="allFactories">All 工場</option>
+                            <option value="" data-i18n="allFactories">All Factories</option>
                         </select>
                         <select id="statusFilter" class="p-2 border rounded">
                             <option value="" data-i18n="allStatus">All Status</option>
@@ -262,6 +290,7 @@ function loadPage(page) {
                         <input type="text" id="approvalSearchInput" placeholder="品番、背番号、作業者で検索..." class="p-2 border rounded flex-1 min-w-64">
                         <select id="itemsPerPageSelect" class="p-2 border rounded">
                             <option value="10">10件表示</option>
+                            <option value="15">15件表示</option>
                             <option value="50">50件表示</option>
                             <option value="100">100件表示</option>
                         </select>
@@ -301,12 +330,12 @@ function loadPage(page) {
                     </div>
 
                     <!-- Pagination -->
-                    <div class="flex items-center justify-between mt-6">
+                    <div class="flex items-center justify-between mt-6 p-4 bg-gray-50 border rounded-lg" id="paginationContainer">
                         <div class="text-sm text-gray-700" id="pageInfo">0件中 0-0件を表示</div>
                         <div class="flex items-center space-x-2">
-                            <button id="prevPageBtn" class="p-2 border rounded hover:bg-gray-50" disabled>前へ</button>
+                            <button id="prevPageBtn" class="p-2 border rounded hover:bg-gray-50 bg-white shadow-sm" disabled>前へ</button>
                             <div id="pageNumbers" class="flex space-x-1"></div>
-                            <button id="nextPageBtn" class="p-2 border rounded hover:bg-gray-50" disabled>次へ</button>
+                            <button id="nextPageBtn" class="p-2 border rounded hover:bg-gray-50 bg-white shadow-sm" disabled>次へ</button>
                         </div>
                     </div>
                 </div>
@@ -2119,19 +2148,28 @@ function loadPage(page) {
 }
 
 
-// ==================== APPROVAL SYSTEM ====================
+// ==================== APPROVAL SYSTEM (OPTIMIZED) ====================
 
 let currentApprovalPage = 1;
-let itemsPerPage = 10;
-let allApprovalData = [];
+let itemsPerPage = 10; // Match the dropdown default
+let allApprovalData = []; // Keep for compatibility, but won't store all data
 let filteredApprovalData = [];
 let approvalSortState = { column: null, direction: 1 };
 let currentApprovalTab = 'kensaDB'; // Default tab
+let currentUserData = {}; // Cache user data
+let approvalStatistics = {}; // Cache statistics
+let dataRangeMode = 'current'; // 'current' or 'all' - controls whether to show current date or all historical data
 
 /**
- * Initialize the approval system
+ * Initialize the approval system (OPTIMIZED)
  */
 function initializeApprovalSystem() {
+    // Get current user data and cache it
+    currentUserData = JSON.parse(localStorage.getItem("authUser") || "{}");
+    
+    // Initialize data range mode to current date
+    dataRangeMode = 'current';
+    
     // Set today's date as default
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('dateFilter').value = today;
@@ -2143,9 +2181,21 @@ function initializeApprovalSystem() {
     document.getElementById('dateFilter').addEventListener('change', applyApprovalFilters);
     document.getElementById('approvalSearchInput').addEventListener('input', applyApprovalFilters);
     document.getElementById('itemsPerPageSelect').addEventListener('change', function() {
+        const oldItemsPerPage = itemsPerPage;
         itemsPerPage = parseInt(this.value);
         currentApprovalPage = 1;
-        renderApprovalTable();
+        
+        console.log(`📝 Items per page changed from ${oldItemsPerPage} to ${itemsPerPage}, reset to page 1`);
+        
+        // Check current view mode and reload appropriate view
+        const viewMode = document.getElementById('viewModeSelect').value;
+        if (viewMode === 'list') {
+            console.log('📝 In list view - reloading list data with new pagination');
+            renderApprovalList(); // Reload list data with new pagination
+        } else {
+            console.log('📝 In table view - reloading table data');
+            loadApprovalTableData(); // Only reload table data
+        }
     });
     document.getElementById('prevPageBtn').addEventListener('click', () => changePage(-1));
     document.getElementById('nextPageBtn').addEventListener('click', () => changePage(1));
@@ -2153,7 +2203,7 @@ function initializeApprovalSystem() {
     // Initialize tab styles
     updateTabStyles();
     
-    // Load initial data
+    // Load initial data efficiently
     loadApprovalData();
 }
 
@@ -2180,93 +2230,333 @@ function updateTabStyles() {
 }
 
 /**
- * Load approval data from database
+ * Load approval data efficiently (OPTIMIZED)
  */
 async function loadApprovalData() {
     try {
-        let currentUserData = JSON.parse(localStorage.getItem("authUser") || "{}");
+        console.log('🔄 Loading approval data optimized for tab:', currentApprovalTab);
         
-        // Debug log to check user data structure
-        console.log('Initial user data from localStorage:', currentUserData);
+        // Show loading state
+        showApprovalLoadingState();
         
-        // If user data is missing factory information, fetch it from database
-        if ((currentUserData.role === '班長' || currentUserData.role === '係長') && (!currentUserData.工場 && !currentUserData.factory)) {
+        // Ensure we have complete user data with factory information
+        if ((currentUserData.role === '班長' || currentUserData.role === '係長') && 
+            (!currentUserData.工場 && !currentUserData.factory)) {
             console.log('Factory info missing, fetching from database...');
             currentUserData = await fetchCompleteUserData(currentUserData.username);
         }
         
-        // Determine query based on user role and current tab
-        let query = {};
+        // Load data efficiently in parallel
+        await Promise.all([
+            loadApprovalStatistics(),
+            loadFactoryList(),
+            loadApprovalTableData()
+        ]);
         
-        // Role-based visibility for 2-step approval system
-        if (currentUserData.role === '班長') {
-            // 班長 can only see data for their assigned factories (first approval level)
-            const userFactories = currentUserData.工場 || currentUserData.factory;
-            console.log('班長 factories found:', userFactories);
-            
-            if (userFactories && userFactories.length > 0) {
-                const factoryArray = Array.isArray(userFactories) ? userFactories : [userFactories];
-                query = { "工場": { $in: factoryArray } };
-                console.log('Applying 班長 factory filter:', query);
-            } else {
-                console.warn('班長 user has no assigned factories, showing no data');
-                query = { "工場": { $in: [] } };
-            }
-        } else if (currentUserData.role === '係長') {
-            // 係長 can only see data for their assigned factories (similar to 班長 but limited access)
-            const userFactories = currentUserData.工場 || currentUserData.factory;
-            console.log('係長 factories found:', userFactories);
-            
-            if (userFactories && userFactories.length > 0) {
-                const factoryArray = Array.isArray(userFactories) ? userFactories : [userFactories];
-                query = { "工場": { $in: factoryArray } };
-                console.log('Applying 係長 factory filter:', query);
-            } else {
-                console.warn('係長 user has no assigned factories, showing no data');
-                query = { "工場": { $in: [] } };
-            }
-        } else if (currentUserData.role === '課長') {
-            // 課長 can see all data (to monitor 班長 approvals and do second approval)
-            query = {}; // No filter - see everything
-            console.log('課長 can see all data');
-        } else if (['admin', '部長'].includes(currentUserData.role)) {
-            // Admin/部長 can see everything including history
-            query = {}; // No filter - see everything
-            console.log('Admin/部長 can see all data including history');
-        } else {
-            // Other roles have no access
-            query = { "_id": { $exists: false } }; // Show nothing
-            console.log('Role has no approval access');
+        console.log('✅ Optimized approval data loading completed');
+        
+    } catch (error) {
+        console.error('❌ Error loading approval data:', error);
+        showApprovalErrorState(error.message);
+    }
+}
+
+/**
+ * Load approval statistics using server-side aggregation (NEW)
+ */
+async function loadApprovalStatistics() {
+    try {
+        const factoryAccess = getFactoryAccessForUser();
+        // Use statistics-specific filters (no status filter to get all counts)
+        const filters = buildStatisticsQueryFilters();
+        
+        console.log('📊 Loading approval statistics via aggregation...');
+        
+        const response = await fetch(BASE_URL + 'api/approval-stats', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                collectionName: currentApprovalTab,
+                userRole: currentUserData.role,
+                factoryAccess: factoryAccess,
+                filters: filters
+            })
+        });
+
+        if (!response.ok) {
+            // Fallback to old method if new route doesn't exist yet
+            console.log('📊 New stats route not available, calculating statistics from sample...');
+            await loadApprovalStatisticsFallback();
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to load statistics');
         }
 
-        console.log('Final query for', currentApprovalTab, ':', query);
+        approvalStatistics = result.statistics;
+        console.log('✅ Statistics loaded via aggregation:', approvalStatistics);
+        
+        updateApprovalStatisticsDisplay();
+        
+    } catch (error) {
+        console.error('❌ Error loading approval statistics:', error);
+        // Fallback to old method
+        await loadApprovalStatisticsFallback();
+    }
+}
 
+/**
+ * Fallback statistics calculation using limited data sample (FALLBACK)
+ */
+async function loadApprovalStatisticsFallback() {
+    try {
+        console.log('📊 Using fallback statistics calculation...');
+        
+        // Get statistics query (without status filter) combined with database query
+        const baseQuery = buildApprovalDatabaseQuery();
+        const statisticsFilters = buildStatisticsQueryFilters();
+        
+        // Merge the queries 
+        const query = { ...baseQuery, ...statisticsFilters };
+        
         const response = await fetch(BASE_URL + "queries", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 dbName: "submittedDB",
                 collectionName: currentApprovalTab,
-                query: query
+                query: query,
+                limit: 5000, // Limit to reasonable sample size
+                sort: { Date: -1 } // Get recent data first
             })
         });
 
-        if (!response.ok) throw new Error('Failed to fetch data');
+        if (!response.ok) throw new Error('Failed to fetch statistics data');
         
-        allApprovalData = await response.json();
+        const sampleData = await response.json();
+        console.log('📊 Statistics calculated from sample:', sampleData.length, 'items');
         
-        console.log('Loaded approval data:', allApprovalData.length, 'items');
+        // Calculate statistics from sample
+        const pending = sampleData.filter(item => !item.approvalStatus || item.approvalStatus === 'pending').length;
+        const hanchoApproved = sampleData.filter(item => item.approvalStatus === 'hancho_approved').length;
+        const fullyApproved = sampleData.filter(item => item.approvalStatus === 'fully_approved').length;
+        const correction = sampleData.filter(item => 
+            item.approvalStatus === 'correction_needed' || item.approvalStatus === 'correction_needed_from_kacho'
+        ).length;
+        const correctionFromKacho = sampleData.filter(item => item.approvalStatus === 'correction_needed_from_kacho').length;
+        const today = new Date().toISOString().split('T')[0];
+        const todayTotal = sampleData.filter(item => item.Date === today).length;
         
-        // Load factory filter options
-        loadFactoryFilterOptions();
+        approvalStatistics = {
+            pending,
+            hanchoApproved,
+            fullyApproved,
+            correctionNeeded: correction,
+            correctionNeededFromKacho: correctionFromKacho,
+            todayTotal,
+            overallTotal: sampleData.length
+        };
         
-        // Apply filters and render
-        applyApprovalFilters();
+        updateApprovalStatisticsDisplay();
         
     } catch (error) {
-        console.error('Error loading approval data:', error);
-        document.getElementById('approvalsTableContainer').innerHTML = 
-            '<div class="p-8 text-center text-red-500">データの読み込みに失敗しました</div>';
+        console.error('❌ Error in fallback statistics:', error);
+        // Show error state in statistics
+        document.querySelectorAll('[id$="Count"]').forEach(element => {
+            element.textContent = '?';
+            element.parentElement.classList.add('opacity-50');
+        });
+    }
+}
+
+/**
+ * Load factory list efficiently (NEW)
+ */
+async function loadFactoryList() {
+    try {
+        const factoryAccess = getFactoryAccessForUser();
+        
+        console.log('🏭 Loading factory list...');
+        
+        const response = await fetch(BASE_URL + 'api/approval-factories', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                collectionName: currentApprovalTab,
+                userRole: currentUserData.role,
+                factoryAccess: factoryAccess
+            })
+        });
+
+        if (!response.ok) {
+            // Fallback to old method
+            console.log('🏭 New factory route not available, using fallback...');
+            await loadFactoryListFallback();
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to load factory list');
+        }
+
+        console.log('✅ Factory list loaded:', result.factories);
+        updateFactoryFilterOptions(result.factories);
+        
+    } catch (error) {
+        console.error('❌ Error loading factory list:', error);
+        await loadFactoryListFallback();
+    }
+}
+
+/**
+ * Fallback factory list loading (FALLBACK)
+ */
+async function loadFactoryListFallback() {
+    try {
+        console.log('🏭 Using fallback factory list loading...');
+        
+        const query = buildApprovalDatabaseQuery();
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "submittedDB",
+                collectionName: currentApprovalTab,
+                query: query,
+                projection: { 工場: 1 }, // Only get factory field
+                limit: 1000 // Reasonable sample for factory list
+            })
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch factory data');
+        
+        const factoryData = await response.json();
+        const factories = [...new Set(factoryData.map(item => item.工場))].filter(Boolean);
+        
+        console.log('✅ Factory list from fallback:', factories);
+        updateFactoryFilterOptions(factories);
+        
+    } catch (error) {
+        console.error('❌ Error in fallback factory loading:', error);
+        // Provide basic factory filter
+        const factoryFilter = document.getElementById('factoryFilter');
+        factoryFilter.innerHTML = '<option value="" data-i18n="allFactories">All Factories</option>';
+    }
+}
+
+/**
+ * Load paginated table data efficiently (NEW)
+ */
+async function loadApprovalTableData() {
+    console.log(`🔄 📊 loadApprovalTableData called for page: ${currentApprovalPage}`);
+    try {
+        const factoryAccess = getFactoryAccessForUser();
+        const filters = buildApprovalQueryFilters();
+        
+        console.log(`📄 Loading table data: Page ${currentApprovalPage}, Limit ${itemsPerPage}`);
+        
+        const response = await fetch(BASE_URL + 'api/approval-paginate', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                collectionName: currentApprovalTab,
+                page: currentApprovalPage,
+                limit: itemsPerPage,
+                maxLimit: 100,
+                filters: filters,
+                userRole: currentUserData.role,
+                factoryAccess: factoryAccess
+            })
+        });
+
+        if (!response.ok) {
+            // Fallback to old pagination method
+            console.log('📄 New pagination route not available, using fallback...');
+            await loadApprovalTableDataFallback();
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to load table data');
+        }
+
+        console.log(`✅ Table data loaded: ${result.data.length} items, Page ${result.pagination.currentPage}/${result.pagination.totalPages}`);
+        console.log('📊 Server pagination info:', result.pagination);
+        
+        // Store current page data for compatibility and apply sort if active
+        filteredApprovalData = applySortToData(result.data);
+        
+        renderApprovalTable(filteredApprovalData, result.pagination);
+        
+    } catch (error) {
+        console.error('❌ Error loading table data:', error);
+        await loadApprovalTableDataFallback();
+    }
+}
+
+/**
+ * Fallback table data loading with client-side pagination (FALLBACK) 
+ */
+async function loadApprovalTableDataFallback() {
+    try {
+        console.log('📄 Using fallback table data loading...');
+        
+        const query = buildApprovalDatabaseQuery();
+        const filters = buildApprovalQueryFilters();
+        
+        // Merge query and filters
+        const combinedQuery = { ...query, ...filters };
+        
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "submittedDB",
+                collectionName: currentApprovalTab,
+                query: combinedQuery,
+                limit: itemsPerPage * 10, // Get more data for local pagination
+                sort: { Date: -1, _id: -1 }
+            })
+        });
+
+        if (!response.ok) throw new Error('Failed to fetch table data');
+        
+        const data = await response.json();
+        console.log('📄 Table data from fallback:', data.length, 'items');
+        
+        // Apply client-side pagination
+        const startIndex = (currentApprovalPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const pageData = data.slice(startIndex, endIndex);
+        
+        filteredApprovalData = applySortToData(pageData);
+        
+        // Create fake pagination info
+        const totalPages = Math.ceil(data.length / itemsPerPage);
+        const paginationInfo = {
+            currentPage: currentApprovalPage,
+            totalPages: totalPages,
+            totalRecords: data.length,
+            itemsPerPage: itemsPerPage,
+            hasNext: currentApprovalPage < totalPages,
+            hasPrevious: currentApprovalPage > 1,
+            startIndex: startIndex + 1,
+            endIndex: Math.min(endIndex, data.length)
+        };
+        
+        renderApprovalTable(pageData, paginationInfo);
+        
+    } catch (error) {
+        console.error('❌ Error in fallback table loading:', error);
+        const container = document.getElementById('approvalsTableContainer');
+        container.innerHTML = '<div class="p-8 text-center text-red-500">テーブルデータの読み込みに失敗しました</div>';
     }
 }
 
@@ -2308,7 +2598,256 @@ async function fetchCompleteUserData(username) {
 }
 
 /**
- * Load factory filter options
+ * Get factory access for current user (NEW HELPER)
+ */
+function getFactoryAccessForUser() {
+    let factoryAccess = [];
+    
+    if (currentUserData.role === '班長' || currentUserData.role === '係長') {
+        const userFactories = currentUserData.工場 || currentUserData.factory;
+        if (userFactories && userFactories.length > 0) {
+            factoryAccess = Array.isArray(userFactories) ? userFactories : [userFactories];
+        }
+        console.log(`${currentUserData.role} factory access:`, factoryAccess);
+    }
+    // Admin, 部長, 課長 have access to all factories (empty array = no restriction)
+    
+    return factoryAccess;
+}
+
+/**
+ * Build database query based on user role (NEW HELPER)
+ */
+function buildApprovalDatabaseQuery() {
+    let query = {};
+    
+    // Role-based visibility for 2-step approval system
+    if (currentUserData.role === '班長') {
+        // 班長 can only see data for their assigned factories (first approval level)
+        const userFactories = currentUserData.工場 || currentUserData.factory;
+        console.log('班長 factories found:', userFactories);
+        
+        if (userFactories && userFactories.length > 0) {
+            const factoryArray = Array.isArray(userFactories) ? userFactories : [userFactories];
+            query = { "工場": { $in: factoryArray } };
+            console.log('Applying 班長 factory filter:', query);
+        } else {
+            console.warn('班長 user has no assigned factories, showing no data');
+            query = { "工場": { $in: [] } };
+        }
+    } else if (currentUserData.role === '係長') {
+        // 係長 can only see data for their assigned factories (similar to 班長 but limited access)
+        const userFactories = currentUserData.工場 || currentUserData.factory;
+        console.log('係長 factories found:', userFactories);
+        
+        if (userFactories && userFactories.length > 0) {
+            const factoryArray = Array.isArray(userFactories) ? userFactories : [userFactories];
+            query = { "工場": { $in: factoryArray } };
+            console.log('Applying 係長 factory filter:', query);
+        } else {
+            console.warn('係長 user has no assigned factories, showing no data');
+            query = { "工場": { $in: [] } };
+        }
+    } else if (currentUserData.role === '課長') {
+        // 課長 can see all data (to monitor 班長 approvals and do second approval)
+        query = {}; // No filter - see everything
+        console.log('課長 can see all data');
+    } else if (['admin', '部長'].includes(currentUserData.role)) {
+        // Admin/部長 can see everything including history
+        query = {}; // No filter - see everything
+        console.log('Admin/部長 can see all data including history');
+    } else {
+        // Other roles have no access
+        query = { "_id": { $exists: false } }; // Show nothing
+        console.log('Role has no approval access');
+    }
+
+    console.log('Final database query for', currentApprovalTab, ':', query);
+    return query;
+}
+
+/**
+ * Build query filters for statistics (excludes status filter to get all counts)
+ */
+function buildStatisticsQueryFilters() {
+    const filters = {};
+    
+    // Factory filter
+    const factoryFilter = document.getElementById('factoryFilter')?.value;
+    if (factoryFilter) {
+        filters.工場 = factoryFilter;
+    }
+    
+    // Date filter - enhanced with data range mode logic
+    const dateFilter = document.getElementById('dateFilter')?.value;
+    if (dateFilter) {
+        filters.Date = dateFilter;
+    } else if (dataRangeMode === 'current') {
+        // If we're in current mode and no specific date is set, default to today
+        const today = new Date().toISOString().split('T')[0];
+        filters.Date = today;
+    }
+    // If dataRangeMode is 'all' and no date filter, don't add date restriction
+    
+    // Search filter
+    const searchTerm = document.getElementById('approvalSearchInput')?.value?.toLowerCase();
+    if (searchTerm) {
+        filters.$or = [
+            { 品番: { $regex: searchTerm, $options: 'i' } },
+            { 背番号: { $regex: searchTerm, $options: 'i' } },
+            { Worker_Name: { $regex: searchTerm, $options: 'i' } }
+        ];
+    }
+    
+    console.log('📊 Built statistics query filters (mode: ' + dataRangeMode + '):', filters);
+    return filters;
+}
+
+/**
+ * Build query filters from UI controls (NEW HELPER)
+ */
+function buildApprovalQueryFilters() {
+    const filters = {};
+    
+    // Factory filter
+    const factoryFilter = document.getElementById('factoryFilter')?.value;
+    if (factoryFilter) {
+        filters.工場 = factoryFilter;
+    }
+    
+    // Status filter
+    const statusFilter = document.getElementById('statusFilter')?.value;
+    if (statusFilter) {
+        if (statusFilter === 'today') {
+            const today = new Date().toISOString().split('T')[0];
+            filters.Date = today;
+        } else if (statusFilter === 'pending') {
+            filters.$or = [
+                { approvalStatus: { $exists: false } },
+                { approvalStatus: 'pending' }
+            ];
+        } else if (statusFilter === 'correction_needed') {
+            // Handle both correction types for the main "Correction Needed" card
+            filters.$or = [
+                { approvalStatus: 'correction_needed' },
+                { approvalStatus: 'correction_needed_from_kacho' }
+            ];
+        } else {
+            filters.approvalStatus = statusFilter;
+        }
+    }
+    
+    // Date filter - enhanced with data range mode logic
+    const dateFilter = document.getElementById('dateFilter')?.value;
+    if (dateFilter) {
+        filters.Date = dateFilter;
+    } else if (dataRangeMode === 'current' && !statusFilter) {
+        // If we're in current mode and no specific date is set, default to today
+        const today = new Date().toISOString().split('T')[0];
+        filters.Date = today;
+    }
+    // If dataRangeMode is 'all' and no date filter, don't add date restriction
+    
+    // Search filter
+    const searchTerm = document.getElementById('approvalSearchInput')?.value?.toLowerCase();
+    if (searchTerm) {
+        // If we already have an $or from status filtering, combine them with $and
+        if (filters.$or) {
+            filters.$and = [
+                { $or: filters.$or }, // Existing status $or condition
+                { $or: [              // Search $or condition
+                    { 品番: { $regex: searchTerm, $options: 'i' } },
+                    { 背番号: { $regex: searchTerm, $options: 'i' } },
+                    { Worker_Name: { $regex: searchTerm, $options: 'i' } }
+                ]}
+            ];
+            delete filters.$or; // Remove the single $or since we're using $and now
+        } else {
+            filters.$or = [
+                { 品番: { $regex: searchTerm, $options: 'i' } },
+                { 背番号: { $regex: searchTerm, $options: 'i' } },
+                { Worker_Name: { $regex: searchTerm, $options: 'i' } }
+            ];
+        }
+    }
+    
+    console.log('🔍 Built query filters (mode: ' + dataRangeMode + '):', filters);
+    return filters;
+}
+
+/**
+ * Update statistics display in the UI (NEW HELPER)
+ */
+function updateApprovalStatisticsDisplay() {
+    document.getElementById('pendingCount').textContent = approvalStatistics.pending || 0;
+    document.getElementById('hanchoApprovedCount').textContent = approvalStatistics.hanchoApproved || 0;
+    document.getElementById('fullyApprovedCount').textContent = approvalStatistics.fullyApproved || 0;
+    document.getElementById('correctionCount').textContent = approvalStatistics.correctionNeeded || 0;
+    document.getElementById('totalCount').textContent = approvalStatistics.todayTotal || 0;
+    
+    // Update 班長-specific card if it exists
+    if (currentUserData.role === '班長') {
+        const kachoRequestElement = document.getElementById('kachoRequestCount');
+        if (kachoRequestElement) {
+            kachoRequestElement.textContent = approvalStatistics.correctionNeededFromKacho || 0;
+        }
+    }
+    
+    // Remove loading opacity
+    document.querySelectorAll('[id$="Count"]').forEach(element => {
+        element.parentElement.classList.remove('opacity-50');
+    });
+}
+
+/**
+ * Update factory filter dropdown options (NEW HELPER)
+ */
+function updateFactoryFilterOptions(factories) {
+    const factoryFilter = document.getElementById('factoryFilter');
+    const currentValue = factoryFilter.value;
+    
+    factoryFilter.innerHTML = '<option value="" data-i18n="allFactories">All Factories</option>';
+    
+    factories.forEach(factory => {
+        const option = document.createElement('option');
+        option.value = factory;
+        option.textContent = factory;
+        if (factory === currentValue) {
+            option.selected = true;
+        }
+        factoryFilter.appendChild(option);
+    });
+}
+
+/**
+ * Show loading state in UI (NEW HELPER)
+ */
+function showApprovalLoadingState() {
+    // Add opacity to statistics cards
+    document.querySelectorAll('[id$="Count"]').forEach(element => {
+        element.textContent = '...';
+        element.parentElement.classList.add('opacity-50');
+    });
+    
+    // Show loading in table
+    const container = document.getElementById('approvalsTableContainer');
+    container.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>データを読み込んでいます...</div>';
+}
+
+/**
+ * Show error state in UI (NEW HELPER)
+ */
+function showApprovalErrorState(errorMessage) {
+    const container = document.getElementById('approvalsTableContainer');
+    container.innerHTML = `<div class="p-8 text-center text-red-500">
+        <i class="ri-error-warning-line text-2xl mr-2"></i>
+        エラー: ${errorMessage}
+        <br><button class="mt-2 text-blue-500 hover:underline" onclick="loadApprovalData()">再試行</button>
+    </div>`;
+}
+
+/**
+ * Load factory filter options (LEGACY - REPLACED BUT KEPT FOR COMPATIBILITY)
  */
 function loadFactoryFilterOptions() {
     const factoryFilter = document.getElementById('factoryFilter');
@@ -2319,110 +2858,182 @@ function loadFactoryFilterOptions() {
 }
 
 /**
+ * Toggle data range mode between current date and all historical data
+ */
+window.toggleDataRange = function(mode) {
+    dataRangeMode = mode;
+    
+    const currentBtn = document.getElementById('currentDateModeBtn');
+    const allBtn = document.getElementById('allDataModeBtn');
+    const indicator = document.getElementById('dataRangeIndicator');
+    const dateFilter = document.getElementById('dateFilter');
+    
+    if (mode === 'current') {
+        // Switch to current date mode
+        currentBtn.classList.remove('text-gray-600', 'hover:bg-gray-100');
+        currentBtn.classList.add('bg-blue-500', 'text-white');
+        allBtn.classList.remove('bg-blue-500', 'text-white');
+        allBtn.classList.add('text-gray-600', 'hover:bg-gray-100');
+        
+        // Set today's date if no date is selected
+        if (!dateFilter.value) {
+            const today = new Date().toISOString().split('T')[0];
+            dateFilter.value = today;
+        }
+        
+        // Update indicator
+        indicator.innerHTML = `
+            <i class="ri-calendar-check-line mr-1 text-blue-500"></i>
+            <span data-i18n="showingCurrentDate">Showing current date data</span>
+        `;
+        
+    } else {
+        // Switch to all data mode
+        allBtn.classList.remove('text-gray-600', 'hover:bg-gray-100');
+        allBtn.classList.add('bg-blue-500', 'text-white');
+        currentBtn.classList.remove('bg-blue-500', 'text-white');
+        currentBtn.classList.add('text-gray-600', 'hover:bg-gray-100');
+        
+        // Clear date filter to show all data
+        dateFilter.value = '';
+        
+        // Update indicator
+        indicator.innerHTML = `
+            <i class="ri-database-2-line mr-1 text-blue-500"></i>
+            <span data-i18n="showingAllData">Showing all historical data</span>
+        `;
+    }
+    
+    // Reload data with new range
+    applyApprovalFilters();
+};
+
+/**
  * Filter by status when clicking on stat cards
  */
 window.filterByStatus = function(status) {
     const statusFilter = document.getElementById('statusFilter');
+    const dateFilter = document.getElementById('dateFilter');
     
     if (status === 'today') {
-        // Filter by today's date
+        // Filter by today's date - clear status to show all
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('dateFilter').value = today;
+        dateFilter.value = today;
         statusFilter.value = '';
+        // Ensure we're in current mode when clicking "Today's Total"
+        if (dataRangeMode === 'all') {
+            toggleDataRange('current');
+            return; // toggleDataRange will call applyApprovalFilters
+        }
     } else {
-        // Clear date filter and set status filter
-        document.getElementById('dateFilter').value = '';
+        // Set status filter for table data
         statusFilter.value = status;
+        
+        if (dataRangeMode === 'current') {
+            // Keep current date if we're in current date mode
+            const today = new Date().toISOString().split('T')[0];
+            if (!dateFilter.value) {
+                dateFilter.value = today;
+            }
+        } else {
+            // Clear date filter only if in "all data" mode
+            dateFilter.value = '';
+        }
     }
     
-    // Apply filters
+    // Apply filters normally
     applyApprovalFilters();
 };
 
 /**
  * Apply filters to approval data
  */
+/**
+ * Apply filters to approval data (OPTIMIZED)
+ */
 function applyApprovalFilters() {
-    const factoryFilter = document.getElementById('factoryFilter').value;
-    const statusFilter = document.getElementById('statusFilter').value;
-    const dateFilter = document.getElementById('dateFilter').value;
-    const searchTerm = document.getElementById('approvalSearchInput').value.toLowerCase();
-
-    filteredApprovalData = allApprovalData.filter(item => {
-        const factoryMatch = !factoryFilter || item.工場 === factoryFilter;
-        
-        // Updated status matching for 2-step approval
-        const statusMatch = !statusFilter || 
-            (statusFilter === 'pending' && (!item.approvalStatus || item.approvalStatus === 'pending')) ||
-            (statusFilter === 'hancho_approved' && item.approvalStatus === 'hancho_approved') ||
-            (statusFilter === 'fully_approved' && item.approvalStatus === 'fully_approved') ||
-            (statusFilter === 'correction_needed' && item.approvalStatus === 'correction_needed') ||
-            (statusFilter === 'correction_needed_from_kacho' && item.approvalStatus === 'correction_needed_from_kacho');
-            
-        const dateMatch = !dateFilter || item.Date === dateFilter;
-        const searchMatch = !searchTerm || 
-            (item.品番 && item.品番.toLowerCase().includes(searchTerm)) ||
-            (item.背番号 && item.背番号.toLowerCase().includes(searchTerm)) ||
-            (item.Worker_Name && item.Worker_Name.toLowerCase().includes(searchTerm));
-
-        return factoryMatch && statusMatch && dateMatch && searchMatch;
+    console.log('🔍 Applying filters and reloading data...');
+    currentApprovalPage = 1; // Reset to first page
+    
+    // Reload both statistics and table data with new filters
+    Promise.all([
+        loadApprovalStatistics(),
+        loadApprovalTableData()
+    ]).catch(error => {
+        console.error('❌ Error applying filters:', error);
+        showApprovalErrorState('フィルター適用中にエラーが発生しました');
     });
-
-    currentApprovalPage = 1;
-    renderApprovalTable();
-    updateStats();
 }
 
 /**
- * Update statistics cards with clickable functionality
+ * Update statistics cards (OPTIMIZED - Now handled by loadApprovalStatistics)
  */
 function updateStats() {
-    const pending = allApprovalData.filter(item => !item.approvalStatus || item.approvalStatus === 'pending').length;
-    const hanchoApproved = allApprovalData.filter(item => item.approvalStatus === 'hancho_approved').length;
-    const fullyApproved = allApprovalData.filter(item => item.approvalStatus === 'fully_approved').length;
-    const correction = allApprovalData.filter(item => 
-        item.approvalStatus === 'correction_needed' || item.approvalStatus === 'correction_needed_from_kacho'
-    ).length;
-    const kachoRequest = allApprovalData.filter(item => item.approvalStatus === 'correction_needed_from_kacho').length;
-    const today = new Date().toISOString().split('T')[0];
-    const todayTotal = allApprovalData.filter(item => item.Date === today).length;
-
-    document.getElementById('pendingCount').textContent = pending;
-    document.getElementById('hanchoApprovedCount').textContent = hanchoApproved;
-    document.getElementById('fullyApprovedCount').textContent = fullyApproved;
-    document.getElementById('correctionCount').textContent = correction;
-    if (role === '班長') {
-        const kachoRequestElement = document.getElementById('kachoRequestCount');
-        if (kachoRequestElement) {
-            kachoRequestElement.textContent = kachoRequest;
-        }
+    // This function is now handled by updateApprovalStatisticsDisplay()
+    // Keep it for compatibility with existing code
+    if (approvalStatistics && Object.keys(approvalStatistics).length > 0) {
+        updateApprovalStatisticsDisplay();
+    } else {
+        console.log('📊 Statistics not loaded yet, calling loadApprovalStatistics...');
+        loadApprovalStatistics();
     }
-    document.getElementById('totalCount').textContent = todayTotal;
 }
 
 /**
- * Render the approval table
+ * Render the approval table (UPDATED TO HANDLE BOTH OLD AND NEW FORMATS)
  */
-function renderApprovalTable() {
+function renderApprovalTable(data = null, paginationInfo = null) {
     const container = document.getElementById('approvalsTableContainer');
     
     // Check if we're in list view mode
     const viewMode = document.getElementById('viewModeSelect').value;
     if (viewMode === 'list') {
-        renderApprovalList();
+        renderApprovalList(); // Async function - will load ALL data
         generateSummaryReport();
         return;
     }
     
-    if (filteredApprovalData.length === 0) {
+    // Use provided data or fallback to legacy filteredApprovalData
+    let tableData = data || filteredApprovalData;
+    let totalRecords = 0;
+    let currentPagination = null;
+    
+    if (paginationInfo) {
+        // New optimized format - data is already paginated
+        totalRecords = paginationInfo.totalRecords;
+        currentPagination = paginationInfo;
+    } else {
+        // Legacy format - apply client-side pagination
+        if (tableData.length === 0) {
+            container.innerHTML = '<div class="p-8 text-center text-gray-500">データがありません</div>';
+            updatePagination(0, { currentPage: 1, totalPages: 0 });
+            return;
+        }
+        
+        const startIndex = (currentApprovalPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        tableData = tableData.slice(startIndex, endIndex);
+        totalRecords = filteredApprovalData.length;
+        
+        // Create legacy pagination info
+        const totalPages = Math.ceil(filteredApprovalData.length / itemsPerPage);
+        currentPagination = {
+            currentPage: currentApprovalPage,
+            totalPages: totalPages,
+            totalRecords: totalRecords,
+            itemsPerPage: itemsPerPage,
+            hasNext: currentApprovalPage < totalPages,
+            hasPrevious: currentApprovalPage > 1,
+            startIndex: startIndex + 1,
+            endIndex: Math.min(endIndex, filteredApprovalData.length)
+        };
+    }
+    
+    if (tableData.length === 0) {
         container.innerHTML = '<div class="p-8 text-center text-gray-500">データがありません</div>';
-        updatePagination(0);
+        updatePagination(0, { currentPage: 1, totalPages: 0 });
         return;
     }
-
-    const startIndex = (currentApprovalPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const pageData = filteredApprovalData.slice(startIndex, endIndex);
 
     // Get columns based on current tab
     const columns = getTableColumns(currentApprovalTab);
@@ -2462,7 +3073,7 @@ function renderApprovalTable() {
                 </tr>
             </thead>
             <tbody>
-                ${pageData.map(item => {
+                ${tableData.map(item => {
                     const statusInfo = getStatusInfo(item);
                     const quantityField = getQuantityField(currentApprovalTab);
                     const ngField = getNGField(currentApprovalTab);
@@ -2498,7 +3109,7 @@ function renderApprovalTable() {
     `;
 
     container.innerHTML = tableHTML;
-    updatePagination(filteredApprovalData.length);
+    updatePagination(totalRecords, currentPagination);
 }
 
 /**
@@ -2552,14 +3163,21 @@ function getNGField(tabName) {
 /**
  * Sort approval table by column
  */
-window.sortApprovalTable = function(column) {
+window.sortApprovalTable = async function(column) {
+    console.log(`🔄 sortApprovalTable called: column=${column}`);
+    console.log(`🔄 Current filteredApprovalData length: ${filteredApprovalData.length}`);
+    console.log(`🔄 First few items before sort:`, filteredApprovalData.slice(0, 3));
+    
     if (approvalSortState.column === column) {
         approvalSortState.direction *= -1;
     } else {
         approvalSortState.column = column;
         approvalSortState.direction = 1;
     }
+    
+    console.log(`🔄 Sort state: column=${approvalSortState.column}, direction=${approvalSortState.direction}`);
 
+    // Sort the current page data
     filteredApprovalData.sort((a, b) => {
         let aVal = a[column];
         let bVal = b[column];
@@ -2574,16 +3192,60 @@ window.sortApprovalTable = function(column) {
         if (aVal > bVal) return 1 * approvalSortState.direction;
         return 0;
     });
+    
+    console.log(`🔄 First few items after sort:`, filteredApprovalData.slice(0, 3));
 
     // Render appropriate view based on current mode
     const viewMode = document.getElementById('viewModeSelect').value;
+    console.log(`🔄 Current view mode: ${viewMode}`);
+    
     if (viewMode === 'list') {
-        renderApprovalList();
+        console.log('🔄 Updating list view after sort');
+        await renderApprovalList();
         generateSummaryReport();
     } else {
-        renderApprovalTable();
+        console.log('🔄 Updating table view after sort');
+        // Re-render table with sorted data - use existing pagination info
+        const paginationContainer = document.querySelector('#approvalContainer .flex.items-center.justify-between');
+        const currentPaginationInfo = {
+            currentPage: currentApprovalPage,
+            totalPages: 10, // This will be updated by the table function
+            totalRecords: filteredApprovalData.length,
+            itemsPerPage: itemsPerPage
+        };
+        
+        renderApprovalTable(filteredApprovalData, currentPaginationInfo);
+        console.log('🔄 Table view updated after sort');
     }
+    
+    console.log('🔄 Sort completed');
 };
+
+/**
+ * Apply current sort state to data array
+ */
+function applySortToData(dataArray) {
+    if (!approvalSortState.column || !dataArray || dataArray.length === 0) {
+        return dataArray;
+    }
+    
+    console.log(`🔄 Applying sort: ${approvalSortState.column} (direction: ${approvalSortState.direction})`);
+    
+    return dataArray.sort((a, b) => {
+        let aVal = a[approvalSortState.column];
+        let bVal = b[approvalSortState.column];
+        
+        if (aVal === undefined) aVal = '';
+        if (bVal === undefined) bVal = '';
+        
+        if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+        if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+        
+        if (aVal < bVal) return -1 * approvalSortState.direction;
+        if (aVal > bVal) return 1 * approvalSortState.direction;
+        return 0;
+    });
+}
 
 /**
  * Get sort arrow for column headers
@@ -2614,8 +3276,12 @@ function getStatusInfo(item) {
 /**
  * Update pagination controls
  */
-function updatePagination(totalItems) {
-    const totalPages = Math.ceil(totalItems / itemsPerPage);
+/**
+ * Update pagination controls (UPDATED TO HANDLE BOTH OLD AND NEW FORMATS)
+ */
+function updatePagination(totalItems, paginationInfo = null) {
+    console.log('🔢 updatePagination called:', { totalItems, paginationInfo, itemsPerPage, currentApprovalPage });
+    
     const pageInfo = document.getElementById('pageInfo');
     const pageNumbers = document.getElementById('pageNumbers');
     const prevBtn = document.getElementById('prevPageBtn');
@@ -2629,46 +3295,281 @@ function updatePagination(totalItems) {
         return;
     }
 
-    const startItem = (currentApprovalPage - 1) * itemsPerPage + 1;
-    const endItem = Math.min(currentApprovalPage * itemsPerPage, totalItems);
-    pageInfo.textContent = `${totalItems}件中 ${startItem}-${endItem}件を表示`;
-
-    // Generate page numbers
-    pageNumbers.innerHTML = '';
-    const startPage = Math.max(1, currentApprovalPage - 2);
-    const endPage = Math.min(totalPages, currentApprovalPage + 2);
-
-    for (let i = startPage; i <= endPage; i++) {
-        const pageBtn = document.createElement('button');
-        pageBtn.textContent = i;
-        pageBtn.className = `px-3 py-1 border rounded ${i === currentApprovalPage ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}`;
-        pageBtn.onclick = () => goToPage(i);
-        pageNumbers.appendChild(pageBtn);
+    let currentPage, totalPages, startItem, endItem, hasNext, hasPrevious;
+    
+    if (paginationInfo) {
+        // New optimized format - use provided pagination info
+        currentPage = paginationInfo.currentPage;
+        totalPages = paginationInfo.totalPages;
+        startItem = paginationInfo.startIndex;
+        endItem = paginationInfo.endIndex;
+        hasNext = paginationInfo.hasNext;
+        hasPrevious = paginationInfo.hasPrevious;
+        console.log('📊 Using provided pagination info:', paginationInfo);
+    } else {
+        // Legacy format - calculate pagination info
+        totalPages = Math.ceil(totalItems / itemsPerPage);
+        currentPage = currentApprovalPage;
+        startItem = (currentPage - 1) * itemsPerPage + 1;
+        endItem = Math.min(currentPage * itemsPerPage, totalItems);
+        hasNext = currentPage < totalPages;
+        hasPrevious = currentPage > 1;
+        console.log('📊 Calculated pagination:', { totalPages, currentPage, startItem, endItem, hasNext, hasPrevious, itemsPerPage, totalItems });
     }
 
-    prevBtn.disabled = currentApprovalPage === 1;
-    nextBtn.disabled = currentApprovalPage === totalPages;
+    pageInfo.textContent = `${totalItems}件中 ${startItem}-${endItem}件を表示`;
+
+    // Generate page numbers with better pagination
+    pageNumbers.innerHTML = '';
+    
+    // Clean up any existing direct page input
+    const existingInput = pageNumbers.parentElement.querySelector('div.flex.items-center.space-x-2.ml-4');
+    if (existingInput) {
+        existingInput.remove();
+    }
+    
+    // Helper function to create page button
+    const createPageButton = (pageNum, isActive = false, isEllipsis = false) => {
+        const pageBtn = document.createElement('button');
+        pageBtn.type = 'button'; // Ensure it's a button type
+        
+        if (isEllipsis) {
+            pageBtn.textContent = '...';
+            pageBtn.className = 'px-3 py-1 border rounded bg-white shadow-sm cursor-default';
+            pageBtn.disabled = true;
+        } else {
+            pageBtn.textContent = pageNum;
+            pageBtn.className = `px-3 py-1 border rounded bg-white shadow-sm ${isActive ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}`;
+            pageBtn.onclick = (e) => {
+                console.log(`🖱️ Page button ${pageNum} clicked!`);
+                e.preventDefault();
+                console.log(`🔄 About to call goToPageNew(${pageNum})`);
+                console.log(`🔄 goToPageNew function exists:`, typeof window.goToPageNew);
+                try {
+                    window.goToPageNew(pageNum);
+                    console.log(`🔄 window.goToPageNew(${pageNum}) called successfully`);
+                } catch (error) {
+                    console.error(`🔄 Error calling window.goToPageNew(${pageNum}):`, error);
+                }
+                return false;
+            };
+            // Also add event listener as backup
+            pageBtn.addEventListener('click', (e) => {
+                console.log(`🖱️ Page button ${pageNum} event listener triggered!`);
+                e.preventDefault();
+                e.stopPropagation();
+                window.goToPageNew(pageNum);
+            });
+        }
+        return pageBtn;
+    };
+    
+    if (totalPages <= 7) {
+        // Show all pages if 7 or fewer
+        for (let i = 1; i <= totalPages; i++) {
+            const pageBtn = createPageButton(i, i === currentPage);
+            pageNumbers.appendChild(pageBtn);
+        }
+    } else {
+        // Complex pagination for many pages
+        // Always show page 1
+        const page1Btn = createPageButton(1, currentPage === 1);
+        pageNumbers.appendChild(page1Btn);
+        
+        let startRange, endRange;
+        
+        if (currentPage <= 4) {
+            // Near the beginning: 1, 2, 3, 4, 5, ..., last
+            startRange = 2;
+            endRange = 5;
+        } else if (currentPage >= totalPages - 3) {
+            // Near the end: 1, ..., last-4, last-3, last-2, last-1, last
+            startRange = totalPages - 4;
+            endRange = totalPages - 1;
+        } else {
+            // In the middle: 1, ..., current-1, current, current+1, ..., last
+            startRange = currentPage - 1;
+            endRange = currentPage + 1;
+        }
+        
+        // Add ellipsis if there's a gap after page 1
+        if (startRange > 2) {
+            pageNumbers.appendChild(createPageButton(0, false, true)); // ellipsis
+        }
+        
+        // Add the middle range
+        for (let i = startRange; i <= endRange; i++) {
+            const pageBtn = createPageButton(i, i === currentPage);
+            pageNumbers.appendChild(pageBtn);
+        }
+        
+        // Add ellipsis if there's a gap before the last page
+        if (endRange < totalPages - 1) {
+            pageNumbers.appendChild(createPageButton(0, false, true)); // ellipsis
+        }
+        
+        // Always show last page (if not already shown)
+        if (totalPages > 1) {
+            const pageBtn = createPageButton(totalPages, currentPage === totalPages);
+            pageNumbers.appendChild(pageBtn);
+        }
+    }
+    
+    // Add direct page input for very large pagination
+    if (totalPages > 10) {
+        const inputContainer = document.createElement('div');
+        inputContainer.className = 'flex items-center space-x-2 ml-4';
+        inputContainer.innerHTML = `
+            <span class="text-sm text-gray-600">ページ:</span>
+            <input type="number" id="directPageInput" min="1" max="${totalPages}" 
+                   class="w-16 px-2 py-1 border rounded text-sm text-center" 
+                   placeholder="${currentPage}">
+            <button type="button" onclick="goToDirectPage()" 
+                    class="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600">移動</button>
+        `;
+        pageNumbers.parentElement.appendChild(inputContainer);
+        
+        // Add Enter key support for direct page input
+        const input = inputContainer.querySelector('#directPageInput');
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                goToDirectPage();
+            }
+        });
+    }
+
+    prevBtn.disabled = !hasPrevious;
+    nextBtn.disabled = !hasNext;
+    
+    // Debug: Check if pagination elements are visible
+    setTimeout(() => {
+        const paginationElements = {
+            pageInfo: document.getElementById('pageInfo'),
+            pageNumbers: document.getElementById('pageNumbers'),
+            prevBtn: document.getElementById('prevPageBtn'),
+            nextBtn: document.getElementById('nextPageBtn'),
+            paginationContainer: document.getElementById('paginationContainer')
+        };
+        
+        // Silent visibility check - no console output
+    }, 100);
 }
 
 /**
  * Change page
  */
+/**
+ * Change page (OPTIMIZED)
+ */
 function changePage(direction) {
-    const totalPages = Math.ceil(filteredApprovalData.length / itemsPerPage);
     const newPage = currentApprovalPage + direction;
+    console.log(`🔄 changePage called: direction=${direction}, current=${currentApprovalPage}, new=${newPage}`);
     
-    if (newPage >= 1 && newPage <= totalPages) {
-        currentApprovalPage = newPage;
-        renderApprovalTable();
+    if (newPage >= 1) {
+        console.log(`🔄 changePage calling goToPageNew(${newPage})`);
+        window.goToPageNew(newPage);
+    } else {
+        console.log(`🔄 changePage: Invalid page ${newPage}, staying on current page`);
     }
 }
 
 /**
- * Go to specific page
+ * Go to specific page (OPTIMIZED)
  */
-function goToPage(page) {
-    currentApprovalPage = page;
-    renderApprovalTable();
+window.goToPage = function(page) {
+    console.log(`🔄🔄🔄 GOTTOPAGE FUNCTION ENTRY: page=${page}, current=${currentApprovalPage} 🔄🔄🔄`);
+    console.log(`🔄 goToPage called: page=${page}, current=${currentApprovalPage}`);
+    console.log(`🔄 Type of page:`, typeof page, `Value:`, page);
+    
+    if (page >= 1) {
+        console.log(`🔄 Page ${page} is valid, proceeding...`);
+        currentApprovalPage = page;
+        console.log(`🔄 currentApprovalPage updated to:`, currentApprovalPage);
+        
+        // Check current view mode and reload appropriate view
+        const viewModeElement = document.getElementById('viewModeSelect');
+        console.log(`🔄 viewModeElement:`, viewModeElement);
+        
+        if (!viewModeElement) {
+            console.error(`🔄 ERROR: viewModeSelect element not found!`);
+            return;
+        }
+        
+        const viewMode = viewModeElement.value;
+        console.log(`🔄 Current view mode: ${viewMode}`);
+        
+        try {
+            if (viewMode === 'list') {
+                console.log('🔄 Calling renderApprovalList for page change');
+                renderApprovalList(); // Load new page data for list view
+            } else {
+                console.log('🔄 Calling loadApprovalTableData for page change');
+                loadApprovalTableData(); // Load new page data for table view
+            }
+            console.log(`🔄 Successfully switched to page ${page}`);
+        } catch (error) {
+            console.error(`🔄 ERROR in goToPage: ${error.message}`, error);
+        }
+    } else {
+        console.log(`🔄 Invalid page number: ${page}`);
+    }
+}
+
+/**
+ * NEW TEST FUNCTION - Go to specific page
+ */
+window.goToPageNew = function(page) {
+    console.log(`🔄🔄🔄 GOTTOPAGENEW FUNCTION ENTRY: page=${page}, current=${currentApprovalPage} 🔄🔄🔄`);
+    console.log(`🔄 goToPageNew called: page=${page}, current=${currentApprovalPage}`);
+    
+    if (page >= 1) {
+        console.log(`🔄 Page ${page} is valid, updating currentApprovalPage...`);
+        currentApprovalPage = page;
+        console.log(`🔄 currentApprovalPage updated to:`, currentApprovalPage);
+        
+        // Check current view mode and reload appropriate view
+        const viewModeElement = document.getElementById('viewModeSelect');
+        console.log(`🔄 viewModeElement:`, viewModeElement);
+        
+        if (!viewModeElement) {
+            console.error(`🔄 ERROR: viewModeSelect element not found!`);
+            return;
+        }
+        
+        const viewMode = viewModeElement.value;
+        console.log(`🔄 Current view mode: ${viewMode}`);
+        
+        try {
+            if (viewMode === 'list') {
+                console.log('🔄 Calling renderApprovalList for page change');
+                renderApprovalList(); // Load new page data for list view
+            } else {
+                console.log('🔄 Calling loadApprovalTableData for page change');
+                loadApprovalTableData(); // Load new page data for table view
+            }
+            console.log(`🔄 Successfully switched to page ${page}`);
+        } catch (error) {
+            console.error(`🔄 ERROR in goToPageNew: ${error.message}`, error);
+        }
+    } else {
+        console.log(`🔄 Invalid page number: ${page}`);
+    }
+}
+
+/**
+ * Go to direct page from input field
+ */
+window.goToDirectPage = function() {
+    const input = document.getElementById('directPageInput');
+    const page = parseInt(input.value);
+    
+    if (page && page >= 1) {
+        console.log(`🔄 goToDirectPage called: page=${page}`);
+        window.goToPageNew(page);
+        input.value = ''; // Clear input after navigation
+    } else {
+        alert('有効なページ番号を入力してください');
+    }
 }
 
 const picURL = 'https://script.google.com/macros/s/AKfycbwHUW1ia8hNZG-ljsguNq8K4LTPVnB6Ng_GLXIHmtJTdUgGGd2WoiQo9ToF-7PvcJh9bA/exec';
@@ -2710,9 +3611,44 @@ function updateImageSrc(link) {
 /**
  * Open approval detail modal with images
  */
-window.openApprovalDetail = function(itemId) {
-    const item = allApprovalData.find(d => d._id === itemId);
-    if (!item) return;
+/**
+ * Open approval detail modal with images (UPDATED FOR OPTIMIZATION)
+ */
+window.openApprovalDetail = async function(itemId) {
+    // First try to find item in current page data
+    let item = filteredApprovalData.find(d => d._id === itemId);
+    
+    // If not found in current page, fetch it from database
+    if (!item) {
+        console.log('🔍 Item not in current page, fetching from database...');
+        try {
+            const response = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: currentApprovalTab,
+                    query: { _id: itemId } // Server will handle ObjectId conversion
+                })
+            });
+
+            if (!response.ok) throw new Error('Failed to fetch item details');
+            
+            const items = await response.json();
+            if (items.length === 0) {
+                console.error('Item not found in database');
+                return;
+            }
+            
+            item = items[0];
+            console.log('✅ Item fetched for modal:', item._id);
+            
+        } catch (error) {
+            console.error('❌ Error fetching item details:', error);
+            alert('アイテムの詳細を取得できませんでした');
+            return;
+        }
+    }
 
     const modal = document.getElementById('approvalModal');
     const content = document.getElementById('approvalModalContent');
@@ -3232,7 +4168,39 @@ window.closeApprovalModal = function() {
 window.approveItem = async function(itemId) {
     try {
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
-        const item = allApprovalData.find(d => d._id === itemId);
+        
+        // First try to find item in current page data, otherwise fetch from server
+        let item = filteredApprovalData.find(d => d._id === itemId);
+        
+        if (!item) {
+            console.log('🔍 Item not found in current page, fetching from server...');
+            // Fetch item from server
+            const response = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: currentApprovalTab,
+                    query: { _id: itemId }
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch item details');
+            }
+            
+            const items = await response.json();
+            if (!items || items.length === 0) {
+                throw new Error('Item not found');
+            }
+            
+            item = items[0];
+            console.log('✅ Item fetched from server:', item._id);
+        }
+        
+        if (!item) {
+            throw new Error('Item not found');
+        }
         
         // Get user's full name for display
         const userFullName = await getUserFullName(currentUser.username);
@@ -3300,7 +4268,14 @@ window.approveItem = async function(itemId) {
         
         alert(stepMessage);
         closeApprovalModal();
-        loadApprovalData();
+        
+        // Reload current view data
+        const viewMode = document.getElementById('viewModeSelect')?.value;
+        if (viewMode === 'list') {
+            await renderApprovalList();
+        } else {
+            await loadApprovalTableData();
+        }
         
     } catch (error) {
         console.error('Error approving item:', error);
@@ -3351,7 +4326,39 @@ window.requestCorrection = async function(itemId) {
     try {
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
         const userFullName = await getUserFullName(currentUser.username);
-        const item = allApprovalData.find(d => d._id === itemId);
+        
+        // First try to find item in current page data, otherwise fetch from server
+        let item = filteredApprovalData.find(d => d._id === itemId);
+        
+        if (!item) {
+            console.log('🔍 Item not found in current page, fetching from server...');
+            // Fetch item from server
+            const response = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: currentApprovalTab,
+                    query: { _id: itemId }
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch item details');
+            }
+            
+            const items = await response.json();
+            if (!items || items.length === 0) {
+                throw new Error('Item not found');
+            }
+            
+            item = items[0];
+            console.log('✅ Item fetched from server:', item._id);
+        }
+        
+        if (!item) {
+            throw new Error('Item not found');
+        }
         
         let newStatus, targetRole;
         
@@ -3404,7 +4411,14 @@ window.requestCorrection = async function(itemId) {
             "修正要求を送信しました（提出者による修正が必要）";
         alert(targetMessage);
         closeApprovalModal();
-        loadApprovalData();
+        
+        // Reload current view data
+        const viewMode = document.getElementById('viewModeSelect')?.value;
+        if (viewMode === 'list') {
+            await renderApprovalList();
+        } else {
+            await loadApprovalTableData();
+        }
         
     } catch (error) {
         console.error('Error requesting correction:', error);
@@ -3456,12 +4470,13 @@ function addInputChangeListeners() {
 /**
  * Toggle between table and list view modes
  */
-function toggleViewMode(viewMode) {
+async function toggleViewMode(viewMode) {
     const tableContainer = document.getElementById('approvalsTableContainer');
     const listContainer = document.getElementById('approvalsListContainer');
     const listControls = document.getElementById('listViewControls');
     const summaryReport = document.getElementById('summaryReport');
     const pagination = document.querySelector('.flex.items-center.justify-between.mt-6');
+    const paginationContainer = document.getElementById('paginationContainer');
 
     if (viewMode === 'list') {
         // Show list view
@@ -3469,11 +4484,15 @@ function toggleViewMode(viewMode) {
         listContainer.classList.remove('hidden');
         listControls.classList.remove('hidden');
         summaryReport.classList.remove('hidden');
-        pagination.classList.add('hidden');
+        // Hide main pagination for list view (we use inline pagination)
+        if (pagination) pagination.classList.add('hidden');
+        if (paginationContainer) paginationContainer.classList.add('hidden');
+        
+        console.log('📋 List view activated - main pagination hidden, using inline pagination');
         
         // Initialize list view
         initializeListView();
-        renderApprovalList();
+        await renderApprovalList();
         generateSummaryReport();
     } else {
         // Show table view (default)
@@ -3481,10 +4500,12 @@ function toggleViewMode(viewMode) {
         listContainer.classList.add('hidden');
         listControls.classList.add('hidden');
         summaryReport.classList.add('hidden');
-        pagination.classList.remove('hidden');
+        // Show main pagination for table view
+        if (pagination) pagination.classList.remove('hidden');
+        if (paginationContainer) paginationContainer.classList.remove('hidden');
         
         // Render table view
-        renderApprovalTable();
+        loadApprovalTableData(); // Reload table data properly
     }
 }
 
@@ -3498,34 +4519,192 @@ function initializeListView() {
 }
 
 /**
- * Render approval data as structured list
+ * Load ALL approval data for list view (batch operations)
+ * This bypasses pagination to get all records for batch approval
  */
-function renderApprovalList() {
+async function loadApprovalDataForListView() {
+    try {
+        const factoryAccess = getFactoryAccessForUser();
+        const filters = buildApprovalQueryFilters();
+        
+        console.log('📋 Loading ALL data for list view (batch approval)...');
+        
+        // Try the optimized route first but request ALL data
+        const response = await fetch(BASE_URL + 'api/approval-paginate', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                collectionName: currentApprovalTab,
+                page: 1,
+                limit: 10000, // Request large limit for all data
+                maxLimit: 10000,
+                filters: filters,
+                userRole: currentUserData.role,
+                factoryAccess: factoryAccess
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Optimized route not available');
+        }
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to load all data');
+        }
+
+        console.log(`✅ All data loaded for list view: ${result.data.length} total items`);
+        
+        return result.data;
+        
+    } catch (error) {
+        console.error('❌ Error loading all data, using fallback:', error);
+        return await loadApprovalDataForListViewFallback();
+    }
+}
+
+/**
+ * Fallback method to load ALL data for list view
+ */
+async function loadApprovalDataForListViewFallback() {
+    console.log('📄 Loading ALL data for list view via fallback...');
+    
+    const factoryAccess = getFactoryAccessForUser();
+    let combinedQuery = {};
+    
+    // Apply current filters
+    const currentFilters = buildApprovalQueryFilters();
+    combinedQuery = { ...combinedQuery, ...currentFilters };
+    
+    // Apply factory access controls
+    if (currentUserData.role !== 'admin' && currentUserData.role !== '部長' && factoryAccess.length > 0) {
+        combinedQuery.工場 = { $in: factoryAccess };
+    }
+
+    const response = await fetch(BASE_URL + "queries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            dbName: "submittedDB",
+            collectionName: currentApprovalTab,
+            query: combinedQuery,
+            limit: 10000, // Get all data
+            sort: { Date: -1, _id: -1 }
+        })
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch all data for list view');
+    
+    const data = await response.json();
+    console.log('✅ All data loaded via fallback for list view:', data.length, 'items');
+    
+    return data;
+}
+async function renderApprovalList() {
     const container = document.getElementById('approvalsListContainer');
     
-    if (filteredApprovalData.length === 0) {
-        container.innerHTML = '<div class="p-8 text-center text-gray-500">データがありません</div>';
-        return;
-    }
+    // Show loading state
+    container.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-xl mr-2"></i>Loading data...</div>';
+    
+    try {
+        // Load data with pagination for list view
+        console.log('📋 Loading paginated data for list view...');
+        
+        // Use the same pagination as table view
+        const factoryAccess = getFactoryAccessForUser();
+        const filters = buildApprovalQueryFilters();
+        
+        // Try the new paginated API first
+        let result = null;
+        try {
+            const response = await fetch(BASE_URL + 'api/approval-paginate', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    collectionName: currentApprovalTab,
+                    page: currentApprovalPage,
+                    limit: itemsPerPage,
+                    maxLimit: 100,
+                    filters: filters,
+                    userRole: currentUserData.role,
+                    factoryAccess: factoryAccess
+                })
+            });
+            
+            if (response.ok) {
+                result = await response.json();
+                if (result.success) {
+                    console.log(`✅ Paginated list data loaded: ${result.data.length} items, Page ${result.pagination.currentPage}/${result.pagination.totalPages}`);
+                }
+            }
+        } catch (error) {
+            console.log('📋 Paginated API not available, using fallback...');
+        }
+        
+        let listData, paginationInfo;
+        
+        if (result && result.success) {
+            // Use paginated data
+            listData = result.data;
+            paginationInfo = result.pagination;
+        } else {
+            // Fallback: Load all data and paginate client-side
+            const allData = await loadApprovalDataForListView();
+            const startIndex = (currentApprovalPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            listData = allData.slice(startIndex, endIndex);
+            
+            const totalPages = Math.ceil(allData.length / itemsPerPage);
+            paginationInfo = {
+                currentPage: currentApprovalPage,
+                totalPages: totalPages,
+                totalRecords: allData.length,
+                itemsPerPage: itemsPerPage,
+                hasNext: currentApprovalPage < totalPages,
+                hasPrevious: currentApprovalPage > 1,
+                startIndex: startIndex + 1,
+                endIndex: Math.min(endIndex, allData.length)
+            };
+        }
 
-    // Sort by Time_start for list view (default) unless another sort is active
-    let sortedData = [...filteredApprovalData];
-    if (!approvalSortState.column) {
-        sortedData.sort((a, b) => {
-            const timeA = a.Time_start || '00:00';
-            const timeB = b.Time_start || '00:00';
-            return timeA.localeCompare(timeB);
-        });
-    }
+        if (listData.length === 0) {
+            container.innerHTML = '<div class="p-8 text-center text-gray-500">データがありません</div>';
+            return;
+        }
 
-    // Get all possible fields for the current tab
-    const allFields = getAllFieldsForTab(currentApprovalTab, sortedData);
+        // Update global variable for current page operations and apply any active sort
+        filteredApprovalData = applySortToData(listData);
 
-    // Create comprehensive table structure
-    const listHTML = `
-        <div class="bg-white border rounded-lg overflow-hidden">
-            <!-- Excel-like table -->
-            <div class="overflow-x-auto">
+        // Sort by Time_start for list view (default) only if no other sort is active
+        let sortedData = [...filteredApprovalData];
+        if (!approvalSortState.column) {
+            sortedData.sort((a, b) => {
+                const timeA = a.Time_start || '00:00';
+                const timeB = b.Time_start || '00:00';
+                return timeA.localeCompare(timeB);
+            });
+        }
+
+        console.log(`📋 Rendering list view with ${sortedData.length} items (Page ${paginationInfo.currentPage}/${paginationInfo.totalPages})`);
+
+        // Get all possible fields for the current tab
+        const allFields = getAllFieldsForTab(currentApprovalTab, sortedData);
+
+        // Create comprehensive table structure with pagination info header
+        const listHTML = `
+            <div class="bg-white border rounded-lg overflow-hidden">
+                <!-- Batch Operations Summary -->
+                <div class="bg-blue-50 border-b p-3">
+                    <div class="text-sm text-blue-800">
+                        <i class="ri-information-line mr-1"></i>
+                        <strong>List View (Batch Approval)</strong> - Page ${paginationInfo.currentPage} of ${paginationInfo.totalPages}
+                        <span class="ml-4 text-blue-600">Showing ${paginationInfo.startIndex}-${paginationInfo.endIndex} of ${paginationInfo.totalRecords} records</span>
+                    </div>
+                </div>
+                
+                <!-- Excel-like table -->
+                <div class="overflow-x-auto">
                 <table class="w-full text-xs border-collapse">
                     <thead class="bg-gray-100 sticky top-0 z-10">
                         <tr>
@@ -3565,13 +4744,239 @@ function renderApprovalList() {
                     </tbody>
                 </table>
             </div>
+            
+            <!-- List View Pagination (inline) -->
+            <div class="flex items-center justify-between mt-4 p-4 bg-gray-50 border rounded-lg">
+                <div class="text-sm text-gray-700">
+                    ${paginationInfo.totalRecords}件中 ${paginationInfo.startIndex}-${paginationInfo.endIndex}件を表示
+                </div>
+                <div class="flex items-center space-x-2" id="listPaginationControls">
+                    <button type="button" onclick="event.preventDefault(); changeListPage(-1); return false;" class="p-2 border rounded hover:bg-gray-50 bg-white shadow-sm" ${!paginationInfo.hasPrevious ? 'disabled' : ''}>前へ</button>
+                    <div class="flex space-x-1" id="listPageNumbers">
+                        <!-- Enhanced pagination will be generated by JavaScript -->
+                    </div>
+                    <button type="button" onclick="event.preventDefault(); changeListPage(1); return false;" class="p-2 border rounded hover:bg-gray-50 bg-white shadow-sm" ${!paginationInfo.hasNext ? 'disabled' : ''}>次へ</button>
+                </div>
+            </div>
         </div>
     `;
 
     container.innerHTML = listHTML;
 
+    // Generate enhanced pagination for list view (same as table view)
+    const listPageNumbers = document.getElementById('listPageNumbers');
+    if (listPageNumbers && paginationInfo.totalPages > 0) {
+        // Clear existing buttons
+        listPageNumbers.innerHTML = '';
+        
+        const totalPages = paginationInfo.totalPages;
+        const currentPage = paginationInfo.currentPage;
+        
+        // Helper function to create page button for list view
+        const createListPageButton = (pageNum, isActive = false, isEllipsis = false) => {
+            const pageBtn = document.createElement('button');
+            pageBtn.type = 'button';
+            
+            if (isEllipsis) {
+                pageBtn.textContent = '...';
+                pageBtn.className = 'px-3 py-1 border rounded bg-white shadow-sm cursor-default';
+                pageBtn.disabled = true;
+            } else {
+                pageBtn.textContent = pageNum;
+                pageBtn.className = `px-3 py-1 border rounded bg-white shadow-sm ${isActive ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}`;
+                pageBtn.onclick = (e) => {
+                    e.preventDefault();
+                    console.log(`🖱️ List page button ${pageNum} clicked!`);
+                    window.goToListPage(pageNum);
+                    return false;
+                };
+            }
+            return pageBtn;
+        };
+        
+        if (totalPages <= 7) {
+            // Show all pages if 7 or fewer
+            for (let i = 1; i <= totalPages; i++) {
+                const pageBtn = createListPageButton(i, i === currentPage);
+                listPageNumbers.appendChild(pageBtn);
+            }
+        } else {
+            // Complex pagination for many pages (same logic as table view)
+            // Always show page 1
+            const page1Btn = createListPageButton(1, currentPage === 1);
+            listPageNumbers.appendChild(page1Btn);
+            
+            let startRange, endRange;
+            
+            if (currentPage <= 4) {
+                // Near beginning: 1 2 3 4 5 ... 10
+                startRange = 2;
+                endRange = 5;
+            } else if (currentPage >= totalPages - 3) {
+                // Near end: 1 ... 6 7 8 9 10
+                startRange = totalPages - 4;
+                endRange = totalPages - 1;
+            } else {
+                // Middle: 1 ... 4 5 6 ... 10
+                startRange = currentPage - 1;
+                endRange = currentPage + 1;
+            }
+            
+            // Add ellipsis after page 1 if needed
+            if (startRange > 2) {
+                const ellipsisBtn = createListPageButton(0, false, true);
+                listPageNumbers.appendChild(ellipsisBtn);
+            }
+            
+            // Add middle range
+            for (let i = startRange; i <= endRange; i++) {
+                const pageBtn = createListPageButton(i, i === currentPage);
+                listPageNumbers.appendChild(pageBtn);
+            }
+            
+            // Add ellipsis before last page if needed
+            if (endRange < totalPages - 1) {
+                const ellipsisBtn = createListPageButton(0, false, true);
+                listPageNumbers.appendChild(ellipsisBtn);
+            }
+            
+            // Always show last page (if not already shown)
+            if (endRange < totalPages) {
+                const lastPageBtn = createListPageButton(totalPages, currentPage === totalPages);
+                listPageNumbers.appendChild(lastPageBtn);
+            }
+        }
+        
+    }
+
     // Add event listeners for list interactions
     addListEventListeners();
+    
+    // No need to update the main pagination since we have inline pagination
+    console.log('📋 List view rendered with inline pagination');
+    
+    } catch (error) {
+        console.error('❌ Error loading data for batch approval:', error);
+        container.innerHTML = '<div class="p-8 text-center text-red-500">Error loading data for batch approval. Please try refreshing.</div>';
+    }
+}
+
+/**
+ * Generate page buttons HTML for inline pagination
+ */
+function generatePageButtons(currentPage, totalPages) {
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+    
+    let buttonsHTML = '';
+    for (let i = startPage; i <= endPage; i++) {
+        const isActive = i === currentPage;
+        buttonsHTML += `<button type="button" onclick="event.preventDefault(); goToListPage(${i}); return false;" class="px-3 py-1 border rounded bg-white shadow-sm ${isActive ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}">${i}</button>`;
+    }
+    return buttonsHTML;
+}
+
+/**
+ * Change list page without scrolling
+ */
+window.changeListPage = function(direction) {
+    const newPage = currentApprovalPage + direction;
+    console.log(`🔄 changeListPage called: direction=${direction}, current=${currentApprovalPage}, new=${newPage}`);
+    
+    if (newPage >= 1) {
+        // Store current scroll position before any DOM changes
+        const scrollInfo = {
+            window: window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop,
+            documentElement: document.documentElement.scrollTop,
+            body: document.body.scrollTop
+        };
+        
+        console.log('📍 Storing scroll position:', scrollInfo);
+        
+        currentApprovalPage = newPage;
+        
+        // Temporarily disable scroll restoration
+        const originalScrollRestoration = history.scrollRestoration;
+        if (history.scrollRestoration) {
+            history.scrollRestoration = 'manual';
+        }
+        
+        renderApprovalList().then(() => {
+            // Multiple attempts to restore scroll position
+            const restoreScroll = () => {
+                window.scrollTo(0, scrollInfo.window);
+                document.documentElement.scrollTop = scrollInfo.documentElement;
+                document.body.scrollTop = scrollInfo.body;
+                console.log('📍 Restored scroll to:', scrollInfo.window);
+            };
+            
+            // Immediate restore
+            restoreScroll();
+            
+            // Delayed restore (in case DOM is still updating)
+            setTimeout(restoreScroll, 0);
+            setTimeout(restoreScroll, 10);
+            setTimeout(restoreScroll, 50);
+            
+            // Restore scroll restoration setting
+            if (originalScrollRestoration) {
+                history.scrollRestoration = originalScrollRestoration;
+            }
+        }).catch(error => {
+            console.error('Error in renderApprovalList:', error);
+        });
+    }
+}
+
+/**
+ * Go to specific list page without scrolling
+ */
+window.goToListPage = function(page) {
+    console.log(`🔄 goToListPage called: page=${page}, current=${currentApprovalPage}`);
+    
+    if (page >= 1) {
+        // Store current scroll position before any DOM changes
+        const scrollInfo = {
+            window: window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop,
+            documentElement: document.documentElement.scrollTop,
+            body: document.body.scrollTop
+        };
+        
+        console.log('📍 Storing scroll position:', scrollInfo);
+        
+        currentApprovalPage = page;
+        
+        // Temporarily disable scroll restoration
+        const originalScrollRestoration = history.scrollRestoration;
+        if (history.scrollRestoration) {
+            history.scrollRestoration = 'manual';
+        }
+        
+        renderApprovalList().then(() => {
+            // Multiple attempts to restore scroll position
+            const restoreScroll = () => {
+                window.scrollTo(0, scrollInfo.window);
+                document.documentElement.scrollTop = scrollInfo.documentElement;
+                document.body.scrollTop = scrollInfo.body;
+                console.log('📍 Restored scroll to:', scrollInfo.window);
+            };
+            
+            // Immediate restore
+            restoreScroll();
+            
+            // Delayed restore (in case DOM is still updating)
+            setTimeout(restoreScroll, 0);
+            setTimeout(restoreScroll, 10);
+            setTimeout(restoreScroll, 50);
+            
+            // Restore scroll restoration setting
+            if (originalScrollRestoration) {
+                history.scrollRestoration = originalScrollRestoration;
+            }
+        }).catch(error => {
+            console.error('Error in renderApprovalList:', error);
+        });
+    }
 }
 
 /**
@@ -4071,7 +5476,35 @@ async function handleBatchApproval() {
         console.log('Debug: User full name:', userFullName);
         
         const promises = selectedItems.map(async (itemId) => {
-            const item = allApprovalData.find(d => d._id === itemId);
+            // First try to find item in current page data, otherwise fetch from server
+            let item = filteredApprovalData.find(d => d._id === itemId);
+            
+            if (!item) {
+                console.log('🔍 Item ' + itemId + ' not found in current page, fetching from server...');
+                // Fetch item from server
+                const response = await fetch(BASE_URL + "queries", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        dbName: "submittedDB",
+                        collectionName: currentApprovalTab,
+                        query: { _id: itemId }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Item ' + itemId + ': サーバーからの取得に失敗しました');
+                }
+                
+                const items = await response.json();
+                if (!items || items.length === 0) {
+                    throw new Error('Item ' + itemId + ': データが見つかりません');
+                }
+                
+                item = items[0];
+                console.log('✅ Item ' + itemId + ' fetched from server');
+            }
+            
             console.log('Debug: Processing item ' + itemId + ':', item);
             
             if (!item) {
@@ -4138,7 +5571,9 @@ async function handleBatchApproval() {
         // Clear selections and reload data
         document.querySelectorAll('.list-checkbox:checked').forEach(checkbox => checkbox.checked = false);
         updateBatchButtons();
-        loadApprovalData();
+        
+        // Reload current view data
+        await renderApprovalList();
         
     } catch (error) {
         console.error('Batch approval error:', error);
@@ -4173,7 +5608,38 @@ async function handleBatchReject() {
         const userFullName = await getUserFullName(currentUser.username);
         
         const promises = selectedItems.map(async (itemId) => {
-            const item = allApprovalData.find(d => d._id === itemId);
+            // First try to find item in current page data, otherwise fetch from server
+            let item = filteredApprovalData.find(d => d._id === itemId);
+            
+            if (!item) {
+                console.log('🔍 Item ' + itemId + ' not found in current page, fetching from server...');
+                // Fetch item from server
+                const response = await fetch(BASE_URL + "queries", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        dbName: "submittedDB",
+                        collectionName: currentApprovalTab,
+                        query: { _id: itemId }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Item ' + itemId + ': サーバーからの取得に失敗しました');
+                }
+                
+                const items = await response.json();
+                if (!items || items.length === 0) {
+                    throw new Error('Item ' + itemId + ': データが見つかりません');
+                }
+                
+                item = items[0];
+                console.log('✅ Item ' + itemId + ' fetched from server');
+            }
+            
+            if (!item) {
+                throw new Error('Item ' + itemId + ': データが見つかりません');
+            }
             
             let newStatus, targetRole;
             
@@ -4224,7 +5690,9 @@ async function handleBatchReject() {
         // Clear selections and reload data
         document.querySelectorAll('.list-checkbox:checked').forEach(checkbox => checkbox.checked = false);
         updateBatchButtons();
-        loadApprovalData();
+        
+        // Reload current view data
+        await renderApprovalList();
         
     } catch (error) {
         console.error('Batch reject error:', error);

@@ -821,33 +821,22 @@ async function initializeSampleFactoryData() {
 }
 
 /**
- * Fetch sensor history for a specific device
+ * Fetch sensor history for a specific device using efficient pagination
  */
-async function getSensorHistory(deviceId, page = 1, limit = 10) {
-    console.log(`Fetching history for sensor ${deviceId}, page ${page}`);
+async function getSensorHistory(deviceId, page = 1, limit = 15, factoryName = null) {
+    console.log(`Fetching history for sensor ${deviceId}, page ${page}, limit ${limit}`);
     
     try {
-        // Calculate date range (last 30 days)
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30);
-        
-        const res = await fetch(BASE_URL + "queries", {
+        const res = await fetch(BASE_URL + "api/sensor-history", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                dbName: "submittedDB",
-                collectionName: "tempHumidityDB",
-                query: { 
-                    device: deviceId,
-                    Date: {
-                        $gte: startDate.toISOString().split("T")[0],
-                        $lte: endDate.toISOString().split("T")[0]
-                    }
-                },
-                sort: { Date: -1, Time: -1 }, // Latest first
-                skip: (page - 1) * limit,
-                limit: limit
+                deviceId: deviceId,
+                page: page,
+                limit: limit,
+                factoryName: factoryName,
+                startDate: null, // Use default 30 days
+                endDate: null
             })
         });
         
@@ -855,53 +844,24 @@ async function getSensorHistory(deviceId, page = 1, limit = 10) {
             throw new Error(`HTTP error! status: ${res.status}`);
         }
         
-        const history = await res.json();
+        const response = await res.json();
         
-        // Sort by datetime (newest first) to ensure proper ordering
-        // since MongoDB string sort on Time field might not work as expected
-        history.sort((a, b) => {
-            const dateTimeA = new Date(`${a.Date} ${a.Time}`);
-            const dateTimeB = new Date(`${b.Date} ${b.Time}`);
-            return dateTimeB - dateTimeA; // Newest first
-        });
-        
-        // Get total count for pagination
-        const countRes = await fetch(BASE_URL + "queries", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                dbName: "submittedDB",
-                collectionName: "tempHumidityDB",
-                query: { 
-                    device: deviceId,
-                    Date: {
-                        $gte: startDate.toISOString().split("T")[0],
-                        $lte: endDate.toISOString().split("T")[0]
-                    }
-                },
-                count: true
-            })
-        });
-        
-        const countData = await countRes.json();
-        const totalCount = countData.count || history.length;
+        if (!response.success) {
+            throw new Error(response.error || 'Failed to fetch sensor history');
+        }
         
         return {
-            history: history.map(record => ({
-                date: record.Date,
-                time: record.Time,
-                temperature: parseFloat(record.Temperature.replace('°C', '').trim()),
-                humidity: parseFloat(record.Humidity.replace('%', '').trim()),
-                status: record.sensorStatus || 'OK',
-                factory: record.工場
+            history: response.data.map(record => ({
+                date: record.date,
+                time: record.time,
+                temperature: record.temperature,
+                humidity: record.humidity,
+                status: record.status,
+                factory: record.factory,
+                timestamp: record.timestamp
             })),
-            pagination: {
-                currentPage: page,
-                totalPages: Math.ceil(totalCount / limit),
-                totalRecords: totalCount,
-                hasNext: page < Math.ceil(totalCount / limit),
-                hasPrevious: page > 1
-            }
+            pagination: response.pagination,
+            query: response.query
         };
         
     } catch (error) {
@@ -966,26 +926,37 @@ function showSensorHistoryModal(deviceId, factoryName) {
         const historyContainer = document.getElementById('historyContainer');
         const paginationContainer = document.getElementById('paginationContainer');
         
-        historyContainer.innerHTML = `<div class="text-center py-4"><i class="ri-loader-4-line animate-spin text-xl"></i> <span data-i18n="loading">読み込み中...</span></div>`;
+        historyContainer.innerHTML = `<div class="text-center py-8"><i class="ri-loader-4-line animate-spin text-2xl text-blue-500"></i> <div class="mt-2 text-gray-600" data-i18n="loading">読み込み中...</div></div>`;
         
         try {
-            const data = await getSensorHistory(deviceId, page);
+            const data = await getSensorHistory(deviceId, page, 15, factoryName);
             
             if (data.error) {
-                historyContainer.innerHTML = `<div class="text-center py-4 text-red-600"><span data-i18n="error">エラー</span>: ${data.error}</div>`;
+                historyContainer.innerHTML = `<div class="text-center py-8 text-red-600"><i class="ri-error-warning-line text-2xl mb-2"></i><div><span data-i18n="error">エラー</span>: ${data.error}</div></div>`;
                 return;
             }
             
             if (data.history.length === 0) {
-                historyContainer.innerHTML = `<div class="text-center py-4 text-gray-500" data-i18n="noDataAvailable">履歴データがありません</div>`;
+                historyContainer.innerHTML = `<div class="text-center py-8 text-gray-500"><i class="ri-database-line text-3xl mb-2 opacity-50"></i><div data-i18n="noDataAvailable">履歴データがありません</div><div class="text-sm mt-1">過去30日間のデータが見つかりません</div></div>`;
+                paginationContainer.innerHTML = '';
                 return;
             }
             
+            // Display query info if available
+            const queryInfo = data.query ? `
+                <div class="mb-4 p-3 bg-blue-50 rounded-lg text-sm">
+                    <div class="font-medium text-blue-800 mb-1">データ範囲:</div>
+                    <div class="text-blue-700">${data.query.startDate} ～ ${data.query.endDate}</div>
+                    ${data.query.factoryName ? `<div class="text-blue-700">工場: ${data.query.factoryName}</div>` : ''}
+                </div>
+            ` : '';
+            
             historyContainer.innerHTML = `
+                ${queryInfo}
                 <div class="space-y-2">
                     ${data.history.map((record, index) => `
-                        <div class="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors">
-                            <div class="flex justify-between items-start mb-2">
+                        <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors sensor-history-card">
+                            <div class="flex justify-between items-start mb-3">
                                 <div class="text-sm font-medium text-gray-900">
                                     ${formatDateTime(record.date, record.time)}
                                 </div>
@@ -994,21 +965,21 @@ function showSensorHistoryModal(deviceId, factoryName) {
                                 </span>
                             </div>
                             
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="text-center p-2 bg-orange-50 rounded">
-                                    <div class="flex items-center justify-center mb-1">
-                                        <i class="ri-temp-hot-line text-orange-600 mr-1"></i>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="text-center p-3 bg-gradient-to-br from-orange-50 to-red-50 rounded-lg">
+                                    <div class="flex items-center justify-center mb-2">
+                                        <i class="ri-temp-hot-line text-orange-600 text-lg mr-1"></i>
+                                        <span class="text-xs text-orange-700 font-medium">温度</span>
                                     </div>
-                                    <div class="text-sm font-bold ${getTempStatusColor(record.temperature)}">${record.temperature}°C</div>
-                                    <div class="text-xs text-gray-600" data-i18n="temperature">温度</div>
+                                    <div class="text-lg font-bold ${getTempStatusColor(record.temperature)}">${record.temperature}°C</div>
                                 </div>
                                 
-                                <div class="text-center p-2 bg-blue-50 rounded">
-                                    <div class="flex items-center justify-center mb-1">
-                                        <i class="ri-drop-line text-blue-600 mr-1"></i>
+                                <div class="text-center p-3 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg">
+                                    <div class="flex items-center justify-center mb-2">
+                                        <i class="ri-drop-line text-blue-600 text-lg mr-1"></i>
+                                        <span class="text-xs text-blue-700 font-medium">湿度</span>
                                     </div>
-                                    <div class="text-sm font-bold text-blue-600">${record.humidity}%</div>
-                                    <div class="text-xs text-gray-600" data-i18n="humidity">湿度</div>
+                                    <div class="text-lg font-bold text-blue-600">${record.humidity}%</div>
                                 </div>
                             </div>
                         </div>
@@ -1016,39 +987,68 @@ function showSensorHistoryModal(deviceId, factoryName) {
                 </div>
             `;
             
-            // Update pagination
+            // Update pagination with improved design
             const { pagination } = data;
             if (pagination.totalPages > 1) {
                 paginationContainer.innerHTML = `
-                    <div class="flex items-center justify-between mt-4 pt-4 border-t">
-                        <div class="text-sm text-gray-600">
-                            ${pagination.totalRecords}<span data-i18n="items">件中</span> ${(pagination.currentPage - 1) * 10 + 1}-${Math.min(pagination.currentPage * 10, pagination.totalRecords)}<span data-i18n="records">件</span>
+                    <div class="mt-6 pt-4 border-t border-gray-200">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="text-sm text-gray-600">
+                                <span class="font-medium">${pagination.totalRecords}</span><span data-i18n="itemsTotal">件中</span> 
+                                <span class="font-medium">${pagination.startIndex}-${pagination.endIndex}</span><span data-i18n="itemsShowing">件を表示</span>
+                            </div>
+                            <div class="text-sm text-gray-600">
+                                <span data-i18n="page">ページ</span> <span class="font-medium">${pagination.currentPage}</span> / <span class="font-medium">${pagination.totalPages}</span>
+                            </div>
                         </div>
-                        <div class="flex space-x-2">
+                        
+                        <div class="flex items-center justify-center space-x-2">
+                            <button 
+                                onclick="loadHistoryPage(1)"
+                                ${pagination.currentPage === 1 ? 'disabled' : ''}
+                                class="px-3 py-2 text-sm border rounded-lg ${pagination.currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 hover:border-gray-300'}"
+                                title="最初のページ"
+                            >
+                                <i class="ri-skip-back-line"></i>
+                            </button>
                             <button 
                                 onclick="loadHistoryPage(${pagination.currentPage - 1})"
                                 ${!pagination.hasPrevious ? 'disabled' : ''}
-                                class="px-3 py-1 text-sm border rounded ${pagination.hasPrevious ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}"
+                                class="px-4 py-2 text-sm border rounded-lg ${pagination.hasPrevious ? 'hover:bg-gray-50 hover:border-gray-300' : 'opacity-50 cursor-not-allowed'}"
                                 data-i18n="previous"
                             >
                                 前へ
                             </button>
-                            <span class="px-3 py-1 text-sm">
-                                ${pagination.currentPage} / ${pagination.totalPages}
-                            </span>
+                            
+                            ${generatePageNumbers(pagination.currentPage, pagination.totalPages)}
+                            
                             <button 
                                 onclick="loadHistoryPage(${pagination.currentPage + 1})"
                                 ${!pagination.hasNext ? 'disabled' : ''}
-                                class="px-3 py-1 text-sm border rounded ${pagination.hasNext ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}"
+                                class="px-4 py-2 text-sm border rounded-lg ${pagination.hasNext ? 'hover:bg-gray-50 hover:border-gray-300' : 'opacity-50 cursor-not-allowed'}"
                                 data-i18n="next"
                             >
                                 次へ
+                            </button>
+                            <button 
+                                onclick="loadHistoryPage(${pagination.totalPages})"
+                                ${pagination.currentPage === pagination.totalPages ? 'disabled' : ''}
+                                class="px-3 py-2 text-sm border rounded-lg ${pagination.currentPage === pagination.totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 hover:border-gray-300'}"
+                                title="最後のページ"
+                            >
+                                <i class="ri-skip-forward-line"></i>
                             </button>
                         </div>
                     </div>
                 `;
             } else {
-                paginationContainer.innerHTML = '';
+                paginationContainer.innerHTML = `
+                    <div class="mt-4 pt-4 border-t border-gray-200 text-center">
+                        <div class="text-sm text-gray-600">
+                            <span class="font-medium">${pagination.totalRecords}</span><span data-i18n="itemsTotal">件のデータを表示中</span>
+                        </div>
+                    </div>
+                `;
             }
             
             currentPage = page;
@@ -1060,7 +1060,52 @@ function showSensorHistoryModal(deviceId, factoryName) {
             }
             
         } catch (error) {
-            historyContainer.innerHTML = `<div class="text-center py-4 text-red-600"><span data-i18n="failedToLoad">エラーが発生しました</span>: ${error.message}</div>`;
+            historyContainer.innerHTML = `<div class="text-center py-8 text-red-600"><i class="ri-error-warning-line text-2xl mb-2"></i><div><span data-i18n="failedToLoad">データの読み込みに失敗しました</span></div><div class="text-sm mt-1">${error.message}</div></div>`;
+            paginationContainer.innerHTML = '';
+        }
+    }
+    
+    // Helper function to generate page number buttons
+    function generatePageNumbers(currentPage, totalPages) {
+        if (totalPages <= 7) {
+            // Show all pages if 7 or fewer
+            return Array.from({ length: totalPages }, (_, i) => i + 1)
+                .map(page => `
+                    <button 
+                        onclick="loadHistoryPage(${page})"
+                        class="px-3 py-2 text-sm border rounded-lg ${page === currentPage ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-gray-50 hover:border-gray-300'}"
+                    >
+                        ${page}
+                    </button>
+                `).join('');
+        } else {
+            // Show abbreviated pagination
+            let pages = [];
+            
+            if (currentPage <= 4) {
+                // Show first 5 pages + ... + last page
+                pages = [1, 2, 3, 4, 5, '...', totalPages];
+            } else if (currentPage >= totalPages - 3) {
+                // Show first page + ... + last 5 pages
+                pages = [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+            } else {
+                // Show first + ... + current-1, current, current+1 + ... + last
+                pages = [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+            }
+            
+            return pages.map(page => {
+                if (page === '...') {
+                    return '<span class="px-3 py-2 text-sm text-gray-400">...</span>';
+                }
+                return `
+                    <button 
+                        onclick="loadHistoryPage(${page})"
+                        class="px-3 py-2 text-sm border rounded-lg ${page === currentPage ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-gray-50 hover:border-gray-300'}"
+                    >
+                        ${page}
+                    </button>
+                `;
+            }).join('');
         }
     }
     

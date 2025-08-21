@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized Approval System Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-6">
+        <h1 class="text-2xl font-bold mb-6">Optimized Approval System Test</h1>
+        
+        <!-- Test Results -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Test Results</h2>
+            <div id="testResults" class="space-y-2">
+                <!-- Results will be populated here -->
+            </div>
+        </div>
+        
+        <!-- Test Buttons -->
+        <div class="space-x-4">
+            <button onclick="testStatisticsLoading()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                Test Statistics Loading
+            </button>
+            <button onclick="testFactoryLoading()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                Test Factory Loading
+            </button>
+            <button onclick="testPaginatedData()" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600">
+                Test Paginated Data
+            </button>
+            <button onclick="testApprovalDetail()" class="bg-orange-500 text-white px-4 py-2 rounded hover:bg-orange-600">
+                Test Approval Detail
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = window.location.origin + '/api/';
+        
+        function addTestResult(test, result, timing) {
+            const container = document.getElementById('testResults');
+            const color = result.includes('✅') ? 'text-green-600' : 
+                         result.includes('❌') ? 'text-red-600' : 'text-blue-600';
+            
+            container.innerHTML += `
+                <div class="flex justify-between items-center py-2 border-b">
+                    <span class="font-medium">${test}</span>
+                    <span class="${color}">${result} ${timing ? `(${timing}ms)` : ''}</span>
+                </div>
+            `;
+        }
+        
+        async function testStatisticsLoading() {
+            const start = Date.now();
+            addTestResult('Statistics Loading', '⏳ Testing...', '');
+            
+            try {
+                const response = await fetch('/api/approval-stats', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        collectionName: 'kensaDB',
+                        userRole: 'admin',
+                        factoryAccess: [],
+                        filters: {}
+                    })
+                });
+                
+                const timing = Date.now() - start;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        addTestResult('Statistics Loading', `✅ Success - ${JSON.stringify(data.statistics)}`, timing);
+                    } else {
+                        addTestResult('Statistics Loading', `❌ API Error: ${data.error}`, timing);
+                    }
+                } else {
+                    addTestResult('Statistics Loading', `❌ HTTP ${response.status} - Route not found (will use fallback)`, timing);
+                }
+            } catch (error) {
+                const timing = Date.now() - start;
+                addTestResult('Statistics Loading', `❌ Error: ${error.message}`, timing);
+            }
+        }
+        
+        async function testFactoryLoading() {
+            const start = Date.now();
+            addTestResult('Factory Loading', '⏳ Testing...', '');
+            
+            try {
+                const response = await fetch('/api/approval-factories', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        collectionName: 'kensaDB',
+                        userRole: 'admin',
+                        factoryAccess: []
+                    })
+                });
+                
+                const timing = Date.now() - start;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        addTestResult('Factory Loading', `✅ Success - Found ${data.factories.length} factories`, timing);
+                    } else {
+                        addTestResult('Factory Loading', `❌ API Error: ${data.error}`, timing);
+                    }
+                } else {
+                    addTestResult('Factory Loading', `❌ HTTP ${response.status} - Route not found (will use fallback)`, timing);
+                }
+            } catch (error) {
+                const timing = Date.now() - start;
+                addTestResult('Factory Loading', `❌ Error: ${error.message}`, timing);
+            }
+        }
+        
+        async function testPaginatedData() {
+            const start = Date.now();
+            addTestResult('Paginated Data', '⏳ Testing...', '');
+            
+            try {
+                const response = await fetch('/api/approval-paginate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        collectionName: 'kensaDB',
+                        page: 1,
+                        limit: 15,
+                        maxLimit: 100,
+                        filters: {},
+                        userRole: 'admin',
+                        factoryAccess: []
+                    })
+                });
+                
+                const timing = Date.now() - start;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        addTestResult('Paginated Data', `✅ Success - ${data.data.length} records, Page ${data.pagination.currentPage}/${data.pagination.totalPages}`, timing);
+                    } else {
+                        addTestResult('Paginated Data', `❌ API Error: ${data.error}`, timing);
+                    }
+                } else {
+                    addTestResult('Paginated Data', `❌ HTTP ${response.status} - Route not found (will use fallback)`, timing);
+                }
+            } catch (error) {
+                const timing = Date.now() - start;
+                addTestResult('Paginated Data', `❌ Error: ${error.message}`, timing);
+            }
+        }
+        
+        async function testApprovalDetail() {
+            const start = Date.now();
+            addTestResult('Approval Detail Modal', '⏳ Testing...', '');
+            
+            try {
+                // First get some data to test with
+                const response = await fetch(BASE_URL + 'queries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dbName: 'submittedDB',
+                        collectionName: 'kensaDB',
+                        query: {},
+                        limit: 1
+                    })
+                });
+                
+                const timing = Date.now() - start;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.length > 0) {
+                        addTestResult('Approval Detail Modal', `✅ Success - Can fetch item details (tested with ${data[0]._id})`, timing);
+                    } else {
+                        addTestResult('Approval Detail Modal', '⚠️ No data available to test with', timing);
+                    }
+                } else {
+                    addTestResult('Approval Detail Modal', `❌ Cannot test - queries endpoint not available`, timing);
+                }
+            } catch (error) {
+                const timing = Date.now() - start;
+                addTestResult('Approval Detail Modal', `❌ Error: ${error.message}`, timing);
+            }
+        }
+    </script>
+</body>
+</html>

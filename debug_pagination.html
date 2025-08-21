@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pagination Debug</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="p-8">
+    <h1 class="text-2xl font-bold mb-4">Pagination Debug Tool</h1>
+    
+    <div class="bg-gray-100 p-4 rounded mb-4">
+        <h2 class="font-bold mb-2">Test Pagination Logic:</h2>
+        <div>
+            <label class="block mb-2">Total Records: <input type="number" id="totalRecords" value="81" class="border p-1 rounded"></label>
+            <label class="block mb-2">Items Per Page: <select id="itemsPerPage" class="border p-1 rounded">
+                <option value="15">15</option>
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+            </select></label>
+            <label class="block mb-2">Current Page: <input type="number" id="currentPage" value="1" class="border p-1 rounded"></label>
+            <button onclick="calculatePagination()" class="bg-blue-500 text-white px-4 py-2 rounded">Calculate</button>
+        </div>
+    </div>
+    
+    <div id="results" class="bg-white border p-4 rounded">
+        <h3 class="font-bold mb-2">Results:</h3>
+        <div id="paginationInfo"></div>
+        <div id="pageButtons" class="mt-4"></div>
+    </div>
+
+    <script>
+        function calculatePagination() {
+            const totalRecords = parseInt(document.getElementById('totalRecords').value);
+            const itemsPerPage = parseInt(document.getElementById('itemsPerPage').value);
+            const currentPage = parseInt(document.getElementById('currentPage').value);
+            
+            const totalPages = Math.ceil(totalRecords / itemsPerPage);
+            const startItem = (currentPage - 1) * itemsPerPage + 1;
+            const endItem = Math.min(currentPage * itemsPerPage, totalRecords);
+            const hasNext = currentPage < totalPages;
+            const hasPrevious = currentPage > 1;
+            
+            const info = `
+                <div><strong>Total Records:</strong> ${totalRecords}</div>
+                <div><strong>Items Per Page:</strong> ${itemsPerPage}</div>
+                <div><strong>Total Pages:</strong> ${totalPages}</div>
+                <div><strong>Current Page:</strong> ${currentPage}</div>
+                <div><strong>Showing:</strong> ${totalRecords}件中 ${startItem}-${endItem}件を表示</div>
+                <div><strong>Has Next:</strong> ${hasNext}</div>
+                <div><strong>Has Previous:</strong> ${hasPrevious}</div>
+            `;
+            
+            document.getElementById('paginationInfo').innerHTML = info;
+            
+            // Generate page buttons
+            let buttonsHTML = '<div class="flex space-x-1">';
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, currentPage + 2);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                const isActive = i === currentPage;
+                buttonsHTML += `<button class="px-3 py-1 border rounded ${isActive ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}" onclick="document.getElementById('currentPage').value = ${i}; calculatePagination();">${i}</button>`;
+            }
+            buttonsHTML += '</div>';
+            
+            document.getElementById('pageButtons').innerHTML = buttonsHTML;
+        }
+        
+        // Initial calculation
+        calculatePagination();
+    </script>
+</body>
+</html>
