@@ -156,12 +156,222 @@ function loadPage(page) {
 
         case "analytics":
             mainContent.innerHTML = `
-                <h2 class="text-2xl font-semibold" data-i18n="defectRateAnalytics">Defect Rate Analytics</h2>
-                <div id="analyticsChart" class="h-80"></div>
-                <div id="analyticsChart1" style="width: 100%; height: 400px;"></div>
-                <div id="analyticsChart2" style="width: 100%; height: 400px;"></div>
+                <div class="space-y-6">
+                    <!-- Header Section -->
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div>
+                            <h2 class="text-3xl font-bold text-gray-900" data-i18n="analyticsTitle">Analytics</h2>
+                            <p class="mt-2 text-gray-600" data-i18n="analyticsSubtitle">Inspection Data Analysis & Insights</p>
+                            <div class="mt-2 text-sm text-blue-600 date-range-display">
+                                <span data-i18n="loading">Loading...</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <button onclick="exportAnalyticsData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
+                            </button>
+                            <button id="refreshAnalyticsBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                                <i class="ri-refresh-line mr-2"></i><span data-i18n="update">Update</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Date Range Controls -->
+                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="periodSelection">Period Selection</label>
+                                <select id="analyticsRangeSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="today" data-i18n="today">Today</option>
+                                    <option value="last7" data-i18n="last7Days">Last 7 Days</option>
+                                    <option value="last30" selected data-i18n="last30Days">Last 30 Days</option>
+                                    <option value="last90" data-i18n="last3Months">Last 3 Months</option>
+                                    <option value="thisMonth" data-i18n="thisMonth">This Month</option>
+                                    <option value="lastMonth" data-i18n="lastMonth">Last Month</option>
+                                    <option value="custom" data-i18n="customRange">Custom Range</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="startDate">Start Date</label>
+                                <input type="date" id="analyticsFromDate" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="endDate">End Date</label>
+                                <input type="date" id="analyticsToDate" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="process">Process</label>
+                                <select id="analyticsCollectionFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="kensaDB" data-i18n="inspection">Inspection (kensaDB)</option>
+                                    <option value="pressDB" data-i18n="press">Press (pressDB)</option>
+                                    <option value="slitDB" data-i18n="slit">Slit (slitDB)</option>
+                                    <option value="SRSDB" data-i18n="srs">SRS (SRSDB)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory Filter</label>
+                                <select id="analyticsFactoryFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allFactories">All Factories</option>
+                                </select>
+                            </div>
+                            <div class="flex space-x-2">
+                                <div id="analyticsLoader" class="hidden">
+                                    <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Summary Cards -->
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-blue-100 rounded-lg">
+                                    <i class="ri-line-chart-line text-blue-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="totalProduction">Total Production</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="totalProductionCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-red-100 rounded-lg">
+                                    <i class="ri-error-warning-line text-red-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="totalDefects">Total Defects</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="totalDefectsCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-yellow-100 rounded-lg">
+                                    <i class="ri-percent-line text-yellow-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="avgDefectRateCount">0.00%</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-green-100 rounded-lg">
+                                    <i class="ri-building-line text-green-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="factoryCount">Factory Count</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="totalFactoriesCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-purple-100 rounded-lg">
+                                    <i class="ri-user-line text-purple-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="workerCount">Worker Count</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="totalWorkersCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-indigo-100 rounded-lg">
+                                    <i class="ri-time-line text-indigo-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="avgCycleTime">Avg Cycle Time</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="avgCycleTimeCount">0.0<span data-i18n="minutes">min</span></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Charts Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Production Trend Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="productionDefectTrend">Production & Defect Trend</h3>
+                            <div class="h-80">
+                                <canvas id="productionTrendChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Quality Trend Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="qualityTrendDefectRate">Quality Trend (Defect Rate)</h3>
+                            <div class="h-80">
+                                <canvas id="qualityTrendChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Factory Comparison Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="factoryPerformance">Factory Performance</h3>
+                            <div class="h-80">
+                                <canvas id="factoryComparisonChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Defect Distribution Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="defectDistributionByProcess">Defect Distribution (by Process)</h3>
+                            <div class="h-80">
+                                <canvas id="defectDistributionChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Worker Performance Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="workerPerformance">Worker Performance (Top 10)</h3>
+                            <div class="h-80">
+                                <canvas id="workerPerformanceChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Process Efficiency Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="equipmentEfficiency">Equipment Efficiency (Top 10)</h3>
+                            <div class="h-80">
+                                <canvas id="processEfficiencyChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Temperature Trend Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="temperatureTrend">🌡️ Temperature Trend</h3>
+                            <div class="h-80">
+                                <canvas id="temperatureTrendChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Humidity Trend Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="humidityTrend">💧 Humidity Trend</h3>
+                            <div class="h-80">
+                                <canvas id="humidityTrendChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             `;
-            fetchFactoryDefects();
+            // Initialize analytics after DOM is ready
+            setTimeout(() => {
+                if (typeof initializeAnalytics === 'function') {
+                    initializeAnalytics();
+                }
+            }, 100);
+            
             if (typeof applyLanguageEnhanced === 'function') {
               applyLanguageEnhanced();
             } else if (typeof applyLanguage === 'function') {
