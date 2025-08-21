@@ -88,6 +88,10 @@ const translations = {
       needsCorrection: "Needs Correction & Resubmission",
       hanchoAction: "Hancho Action Required",
       kachoApprovalComplete: "Kacho Approval Complete",
+      currentDateOnly: "Current Date Only",
+      allHistoricalData: "All Historical Data", 
+      showingCurrentDate: "Showing current date data",
+      showingAllData: "Showing all historical data",
       
       // Master DB
       masterProductManagement: "Master Product Management",
@@ -365,6 +369,10 @@ const translations = {
       needsCorrection: "要修正・再提出",
       hanchoAction: "班長対応必要",
       kachoApprovalComplete: "課長承認完了",
+      currentDateOnly: "現在の日付のみ",
+      allHistoricalData: "全履歴データ",
+      showingCurrentDate: "現在の日付データを表示中",
+      showingAllData: "全履歴データを表示中",
       
       // Master DB
       masterProductManagement: "Master 製品管理",
