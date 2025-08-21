@@ -3,6 +3,8 @@
 const BASE_URL = "https://kurachi.onrender.com/";
 //const BASE_URL = "http://localhost:3000/";
 
+//test
+
 async function fetchFactoryDefects() {
   try {
       const response = await fetch(`${BASE_URL}queries`, {
