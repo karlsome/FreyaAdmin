@@ -2726,6 +2726,12 @@ function buildApprovalQueryFilters() {
                 { approvalStatus: { $exists: false } },
                 { approvalStatus: 'pending' }
             ];
+        } else if (statusFilter === 'correction_needed') {
+            // Handle both correction types for the main "Correction Needed" card
+            filters.$or = [
+                { approvalStatus: 'correction_needed' },
+                { approvalStatus: 'correction_needed_from_kacho' }
+            ];
         } else {
             filters.approvalStatus = statusFilter;
         }
@@ -2745,11 +2751,24 @@ function buildApprovalQueryFilters() {
     // Search filter
     const searchTerm = document.getElementById('approvalSearchInput')?.value?.toLowerCase();
     if (searchTerm) {
-        filters.$or = [
-            { 品番: { $regex: searchTerm, $options: 'i' } },
-            { 背番号: { $regex: searchTerm, $options: 'i' } },
-            { Worker_Name: { $regex: searchTerm, $options: 'i' } }
-        ];
+        // If we already have an $or from status filtering, combine them with $and
+        if (filters.$or) {
+            filters.$and = [
+                { $or: filters.$or }, // Existing status $or condition
+                { $or: [              // Search $or condition
+                    { 品番: { $regex: searchTerm, $options: 'i' } },
+                    { 背番号: { $regex: searchTerm, $options: 'i' } },
+                    { Worker_Name: { $regex: searchTerm, $options: 'i' } }
+                ]}
+            ];
+            delete filters.$or; // Remove the single $or since we're using $and now
+        } else {
+            filters.$or = [
+                { 品番: { $regex: searchTerm, $options: 'i' } },
+                { 背番号: { $regex: searchTerm, $options: 'i' } },
+                { Worker_Name: { $regex: searchTerm, $options: 'i' } }
+            ];
+        }
     }
     
     console.log('🔍 Built query filters (mode: ' + dataRangeMode + '):', filters);
