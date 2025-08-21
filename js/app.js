@@ -207,6 +207,34 @@ function loadPage(page) {
                 <!-- Tab Content Container -->
                 <div id="approvalTabContent">
                     <!-- Stats Cards -->
+                    <!-- Data Range Toggle -->
+                    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
+                        <div class="flex items-center space-x-4">
+                            <div class="bg-white rounded-lg border border-gray-200 p-1 flex items-center">
+                                <button 
+                                    id="currentDateModeBtn" 
+                                    class="px-3 py-2 text-sm font-medium rounded-md transition-colors bg-blue-500 text-white"
+                                    onclick="toggleDataRange('current')"
+                                >
+                                    <i class="ri-calendar-line mr-1"></i>
+                                    <span data-i18n="currentDateOnly">Current Date Only</span>
+                                </button>
+                                <button 
+                                    id="allDataModeBtn" 
+                                    class="px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100"
+                                    onclick="toggleDataRange('all')"
+                                >
+                                    <i class="ri-database-2-line mr-1"></i>
+                                    <span data-i18n="allHistoricalData">All Historical Data</span>
+                                </button>
+                            </div>
+                            <div id="dataRangeIndicator" class="text-sm text-gray-600">
+                                <i class="ri-calendar-check-line mr-1 text-blue-500"></i>
+                                <span data-i18n="showingCurrentDate">Showing current date data</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="grid grid-cols-${role === '班長' ? '6' : '5'} gap-4 mb-6">
                         <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
                             <h3 class="text-sm font-medium text-yellow-800" data-i18n="pending">Pending</h3>
@@ -2130,6 +2158,7 @@ let approvalSortState = { column: null, direction: 1 };
 let currentApprovalTab = 'kensaDB'; // Default tab
 let currentUserData = {}; // Cache user data
 let approvalStatistics = {}; // Cache statistics
+let dataRangeMode = 'current'; // 'current' or 'all' - controls whether to show current date or all historical data
 
 /**
  * Initialize the approval system (OPTIMIZED)
@@ -2137,6 +2166,9 @@ let approvalStatistics = {}; // Cache statistics
 function initializeApprovalSystem() {
     // Get current user data and cache it
     currentUserData = JSON.parse(localStorage.getItem("authUser") || "{}");
+    
+    // Initialize data range mode to current date
+    dataRangeMode = 'current';
     
     // Set today's date as default
     const today = new Date().toISOString().split('T')[0];
@@ -2235,7 +2267,8 @@ async function loadApprovalData() {
 async function loadApprovalStatistics() {
     try {
         const factoryAccess = getFactoryAccessForUser();
-        const filters = buildApprovalQueryFilters();
+        // Use statistics-specific filters (no status filter to get all counts)
+        const filters = buildStatisticsQueryFilters();
         
         console.log('📊 Loading approval statistics via aggregation...');
         
@@ -2282,8 +2315,13 @@ async function loadApprovalStatisticsFallback() {
     try {
         console.log('📊 Using fallback statistics calculation...');
         
-        // Get a limited sample for statistics (much more efficient than loading all)
-        const query = buildApprovalDatabaseQuery();
+        // Get statistics query (without status filter) combined with database query
+        const baseQuery = buildApprovalDatabaseQuery();
+        const statisticsFilters = buildStatisticsQueryFilters();
+        
+        // Merge the queries 
+        const query = { ...baseQuery, ...statisticsFilters };
+        
         const response = await fetch(BASE_URL + "queries", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2629,6 +2667,43 @@ function buildApprovalDatabaseQuery() {
 }
 
 /**
+ * Build query filters for statistics (excludes status filter to get all counts)
+ */
+function buildStatisticsQueryFilters() {
+    const filters = {};
+    
+    // Factory filter
+    const factoryFilter = document.getElementById('factoryFilter')?.value;
+    if (factoryFilter) {
+        filters.工場 = factoryFilter;
+    }
+    
+    // Date filter - enhanced with data range mode logic
+    const dateFilter = document.getElementById('dateFilter')?.value;
+    if (dateFilter) {
+        filters.Date = dateFilter;
+    } else if (dataRangeMode === 'current') {
+        // If we're in current mode and no specific date is set, default to today
+        const today = new Date().toISOString().split('T')[0];
+        filters.Date = today;
+    }
+    // If dataRangeMode is 'all' and no date filter, don't add date restriction
+    
+    // Search filter
+    const searchTerm = document.getElementById('approvalSearchInput')?.value?.toLowerCase();
+    if (searchTerm) {
+        filters.$or = [
+            { 品番: { $regex: searchTerm, $options: 'i' } },
+            { 背番号: { $regex: searchTerm, $options: 'i' } },
+            { Worker_Name: { $regex: searchTerm, $options: 'i' } }
+        ];
+    }
+    
+    console.log('📊 Built statistics query filters (mode: ' + dataRangeMode + '):', filters);
+    return filters;
+}
+
+/**
  * Build query filters from UI controls (NEW HELPER)
  */
 function buildApprovalQueryFilters() {
@@ -2656,11 +2731,16 @@ function buildApprovalQueryFilters() {
         }
     }
     
-    // Date filter
+    // Date filter - enhanced with data range mode logic
     const dateFilter = document.getElementById('dateFilter')?.value;
     if (dateFilter) {
         filters.Date = dateFilter;
+    } else if (dataRangeMode === 'current' && !statusFilter) {
+        // If we're in current mode and no specific date is set, default to today
+        const today = new Date().toISOString().split('T')[0];
+        filters.Date = today;
     }
+    // If dataRangeMode is 'all' and no date filter, don't add date restriction
     
     // Search filter
     const searchTerm = document.getElementById('approvalSearchInput')?.value?.toLowerCase();
@@ -2672,7 +2752,7 @@ function buildApprovalQueryFilters() {
         ];
     }
     
-    console.log('🔍 Built query filters:', filters);
+    console.log('🔍 Built query filters (mode: ' + dataRangeMode + '):', filters);
     return filters;
 }
 
@@ -2759,23 +2839,90 @@ function loadFactoryFilterOptions() {
 }
 
 /**
+ * Toggle data range mode between current date and all historical data
+ */
+window.toggleDataRange = function(mode) {
+    dataRangeMode = mode;
+    
+    const currentBtn = document.getElementById('currentDateModeBtn');
+    const allBtn = document.getElementById('allDataModeBtn');
+    const indicator = document.getElementById('dataRangeIndicator');
+    const dateFilter = document.getElementById('dateFilter');
+    
+    if (mode === 'current') {
+        // Switch to current date mode
+        currentBtn.classList.remove('text-gray-600', 'hover:bg-gray-100');
+        currentBtn.classList.add('bg-blue-500', 'text-white');
+        allBtn.classList.remove('bg-blue-500', 'text-white');
+        allBtn.classList.add('text-gray-600', 'hover:bg-gray-100');
+        
+        // Set today's date if no date is selected
+        if (!dateFilter.value) {
+            const today = new Date().toISOString().split('T')[0];
+            dateFilter.value = today;
+        }
+        
+        // Update indicator
+        indicator.innerHTML = `
+            <i class="ri-calendar-check-line mr-1 text-blue-500"></i>
+            <span data-i18n="showingCurrentDate">Showing current date data</span>
+        `;
+        
+    } else {
+        // Switch to all data mode
+        allBtn.classList.remove('text-gray-600', 'hover:bg-gray-100');
+        allBtn.classList.add('bg-blue-500', 'text-white');
+        currentBtn.classList.remove('bg-blue-500', 'text-white');
+        currentBtn.classList.add('text-gray-600', 'hover:bg-gray-100');
+        
+        // Clear date filter to show all data
+        dateFilter.value = '';
+        
+        // Update indicator
+        indicator.innerHTML = `
+            <i class="ri-database-2-line mr-1 text-blue-500"></i>
+            <span data-i18n="showingAllData">Showing all historical data</span>
+        `;
+    }
+    
+    // Reload data with new range
+    applyApprovalFilters();
+};
+
+/**
  * Filter by status when clicking on stat cards
  */
 window.filterByStatus = function(status) {
     const statusFilter = document.getElementById('statusFilter');
+    const dateFilter = document.getElementById('dateFilter');
     
     if (status === 'today') {
-        // Filter by today's date
+        // Filter by today's date - clear status to show all
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('dateFilter').value = today;
+        dateFilter.value = today;
         statusFilter.value = '';
+        // Ensure we're in current mode when clicking "Today's Total"
+        if (dataRangeMode === 'all') {
+            toggleDataRange('current');
+            return; // toggleDataRange will call applyApprovalFilters
+        }
     } else {
-        // Clear date filter and set status filter
-        document.getElementById('dateFilter').value = '';
+        // Set status filter for table data
         statusFilter.value = status;
+        
+        if (dataRangeMode === 'current') {
+            // Keep current date if we're in current date mode
+            const today = new Date().toISOString().split('T')[0];
+            if (!dateFilter.value) {
+                dateFilter.value = today;
+            }
+        } else {
+            // Clear date filter only if in "all data" mode
+            dateFilter.value = '';
+        }
     }
     
-    // Apply filters
+    // Apply filters normally
     applyApprovalFilters();
 };
 
