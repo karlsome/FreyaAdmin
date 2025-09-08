@@ -13,11 +13,11 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment"],
-  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment"], // Same as 部長
-  係長: ["dashboard", "factories", "approvals", "masterDB", "equipment"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "approvals", "masterDB", "equipment"],
+  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna"],
+  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna"], // Same as 部長
+  係長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna"], // Same as 班長 but factory-limited
+  班長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna"],
   member: ["dashboard"]
 };
 
@@ -32,6 +32,7 @@ const navItemsConfig = {
   approvals: { icon: "ri-checkbox-line", label: "approvals", badge: "12" },
   customerManagement: { icon: "ri-user-3-line", label: "customerManagement" },
   equipment: { icon: "ri-tools-line", label: "equipment" },
+  scna: { icon: "ri-folder-line", label: "scna" },
 };
 
 // Navigation functions are now handled in navbar.js to avoid duplicates
@@ -39,14 +40,21 @@ const navItemsConfig = {
 function setupNavigation() {
   document.querySelectorAll(".nav-btn").forEach(button => {
     const page = button.getAttribute("data-page");
+    
     if (!roleAccess[role]?.includes(page)) {
       button.style.display = "none";  // hide button if no permission
     } else {
-      button.addEventListener("click", function () {
-        document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active"));
-        this.classList.add("active");
-        loadPage(page);
-      });
+      // Only add event listener if it doesn't already have one
+      if (!button.hasAttribute('data-listener-added')) {
+        button.setAttribute('data-listener-added', 'true');
+        
+        button.addEventListener("click", function (e) {
+          // Handle page navigation
+          document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active", "bg-gray-100", "text-gray-900"));
+          this.classList.add("active", "bg-gray-100", "text-gray-900");
+          loadPage(page);
+        });
+      }
     }
   });
 }
@@ -55,6 +63,9 @@ function createNavItem(page) {
   const { icon, label, badge } = navItemsConfig[page] || {};
   if (!icon || !label) return null;
 
+  const li = document.createElement("li");
+  
+  // Regular nav item
   const button = document.createElement("button");
   button.className = "nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100";
   button.setAttribute("data-page", page);
@@ -65,7 +76,6 @@ function createNavItem(page) {
     ${badge ? `<span class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">${badge}</span>` : ""}
   `;
 
-  const li = document.createElement("li");
   li.appendChild(button);
   return li;
 }
@@ -81,15 +91,7 @@ function renderSidebarNavigation() {
     if (navItem) navList.appendChild(navItem);
   });
 
-  // Setup nav click handlers (for active styling + loading)
-  document.querySelectorAll(".nav-btn").forEach(button => {
-    const page = button.getAttribute("data-page");
-    button.addEventListener("click", function () {
-      document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("bg-gray-100", "text-gray-900"));
-      this.classList.add("bg-gray-100", "text-gray-900");
-      loadPage(page); // You must define loadPage(page) elsewhere
-    });
-  });
+  // Event handlers will be set up by setupNavigation() which is called after this
 }
 renderSidebarNavigation();
 
@@ -2346,6 +2348,58 @@ function loadPage(page) {
           }
           break;
 
+        case "scna":
+            mainContent.innerHTML = `
+                <div class="space-y-6">
+                    <!-- Header Section -->
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div>
+                            <h2 class="text-3xl font-bold text-gray-900" data-i18n="scnaTitle">SCNA Management</h2>
+                            <p class="mt-2 text-gray-600" data-i18n="scnaSubtitle">Supply Chain Network Analytics & Work Order Management</p>
+                        </div>
+                    </div>
+
+                    <!-- Tab Navigation -->
+                    <div class="bg-white border-b border-gray-200 rounded-lg">
+                        <nav class="flex space-x-8 px-6" aria-label="Tabs">
+                            <button onclick="switchSCNATab('freyaTablet')" 
+                                    class="scna-tab-btn py-4 px-1 border-b-2 border-blue-500 font-medium text-sm text-blue-600" 
+                                    data-tab="freyaTablet" data-i18n="freyaTablet">
+                                Freya Tablet
+                            </button>
+                            <button onclick="switchSCNATab('workOrder')" 
+                                    class="scna-tab-btn py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                                    data-tab="workOrder" data-i18n="workOrder">
+                                Work Order
+                            </button>
+                            <!-- Future tabs can be added here -->
+                            <button onclick="switchSCNATab('analytics')" 
+                                    class="scna-tab-btn py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700 hover:border-gray-300" 
+                                    data-tab="analytics" data-i18n="analytics">
+                                Analytics
+                            </button>
+                        </nav>
+                    </div>
+
+                    <!-- Tab Content -->
+                    <div id="scnaTabContent">
+                        <!-- Content will be loaded by switchSCNATab function -->
+                    </div>
+                </div>
+            `;
+            
+            // Initialize with freya tablet tab
+            if (typeof switchSCNATab === 'function') {
+                switchSCNATab('freyaTablet');
+            }
+            
+            if (typeof applyLanguageEnhanced === 'function') {
+                applyLanguageEnhanced();
+            } else if (typeof applyLanguage === 'function') {
+                applyLanguage();
+            }
+            break;
+
         default:
             mainContent.innerHTML = `<h2 class="text-xl font-semibold">Page Not Found</h2>`;
             if (typeof applyLanguageEnhanced === 'function') {
@@ -2356,6 +2410,385 @@ function loadPage(page) {
             break;
     }
 }
+
+// ==================== SCNA TAB MANAGEMENT ====================
+
+/**
+ * Switch between SCNA tabs
+ */
+window.switchSCNATab = function(tabName) {
+    // Update tab button styles
+    document.querySelectorAll('.scna-tab-btn').forEach(btn => {
+        btn.classList.remove('border-blue-500', 'text-blue-600');
+        btn.classList.add('border-transparent', 'text-gray-500', 'hover:text-gray-700', 'hover:border-gray-300');
+    });
+    
+    const activeTab = document.querySelector(`[data-tab="${tabName}"]`);
+    if (activeTab) {
+        activeTab.classList.remove('border-transparent', 'text-gray-500', 'hover:text-gray-700', 'hover:border-gray-300');
+        activeTab.classList.add('border-blue-500', 'text-blue-600');
+    }
+    
+    const tabContent = document.getElementById('scnaTabContent');
+    
+    switch (tabName) {
+        case 'freyaTablet':
+            tabContent.innerHTML = `
+                <!-- Freya Tablet Tab Content -->
+                <div class="space-y-6">
+                    <!-- Action Buttons -->
+                    <div class="flex items-center justify-end space-x-4">
+                        <button onclick="exportFreyaTabletData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                            <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
+                        </button>
+                        <button id="refreshFreyaTabletBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="ri-refresh-line mr-2"></i><span data-i18n="refresh">Refresh</span>
+                        </button>
+                    </div>
+
+                    <!-- Filter Controls -->
+                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">設備 (Equipment)</label>
+                                <select id="freyaTabletEquipmentFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="">All Equipment</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Date From</label>
+                                <input type="date" id="freyaTabletDateFrom" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Date To</label>
+                                <input type="date" id="freyaTabletDateTo" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <button onclick="applyFreyaTabletFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                                    <i class="ri-filter-line mr-2"></i><span data-i18n="applyFilters">Apply Filters</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <input type="text" id="freyaTabletSearchInput" placeholder="Search production records..." class="w-full p-2 border border-gray-300 rounded-md">
+                        </div>
+                    </div>
+
+                    <!-- Statistics Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-blue-100 rounded-lg">
+                                    <i class="ri-file-list-line text-2xl text-blue-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Total Records</p>
+                                    <p id="freyaTabletTotalRecords" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-green-100 rounded-lg">
+                                    <i class="ri-checkbox-circle-line text-2xl text-green-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Total Quantity</p>
+                                    <p id="freyaTabletTotalQuantity" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-yellow-100 rounded-lg">
+                                    <i class="ri-error-warning-line text-2xl text-yellow-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Total NG</p>
+                                    <p id="freyaTabletTotalNG" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-purple-100 rounded-lg">
+                                    <i class="ri-time-line text-2xl text-purple-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Avg Cycle Time</p>
+                                    <p id="freyaTabletAvgCycleTime" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data Table -->
+                    <div class="bg-white rounded-lg border border-gray-200">
+                        <div class="p-4 border-b border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900">Production Records</h3>
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <div id="freyaTabletTableContainer">
+                                <!-- Table content will be loaded here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        <div class="px-6 py-4 border-t border-gray-200">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <label class="text-sm text-gray-500">Items per page</label>
+                                    <select id="freyaTabletItemsPerPage" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                        <option value="10">10</option>
+                                        <option value="25">25</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <button id="freyaTabletPrevPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-left-line"></i>
+                                    </button>
+                                    <!-- Numbered pagination container -->
+                                    <div id="freyaTabletPaginationNumbers" class="flex items-center space-x-1">
+                                        <!-- Page numbers will be dynamically generated here -->
+                                    </div>
+                                    <button id="freyaTabletNextPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-right-line"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Freya Tablet Detail Modal -->
+                <div id="freyaTabletDetailModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg max-w-6xl w-full max-h-screen overflow-y-auto">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-semibold">Production Record Details</h3>
+                                    <button onclick="closeFreyaTabletModal()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="ri-close-line text-xl"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="freyaTabletDetailContent" class="p-6">
+                                <!-- Content will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Initialize freya tablet system
+            if (typeof initializeFreyaTabletSystem === 'function') {
+                initializeFreyaTabletSystem();
+            }
+            break;
+            
+        case 'workOrder':
+            tabContent.innerHTML = `
+                <!-- Work Order Tab Content -->
+                <div class="space-y-6">
+                    <!-- Action Buttons -->
+                    <div class="flex items-center justify-end space-x-4">
+                        <button onclick="exportWorkOrderData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                            <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
+                        </button>
+                        <button id="refreshWorkOrderBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="ri-refresh-line mr-2"></i><span data-i18n="refresh">Refresh</span>
+                        </button>
+                    </div>
+
+                    <!-- Filter Controls -->
+                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="status">Status</label>
+                                <select id="workOrderStatusFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allStatuses">All Statuses</option>
+                                    <option value="Entered">Entered</option>
+                                    <option value="In Progress">In Progress</option>
+                                    <option value="Completed">Completed</option>
+                                    <option value="Cancelled">Cancelled</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="customer">Customer</label>
+                                <select id="workOrderCustomerFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allCustomers">All Customers</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="assignedTo">Assigned To</label>
+                                <select id="workOrderAssignFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allAssignees">All Assignees</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateFrom">Date From</label>
+                                <input type="date" id="workOrderDateFrom" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateTo">Date To</label>
+                                <input type="date" id="workOrderDateTo" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <button onclick="applyWorkOrderFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                                    <i class="ri-filter-line mr-2"></i><span data-i18n="applyFilters">Apply Filters</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <input type="text" id="workOrderSearchInput" placeholder="Search work orders..." class="w-full p-2 border border-gray-300 rounded-md">
+                        </div>
+                    </div>
+
+                    <!-- Statistics Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-blue-100 rounded-lg">
+                                    <i class="ri-file-list-line text-2xl text-blue-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="totalOrders">Total Orders</p>
+                                    <p class="text-2xl font-semibold text-gray-900" id="totalWorkOrders">-</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-yellow-100 rounded-lg">
+                                    <i class="ri-time-line text-2xl text-yellow-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="inProgress">In Progress</p>
+                                    <p class="text-2xl font-semibold text-gray-900" id="inProgressOrders">-</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-green-100 rounded-lg">
+                                    <i class="ri-checkbox-circle-line text-2xl text-green-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="completed">Completed</p>
+                                    <p class="text-2xl font-semibold text-gray-900" id="completedOrders">-</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-red-100 rounded-lg">
+                                    <i class="ri-alarm-warning-line text-2xl text-red-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="overdue">Overdue</p>
+                                    <p class="text-2xl font-semibold text-gray-900" id="overdueOrders">-</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Work Orders Table -->
+                    <div class="bg-white rounded-lg border border-gray-200">
+                        <div class="p-6 border-b border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900" data-i18n="workOrdersList">Work Orders List</h3>
+                        </div>
+                        <div id="workOrdersTableContainer" class="overflow-x-auto">
+                            <!-- Table will be populated by JavaScript -->
+                        </div>
+                        <!-- Pagination -->
+                        <div class="px-6 py-4 border-t border-gray-200">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm text-gray-500" data-i18n="itemsPerPage">Items per page:</span>
+                                    <select id="workOrderItemsPerPage" class="p-1 border border-gray-300 rounded text-sm">
+                                        <option value="10">10</option>
+                                        <option value="25">25</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <button id="workOrderPrevPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-left-line"></i>
+                                    </button>
+                                    <!-- Numbered pagination container -->
+                                    <div id="workOrderPaginationNumbers" class="flex items-center space-x-1">
+                                        <!-- Page numbers will be dynamically generated here -->
+                                    </div>
+                                    <button id="workOrderNextPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-right-line"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Work Order Detail Modal -->
+                <div id="workOrderDetailModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg max-w-4xl w-full max-h-screen overflow-y-auto">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-semibold" data-i18n="workOrderDetails">Work Order Details</h3>
+                                    <button onclick="closeWorkOrderModal()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="ri-close-line text-xl"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="workOrderDetailContent" class="p-6">
+                                <!-- Content will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Initialize work order system
+            if (typeof initializeWorkOrderSystem === 'function') {
+                initializeWorkOrderSystem();
+            }
+            break;
+            
+        case 'analytics':
+            tabContent.innerHTML = `
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <div class="text-center py-12">
+                        <i class="ri-bar-chart-line text-6xl text-gray-400 mb-4"></i>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">SCNA Analytics</h3>
+                        <p class="text-gray-600">Analytics and reporting features will be available in a future update.</p>
+                    </div>
+                </div>
+            `;
+            break;
+            
+        default:
+            tabContent.innerHTML = `
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <div class="text-center py-12">
+                        <i class="ri-error-warning-line text-6xl text-gray-400 mb-4"></i>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Tab Not Found</h3>
+                        <p class="text-gray-600">The requested tab could not be found.</p>
+                    </div>
+                </div>
+            `;
+    }
+    
+    // Apply language translations
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    } else if (typeof applyLanguage === 'function') {
+        applyLanguage();
+    }
+};
 
 
 // ==================== APPROVAL SYSTEM (OPTIMIZED) ====================

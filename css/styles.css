@@ -210,6 +210,16 @@
     animation: spin 1s linear infinite;
 }
 
+/* Navigation dropdown arrow rotation */
+.rotate-180 {
+    transform: rotate(180deg);
+}
+
+/* Navigation sub-items visibility */
+.hidden {
+    display: none !important;
+}
+
 /* Sensor history modal improvements */
 .sensor-history-card {
     transition: all 0.2s ease;
