@@ -2595,6 +2595,9 @@ window.switchSCNATab = function(tabName) {
                 <div class="space-y-6">
                     <!-- Action Buttons -->
                     <div class="flex items-center justify-end space-x-4">
+                        <button onclick="triggerJsonUpload()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                            <i class="ri-upload-line mr-2"></i><span data-i18n="jsonUpload">Upload JSON</span>
+                        </button>
                         <button onclick="exportWorkOrderData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                             <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
                         </button>
@@ -2602,6 +2605,9 @@ window.switchSCNATab = function(tabName) {
                             <i class="ri-refresh-line mr-2"></i><span data-i18n="refresh">Refresh</span>
                         </button>
                     </div>
+
+                    <!-- Hidden file input for JSON upload -->
+                    <input type="file" id="jsonFileInput" accept=".json" style="display: none;" onchange="handleJsonFileUpload(this)">
 
                     <!-- Filter Controls -->
                     <div class="bg-white p-6 rounded-lg border border-gray-200">

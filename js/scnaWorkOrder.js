@@ -12,10 +12,17 @@ let workOrderSortState = { column: null, direction: 1 };
 let workOrderStatistics = {};
 
 /**
- * Initialize the Work Order system
+ * Initialize the Work Order system with enhanced modal support
  */
 function initializeWorkOrderSystem() {
-    console.log('🚀 Initializing SCNA Work Order System');
+    console.log('🚀 Initializing SCNA Work Order System with enhanced modals');
+    
+    // Initialize modal stack manager if not already available
+    if (typeof window.modalStackManager === 'undefined') {
+        console.log('🔑 Initializing modal stack manager...');
+        // Load the modal stack manager
+        loadModalStackManager();
+    }
     
     // Set default deadline range (from 30 days ago to 30 days in the future)
     const today = new Date();
@@ -904,6 +911,13 @@ function showEditWorkOrderModal(workOrder) {
 
     // Add form submit handler
     document.getElementById('editWorkOrderForm').addEventListener('submit', handleEditWorkOrderSubmit);
+    
+    // Register with modal stack manager for ESC key support
+    if (window.modalStackManager) {
+        modalStackManager.pushModal('editWorkOrderModal', () => {
+            closeEditWorkOrderModal();
+        });
+    }
 }
 
 /**
@@ -922,6 +936,11 @@ window.closeEditWorkOrderModal = function() {
     const modal = document.getElementById('editWorkOrderModal');
     if (modal) {
         modal.remove();
+    }
+    
+    // Remove from modal stack
+    if (window.modalStackManager) {
+        modalStackManager.popModal('editWorkOrderModal');
     }
 };
 
@@ -1054,6 +1073,308 @@ window.exportWorkOrderData = function() {
         alert('Error exporting data. Please try again.');
     }
 };
+
+/**
+ * Trigger file input for JSON upload
+ */
+window.triggerJsonUpload = function() {
+    const fileInput = document.getElementById('jsonFileInput');
+    if (fileInput) {
+        fileInput.click();
+    } else {
+        console.error('JSON file input not found');
+    }
+};
+
+/**
+ * Handle JSON file upload
+ */
+window.handleJsonFileUpload = async function(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.name.endsWith('.json')) {
+        alert('Please select a valid JSON file.');
+        return;
+    }
+
+    try {
+        // Read file content
+        const fileContent = await readFileAsText(file);
+        let workOrderData;
+
+        try {
+            workOrderData = JSON.parse(fileContent);
+        } catch (parseError) {
+            alert('Invalid JSON format. Please check your file and try again.');
+            console.error('JSON parse error:', parseError);
+            return;
+        }
+
+        // Validate data structure
+        if (!Array.isArray(workOrderData)) {
+            alert('JSON file must contain an array of work orders.');
+            return;
+        }
+
+        if (workOrderData.length === 0) {
+            alert('JSON file is empty.');
+            return;
+        }
+
+        // Validate each work order structure
+        const requiredFields = ['Number', 'Status', 'Customer-Custom fields', 'P_SKU-Custom fields'];
+        const invalidOrders = [];
+
+        workOrderData.forEach((order, index) => {
+            const missingFields = requiredFields.filter(field => !order.hasOwnProperty(field) || order[field] === null || order[field] === '');
+            if (missingFields.length > 0) {
+                invalidOrders.push({ index: index + 1, missingFields });
+            }
+        });
+
+        if (invalidOrders.length > 0) {
+            const errorMessage = `Invalid work orders found:\n${invalidOrders.map(item => 
+                `Order ${item.index}: Missing ${item.missingFields.join(', ')}`
+            ).join('\n')}`;
+            alert(errorMessage);
+            return;
+        }
+
+        console.log(`📁 Processing ${workOrderData.length} work orders from JSON file`);
+
+        // Upload the data
+        await uploadWorkOrderData(workOrderData);
+
+    } catch (error) {
+        console.error('❌ Error processing JSON file:', error);
+        alert('Error reading file. Please try again.');
+    } finally {
+        // Clear the file input
+        input.value = '';
+    }
+};
+
+/**
+ * Upload work order data to server
+ */
+async function uploadWorkOrderData(workOrderData, overwrite = false) {
+    try {
+        // Show loading state
+        const uploadButton = document.querySelector('[onclick="triggerJsonUpload()"]');
+        const originalText = uploadButton.innerHTML;
+        uploadButton.innerHTML = '<i class="ri-loader-line mr-2 animate-spin"></i>Uploading...';
+        uploadButton.disabled = true;
+
+        const response = await fetch(`${BASE_URL}api/workorders/bulk-upload`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                workOrders: workOrderData,
+                username: getCurrentUsername() || 'system',
+                overwrite: overwrite
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            // Handle the upload result
+            let message = `Upload completed!\n`;
+            
+            // Show successfully uploaded work orders
+            if (result.inserted > 0) {
+                message += `✅ Successfully uploaded: ${result.inserted} work orders\n`;
+                if (result.uploadedNumbers && result.uploadedNumbers.length > 0) {
+                    message += `   Work Orders: ${result.uploadedNumbers.join(', ')}\n`;
+                }
+            }
+            
+            if (result.duplicates && result.duplicates.length > 0 && !overwrite) {
+                message += `⚠️ Duplicates found: ${result.duplicates.length} work orders\n`;
+                
+                // Ask user what to do with duplicates
+                const duplicateNumbers = result.duplicates.map(dup => dup.Number).join(', ');
+                const overwriteConfirm = confirm(
+                    `${message}   Duplicate Work Orders: ${duplicateNumbers}\n\nDo you want to overwrite the existing work orders?\n\nClick OK to overwrite, Cancel to skip duplicates.`
+                );
+
+                if (overwriteConfirm) {
+                    // Upload duplicates with overwrite flag
+                    await uploadWorkOrderData(result.duplicates, true);
+                } else {
+                    alert(`${message}   Skipped Work Orders: ${duplicateNumbers}`);
+                }
+            } else {
+                alert(message);
+            }
+
+            // Show errors if any
+            if (result.errors && result.errors.length > 0) {
+                console.warn('Upload errors:', result.errors);
+                const errorMessage = result.errors.map(err => 
+                    `${err.workOrderNumber}: ${err.error}`
+                ).join('\n');
+                alert(`Some errors occurred during upload:\n${errorMessage}`);
+            }
+
+            // Refresh the data table
+            await loadWorkOrderData();
+
+        } else {
+            throw new Error(result.message || result.error || 'Upload failed');
+        }
+
+    } catch (error) {
+        console.error('❌ Error uploading work order data:', error);
+        alert(`Upload failed: ${error.message}`);
+    } finally {
+        // Restore button state
+        const uploadButton = document.querySelector('[onclick="triggerJsonUpload()"]');
+        uploadButton.innerHTML = '<i class="ri-upload-line mr-2"></i><span data-i18n="jsonUpload">Upload JSON</span>';
+        uploadButton.disabled = false;
+    }
+}
+
+/**
+ * Helper function to read file as text
+ */
+function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(e);
+        reader.readAsText(file);
+    });
+}
+
+/**
+ * Get current username (assuming it's stored somewhere in the app)
+ */
+function getCurrentUsername() {
+    // This should be implemented based on your authentication system
+    // For now, return a default value
+    return localStorage.getItem('username') || 'admin';
+}
+
+/**
+ * Load modal stack manager if not already loaded
+ */
+function loadModalStackManager() {
+    if (typeof window.modalStackManager !== 'undefined') return;
+    
+    // Simple inline modal stack manager
+    class ModalStackManager {
+        constructor() {
+            this.modalStack = [];
+            this.setupEscapeListener();
+        }
+
+        pushModal(modalId, closeFunction = null) {
+            const modal = { id: modalId, closeFunction: closeFunction };
+            this.modalStack.push(modal);
+            console.log(`📋 Modal opened: ${modalId}, Stack: [${this.modalStack.map(m => m.id).join(', ')}]`);
+        }
+
+        popModal(modalId = null) {
+            if (this.modalStack.length === 0) return null;
+            
+            let removedModal;
+            if (modalId) {
+                const index = this.modalStack.findIndex(m => m.id === modalId);
+                if (index !== -1) {
+                    removedModal = this.modalStack.splice(index, 1)[0];
+                }
+            } else {
+                removedModal = this.modalStack.pop();
+            }
+            
+            if (removedModal) {
+                console.log(`📋 Modal closed: ${removedModal.id}, Remaining: [${this.modalStack.map(m => m.id).join(', ')}]`);
+            }
+            return removedModal;
+        }
+
+        closeTopModal() {
+            const topModal = this.modalStack[this.modalStack.length - 1];
+            if (!topModal) return false;
+
+            console.log(`🔑 ESC pressed - closing modal: ${topModal.id}`);
+
+            if (topModal.closeFunction) {
+                topModal.closeFunction();
+            } else {
+                const modal = document.getElementById(topModal.id);
+                if (modal) {
+                    modal.classList.add('hidden');
+                    modal.style.display = 'none';
+                }
+            }
+
+            this.popModal(topModal.id);
+            return true;
+        }
+
+        setupEscapeListener() {
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' || event.keyCode === 27) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.closeTopModal();
+                }
+            });
+        }
+    }
+
+    window.modalStackManager = new ModalStackManager();
+    console.log('🔑 Modal stack manager initialized');
+}
+
+/**
+ * Enhanced work order detail modal with ESC support
+ */
+window.showWorkOrderDetails = function(workOrderId) {
+    console.log('📄 Opening work order details modal for:', workOrderId);
+    
+    // Your existing modal opening logic here
+    const modal = document.getElementById('workOrderDetailModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        
+        // Register in modal stack
+        if (window.modalStackManager) {
+            modalStackManager.pushModal('workOrderDetailModal', () => {
+                closeWorkOrderDetails();
+            });
+        }
+    }
+};
+
+/**
+ * Close work order detail modal
+ */
+window.closeWorkOrderDetails = function() {
+    const modal = document.getElementById('workOrderDetailModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
+    
+    // Remove from modal stack
+    if (window.modalStackManager) {
+        modalStackManager.popModal('workOrderDetailModal');
+    }
+};
+
+/**
+ * Enhanced work order edit modal with ESC support  
+ * This function works with your existing dynamic modal creation system
+ */
+// The original editWorkOrder function works properly with dynamic modal creation
 
 // Make functions globally available
 window.initializeWorkOrderSystem = initializeWorkOrderSystem;
