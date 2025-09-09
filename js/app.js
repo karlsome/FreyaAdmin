@@ -2766,14 +2766,85 @@ window.switchSCNATab = function(tabName) {
             
         case 'analytics':
             tabContent.innerHTML = `
-                <div class="bg-white p-6 rounded-lg border border-gray-200">
-                    <div class="text-center py-12">
-                        <i class="ri-bar-chart-line text-6xl text-gray-400 mb-4"></i>
-                        <h3 class="text-lg font-semibold text-gray-900 mb-2">SCNA Analytics</h3>
-                        <p class="text-gray-600">Analytics and reporting features will be available in a future update.</p>
+                <div class="space-y-6">
+                    <!-- Header Section -->
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-900">Machine Downtime Analytics</h2>
+                            <p class="text-gray-600">Machine utilization and downtime analysis for SCNA factory</p>
+                        </div>
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <button onclick="exportSCNAMachineData()" 
+                                    class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                <i class="ri-download-line mr-2"></i>Export Data
+                            </button>
+                            <button id="refreshSCNAMachineBtn" 
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                                <i class="ri-refresh-line mr-2"></i>Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filters Section -->
+                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div>
+                                <label for="scnaMachineDateFrom" class="block text-sm font-medium text-gray-700 mb-2">From Date</label>
+                                <input type="date" id="scnaMachineDateFrom" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label for="scnaMachineDateTo" class="block text-sm font-medium text-gray-700 mb-2">To Date</label>
+                                <input type="date" id="scnaMachineDateTo" 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Machine</label>
+                                <div class="mb-2">
+                                    <input type="checkbox" id="scnaMachineAll" checked onchange="toggleAllMachines(this.checked)" class="mr-2">
+                                    <label for="scnaMachineAll" class="text-sm text-gray-700 cursor-pointer">All</label>
+                                    <button onclick="toggleAllMachines(false)" class="ml-4 text-xs text-blue-600 hover:text-blue-800">None</button>
+                                </div>
+                                <div id="scnaMachineCheckboxes" class="space-y-2 max-h-32 overflow-y-auto p-2 border rounded-md bg-gray-50"></div>
+                            </div>
+                            <div class="flex items-end">
+                                <div class="text-sm text-gray-600">
+                                    <div class="flex items-center space-x-4">
+                                        <div class="flex items-center">
+                                            <div class="w-4 h-4 bg-blue-500 rounded mr-2"></div>
+                                            <span>Working</span>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <div class="w-4 h-4 bg-red-500 rounded mr-2"></div>
+                                            <span>Break</span>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <div class="w-4 h-4 bg-gray-500 rounded mr-2"></div>
+                                            <span>Downtime</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Machine Downtime Chart -->
+                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="mb-4">
+                            <h3 class="text-lg font-semibold text-gray-900">Machine Utilization Timeline</h3>
+                            <p class="text-sm text-gray-600">Real-time view of machine working status, breaks, and downtime periods</p>
+                        </div>
+                        <div id="machineDowntimeChart" style="height: 600px;"></div>
                     </div>
                 </div>
             `;
+            
+            // Initialize machine analytics after DOM is ready
+            setTimeout(() => {
+                if (typeof initializeSCNAMachineAnalytics === 'function') {
+                    initializeSCNAMachineAnalytics();
+                }
+            }, 100);
             break;
             
         default:
