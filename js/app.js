@@ -2900,6 +2900,199 @@ let approvalStatistics = {}; // Cache statistics
 let dataRangeMode = 'current'; // 'current' or 'all' - controls whether to show current date or all historical data
 
 /**
+ * Load unique factory options for the current approval tab
+ */
+async function loadFactoryOptions(collection = 'kensaDB') {
+    try {
+        console.log(`📋 Loading factory options for ${collection}...`);
+        
+        const factoryFilter = document.getElementById('factoryFilter');
+        if (!factoryFilter) {
+            console.warn('❌ Factory filter element not found');
+            return;
+        }
+
+        // Show loading state
+        factoryFilter.innerHTML = '<option value="">Loading factories...</option>';
+        factoryFilter.disabled = true;
+
+        // Fetch unique factories from the API - use BASE_URL for server communication
+        const apiUrl = `${BASE_URL}api/factories/${collection}`;
+        console.log(`🌐 Fetching from: ${apiUrl}`);
+        
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to fetch factory data');
+        }
+
+        console.log(`✅ Loaded ${data.count} unique factories for ${collection}:`, data.factories);
+
+        // Clear existing options and add default
+        factoryFilter.innerHTML = '<option value="" data-i18n="allFactories">All Factories</option>';
+        
+        // Add factory options
+        data.factories.forEach(factory => {
+            const option = document.createElement('option');
+            option.value = factory;
+            option.textContent = factory;
+            factoryFilter.appendChild(option);
+        });
+
+        // Re-enable dropdown
+        factoryFilter.disabled = false;
+
+        // Restore previously selected factory for this collection
+        const savedFactoryKey = `factoryFilter_${collection}`;
+        const savedFactory = localStorage.getItem(savedFactoryKey);
+        if (savedFactory && data.factories.includes(savedFactory)) {
+            factoryFilter.value = savedFactory;
+            console.log(`🔄 Restored saved factory selection: ${savedFactory} for ${collection}`);
+        }
+
+        // Add event listener for persistence (remove existing listener first to avoid duplicates)
+        factoryFilter.removeEventListener('change', handleFactoryFilterChange);
+        factoryFilter.addEventListener('change', handleFactoryFilterChange);
+
+        console.log(`✅ Factory dropdown populated with ${data.factories.length} options`);
+
+    } catch (error) {
+        console.error(`❌ Error loading factory options for ${collection}:`, error);
+        
+        const factoryFilter = document.getElementById('factoryFilter');
+        if (factoryFilter) {
+            factoryFilter.innerHTML = `
+                <option value="" data-i18n="allFactories">All Factories</option>
+                <option value="" disabled>Error loading factories</option>
+            `;
+            factoryFilter.disabled = false;
+        }
+    }
+}
+
+/**
+ * Load factory options for multiple collections in batch
+ */
+async function loadFactoryOptionsBatch(collections = ['kensaDB', 'pressDB', 'SRSDB', 'slitDB']) {
+    try {
+        console.log('📋 Loading factory options for multiple collections...');
+        
+        // Use BASE_URL for server communication
+        const apiUrl = `${BASE_URL}api/factories/batch`;
+        console.log(`🌐 Fetching batch from: ${apiUrl}`);
+        
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ collections })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error('Failed to fetch batch factory data');
+        }
+
+        console.log('✅ Loaded factory data for all collections:', data.results);
+        
+        // Store factory data for each collection
+        window.factoryData = data.results;
+        
+        return data.results;
+
+    } catch (error) {
+        console.error('❌ Error loading batch factory options:', error);
+        return null;
+    }
+}
+
+/**
+ * Update factory dropdown when switching approval tabs
+ */
+function updateFactoryDropdownForTab(collection) {
+    console.log(`🔄 Updating factory dropdown for ${collection}`);
+    
+    // If we have cached batch data, use it
+    if (window.factoryData && window.factoryData[collection]) {
+        const factoryFilter = document.getElementById('factoryFilter');
+        if (!factoryFilter) return;
+
+        const factories = window.factoryData[collection].factories || [];
+        
+        // Clear and rebuild options
+        factoryFilter.innerHTML = '<option value="" data-i18n="allFactories">All Factories</option>';
+        
+        factories.forEach(factory => {
+            const option = document.createElement('option');
+            option.value = factory;
+            option.textContent = factory;
+            factoryFilter.appendChild(option);
+        });
+
+        // Restore previously selected factory for this collection
+        const savedFactoryKey = `factoryFilter_${collection}`;
+        const savedFactory = localStorage.getItem(savedFactoryKey);
+        if (savedFactory && factories.includes(savedFactory)) {
+            factoryFilter.value = savedFactory;
+            console.log(`🔄 Restored saved factory selection: ${savedFactory} for ${collection}`);
+        }
+
+        // Add event listener for persistence (remove existing listener first to avoid duplicates)
+        factoryFilter.removeEventListener('change', handleFactoryFilterChange);
+        factoryFilter.addEventListener('change', handleFactoryFilterChange);
+
+        console.log(`✅ Updated factory dropdown with ${factories.length} options for ${collection}`);
+    } else {
+        // Fall back to individual loading
+        loadFactoryOptions(collection);
+    }
+}
+
+/**
+ * Handle factory filter change (unified function for persistence and filtering)
+ */
+function handleFactoryFilterChange() {
+    saveFactorySelection(); // Save the selection
+    applyApprovalFilters(); // Apply the filter
+}
+
+/**
+ * Save factory selection to localStorage for persistence
+ */
+function saveFactorySelection() {
+    const factoryFilter = document.getElementById('factoryFilter');
+    if (!factoryFilter) return;
+    
+    const selectedFactory = factoryFilter.value;
+    const savedFactoryKey = `factoryFilter_${currentApprovalTab}`;
+    
+    if (selectedFactory) {
+        localStorage.setItem(savedFactoryKey, selectedFactory);
+        console.log(`💾 Saved factory selection: ${selectedFactory} for ${currentApprovalTab}`);
+    } else {
+        localStorage.removeItem(savedFactoryKey);
+        console.log(`🗑️ Cleared factory selection for ${currentApprovalTab}`);
+    }
+}
+
+/**
  * Initialize the approval system (OPTIMIZED)
  */
 function initializeApprovalSystem() {
@@ -2915,7 +3108,7 @@ function initializeApprovalSystem() {
     
     // Event listeners
     document.getElementById('refreshBtn').addEventListener('click', loadApprovalData);
-    document.getElementById('factoryFilter').addEventListener('change', applyApprovalFilters);
+    document.getElementById('factoryFilter').addEventListener('change', handleFactoryFilterChange);
     document.getElementById('statusFilter').addEventListener('change', applyApprovalFilters);
     document.getElementById('dateFilter').addEventListener('change', applyApprovalFilters);
     document.getElementById('approvalSearchInput').addEventListener('input', applyApprovalFilters);
@@ -2942,6 +3135,22 @@ function initializeApprovalSystem() {
     // Initialize tab styles
     updateTabStyles();
     
+    // Load factory options for all collections in batch (for better performance)
+    if (typeof loadFactoryOptionsBatch === 'function') {
+        loadFactoryOptionsBatch(['kensaDB', 'pressDB', 'SRSDB', 'slitDB']).then(() => {
+            // After loading batch data, update factory dropdown for current tab
+            if (typeof updateFactoryDropdownForTab === 'function') {
+                updateFactoryDropdownForTab(currentApprovalTab);
+            }
+        });
+    } else {
+        // Fallback to individual loading for current tab
+        console.warn('⚠️ Factory batch loading function not available, using fallback');
+        if (typeof loadFactoryOptions === 'function') {
+            loadFactoryOptions(currentApprovalTab);
+        }
+    }
+    
     // Load initial data efficiently
     loadApprovalData();
 }
@@ -2952,6 +3161,12 @@ function initializeApprovalSystem() {
 window.switchApprovalTab = function(tabName) {
     currentApprovalTab = tabName;
     updateTabStyles();
+    
+    // Update factory dropdown for the new tab
+    if (typeof updateFactoryDropdownForTab === 'function') {
+        updateFactoryDropdownForTab(tabName);
+    }
+    
     loadApprovalData();
 };
 
@@ -3539,11 +3754,17 @@ function updateApprovalStatisticsDisplay() {
 }
 
 /**
- * Update factory filter dropdown options (NEW HELPER)
+ * Update factory filter dropdown options (UPDATED TO WORK WITH PERSISTENCE)
  */
 function updateFactoryFilterOptions(factories) {
     const factoryFilter = document.getElementById('factoryFilter');
+    
+    // Store current value before rebuilding
     const currentValue = factoryFilter.value;
+    
+    // Get saved value for current collection
+    const savedFactoryKey = `factoryFilter_${currentApprovalTab}`;
+    const savedFactory = localStorage.getItem(savedFactoryKey);
     
     factoryFilter.innerHTML = '<option value="" data-i18n="allFactories">All Factories</option>';
     
@@ -3551,11 +3772,21 @@ function updateFactoryFilterOptions(factories) {
         const option = document.createElement('option');
         option.value = factory;
         option.textContent = factory;
-        if (factory === currentValue) {
-            option.selected = true;
-        }
         factoryFilter.appendChild(option);
     });
+    
+    // Restore saved selection if it exists and is valid
+    if (savedFactory && factories.includes(savedFactory)) {
+        factoryFilter.value = savedFactory;
+        console.log(`🔄 Restored saved factory selection in updateFactoryFilterOptions: ${savedFactory}`);
+    } else if (currentValue && factories.includes(currentValue)) {
+        factoryFilter.value = currentValue;
+        console.log(`🔄 Preserved current factory selection: ${currentValue}`);
+    }
+    
+    // Ensure the change event listener for persistence is attached
+    factoryFilter.removeEventListener('change', handleFactoryFilterChange);
+    factoryFilter.addEventListener('change', handleFactoryFilterChange);
 }
 
 /**
