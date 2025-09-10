@@ -647,6 +647,27 @@ function showFreyaTabletDetail(record) {
         Object.keys(record['2HourQualityCheck'].checks).forEach(checkKey => {
             const check = record['2HourQualityCheck'].checks[checkKey];
             if (check) {
+                // Convert timestamp to Indiana (Eastern) time
+                let displayTime = 'N/A';
+                if (check.timestamp) {
+                    try {
+                        const date = new Date(check.timestamp);
+                        // Convert to Eastern Time (Indiana)
+                        displayTime = date.toLocaleString('en-US', {
+                            timeZone: 'America/Indiana/Indianapolis',
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    } catch (error) {
+                        console.warn('Error converting timestamp:', error);
+                        displayTime = check.checkTime || 'N/A';
+                    }
+                }
+                
                 detailHTML += `
                     <div class="border border-purple-200 rounded p-3">
                         <h6 class="font-medium text-purple-900">Check ${check.checkNumber || checkKey}</h6>
@@ -656,8 +677,8 @@ function showFreyaTabletDetail(record) {
                                 <span class="text-purple-900">${check.checkerName || 'N/A'}</span>
                             </div>
                             <div class="text-sm">
-                                <span class="text-purple-700">Time: </span>
-                                <span class="text-purple-900">${check.checkTime || 'N/A'}</span>
+                                <span class="text-purple-700">Time (Indiana): </span>
+                                <span class="text-purple-900">${displayTime}</span>
                             </div>
                         </div>
                     </div>

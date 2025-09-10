@@ -345,6 +345,7 @@ function renderMachineChart(machineName, machineData, chartElement) {
             let productName = '';
             let status = 'Downtime';
             let workerName = '';
+            let currentRecord = null; // Store the record for this interval
             
             // Check if this time interval has any activity
             const intervalTime = parseTimeToMinutes(timeInterval);
@@ -355,6 +356,8 @@ function renderMachineChart(machineName, machineData, chartElement) {
                 
                 // Check if current interval is within work time
                 if (intervalTime >= workStart && intervalTime < workEnd) {
+                    currentRecord = workSession; // Store the work session record
+                    
                     // Check if it's break time
                     let isBreakTime = false;
                     if (workSession.Break_Time_Data) {
@@ -390,7 +393,8 @@ function renderMachineChart(machineName, machineData, chartElement) {
                 productName,
                 status,
                 timeInterval,
-                workerName
+                workerName,
+                record: currentRecord // Include the record for click functionality
             });
         });
         
@@ -447,7 +451,8 @@ function renderMachineChart(machineName, machineData, chartElement) {
                         ${interval.productName ? `<div><strong>Product:</strong> ${interval.productName}</div>` : ''}
                         ${(interval.status === 'Production' || interval.status === 'Break') && interval.workerName ? `<div><strong>Worker:</strong> ${interval.workerName}</div>` : ''}
                     </div>`
-                }
+                },
+                record: interval.record // Attach the record data for click events
             });
         });
         
@@ -476,7 +481,10 @@ function renderMachineChart(machineName, machineData, chartElement) {
         tooltip: {
             trigger: 'item',
             formatter: function(params) {
-                return params.data.tooltip.formatter;
+                if (params.data && params.data.tooltip) {
+                    return params.data.tooltip.formatter + '<div style="color: #666; margin-top: 4px; font-size: 12px;">💡 Click to view details</div>';
+                }
+                return params.data.tooltip?.formatter || '';
             }
         },
         grid: {
@@ -525,7 +533,8 @@ function renderMachineChart(machineName, machineData, chartElement) {
                 },
                 label: {
                     show: false // Disable default labels
-                }
+                },
+                cursor: 'pointer' // Show pointer cursor to indicate clickability
             },
             {
                 name: 'Product Labels',
@@ -551,6 +560,15 @@ function renderMachineChart(machineName, machineData, chartElement) {
     };
     
     chart.setOption(option);
+    
+    // Add click event handler for opening production record details
+    chart.on('click', function(params) {
+        // Only handle clicks on the heatmap series (not labels)
+        if (params.seriesName === 'Machine Status' && params.data && params.data.record) {
+            console.log('🎯 Chart clicked:', params.data.record);
+            showMachineAnalyticsDetail(params.data.record);
+        }
+    });
     
     // Handle window resize
     window.addEventListener('resize', () => {
@@ -931,10 +949,398 @@ function showSCNAMachineErrorState(errorMessage) {
     </div>`;
 }
 
+/**
+ * Show machine analytics detail modal
+ */
+function showMachineAnalyticsDetail(record) {
+    const modal = document.getElementById('machineAnalyticsDetailModal');
+    const content = document.getElementById('machineAnalyticsDetailContent');
+    
+    if (!modal || !content || !record) {
+        console.warn('Modal elements or record not found');
+        return;
+    }
+
+    // Build detail content similar to Freya Tablet modal structure
+    let detailHTML = `
+        <!-- Production Overview -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="lg:col-span-2">
+                <div class="bg-white border border-gray-200 rounded-lg p-6">
+                    <h4 class="text-lg font-semibold text-gray-900 mb-4">Production Information</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="space-y-3">
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Date</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.Date ? new Date(record.Date).toLocaleDateString('ja-JP') : 'N/A'}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Equipment (設備)</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.設備 || 'N/A'}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Part Number (品番)</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.品番 || 'N/A'}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Background Number (背番号)</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.背番号 || 'N/A'}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Worker Name</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.Worker_Name || 'N/A'}</dd>
+                            </div>
+                        </div>
+                        <div class="space-y-3">
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Time Range</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.Time_start || 'N/A'} - ${record.Time_end || 'N/A'}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Total Work Hours</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.Total_Work_Hours || 'N/A'} hours</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Material Lot (材料ロット)</dt>
+                                <dd class="text-sm text-gray-900 mt-1 break-all">${record.材料ロット || 'N/A'}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Comment</dt>
+                                <dd class="text-sm text-gray-900 mt-1">${record.Comment || 'N/A'}</dd>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Statistics Card -->
+            <div class="space-y-4">
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h5 class="font-medium text-blue-900 mb-3">Production Stats</h5>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-sm text-blue-700">Quantity Made:</span>
+                            <span class="text-sm font-medium text-blue-900">${(record.Process_Quantity || 0).toLocaleString()}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-blue-700">Actual Total:</span>
+                            <span class="text-sm font-medium text-blue-900">${(record.Total || 0).toLocaleString()}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-blue-700">Cycle Time:</span>
+                            <span class="text-sm font-medium text-blue-900">${record.Cycle_Time ? record.Cycle_Time + 's' : 'N/A'}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-blue-700">Shot Count:</span>
+                            <span class="text-sm font-medium text-blue-900">${record.ショット数 || 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- NG Analysis -->
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <h5 class="font-medium text-red-900 mb-3">NG Analysis</h5>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-sm text-red-700">Total NG:</span>
+                            <span class="text-sm font-medium text-red-900">${(record.Total_NG || 0).toLocaleString()}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-red-700">Non Conforming (Internal):</span>
+                            <span class="text-sm font-medium text-red-900">${(record.疵引不良 || 0).toLocaleString()}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-red-700">Non Conforming (Supplier):</span>
+                            <span class="text-sm font-medium text-red-900">${(record.加工不良 || 0).toLocaleString()}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-red-700">Others:</span>
+                            <span class="text-sm font-medium text-red-900">${(record.その他 || 0).toLocaleString()}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Work Order Information (if available)
+    if (record.WorkOrder_Info && record.WorkOrder_Info.isWorkOrder) {
+        detailHTML += `
+            <div class="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <h4 class="text-lg font-semibold text-green-900 mb-4">Work Order Information</h4>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <dt class="text-sm font-medium text-green-700">Work Order Number</dt>
+                        <dd class="text-sm text-green-900 mt-1 font-mono">${record.WorkOrder_Info.workOrderNumber || 'N/A'}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-green-700">Status</dt>
+                        <dd class="text-sm text-green-900 mt-1">
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                                ${record.WorkOrder_Info.status || 'N/A'}
+                            </span>
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-green-700">SKU</dt>
+                        <dd class="text-sm text-green-900 mt-1">${record.WorkOrder_Info.sku || 'N/A'}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-green-700">Assigned To</dt>
+                        <dd class="text-sm text-green-900 mt-1">${record.WorkOrder_Info.assignedTo || 'N/A'}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-green-700">NC Program Sent</dt>
+                        <dd class="text-sm text-green-900 mt-1">${record.WorkOrder_Info.ncProgramSent ? 'Yes' : 'No'}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-green-700">Target Machines</dt>
+                        <dd class="text-sm text-green-900 mt-1">${record.WorkOrder_Info.targetMachines ? record.WorkOrder_Info.targetMachines.join(', ') : 'N/A'}</dd>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Break Time Data (if available)
+    if (record.Break_Time_Data) {
+        detailHTML += `
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
+                <h4 class="text-lg font-semibold text-yellow-900 mb-4">Break Time Information</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        `;
+        
+        Object.keys(record.Break_Time_Data).forEach(breakKey => {
+            const breakData = record.Break_Time_Data[breakKey];
+            if (breakData && typeof breakData === 'object' && (breakData.start || breakData.end)) {
+                detailHTML += `
+                    <div>
+                        <dt class="text-sm font-medium text-yellow-700">${breakKey.toUpperCase()}</dt>
+                        <dd class="text-sm text-yellow-900 mt-1">${breakData.start || 'N/A'} - ${breakData.end || 'N/A'}</dd>
+                    </div>
+                `;
+            }
+        });
+        
+        detailHTML += `
+                </div>
+                <div class="flex space-x-6">
+                    <div>
+                        <dt class="text-sm font-medium text-yellow-700">Total Break Minutes</dt>
+                        <dd class="text-sm text-yellow-900 mt-1">${record.Total_Break_Minutes || 0} minutes</dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm font-medium text-yellow-700">Total Break Hours</dt>
+                        <dd class="text-sm text-yellow-900 mt-1">${record.Total_Break_Hours || 0} hours</dd>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Quality Check Information (if available)
+    if (record['2HourQualityCheck'] && record['2HourQualityCheck'].checks) {
+        detailHTML += `
+            <div class="bg-purple-50 border border-purple-200 rounded-lg p-6 mb-6">
+                <h4 class="text-lg font-semibold text-purple-900 mb-4">Quality Check Information</h4>
+                <div class="mb-4">
+                    <span class="text-sm text-purple-700">Total Checks: </span>
+                    <span class="text-sm font-medium text-purple-900">${record['2HourQualityCheck'].totalChecks || 0}</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        `;
+        
+        Object.keys(record['2HourQualityCheck'].checks).forEach(checkKey => {
+            const check = record['2HourQualityCheck'].checks[checkKey];
+            if (check) {
+                // Convert timestamp to Indiana (Eastern) time
+                let displayTime = 'N/A';
+                if (check.timestamp) {
+                    try {
+                        const date = new Date(check.timestamp);
+                        // Convert to Eastern Time (Indiana)
+                        displayTime = date.toLocaleString('en-US', {
+                            timeZone: 'America/Indiana/Indianapolis',
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+                    } catch (error) {
+                        console.warn('Error converting timestamp:', error);
+                        displayTime = check.checkTime || 'N/A';
+                    }
+                }
+                
+                detailHTML += `
+                    <div class="border border-purple-200 rounded p-3">
+                        <h6 class="font-medium text-purple-900">Check ${check.checkNumber || checkKey}</h6>
+                        <div class="mt-2 space-y-1">
+                            <div class="text-sm">
+                                <span class="text-purple-700">Checker: </span>
+                                <span class="text-purple-900">${check.checkerName || 'N/A'}</span>
+                            </div>
+                            <div class="text-sm">
+                                <span class="text-purple-700">Time (Indiana): </span>
+                                <span class="text-purple-900">${displayTime}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        });
+        
+        detailHTML += `
+                </div>
+            </div>
+        `;
+    }
+
+    // Images Section
+    const imageFields = getMachineAnalyticsImageFields(record);
+    if (imageFields.length > 0) {
+        detailHTML += `
+            <div class="border border-gray-200 rounded-lg p-6">
+                <h4 class="text-lg font-semibold text-gray-900 mb-4">Images</h4>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        `;
+
+        imageFields.forEach(({ key, url, label }) => {
+            detailHTML += `
+                <div class="space-y-2">
+                    <div class="text-sm font-medium text-gray-700">${label}</div>
+                    <div class="border border-gray-200 rounded-lg overflow-hidden">
+                        <img src="${url}" 
+                             alt="${label}"
+                             class="w-full h-32 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                             onclick="showMachineAnalyticsImageModal('${url}', '${label}')"
+                             onerror="this.parentElement.innerHTML='<div class=\\'flex items-center justify-center h-32 bg-gray-100 text-gray-400\\'>Failed to load image</div>'"
+                        />
+                    </div>
+                </div>
+            `;
+        });
+
+        detailHTML += `
+                </div>
+            </div>
+        `;
+    }
+
+    content.innerHTML = detailHTML;
+    
+    // Show modal using same pattern as enhanced modal stack
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    
+    console.log('✅ Machine analytics detail modal opened for:', record.設備, record.品番);
+}
+
+/**
+ * Close machine analytics detail modal
+ */
+function closeMachineAnalyticsModal() {
+    const modal = document.getElementById('machineAnalyticsDetailModal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
+}
+
+/**
+ * Get all image fields from a machine analytics record
+ */
+function getMachineAnalyticsImageFields(record) {
+    const imageFields = [];
+    
+    // Material label images array
+    if (record.materialLabelImages && Array.isArray(record.materialLabelImages)) {
+        record.materialLabelImages.forEach((url, index) => {
+            imageFields.push({
+                key: `materialLabelImages[${index}]`,
+                url: url,
+                label: `Material Label ${index + 1}`
+            });
+        });
+    }
+    
+    // Individual image fields with Japanese names
+    const namedImageFields = {
+        '初物チェック画像': 'First Article Check Image',
+        '終物チェック画像': 'Final Article Check Image',
+        '材料ラベル画像': 'Material Label Image'
+    };
+    
+    Object.keys(namedImageFields).forEach(key => {
+        if (record[key] && typeof record[key] === 'string' && record[key].includes('firebase')) {
+            imageFields.push({
+                key: key,
+                url: record[key],
+                label: namedImageFields[key]
+            });
+        }
+    });
+    
+    return imageFields;
+}
+
+/**
+ * Show image modal for machine analytics
+ */
+function showMachineAnalyticsImageModal(imageUrl, title) {
+    // Create image modal if it doesn't exist
+    let imageModal = document.getElementById('machineAnalyticsImageModal');
+    if (!imageModal) {
+        imageModal = document.createElement('div');
+        imageModal.id = 'machineAnalyticsImageModal';
+        imageModal.className = 'fixed inset-0 bg-black bg-opacity-75 hidden z-50';
+        imageModal.innerHTML = `
+            <div class="flex items-center justify-center min-h-screen p-4">
+                <div class="relative max-w-4xl max-h-full">
+                    <button onclick="closeMachineAnalyticsImageModal()" class="absolute top-4 right-4 text-white bg-black bg-opacity-50 rounded-full p-2 hover:bg-opacity-75 z-10">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                    <img id="machineAnalyticsModalImage" src="" alt="" class="max-w-full max-h-screen object-contain rounded-lg" />
+                    <div id="machineAnalyticsModalImageTitle" class="absolute bottom-4 left-4 text-white bg-black bg-opacity-50 px-3 py-1 rounded"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(imageModal);
+    }
+
+    document.getElementById('machineAnalyticsModalImage').src = imageUrl;
+    document.getElementById('machineAnalyticsModalImageTitle').textContent = title;
+    imageModal.classList.remove('hidden');
+}
+
+/**
+ * Close machine analytics image modal
+ */
+function closeMachineAnalyticsImageModal() {
+    const imageModal = document.getElementById('machineAnalyticsImageModal');
+    if (imageModal) {
+        imageModal.classList.add('hidden');
+    }
+}
+
 // Make functions globally available
 window.initializeSCNAMachineAnalytics = initializeSCNAMachineAnalytics;
 window.loadSCNAMachineData = loadSCNAMachineData;
 window.toggleAllMachines = toggleAllMachines;
 window.saveMachineSelection = saveMachineSelection;
+window.showMachineAnalyticsDetail = showMachineAnalyticsDetail;
+window.closeMachineAnalyticsModal = closeMachineAnalyticsModal;
+window.showMachineAnalyticsImageModal = showMachineAnalyticsImageModal;
+window.closeMachineAnalyticsImageModal = closeMachineAnalyticsImageModal;
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeMachineAnalyticsModal();
+        closeMachineAnalyticsImageModal();
+    }
+});
 
 console.log('✅ SCNA Machine Analytics module loaded');
