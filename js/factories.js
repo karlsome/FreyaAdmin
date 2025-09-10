@@ -2336,9 +2336,9 @@ async function loadDailyProduction(factory, date) {
                       <div class="space-y-2 max-h-64 overflow-y-auto">
                         ${data.map(item => {
                           const encodedData = safeEncodeItemData(item);
-                          const total = item.Total ?? item.Process_Quantity ?? 0;
+                          const processQuantity = item.Process_Quantity ?? 0;
                           const totalNG = item.Total_NG ?? 0;
-                          const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(1) : '0.0';
+                          const defectRate = processQuantity > 0 ? ((totalNG / processQuantity) * 100).toFixed(1) : '0.0';
                           
                           return `
                             <div class="bg-white/80 backdrop-blur-sm rounded-lg p-3 cursor-pointer hover:bg-white/90 transition-colors border border-white/30"
@@ -3032,9 +3032,9 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                               </tr>
                             ` : pageData.map((item, index) => {
                               const encodedData = safeEncodeItemData(item);
-                              const total = item.Total ?? item.Process_Quantity ?? 0;
+                              const processQuantity = item.Process_Quantity ?? 0;
                               const totalNG = item.Total_NG ?? 0;
-                              const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(2) : '0.00';
+                              const defectRate = processQuantity > 0 ? ((totalNG / processQuantity) * 100).toFixed(2) : '0.00';
                               
                               // Calculate working hours
                               let workingHours = 'N/A';
@@ -3058,7 +3058,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                                   <td class="px-4 py-3 text-gray-700">${item.背番号 ?? "-"}</td>
                                   <td class="px-4 py-3 text-gray-700">${item.Worker_Name ?? "-"}</td>
                                   <td class="px-4 py-3 text-gray-700">${item.Date ?? "-"}</td>
-                                  <td class="px-4 py-3 font-medium text-gray-900">${total.toLocaleString()}</td>
+                                  <td class="px-4 py-3 font-medium text-gray-900">${processQuantity.toLocaleString()}</td>
                                   <td class="px-4 py-3 ${totalNG > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}">${totalNG}</td>
                                   <td class="px-4 py-3 text-gray-700">${workingHours === 'N/A' ? workingHours : workingHours + ' hrs'}</td>
                                   <td class="px-4 py-3">
@@ -3266,9 +3266,9 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                     <tbody>
                       ${sorted.map(item => {
                         const encodedData = safeEncodeItemData(item);
-                        const total = item.Total ?? item.Process_Quantity ?? 0;
+                        const processQuantity = item.Process_Quantity ?? 0;
                         const totalNG = item.Total_NG ?? 0;
-                        const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(2) : '0.00';
+                        const defectRate = processQuantity > 0 ? ((totalNG / processQuantity) * 100).toFixed(2) : '0.00';
                         
                         // Calculate working hours
                         let workingHours = 'N/A';
