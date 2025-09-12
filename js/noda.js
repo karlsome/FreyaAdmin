@@ -228,11 +228,11 @@ function renderNodaTable() {
                     const pickupDate = new Date(item.date).toLocaleDateString();
                     
                     return `
-                        <tr class="border-b hover:bg-gray-50 ${statusInfo.rowClass}">
+                        <tr class="border-b hover:bg-gray-50 cursor-pointer ${statusInfo.rowClass}" onclick="openNodaDetail('${item._id}')">
                             <td class="px-4 py-3 font-medium text-blue-600">
-                                <button onclick="openNodaDetail('${item._id}')" class="hover:underline">
+                                <span class="hover:underline">
                                     ${item.requestNumber}
-                                </button>
+                                </span>
                             </td>
                             <td class="px-4 py-3">
                                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.badgeClass}">
@@ -245,19 +245,18 @@ function renderNodaTable() {
                             <td class="px-4 py-3">${pickupDate}</td>
                             <td class="px-4 py-3">${item.quantity}</td>
                             <td class="px-4 py-3">${createdDate}</td>
-                            <td class="px-4 py-3">
+                            <td class="px-4 py-3" onclick="event.stopPropagation()">
                                 <div class="flex items-center space-x-2">
-                                    <button onclick="openNodaDetail('${item._id}')" class="text-blue-600 hover:text-blue-800">
-                                        <i class="ri-eye-line"></i>
-                                    </button>
                                     ${canEdit ? `
-                                        <button onclick="editNodaRequest('${item._id}')" class="text-green-600 hover:text-green-800">
+                                        <button onclick="editNodaRequest('${item._id}')" class="text-green-600 hover:text-green-800" title="Edit">
                                             <i class="ri-edit-line"></i>
                                         </button>
-                                        <button onclick="deleteNodaRequest('${item._id}')" class="text-red-600 hover:text-red-800">
+                                        <button onclick="deleteNodaRequest('${item._id}')" class="text-red-600 hover:text-red-800" title="Delete">
                                             <i class="ri-delete-bin-line"></i>
                                         </button>
-                                    ` : ''}
+                                    ` : `
+                                        <span class="text-gray-400 text-sm">Click row to view</span>
+                                    `}
                                 </div>
                             </td>
                         </tr>
@@ -699,8 +698,34 @@ async function lookupMasterData(query) {
 }
 
 /**
- * Show auto-generation notification
+ * Get user's full name from database (similar to approvals system)
  */
+async function getUserFullName(username) {
+    try {
+        const response = await fetch(`${BASE_URL}queries`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "users",
+                query: { username: username },
+                projection: { firstName: 1, lastName: 1 }
+            })
+        });
+
+        if (response.ok) {
+            const users = await response.json();
+            if (users.length > 0) {
+                const user = users[0];
+                return `${user.firstName || ''} ${user.lastName || ''}`.trim() || username;
+            }
+        }
+        return username; // Fallback to username if full name not found
+    } catch (error) {
+        console.error('Error getting user full name:', error);
+        return username;
+    }
+}
 function showAutoGenerationNotification(fieldName, value) {
     const notification = document.createElement('div');
     notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-pulse';
@@ -869,6 +894,14 @@ async function handleNodaAddFormSubmit(event) {
     
     try {
         console.log('💾 Creating request...');
+        
+        // Get current user information and fetch full name from database
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        console.log('👤 Current user object:', currentUser);
+        
+        const userName = await getUserFullName(currentUser.username || 'unknown');
+        console.log('🏷️ Final userName from database:', userName);
+        
         const response = await fetch(`${BASE_URL}api/noda-requests`, {
             method: 'POST',
             headers: {
@@ -880,7 +913,8 @@ async function handleNodaAddFormSubmit(event) {
                     品番: partNumber,
                     背番号: backNumber,
                     quantity: quantity,
-                    date: date
+                    date: date,
+                    userName: userName
                 }
             })
         });
@@ -1001,6 +1035,13 @@ async function parseAndUploadNodaCsv(csvData) {
         }
         
         // Upload requests
+        // Get current user information and fetch full name from database
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        console.log('👤 CSV Upload - Current user object:', currentUser);
+        
+        const userName = await getUserFullName(currentUser.username || 'unknown');
+        console.log('🏷️ CSV Upload - Final userName from database:', userName);
+        
         const response = await fetch(`${BASE_URL}/api/noda-requests`, {
             method: 'POST',
             headers: {
@@ -1008,7 +1049,8 @@ async function parseAndUploadNodaCsv(csvData) {
             },
             body: JSON.stringify({
                 action: 'bulkCreateRequests',
-                data: requests
+                data: requests,
+                userName: userName
             })
         });
         
@@ -1108,7 +1150,7 @@ function downloadNodaCsv(data) {
  */
 window.openNodaDetail = async function(requestId) {
     try {
-        const response = await fetch(`${BASE_URL}/api/noda-requests`, {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
