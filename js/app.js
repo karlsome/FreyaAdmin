@@ -1759,12 +1759,67 @@ function loadPage(page) {
             const endIndex = startIndex + masterItemsPerPage;
             const pageData = filteredMasterData.slice(startIndex, endIndex);
 
-            // Dynamically determine headers from the first data item
-            const firstItem = pageData[0] || filteredMasterData[0];
-            if (!firstItem) return;
+            // Filter out any corrupted records from pageData before rendering
+            const cleanPageData = pageData.filter(item => {
+              if (!item || typeof item !== 'object') return false;
+              
+              // Check for header corruption signs
+              const hasHeaderCorruption = 
+                item[""] === '品番' ||
+                item._1 === 'モデル' ||
+                item['製品背番号一覧'] === '背番号' ||
+                Object.values(item).includes('品番') ||
+                Object.values(item).includes('モデル');
+              
+              if (hasHeaderCorruption) {
+                return false;
+              }
+              
+              return true;
+            });
+
+            // Use a reliable source for field structure - check the entire dataset for a good sample
+            let referenceItem = null;
+            
+            // Try to find a record with a proper 品番 field
+            for (let item of filteredMasterData) {
+              if (item && item.品番 && typeof item.品番 === 'string' && item.品番.trim() !== '') {
+                referenceItem = item;
+                break;
+              }
+            }
+            
+            // If no good reference found, use predefined field structure
+            if (!referenceItem) {
+              console.warn('No proper reference item found, using default field structure');
+              referenceItem = {
+                品番: '',
+                モデル: '',
+                背番号: '',
+                品名: '',
+                形状: '',
+                'R/L': '',
+                色: '',
+                '顧客/納入先': '',
+                備考: '',
+                加工設備: '',
+                'QR CODE': '',
+                型番: '',
+                材料背番号: '',
+                材料: '',
+                収容数: '',
+                工場: '',
+                '秒数(1pcs何秒)': '',
+                '離型紙上/下': '',
+                送りピッチ: '',
+                SRS: '',
+                SLIT: '',
+                imageURL: ''
+              };
+            }
 
             // Get all fields except _id and imageURL, then add imageURL at the end
-            const dataFields = Object.keys(firstItem).filter(k => k !== "_id" && k !== "imageURL");
+            const dataFields = Object.keys(referenceItem).filter(k => k !== "_id" && k !== "imageURL");
             const headers = [
               ...dataFields.map(field => ({ key: field, label: field })),
               { key: "imageURL", label: "画像" }
@@ -1774,6 +1829,9 @@ function loadPage(page) {
               if (masterSortState.column !== col) return '';
               return masterSortState.direction === 1 ? ' ↑' : ' ↓';
             };
+
+            // Store the cleaned page data for sidebar access
+            storeMasterData(cleanPageData);
 
             const tableHTML = `
               <div class="overflow-x-auto">
@@ -1791,12 +1849,13 @@ function loadPage(page) {
                     </tr>
                   </thead>
                   <tbody class="bg-white divide-y divide-gray-200">
-                    ${pageData.map((row, index) => `
-                      <tr class="hover:bg-gray-50 cursor-pointer transition-colors" onclick='showMasterSidebarFromRow(this)' data-row='${encodeURIComponent(JSON.stringify(row))}'>
+                    ${cleanPageData.map((row, index) => `
+                      <tr class="hover:bg-gray-50 cursor-pointer transition-colors" onclick='showMasterSidebarFromRow(this)' data-index='${index}'>
                         ${dataFields.map(field => {
-                          const value = row[field] || "-";
+                          const value = row[field];
+                          const displayValue = (value === null || value === undefined || value === '') ? "-" : value;
                           const isMainField = field === "品番" || field === "品名" || field === "材料品番" || field === "材料";
-                          return `<td class="px-3 py-2 text-sm ${isMainField ? 'font-medium text-blue-600 hover:text-blue-800' : 'text-gray-900'}">${value}</td>`;
+                          return `<td class="px-3 py-2 text-sm ${isMainField ? 'font-medium text-blue-600 hover:text-blue-800' : 'text-gray-900'}">${displayValue}</td>`;
                         }).join('')}
                         <td class="px-3 py-2 text-sm">
                           ${row.imageURL 
@@ -1839,17 +1898,47 @@ function loadPage(page) {
             pageInfo.textContent = infoText;
             paginationInfo.textContent = infoText;
 
-            // Generate page numbers
+            // Generate page numbers with smart pagination (like approvals page)
             pageNumbers.innerHTML = '';
-            const startPage = Math.max(1, currentMasterPage - 2);
-            const endPage = Math.min(totalPages, currentMasterPage + 2);
-
-            for (let i = startPage; i <= endPage; i++) {
-              const pageBtn = document.createElement('button');
-              pageBtn.className = `px-3 py-1 text-sm rounded transition-colors ${i === currentMasterPage ? 'bg-blue-600 text-white' : 'border hover:bg-gray-100'}`;
-              pageBtn.textContent = i;
-              pageBtn.onclick = () => goToMasterPage(i);
-              pageNumbers.appendChild(pageBtn);
+            
+            if (totalPages <= 7) {
+              // Show all pages if 7 or fewer
+              for (let i = 1; i <= totalPages; i++) {
+                const pageBtn = document.createElement('button');
+                pageBtn.className = `px-3 py-1 text-sm rounded transition-colors ${i === currentMasterPage ? 'bg-blue-600 text-white' : 'border hover:bg-gray-100'}`;
+                pageBtn.textContent = i;
+                pageBtn.onclick = () => goToMasterPage(i);
+                pageNumbers.appendChild(pageBtn);
+              }
+            } else {
+              // Show abbreviated pagination with consistent pattern
+              let pages = [];
+              
+              if (currentMasterPage <= 4) {
+                // Show first 5 pages + ... + last page
+                pages = [1, 2, 3, 4, 5, '...', totalPages];
+              } else if (currentMasterPage >= totalPages - 3) {
+                // Show first page + ... + last 5 pages
+                pages = [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+              } else {
+                // Show first + ... + current-1, current, current+1 + ... + last
+                pages = [1, '...', currentMasterPage - 1, currentMasterPage, currentMasterPage + 1, '...', totalPages];
+              }
+              
+              pages.forEach(page => {
+                if (page === '...') {
+                  const dots = document.createElement('span');
+                  dots.className = 'px-3 py-1 text-sm text-gray-400';
+                  dots.textContent = '...';
+                  pageNumbers.appendChild(dots);
+                } else {
+                  const pageBtn = document.createElement('button');
+                  pageBtn.className = `px-3 py-1 text-sm rounded transition-colors ${page === currentMasterPage ? 'bg-blue-600 text-white' : 'border hover:bg-gray-100'}`;
+                  pageBtn.textContent = page;
+                  pageBtn.onclick = () => goToMasterPage(page);
+                  pageNumbers.appendChild(pageBtn);
+                }
+              });
             }
 
             prevBtn.disabled = currentMasterPage === 1;
@@ -1889,8 +1978,62 @@ function loadPage(page) {
             renderMasterTable();
           };
 
+          // Store master data globally for sidebar access
+          let masterDataCache = [];
+
+          // Safe data storage approach - use index instead of embedding full object
+          function storeMasterData(dataArray) {
+            // Filter out corrupted records that have header data as values
+            const cleanedData = (dataArray || []).filter(item => {
+              // Check if this is a corrupted record with headers as values
+              if (!item || typeof item !== 'object') return false;
+              
+              // Look for signs of header corruption
+              const hasHeaderCorruption = 
+                item[""] === '品番' ||
+                item._1 === 'モデル' ||
+                item['製品背番号一覧'] === '背番号' ||
+                item._2 === '材料' ||
+                Object.values(item).includes('品番') ||
+                Object.values(item).includes('モデル') ||
+                Object.values(item).includes('背番号');
+              
+              if (hasHeaderCorruption) {
+                return false;
+              }
+              
+              return true;
+            });
+            
+            masterDataCache = cleanedData;
+            
+            // Validate data structure
+            if (masterDataCache.length > 0) {
+              const sampleItem = masterDataCache[0];
+              
+              // Check for required fields
+              if (!sampleItem.品番) {
+                console.warn('Warning: First item missing 品番 field');
+              }
+            }
+          }
+
           window.showMasterSidebarFromRow = (el) => {
-            const data = JSON.parse(decodeURIComponent(el.getAttribute("data-row")));
+            const rowIndex = parseInt(el.getAttribute("data-index"));
+            
+            if (isNaN(rowIndex) || rowIndex < 0 || rowIndex >= masterDataCache.length) {
+              console.error('Invalid row index:', rowIndex, 'Cache length:', masterDataCache.length);
+              alert('データの読み込みエラーが発生しました。ページを再読み込みしてください。');
+              return;
+            }
+            
+            const data = masterDataCache[rowIndex];
+            if (!data) {
+              console.error('No data found at index:', rowIndex);
+              alert('データが見つかりません。ページを再読み込みしてください。');
+              return;
+            }
+            
             showMasterSidebar(data);
           };
 
@@ -2220,67 +2363,112 @@ function loadPage(page) {
           }
 
           async function loadMasterFilters() {
-            // Clear existing options (except "All")
-            ["filterFactory", "filterRL", "filterColor", "filterProcess"].forEach(id => {
-              const select = document.getElementById(id);
-              if (select) {
-                select.innerHTML = '<option value="" data-i18n="all">All</option>';
+            try {
+              
+              // Show loading state for all dropdowns
+              const dropdowns = [
+                { id: 'filterFactory', label: 'Factory' },
+                { id: 'filterRL', label: 'R/L' }, 
+                { id: 'filterColor', label: 'Color' },
+                { id: 'filterProcess', label: 'Equipment' }
+              ];
+              
+              dropdowns.forEach(({ id, label }) => {
+                const select = document.getElementById(id);
+                if (select) {
+                  select.innerHTML = `<option value="">Loading ${label}...</option>`;
+                  select.disabled = true;
+                }
+              });
+
+              // Determine API endpoints based on current tab
+              let apiEndpoints;
+              if (currentMasterTab === '内製品DB') {
+                // For Master DB (内製品DB)
+                apiEndpoints = [
+                  { endpoint: 'api/masterdb/factories', selectId: 'filterFactory', label: 'All Factory' },
+                  { endpoint: 'api/masterdb/rl', selectId: 'filterRL', label: 'All R/L' },
+                  { endpoint: 'api/masterdb/colors', selectId: 'filterColor', label: 'All Color' },
+                  { endpoint: 'api/masterdb/equipment', selectId: 'filterProcess', label: 'All Equipment' }
+                ];
+              } else {
+                // For Material DB (材料DB) - use similar endpoints or create new ones
+                apiEndpoints = [
+                  { endpoint: 'api/masterdb/factories', selectId: 'filterFactory', label: 'All Factory' },
+                  { endpoint: 'api/masterdb/rl', selectId: 'filterRL', label: 'All R/L' },
+                  { endpoint: 'api/masterdb/colors', selectId: 'filterColor', label: 'All Color' },
+                  { endpoint: 'api/masterdb/materials', selectId: 'filterProcess', label: 'All Material' }
+                ];
+              }
+
+              // Load all filter values in parallel for better performance
+              const promises = apiEndpoints.map(async ({ endpoint, selectId, label }) => {
+                try {
+                  const response = await fetch(`${BASE_URL}${endpoint}`);
+                  const data = await response.json();
+                  
+                  if (data.success && data.data) {
+                    populateMasterDropdown(selectId, data.data, label);
+                    //console.log(`✅ Loaded ${data.data.length} options for ${selectId}`);
+                  } else {
+                    console.warn(`⚠️ No data received for ${endpoint}`);
+                    populateMasterDropdown(selectId, [], label);
+                  }
+                } catch (error) {
+                  console.error(`❌ Error loading ${endpoint}:`, error);
+                  populateMasterDropdown(selectId, [], label);
+                }
+              });
+
+              await Promise.all(promises);
+
+            } catch (error) {
+              console.error('❌ Error loading Master DB filters:', error);
+              
+              // Reset dropdowns to default state on error
+              const dropdowns = [
+                { id: 'filterFactory', label: 'All Factory' },
+                { id: 'filterRL', label: 'All R/L' },
+                { id: 'filterColor', label: 'All Color' },
+                { id: 'filterProcess', label: 'All Equipment' }
+              ];
+              
+              dropdowns.forEach(({ id, label }) => {
+                populateMasterDropdown(id, [], label);
+              });
+            }
+          }
+
+          // Helper function to populate Master DB dropdowns
+          function populateMasterDropdown(selectId, values, defaultLabel) {
+            const select = document.getElementById(selectId);
+            if (!select) {
+              console.warn(`Dropdown with ID '${selectId}' not found`);
+              return;
+            }
+
+            // Clear existing options
+            select.innerHTML = '';
+            
+            // Add "All" option
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = defaultLabel;
+            allOption.setAttribute('data-i18n', 'all');
+            select.appendChild(allOption);
+
+            // Add unique values
+            values.forEach(value => {
+              if (value && value.trim()) {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                select.appendChild(option);
               }
             });
 
-            if (!masterData.length) return;
-
-            // Dynamically determine which fields to use for filters based on the data structure
-            const firstItem = masterData[0];
-            const availableFields = Object.keys(firstItem).filter(k => k !== "_id" && k !== "imageURL");
-            
-            // Define field mapping for common filter categories
-            const filterMapping = {
-              "工場": "filterFactory",
-              "R/L": "filterRL", 
-              "色": "filterColor",
-              "加工設備": "filterProcess",
-              "次工程": "filterFactory", // For materialDB, map 次工程 to factory filter
-              "材料": "filterProcess"    // For materialDB, map 材料 to process filter
-            };
-
-            // Find fields that match our filter categories
-            const fieldsToFilter = availableFields.filter(field => filterMapping[field]);
-
-            for (const field of fieldsToFilter) {
-              try {
-                const collectionName = currentMasterTab;
-                const res = await fetch(BASE_URL + "queries", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    dbName: "Sasaki_Coating_MasterDB",
-                    collectionName: collectionName,
-                    aggregation: [
-                      { $group: { _id: `$${field}` } },
-                      { $sort: { _id: 1 } }
-                    ]
-                  })
-                });
-
-                const values = await res.json();
-                const selectId = filterMapping[field];
-                const select = document.getElementById(selectId);
-
-                if (select && values.length) {
-                  values.forEach(v => {
-                    if (v._id && v._id.trim()) {
-                      const option = document.createElement("option");
-                      option.value = v._id;
-                      option.textContent = v._id;
-                      select.appendChild(option);
-                    }
-                  });
-                }
-              } catch (err) {
-                console.error(`Failed to load filter for ${field}`, err);
-              }
-            }
+            // Re-enable the dropdown
+            select.disabled = false;
           }
 
           loadMasterDB();
