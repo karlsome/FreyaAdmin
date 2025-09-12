@@ -13,9 +13,9 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
-  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
+  admin: ["dashboard", "factories", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
+  部長: ["dashboard", "factories", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
   係長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
   班長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna", "noda"],
   member: ["dashboard", "noda"]
@@ -25,7 +25,7 @@ const navItemsConfig = {
   dashboard: { icon: "ri-dashboard-line", label: "dashboard" },
   factories: { icon: "ri-building-line", label: "factories" },
   masterDB: { icon: "ri-settings-line", label: "masterDB" },
-  processes: { icon: "ri-settings-line", label: "processes" },
+  inventory: { icon: "ri-archive-line", label: "inventory" },
   notifications: { icon: "ri-notification-line", label: "notifications" },
   analytics: { icon: "ri-line-chart-line", label: "analytics" },
   userManagement: { icon: "ri-user-settings-line", label: "userManagement" },
@@ -2850,6 +2850,215 @@ function loadPage(page) {
             // Initialize NODA system
             if (typeof initializeNodaSystem === 'function') {
                 initializeNodaSystem();
+            }
+            break;
+
+        case "inventory":
+            mainContent.innerHTML = `
+                <div class="space-y-6">
+                    <!-- Header Section -->
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div>
+                            <h2 class="text-3xl font-bold text-gray-900" data-i18n="inventoryTitle">Inventory Management</h2>
+                            <p class="mt-2 text-gray-600" data-i18n="inventorySubtitle">Two-Stage Inventory Tracking System</p>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <div id="inventoryAddSection" style="display: none;">
+                                <button onclick="openInventoryAddModal()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                                    <i class="ri-add-line mr-2"></i><span data-i18n="addInventory">Add Inventory</span>
+                                </button>
+                            </div>
+                            <button onclick="exportInventoryData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
+                            </button>
+                            <button id="refreshInventoryBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                                <i class="ri-refresh-line mr-2"></i><span data-i18n="refresh">Refresh</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filters Section -->
+                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="partNumber">品番</label>
+                                <select id="inventoryPartNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allPartNumbers">All Part Numbers</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="backNumber">背番号</label>
+                                <select id="inventoryBackNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allBackNumbers">All Back Numbers</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="search">Search</label>
+                                <input type="text" id="inventorySearchInput" class="w-full p-2 border border-gray-300 rounded-md" placeholder="Search inventory...">
+                            </div>
+                            <div>
+                                <button onclick="applyInventoryFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                                    <i class="ri-search-line mr-2"></i><span data-i18n="search">Search</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Summary Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-blue-100 rounded-lg">
+                                    <i class="ri-archive-line text-blue-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Total Items</p>
+                                    <p id="inventoryTotalItems" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-green-100 rounded-lg">
+                                    <i class="ri-checkbox-circle-line text-green-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Physical Stock</p>
+                                    <p id="inventoryPhysicalStock" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-yellow-100 rounded-lg">
+                                    <i class="ri-time-line text-yellow-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Reserved Stock</p>
+                                    <p id="inventoryReservedStock" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-purple-100 rounded-lg">
+                                    <i class="ri-check-line text-purple-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Available Stock</p>
+                                    <p id="inventoryAvailableStock" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data Table -->
+                    <div class="bg-white rounded-lg border border-gray-200">
+                        <div class="p-4 border-b border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900">Inventory Items</h3>
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <div id="inventoryTableContainer">
+                                <!-- Table content will be loaded here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        <div class="px-6 py-4 border-t border-gray-200">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <label class="text-sm text-gray-500">Items per page</label>
+                                    <select id="inventoryItemsPerPage" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                        <option value="10">10</option>
+                                        <option value="25">25</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                                <div id="inventoryPageInfo" class="text-sm text-gray-600"></div>
+                                <div class="flex items-center space-x-2">
+                                    <button id="inventoryPrevPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-left-line"></i>
+                                    </button>
+                                    <div id="inventoryPageNumbers" class="flex items-center space-x-1">
+                                        <!-- Page numbers will be dynamically generated here -->
+                                    </div>
+                                    <button id="inventoryNextPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-right-line"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventory Transactions Modal -->
+                <div id="inventoryTransactionsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg max-w-6xl w-full max-h-screen overflow-y-auto">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-semibold">Inventory Transactions</h3>
+                                    <button onclick="closeInventoryTransactionsModal()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="ri-close-line text-xl"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="inventoryTransactionsContent" class="p-6">
+                                <!-- Content will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add Inventory Modal -->
+                <div id="inventoryAddModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg max-w-md w-full">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-semibold">Add Inventory</h3>
+                                    <button onclick="closeInventoryAddModal()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="ri-close-line text-xl"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="p-6">
+                                <form id="addInventoryForm" class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">品番 (Part Number) *</label>
+                                        <input type="text" id="addInventory品番" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" required>
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">背番号 (Back Number) *</label>
+                                        <input type="text" id="addInventory背番号" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" required>
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Quantity to Add *</label>
+                                        <input type="number" id="addInventoryQuantity" min="1" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" required>
+                                    </div>
+                                    
+                                    <div class="flex items-center justify-end space-x-4 pt-4">
+                                        <button type="button" onclick="closeInventoryAddModal()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
+                                            Cancel
+                                        </button>
+                                        <button type="submit" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors">
+                                            <i class="ri-add-line mr-2"></i>Add Inventory
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Initialize inventory system
+            if (typeof initializeInventorySystem === 'function') {
+                initializeInventorySystem();
             }
             break;
 

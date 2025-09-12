@@ -1382,14 +1382,19 @@ window.deleteNodaRequest = async function(requestId) {
     }
     
     try {
-        const response = await fetch(`${BASE_URL}/api/noda-requests`, {
+        // Get current user information
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userName = await getUserFullName(currentUser.username || 'Unknown User');
+        
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
                 action: 'deleteRequest',
-                requestId: requestId
+                requestId: requestId,
+                userName: userName
             })
         });
         
