@@ -13,12 +13,12 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna"],
-  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna"], // Same as 部長
-  係長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna"],
-  member: ["dashboard"]
+  admin: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
+  部長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "processes", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
+  係長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
+  班長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna", "noda"],
+  member: ["dashboard", "noda"]
 };
 
 const navItemsConfig = {
@@ -33,6 +33,7 @@ const navItemsConfig = {
   customerManagement: { icon: "ri-user-3-line", label: "customerManagement" },
   equipment: { icon: "ri-tools-line", label: "equipment" },
   scna: { icon: "ri-folder-line", label: "scna" },
+  noda: { icon: "ri-store-line", label: "noda" },
 };
 
 // Navigation functions are now handled in navbar.js to avoid duplicates
@@ -2585,6 +2586,270 @@ function loadPage(page) {
                 applyLanguageEnhanced();
             } else if (typeof applyLanguage === 'function') {
                 applyLanguage();
+            }
+            break;
+
+        case "noda":
+            mainContent.innerHTML = `
+                <div class="space-y-6">
+                    <!-- Header Section -->
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div>
+                            <h2 class="text-3xl font-bold text-gray-900" data-i18n="nodaTitle">NODA Warehouse Management</h2>
+                            <p class="mt-2 text-gray-600" data-i18n="nodaSubtitle">Warehouse Picking Order Management System</p>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <button onclick="triggerNodaCsvUpload()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                                <i class="ri-upload-line mr-2"></i><span data-i18n="csvUpload">Upload CSV</span>
+                            </button>
+                            <button onclick="exportNodaData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
+                            </button>
+                            <button id="refreshNodaBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                                <i class="ri-refresh-line mr-2"></i><span data-i18n="refresh">Refresh</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Hidden file input for CSV upload -->
+                    <input type="file" id="nodaCsvFileInput" accept=".csv" style="display: none;" onchange="handleNodaCsvUpload(this)">
+
+                    <!-- Filters Section -->
+                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="status">Status</label>
+                                <select id="nodaStatusFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allStatuses">All Statuses</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="active">Active</option>
+                                    <option value="complete">Complete</option>
+                                    <option value="failed">Failed</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="partNumber">品番</label>
+                                <select id="nodaPartNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allPartNumbers">All Part Numbers</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="backNumber">背番号</label>
+                                <select id="nodaBackNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allBackNumbers">All Back Numbers</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateFrom">Date From</label>
+                                <input type="date" id="nodaDateFrom" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateTo">Date To</label>
+                                <input type="date" id="nodaDateTo" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <div>
+                                <button onclick="applyNodaFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                                    <i class="ri-filter-line mr-2"></i><span data-i18n="applyFilters">Apply Filters</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <input type="text" id="nodaSearchInput" placeholder="Search requests..." class="w-full p-2 border border-gray-300 rounded-md">
+                        </div>
+                    </div>
+
+                    <!-- Statistics Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-yellow-100 rounded-lg">
+                                    <i class="ri-time-line text-2xl text-yellow-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Pending</p>
+                                    <p id="nodaPendingCount" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-blue-100 rounded-lg">
+                                    <i class="ri-play-line text-2xl text-blue-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Active</p>
+                                    <p id="nodaActiveCount" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-green-100 rounded-lg">
+                                    <i class="ri-checkbox-circle-line text-2xl text-green-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Complete</p>
+                                    <p id="nodaCompleteCount" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-red-100 rounded-lg">
+                                    <i class="ri-close-circle-line text-2xl text-red-600"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm text-gray-600">Failed</p>
+                                    <p id="nodaFailedCount" class="text-2xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Add New Request Button (Role-based) -->
+                    <div id="nodaAddRequestSection" class="flex justify-end" style="display: none;">
+                        <button onclick="openNodaAddModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                            <i class="ri-add-line mr-2"></i>New Request
+                        </button>
+                    </div>
+
+                    <!-- Data Table -->
+                    <div class="bg-white rounded-lg border border-gray-200">
+                        <div class="p-4 border-b border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900">Picking Requests</h3>
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <div id="nodaTableContainer">
+                                <!-- Table content will be loaded here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        <div class="px-6 py-4 border-t border-gray-200">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <label class="text-sm text-gray-500">Items per page</label>
+                                    <select id="nodaItemsPerPage" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                                        <option value="10">10</option>
+                                        <option value="25">25</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                                <div id="nodaPageInfo" class="text-sm text-gray-600"></div>
+                                <div class="flex items-center space-x-2">
+                                    <button id="nodaPrevPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-left-line"></i>
+                                    </button>
+                                    <div id="nodaPageNumbers" class="flex items-center space-x-1">
+                                        <!-- Page numbers will be dynamically generated here -->
+                                    </div>
+                                    <button id="nodaNextPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
+                                        <i class="ri-arrow-right-line"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NODA Detail/Edit Modal -->
+                <div id="nodaDetailModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg max-w-4xl w-full max-h-screen overflow-y-auto">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-semibold">Picking Request Details</h3>
+                                    <button onclick="closeNodaModal()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="ri-close-line text-xl"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="nodaDetailContent" class="p-6">
+                                <!-- Content will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NODA Add Request Modal -->
+                <div id="nodaAddModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg max-w-2xl w-full max-h-screen overflow-y-auto">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-semibold">Add New Picking Request</h3>
+                                    <button onclick="closeNodaAddModal()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="ri-close-line text-xl"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="p-6">
+                                <form id="nodaAddForm" class="space-y-6">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">品番 *</label>
+                                            <input type="text" id="modalNodaPartNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter part number" required>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">背番号 *</label>
+                                            <input type="text" id="modalNodaBackNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter back number" required>
+                                            <div id="modalInventoryCheckResult" class="mt-1 text-sm"></div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">Pickup Date *</label>
+                                            <input type="date" id="modalNodaDate" class="w-full p-3 border border-gray-300 rounded-md" required>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
+                                            <input type="number" id="modalNodaQuantity" min="1" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter quantity" required>
+                                        </div>
+                                    </div>
+
+                                    <!-- Future expansion area -->
+                                    <div id="additionalFields" class="space-y-4">
+                                        <!-- Additional fields can be added here in the future -->
+                                        <!-- Example fields for future use:
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">Priority</label>
+                                                <select id="modalNodaPriority" class="w-full p-3 border border-gray-300 rounded-md">
+                                                    <option value="normal">Normal</option>
+                                                    <option value="high">High</option>
+                                                    <option value="urgent">Urgent</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">Requested By</label>
+                                                <input type="text" id="modalNodaRequestedBy" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter requester name">
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+                                            <textarea id="modalNodaNotes" rows="3" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Additional notes or special instructions"></textarea>
+                                        </div>
+                                        -->
+                                    </div>
+
+                                    <div class="flex justify-end space-x-3 pt-6 border-t">
+                                        <button type="button" onclick="closeNodaAddModal()" class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                                            Cancel
+                                        </button>
+                                        <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                            <i class="ri-add-line mr-2"></i>Create Request
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Initialize NODA system
+            if (typeof initializeNodaSystem === 'function') {
+                initializeNodaSystem();
             }
             break;
 
