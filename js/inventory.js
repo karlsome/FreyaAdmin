@@ -81,6 +81,7 @@ async function loadInventoryData() {
         if (response.ok) {
             const result = await response.json();
             if (result.success) {
+                console.log('📊 Raw inventory data received:', result.data);
                 inventoryData = result.data;
                 inventorySummary = result.summary;
                 updateInventorySummary();
@@ -815,7 +816,12 @@ async function handleInventoryAddFormSubmit(event) {
         if (result.success) {
             // Close modal and refresh data
             closeInventoryAddModal();
-            loadInventoryData();
+            
+            // Add a small delay to ensure database transaction is complete
+            setTimeout(() => {
+                console.log('🔄 Refreshing inventory data after adding inventory...');
+                loadInventoryData();
+            }, 500);
             
             // Show success message
             alert(`Successfully added ${quantity} units to inventory for ${backNumber}`);

@@ -2773,74 +2773,172 @@ function loadPage(page) {
                     </div>
                 </div>
 
-                <!-- NODA Add Request Modal -->
+                <!-- NODA Bulk Request Modal with Cart System -->
                 <div id="nodaAddModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
                     <div class="flex items-center justify-center min-h-screen p-4">
-                        <div class="bg-white rounded-lg max-w-2xl w-full max-h-screen overflow-y-auto">
+                        <div class="bg-white rounded-lg max-w-4xl w-full max-h-screen overflow-y-auto">
                             <div class="p-6 border-b border-gray-200">
                                 <div class="flex items-center justify-between">
-                                    <h3 class="text-lg font-semibold">Add New Picking Request</h3>
+                                    <h3 class="text-lg font-semibold">Bulk Picking Request</h3>
                                     <button onclick="closeNodaAddModal()" class="text-gray-400 hover:text-gray-600">
                                         <i class="ri-close-line text-xl"></i>
                                     </button>
                                 </div>
+                                <!-- Step Indicator -->
+                                <div class="mt-4 flex items-center space-x-4">
+                                    <div id="step1Indicator" class="flex items-center text-blue-600">
+                                        <div class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-medium">1</div>
+                                        <span class="ml-2 text-sm font-medium">Add Items</span>
+                                    </div>
+                                    <div class="flex-1 h-px bg-gray-300"></div>
+                                    <div id="step2Indicator" class="flex items-center text-gray-400">
+                                        <div class="w-8 h-8 bg-gray-300 text-white rounded-full flex items-center justify-center text-sm font-medium">2</div>
+                                        <span class="ml-2 text-sm font-medium">Review Cart</span>
+                                    </div>
+                                    <div class="flex-1 h-px bg-gray-300"></div>
+                                    <div id="step3Indicator" class="flex items-center text-gray-400">
+                                        <div class="w-8 h-8 bg-gray-300 text-white rounded-full flex items-center justify-center text-sm font-medium">3</div>
+                                        <span class="ml-2 text-sm font-medium">Submit</span>
+                                    </div>
+                                </div>
                             </div>
+                            
                             <div class="p-6">
-                                <form id="nodaAddForm" class="space-y-6">
+                                <!-- Step 1: Add Items -->
+                                <div id="addItemStep" class="space-y-6">
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-2">品番 *</label>
-                                            <input type="text" id="modalNodaPartNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter part number" required>
+                                        <!-- Shared Pickup Date -->
+                                        <div class="md:col-span-2">
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                                Pickup Date (All Items) *
+                                            </label>
+                                            <input type="date" id="bulkPickupDate" class="w-full p-3 border border-gray-300 rounded-md" required>
                                         </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-2">背番号 *</label>
-                                            <input type="text" id="modalNodaBackNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter back number" required>
-                                            <div id="modalInventoryCheckResult" class="mt-1 text-sm"></div>
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-2">Pickup Date *</label>
-                                            <input type="date" id="modalNodaDate" class="w-full p-3 border border-gray-300 rounded-md" required>
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
-                                            <input type="number" id="modalNodaQuantity" min="1" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter quantity" required>
+                                    </div>
+                                    
+                                    <div class="border-t pt-6">
+                                        <h4 class="text-md font-medium text-gray-900 mb-4">Add Item to Cart</h4>
+                                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">品番 *</label>
+                                                <input type="text" id="modalNodaPartNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter part number">
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">背番号 *</label>
+                                                <input type="text" id="modalNodaBackNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter back number">
+                                                <div id="modalInventoryCheckResult" class="mt-1 text-sm"></div>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
+                                                <input type="number" id="modalNodaQuantity" min="1" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Qty">
+                                            </div>
+                                            <div class="flex items-end">
+                                                <button type="button" onclick="addItemToCart()" class="w-full px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                                                    <i class="ri-add-line mr-2"></i>Add to Cart
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
 
-                                    <!-- Future expansion area -->
-                                    <div id="additionalFields" class="space-y-4">
-                                        <!-- Additional fields can be added here in the future -->
-                                        <!-- Example fields for future use:
-                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Priority</label>
-                                                <select id="modalNodaPriority" class="w-full p-3 border border-gray-300 rounded-md">
-                                                    <option value="normal">Normal</option>
-                                                    <option value="high">High</option>
-                                                    <option value="urgent">Urgent</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Requested By</label>
-                                                <input type="text" id="modalNodaRequestedBy" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter requester name">
+                                    <!-- Cart Items Display -->
+                                    <div class="border-t pt-6">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h4 class="text-md font-medium text-gray-900">Cart Items</h4>
+                                            <span id="cartItemCount" class="text-sm text-gray-500">0 items</span>
+                                        </div>
+                                        <div id="cartItemsList" class="space-y-2 max-h-40 overflow-y-auto">
+                                            <div class="text-center text-gray-500 py-8">
+                                                <i class="ri-shopping-cart-line text-4xl text-gray-300"></i>
+                                                <p class="mt-2 text-sm">No items in cart</p>
                                             </div>
                                         </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-                                            <textarea id="modalNodaNotes" rows="3" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Additional notes or special instructions"></textarea>
-                                        </div>
-                                        -->
                                     </div>
 
-                                    <div class="flex justify-end space-x-3 pt-6 border-t">
+                                    <div class="flex justify-between pt-6 border-t">
                                         <button type="button" onclick="closeNodaAddModal()" class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
                                             Cancel
                                         </button>
-                                        <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                                            <i class="ri-add-line mr-2"></i>Create Request
+                                        <button type="button" id="proceedToReviewBtn" onclick="proceedToReview()" disabled class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-300">
+                                            Review Cart <i class="ri-arrow-right-line ml-2"></i>
                                         </button>
                                     </div>
-                                </form>
+                                </div>
+
+                                <!-- Step 2: Review Cart -->
+                                <div id="reviewCartStep" class="space-y-6 hidden">
+                                    <div class="bg-gray-50 p-4 rounded-lg">
+                                        <h4 class="text-md font-medium text-gray-900 mb-2">Pickup Date</h4>
+                                        <p id="reviewPickupDate" class="text-gray-700"></p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h4 class="text-md font-medium text-gray-900 mb-4">Items to Request</h4>
+                                        <div class="overflow-x-auto">
+                                            <table class="min-w-full border border-gray-200">
+                                                <thead class="bg-gray-50">
+                                                    <tr>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">品番</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">背番号</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Available</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="reviewTableBody" class="bg-white divide-y divide-gray-200">
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex justify-between pt-6 border-t">
+                                        <button type="button" onclick="backToAddItems()" class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                                            <i class="ri-arrow-left-line mr-2"></i>Back to Add Items
+                                        </button>
+                                        <button type="button" onclick="proceedToSubmit()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                            Proceed to Submit <i class="ri-arrow-right-line ml-2"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Step 3: Submit -->
+                                <div id="submitStep" class="space-y-6 hidden">
+                                    <div class="text-center">
+                                        <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <i class="ri-check-line text-2xl text-green-600"></i>
+                                        </div>
+                                        <h4 class="text-lg font-medium text-gray-900 mb-2">Ready to Submit</h4>
+                                        <p class="text-gray-600">Your bulk picking request is ready to be submitted.</p>
+                                    </div>
+
+                                    <div class="bg-gray-50 p-4 rounded-lg">
+                                        <div class="grid grid-cols-2 gap-4 text-sm">
+                                            <div>
+                                                <span class="font-medium text-gray-700">Pickup Date:</span>
+                                                <span id="submitPickupDate" class="text-gray-900"></span>
+                                            </div>
+                                            <div>
+                                                <span class="font-medium text-gray-700">Total Items:</span>
+                                                <span id="submitTotalItems" class="text-gray-900"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div id="submitProgress" class="hidden">
+                                        <div class="text-center">
+                                            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                                            <p class="mt-2 text-sm text-gray-600">Submitting bulk request...</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex justify-between pt-6 border-t">
+                                        <button type="button" id="backToReviewBtn" onclick="backToReview()" class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                                            <i class="ri-arrow-left-line mr-2"></i>Back to Review
+                                        </button>
+                                        <button type="button" id="submitBulkRequestBtn" onclick="submitBulkRequest()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                            <i class="ri-send-plane-line mr-2"></i>Submit Bulk Request
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
