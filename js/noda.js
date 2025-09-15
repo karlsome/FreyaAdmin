@@ -23,12 +23,8 @@ function initializeNodaSystem() {
         addRequestSection.style.display = 'flex';
     }
     
-    // Set default dates for filters
-    const today = new Date().toISOString().split('T')[0];
-    const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    
-    document.getElementById('nodaDateFrom').value = today;
-    document.getElementById('nodaDateTo').value = weekFromNow;
+    // Leave date filters blank by default - users can set them if they want to filter
+    // This will show all picking requests when the page loads
     
     // Event listeners
     setupNodaEventListeners();
