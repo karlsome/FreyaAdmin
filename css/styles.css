@@ -50,6 +50,20 @@
     transition: transform 0.2s ease;
 }
 
+/* Edit modal tab styling */
+.edit-tab-button {
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.edit-tab-button:hover {
+    color: #374151;
+}
+
+.edit-tab-button.active {
+    font-weight: 600;
+}
+
 .refresh-btn.spinning {
     animation: spin 1s linear infinite;
 }

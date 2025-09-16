@@ -1022,93 +1022,345 @@ window.handleNodaCsvUpload = function(input) {
     if (!file) return;
     
     if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-        alert('Please select a valid CSV file');
+        showToast('Please select a valid CSV file', 'error');
         return;
     }
     
     const reader = new FileReader();
     reader.onload = function(e) {
         const csv = e.target.result;
-        parseAndUploadNodaCsv(csv);
+        parseAndShowCsvReview(csv);
     };
-    reader.readAsText(file);
+    reader.readAsText(file, 'Shift_JIS'); // JIS encoding
 };
 
 /**
- * Parse and upload CSV data
+ * Parse CSV and show review modal
  */
-async function parseAndUploadNodaCsv(csvData) {
+async function parseAndShowCsvReview(csvData) {
     try {
+        console.log('📋 Parsing CSV data...');
+        
+        // Parse CSV (comma delimited)
         const lines = csvData.split('\n').filter(line => line.trim());
-        const headers = lines[0].split(',').map(h => h.trim());
-        
-        // Expected headers: 品番, 背番号, Date, Quantity
-        const requiredHeaders = ['品番', '背番号', 'Date', 'Quantity'];
-        const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-        
-        if (missingHeaders.length > 0) {
-            alert(`Missing required columns: ${missingHeaders.join(', ')}`);
+        if (lines.length < 2) {
+            showToast('CSV file must contain header and at least one data row', 'error');
             return;
         }
         
-        const requests = [];
+        const headers = lines[0].split(',').map(h => h.trim());
+        console.log('📋 CSV Headers:', headers);
+        
+        // Detect CSV format based on headers
+        let formatType = null;
+        let dateColumn = null;
+        let itemColumn = null;
+        let quantityColumn = null;
+        
+        // Check for Japanese headers
+        if (headers.includes('日付') && headers.includes('背番号') && headers.includes('収容数')) {
+            formatType = '背番号';
+            dateColumn = '日付';
+            itemColumn = '背番号';
+            quantityColumn = '収容数';
+        } else if (headers.includes('日付') && headers.includes('品番') && headers.includes('収容数')) {
+            formatType = '品番';
+            dateColumn = '日付';
+            itemColumn = '品番';
+            quantityColumn = '収容数';
+        } else {
+            showToast('Invalid CSV format. Expected headers: 日付,背番号,収容数 or 日付,品番,収容数', 'error');
+            return;
+        }
+        
+        console.log(`📋 Detected CSV format: ${formatType}`);
+        
+        // Parse data rows
+        const rawItems = [];
+        const dates = new Set();
+        
         for (let i = 1; i < lines.length; i++) {
             const values = lines[i].split(',').map(v => v.trim());
-            const request = {};
+            if (values.length < headers.length) continue;
             
+            const rowData = {};
             headers.forEach((header, index) => {
-                request[header] = values[index];
+                rowData[header] = values[index];
             });
             
-            // Validate required fields
-            if (request['品番'] && request['背番号'] && request['Date'] && request['Quantity']) {
-                request.quantity = parseInt(request['Quantity']);
-                requests.push(request);
+            const date = rowData[dateColumn];
+            const item = rowData[itemColumn];
+            const quantity = parseInt(rowData[quantityColumn]);
+            
+            if (date && item && quantity > 0) {
+                dates.add(date);
+                rawItems.push({
+                    date: date,
+                    [formatType]: item,
+                    quantity: quantity,
+                    rowIndex: i
+                });
             }
         }
         
-        if (requests.length === 0) {
-            alert('No valid requests found in CSV');
+        // Validate dates (all must be the same)
+        if (dates.size === 0) {
+            showToast('No valid data rows found in CSV', 'error');
             return;
         }
         
-        // Upload requests
-        // Get current user information and fetch full name from database
-        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
-        console.log('👤 CSV Upload - Current user object:', currentUser);
+        if (dates.size > 1) {
+            showToast(`Invalid CSV: Multiple dates detected (${Array.from(dates).join(', ')}). All items in a picking order must have the same date.`, 'error');
+            return;
+        }
         
-        const userName = await getUserFullName(currentUser.username || 'unknown');
-        console.log('🏷️ CSV Upload - Final userName from database:', userName);
+        const pickupDate = Array.from(dates)[0];
+        console.log(`📋 Single pickup date detected: ${pickupDate}`);
+        console.log(`📋 Found ${rawItems.length} valid items`);
         
-        const response = await fetch(`${BASE_URL}/api/noda-requests`, {
+        // Process items and auto-fill missing data
+        const processedItems = [];
+        for (const item of rawItems) {
+            const processedItem = { ...item };
+            
+            try {
+                // Auto-fill missing data using master database lookup
+                if (formatType === '背番号') {
+                    // CSV has 背番号, lookup 品番
+                    const lookupResult = await lookupMasterData('背番号', item.背番号);
+                    if (lookupResult.success) {
+                        processedItem.品番 = lookupResult.data.品番;
+                        processedItem.品名 = lookupResult.data.品名;
+                    } else {
+                        processedItem.品番 = 'Not found';
+                        processedItem.error = 'Master data not found';
+                    }
+                } else {
+                    // CSV has 品番, lookup 背番号
+                    const lookupResult = await lookupMasterData('品番', item.品番);
+                    if (lookupResult.success) {
+                        processedItem.背番号 = lookupResult.data.背番号;
+                        processedItem.品名 = lookupResult.data.品名;
+                    } else {
+                        processedItem.背番号 = 'Not found';
+                        processedItem.error = 'Master data not found';
+                    }
+                }
+                
+                // Check inventory availability
+                const backNumber = processedItem.背番号;
+                if (backNumber && backNumber !== 'Not found') {
+                    const inventoryResult = await getInventoryAvailability(backNumber);
+                    if (inventoryResult.success) {
+                        processedItem.availableQuantity = inventoryResult.availableQuantity;
+                        processedItem.status = inventoryResult.availableQuantity >= processedItem.quantity ? 'Valid' : 'Insufficient';
+                    } else {
+                        processedItem.availableQuantity = 0;
+                        processedItem.status = 'No inventory';
+                        processedItem.error = processedItem.error || 'Inventory not found';
+                    }
+                } else {
+                    processedItem.availableQuantity = 0;
+                    processedItem.status = 'Invalid';
+                }
+                
+            } catch (error) {
+                console.error(`Error processing item ${item[formatType]}:`, error);
+                processedItem.error = error.message;
+                processedItem.status = 'Error';
+            }
+            
+            processedItems.push(processedItem);
+        }
+        
+        // Show review modal
+        showCsvReviewModal(processedItems, pickupDate, formatType);
+        
+    } catch (error) {
+        console.error('Error parsing CSV:', error);
+        showToast('Error parsing CSV file: ' + error.message, 'error');
+    }
+}
+
+/**
+ * Lookup master data for auto-fill
+ */
+async function lookupMasterData(searchType, searchValue) {
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                action: 'bulkCreateRequests',
-                data: requests,
-                userName: userName
+                action: 'lookupMasterData',
+                [searchType]: searchValue
             })
+        });
+        
+        const result = await response.json();
+        return result;
+        
+    } catch (error) {
+        console.error('Error looking up master data:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Show CSV review modal
+ */
+function showCsvReviewModal(items, pickupDate, formatType) {
+    // Create modal HTML
+    const modalHtml = `
+        <div id="csvReviewModal" class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex min-h-screen items-center justify-center p-4">
+                <div class="fixed inset-0 bg-black bg-opacity-50"></div>
+                <div class="relative bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900">CSV Upload Review</h3>
+                        <p class="text-sm text-gray-600">Review the parsed data before creating bulk request</p>
+                    </div>
+                    
+                    <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                        <div class="grid grid-cols-3 gap-4 text-sm">
+                            <div><strong>Format Detected:</strong> ${formatType} based CSV</div>
+                            <div><strong>Pickup Date:</strong> ${pickupDate}</div>
+                            <div><strong>Total Items:</strong> ${items.length}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-y-auto max-h-96 px-6 py-4">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-100 sticky top-0">
+                                <tr>
+                                    <th class="px-3 py-2 text-left">Row</th>
+                                    <th class="px-3 py-2 text-left">品番</th>
+                                    <th class="px-3 py-2 text-left">背番号</th>
+                                    <th class="px-3 py-2 text-left">品名</th>
+                                    <th class="px-3 py-2 text-left">Quantity</th>
+                                    <th class="px-3 py-2 text-left">Available</th>
+                                    <th class="px-3 py-2 text-left">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${items.map(item => `
+                                    <tr class="border-b border-gray-200 ${item.status === 'Valid' ? '' : 'bg-red-50'}">
+                                        <td class="px-3 py-2">${item.rowIndex}</td>
+                                        <td class="px-3 py-2">${item.品番 || '-'}</td>
+                                        <td class="px-3 py-2">${item.背番号 || '-'}</td>
+                                        <td class="px-3 py-2 text-xs">${item.品名 || '-'}</td>
+                                        <td class="px-3 py-2">${item.quantity}</td>
+                                        <td class="px-3 py-2">${item.availableQuantity || 0}</td>
+                                        <td class="px-3 py-2">
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full ${
+                                                item.status === 'Valid' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                            }">
+                                                ${item.status}
+                                            </span>
+                                            ${item.error ? `<div class="text-xs text-red-600 mt-1">${item.error}</div>` : ''}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                        <div class="flex justify-between items-center">
+                            <div class="text-sm text-gray-600">
+                                Valid: ${items.filter(i => i.status === 'Valid').length} | 
+                                Invalid: ${items.filter(i => i.status !== 'Valid').length}
+                            </div>
+                            <div class="flex space-x-3">
+                                <button onclick="closeCsvReviewModal()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                    Cancel
+                                </button>
+                                <button onclick="submitCsvBulkRequest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${items.filter(i => i.status === 'Valid').length === 0 ? 'opacity-50 cursor-not-allowed' : ''}">
+                                    Create Bulk Request (${items.filter(i => i.status === 'Valid').length} items)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Store data for submission
+    window.csvReviewData = {
+        items: items.filter(i => i.status === 'Valid'), // Only valid items
+        pickupDate: pickupDate
+    };
+}
+
+/**
+ * Close CSV review modal
+ */
+window.closeCsvReviewModal = function() {
+    const modal = document.getElementById('csvReviewModal');
+    if (modal) {
+        modal.remove();
+    }
+    window.csvReviewData = null;
+};
+
+/**
+ * Submit CSV bulk request
+ */
+window.submitCsvBulkRequest = async function() {
+    if (!window.csvReviewData || window.csvReviewData.items.length === 0) {
+        showToast('No valid items to submit', 'error');
+        return;
+    }
+    
+    try {
+        // Get current user
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userName = await getUserFullName(currentUser.username || 'unknown');
+        
+        // Prepare bulk request data (same format as cart system)
+        const requestData = {
+            action: 'bulkCreateRequests',
+            data: {
+                items: window.csvReviewData.items.map(item => ({
+                    品番: item.品番,
+                    背番号: item.背番号,
+                    quantity: item.quantity
+                })),
+                pickupDate: window.csvReviewData.pickupDate
+            },
+            userName: userName
+        };
+        
+        console.log('📤 Submitting CSV bulk request:', requestData);
+        
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
         });
         
         const result = await response.json();
         
         if (result.success) {
-            alert(`Successfully uploaded ${result.successCount} requests!`);
-            if (result.failedCount > 0) {
-                alert(`${result.failedCount} requests failed due to insufficient inventory`);
-            }
-            loadNodaData();
+            showToast(`Successfully created bulk request: ${result.bulkRequestNumber}`, 'success');
+            closeCsvReviewModal();
+            loadNodaData(); // Refresh the data
         } else {
-            alert('Error uploading CSV: ' + (result.error || 'Unknown error'));
+            showToast('Error creating bulk request: ' + (result.error || 'Unknown error'), 'error');
         }
         
     } catch (error) {
-        console.error('Error parsing CSV:', error);
-        alert('Error parsing CSV file: ' + error.message);
+        console.error('Error submitting CSV bulk request:', error);
+        showToast('Error submitting bulk request: ' + error.message, 'error');
     }
-}
+};
 
 // ==================== EXPORT FUNCTIONALITY ====================
 
@@ -1219,7 +1471,7 @@ window.openNodaDetail = async function(requestId) {
  */
 window.editNodaRequest = async function(requestId) {
     try {
-        const response = await fetch(`${BASE_URL}/api/noda-requests`, {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1264,6 +1516,9 @@ function showNodaDetailModal(request, isEditMode = false) {
     let contentHTML = '';
     
     if (isBulkRequest) {
+        // Check if request is pending and in edit mode for "Add More Items" functionality
+        const canAddMoreItems = isEditMode && request.status === 'pending';
+        
         // Bulk request display
         contentHTML = `
             <div class="space-y-6">
@@ -1316,58 +1571,164 @@ function showNodaDetailModal(request, isEditMode = false) {
                     </div>
                 </div>
                 
-                <!-- Line Items Table -->
-                <div class="border-t pt-6">
-                    <h4 class="text-lg font-medium text-gray-900 mb-4">Line Items</h4>
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full border border-gray-200">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Line #</th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">品番</th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">背番号</th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                    ${isEditMode ? '<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
-                                </tr>
-                            </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                ${request.lineItems ? request.lineItems.map(lineItem => {
-                                    const lineStatusInfo = getNodaStatusInfo(lineItem.status);
-                                    return `
-                                        <tr>
-                                            <td class="px-4 py-2 text-sm font-medium text-gray-900">${lineItem.lineNumber}</td>
-                                            <td class="px-4 py-2 text-sm text-gray-900">${lineItem.品番}</td>
-                                            <td class="px-4 py-2 text-sm text-gray-900">${lineItem.背番号}</td>
-                                            <td class="px-4 py-2 text-sm text-gray-900">${lineItem.quantity}</td>
-                                            <td class="px-4 py-2 text-sm">
-                                                ${isEditMode ? `
-                                                    <select id="lineStatus_${lineItem.lineNumber}" class="text-xs px-2 py-1 border border-gray-300 rounded" onchange="updateLineItemStatus('${request._id}', ${lineItem.lineNumber}, this.value)">
-                                                        <option value="pending" ${lineItem.status === 'pending' ? 'selected' : ''}>Pending</option>
-                                                        <option value="in-progress" ${lineItem.status === 'in-progress' ? 'selected' : ''}>In Progress</option>
-                                                        <option value="completed" ${lineItem.status === 'completed' ? 'selected' : ''}>Completed</option>
-                                                    </select>
-                                                ` : `
-                                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${lineStatusInfo.badgeClass}">
-                                                        <i class="${lineStatusInfo.icon} mr-1"></i>
-                                                        ${lineStatusInfo.text}
-                                                    </span>
-                                                `}
-                                            </td>
-                                            ${isEditMode ? `
+                ${canAddMoreItems ? `
+                    <!-- Tab Navigation for Edit Mode -->
+                    <div class="border-t pt-6">
+                        <nav class="flex space-x-1 mb-4">
+                            <button id="existingItemsTab" onclick="switchEditTab('existing')" class="edit-tab-button active px-4 py-2 border-b-2 border-blue-500 text-blue-600 font-medium">
+                                <i class="ri-list-check mr-2"></i>Existing Items
+                            </button>
+                            <button id="addItemsTab" onclick="switchEditTab('add')" class="edit-tab-button px-4 py-2 border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                                <i class="ri-add-line mr-2"></i>Add More Items
+                            </button>
+                        </nav>
+                        
+                        <!-- Existing Items Tab -->
+                        <div id="existingItemsContent" class="edit-tab-content">
+                ` : `
+                    <!-- Line Items Table -->
+                    <div class="border-t pt-6">
+                `}
+                        <h4 class="text-lg font-medium text-gray-900 mb-4">Line Items</h4>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full border border-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Line #</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">品番</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">背番号</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                        ${isEditMode ? '<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    ${request.lineItems ? request.lineItems.map(lineItem => {
+                                        const lineStatusInfo = getNodaStatusInfo(lineItem.status);
+                                        return `
+                                            <tr>
+                                                <td class="px-4 py-2 text-sm font-medium text-gray-900">${lineItem.lineNumber}</td>
+                                                <td class="px-4 py-2 text-sm text-gray-900">${lineItem.品番}</td>
+                                                <td class="px-4 py-2 text-sm text-gray-900">${lineItem.背番号}</td>
+                                                <td class="px-4 py-2 text-sm text-gray-900">${lineItem.quantity}</td>
                                                 <td class="px-4 py-2 text-sm">
-                                                    <button onclick="markLineItemCompleted('${request._id}', ${lineItem.lineNumber})" class="text-green-600 hover:text-green-800 text-xs" ${lineItem.status === 'completed' ? 'disabled' : ''}>
-                                                        <i class="ri-check-line"></i> Complete
-                                                    </button>
+                                                    ${isEditMode ? `
+                                                        <select id="lineStatus_${lineItem.lineNumber}" class="text-xs px-2 py-1 border border-gray-300 rounded" onchange="updateLineItemStatus('${request._id}', ${lineItem.lineNumber}, this.value)">
+                                                            <option value="pending" ${lineItem.status === 'pending' ? 'selected' : ''}>Pending</option>
+                                                            <option value="in-progress" ${lineItem.status === 'in-progress' ? 'selected' : ''}>In Progress</option>
+                                                            <option value="completed" ${lineItem.status === 'completed' ? 'selected' : ''} ${lineItem.status === 'in-progress' ? 'disabled' : ''}>Completed ${lineItem.status === 'in-progress' ? '(ESP32 Only)' : ''}</option>
+                                                        </select>
+                                                        ${lineItem.status === 'in-progress' ? '<div class="text-xs text-orange-600 mt-1">⚠️ Only ESP32 can complete in-progress items</div>' : ''}
+                                                    ` : `
+                                                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${lineStatusInfo.badgeClass}">
+                                                            <i class="${lineStatusInfo.icon} mr-1"></i>
+                                                            ${lineStatusInfo.text}
+                                                        </span>
+                                                    `}
                                                 </td>
-                                            ` : ''}
-                                        </tr>
-                                    `;
-                                }).join('') : '<tr><td colspan="6" class="text-center py-4 text-gray-500">No line items found</td></tr>'}
-                            </tbody>
-                        </table>
+                                                ${isEditMode ? `
+                                                    <td class="px-4 py-2 text-sm">
+                                                        <button onclick="markLineItemCompleted('${request._id}', ${lineItem.lineNumber})" class="text-green-600 hover:text-green-800 text-xs" ${lineItem.status === 'completed' ? 'disabled' : ''}>
+                                                            <i class="ri-check-line"></i> Complete
+                                                        </button>
+                                                    </td>
+                                                ` : ''}
+                                            </tr>
+                                        `;
+                                    }).join('') : '<tr><td colspan="6" class="text-center py-4 text-gray-500">No line items found</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                ${canAddMoreItems ? `
+                        </div>
+                        
+                        <!-- Add More Items Tab -->
+                        <div id="addItemsContent" class="edit-tab-content hidden">
+                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                                <div class="flex">
+                                    <i class="ri-information-line text-yellow-600 mr-2"></i>
+                                    <div>
+                                        <h5 class="text-sm font-medium text-yellow-800">Add More Items</h5>
+                                        <p class="text-sm text-yellow-700 mt-1">You can add more items to this picking request. Items will be added to the same pickup date (${pickupDate}).</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Add Items Options -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                <div class="bg-white border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-blue-400 transition-colors">
+                                    <div class="text-center">
+                                        <i class="ri-add-box-line text-3xl text-blue-600 mb-3"></i>
+                                        <h3 class="text-lg font-medium text-gray-900 mb-2">Add Single Item</h3>
+                                        <p class="text-sm text-gray-600 mb-4">Add individual items one by one</p>
+                                        <button onclick="showAddSingleItemForm()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                                            <i class="ri-add-line mr-2"></i>Add Item
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div class="bg-white border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-green-400 transition-colors">
+                                    <div class="text-center">
+                                        <i class="ri-file-upload-line text-3xl text-green-600 mb-3"></i>
+                                        <h3 class="text-lg font-medium text-gray-900 mb-2">Upload CSV</h3>
+                                        <p class="text-sm text-gray-600 mb-4">Bulk add items from CSV file</p>
+                                        <button onclick="triggerEditCsvUpload()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                                            <i class="ri-upload-line mr-2"></i>Upload CSV
+                                        </button>
+                                        <input type="file" id="editCsvFileInput" accept=".csv" style="display: none;" onchange="handleEditCsvUpload(this)">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Single Item Add Form (Initially Hidden) -->
+                            <div id="singleItemAddForm" class="hidden bg-gray-50 rounded-lg p-6 mb-6">
+                                <h4 class="text-lg font-medium text-gray-900 mb-4">Add Single Item</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">品番</label>
+                                        <input type="text" id="editModal品番" class="w-full p-2 border border-gray-300 rounded-md" placeholder="Enter part number">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">背番号</label>
+                                        <input type="text" id="editModal背番号" class="w-full p-2 border border-gray-300 rounded-md" placeholder="Enter back number">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
+                                        <input type="number" id="editModalQuantity" min="1" class="w-full p-2 border border-gray-300 rounded-md" placeholder="Enter quantity">
+                                    </div>
+                                </div>
+                                
+                                <div id="editModalInventoryResult" class="mt-4"></div>
+                                
+                                <div class="flex justify-end space-x-3 mt-4">
+                                    <button onclick="cancelAddSingleItem()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                        Cancel
+                                    </button>
+                                    <button onclick="addSingleItemToRequest('${request._id}')" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                        <i class="ri-add-line mr-2"></i>Add Item
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Added Items Cart -->
+                            <div id="editAddedItemsCart" class="hidden bg-blue-50 rounded-lg p-6">
+                                <h4 class="text-lg font-medium text-gray-900 mb-4">
+                                    <i class="ri-shopping-cart-line mr-2"></i>Items to Add
+                                    <span id="editCartItemCount" class="text-sm text-gray-600 ml-2">(0 items)</span>
+                                </h4>
+                                <div id="editCartItemsList" class="space-y-2 mb-4"></div>
+                                <div class="flex justify-end space-x-3">
+                                    <button onclick="clearEditCart()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                        Clear All
+                                    </button>
+                                    <button onclick="submitAddedItems('${request._id}')" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                                        <i class="ri-check-line mr-2"></i>Add All Items
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                ` : ''}
                     </div>
-                </div>
                 
                 <div class="flex justify-end pt-6 border-t">
                     <button onclick="closeNodaModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
@@ -2432,7 +2793,16 @@ window.updateLineItemStatus = async function(requestId, lineNumber, newStatus) {
         const result = await response.json();
         
         if (result.success) {
-            showToast(`Line item ${lineNumber} status updated to ${newStatus}`, 'success');
+            let message = `Line item ${lineNumber} status updated to ${newStatus}`;
+            
+            // Show additional message if inventory was reversed
+            if (result.inventoryReversed) {
+                message += ` (Inventory transaction reversed)`;
+                showToast(message, 'warning');
+            } else {
+                showToast(message, 'success');
+            }
+            
             // Refresh the data to show updated status
             loadNodaData();
         } else {
@@ -2453,3 +2823,560 @@ window.markLineItemCompleted = async function(requestId, lineNumber) {
         await updateLineItemStatus(requestId, lineNumber, 'completed');
     }
 };
+
+// ==================== ENHANCED EDIT FUNCTIONALITY ====================
+
+// Edit cart for adding items to existing request
+let editCart = [];
+let currentEditRequestId = null;
+
+/**
+ * Switch tabs in edit modal
+ */
+window.switchEditTab = function(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.edit-tab-button').forEach(btn => {
+        btn.classList.remove('active', 'border-blue-500', 'text-blue-600');
+        btn.classList.add('border-transparent', 'text-gray-500');
+    });
+
+    // Update content
+    document.querySelectorAll('.edit-tab-content').forEach(content => {
+        content.classList.add('hidden');
+    });
+
+    if (tabName === 'existing') {
+        document.getElementById('existingItemsTab').classList.add('active', 'border-blue-500', 'text-blue-600');
+        document.getElementById('existingItemsTab').classList.remove('border-transparent', 'text-gray-500');
+        document.getElementById('existingItemsContent').classList.remove('hidden');
+    } else if (tabName === 'add') {
+        document.getElementById('addItemsTab').classList.add('active', 'border-blue-500', 'text-blue-600');
+        document.getElementById('addItemsTab').classList.remove('border-transparent', 'text-gray-500');
+        document.getElementById('addItemsContent').classList.remove('hidden');
+        
+        // Setup auto-fill and inventory checking for edit modal
+        setupEditModalAutoGeneration();
+    }
+};
+
+/**
+ * Show single item add form
+ */
+window.showAddSingleItemForm = function() {
+    const form = document.getElementById('singleItemAddForm');
+    form.classList.remove('hidden');
+    
+    // Clear form fields
+    document.getElementById('editModal品番').value = '';
+    document.getElementById('editModal背番号').value = '';
+    document.getElementById('editModalQuantity').value = '';
+    document.getElementById('editModalInventoryResult').innerHTML = '';
+    
+    // Focus on first field
+    document.getElementById('editModal品番').focus();
+};
+
+/**
+ * Cancel single item addition
+ */
+window.cancelAddSingleItem = function() {
+    const form = document.getElementById('singleItemAddForm');
+    form.classList.add('hidden');
+};
+
+/**
+ * Setup auto-generation for edit modal inputs
+ */
+function setupEditModalAutoGeneration() {
+    const partNumberInput = document.getElementById('editModal品番');
+    const backNumberInput = document.getElementById('editModal背番号');
+    const quantityInput = document.getElementById('editModalQuantity');
+    
+    if (!partNumberInput || !backNumberInput || !quantityInput) {
+        return; // Elements not ready yet
+    }
+    
+    // Remove existing listeners to prevent duplicates
+    partNumberInput.removeEventListener('blur', handleEditModalPartNumberBlur);
+    backNumberInput.removeEventListener('blur', handleEditModalBackNumberBlur);
+    quantityInput.removeEventListener('input', checkEditModalInventoryAvailability);
+    backNumberInput.removeEventListener('input', checkEditModalInventoryAvailability);
+    
+    // Add new listeners
+    partNumberInput.addEventListener('blur', handleEditModalPartNumberBlur);
+    backNumberInput.addEventListener('blur', handleEditModalBackNumberBlur);
+    quantityInput.addEventListener('input', checkEditModalInventoryAvailability);
+    backNumberInput.addEventListener('input', checkEditModalInventoryAvailability);
+    
+    console.log('✅ Edit modal auto-generation listeners attached');
+}
+
+/**
+ * Handle part number blur for auto-generation in edit modal
+ */
+async function handleEditModalPartNumberBlur() {
+    const partNumber = document.getElementById('editModal品番').value.trim();
+    const backNumberInput = document.getElementById('editModal背番号');
+    
+    if (!partNumber) {
+        if (backNumberInput.dataset.autoGenerated === 'true') {
+            backNumberInput.value = '';
+            backNumberInput.dataset.autoGenerated = 'false';
+            document.getElementById('editModalInventoryResult').innerHTML = '';
+        }
+        return;
+    }
+    
+    if (backNumberInput.value && backNumberInput.dataset.autoGenerated !== 'true') {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'lookupMasterData',
+                品番: partNumber
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.data && result.data.背番号) {
+            backNumberInput.value = result.data.背番号;
+            backNumberInput.dataset.autoGenerated = 'true';
+            checkEditModalInventoryAvailability();
+        } else {
+            if (backNumberInput.dataset.autoGenerated === 'true') {
+                backNumberInput.value = '';
+                backNumberInput.dataset.autoGenerated = 'false';
+                document.getElementById('editModalInventoryResult').innerHTML = '';
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error looking up back number:', error);
+    }
+}
+
+/**
+ * Handle back number blur for auto-generation in edit modal
+ */
+async function handleEditModalBackNumberBlur() {
+    const backNumber = document.getElementById('editModal背番号').value.trim();
+    const partNumberInput = document.getElementById('editModal品番');
+    
+    if (!backNumber) {
+        if (partNumberInput.dataset.autoGenerated === 'true') {
+            partNumberInput.value = '';
+            partNumberInput.dataset.autoGenerated = 'false';
+        }
+        document.getElementById('editModalInventoryResult').innerHTML = '';
+        return;
+    }
+    
+    if (partNumberInput.value && partNumberInput.dataset.autoGenerated !== 'true') {
+        checkEditModalInventoryAvailability();
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'lookupMasterData',
+                背番号: backNumber
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.data && result.data.品番) {
+            partNumberInput.value = result.data.品番;
+            partNumberInput.dataset.autoGenerated = 'true';
+        } else {
+            if (partNumberInput.dataset.autoGenerated === 'true') {
+                partNumberInput.value = '';
+                partNumberInput.dataset.autoGenerated = 'false';
+            }
+        }
+        
+        checkEditModalInventoryAvailability();
+        
+    } catch (error) {
+        console.error('Error looking up part number:', error);
+        checkEditModalInventoryAvailability();
+    }
+}
+
+/**
+ * Check inventory availability in edit modal
+ */
+async function checkEditModalInventoryAvailability() {
+    const backNumber = document.getElementById('editModal背番号').value.trim();
+    const quantity = parseInt(document.getElementById('editModalQuantity').value) || 0;
+    const resultDiv = document.getElementById('editModalInventoryResult');
+    
+    if (!backNumber) {
+        resultDiv.innerHTML = '';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'checkInventory',
+                背番号: backNumber
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.inventory) {
+            const available = result.inventory.availableQuantity || 0;
+            
+            // Calculate quantity already in edit cart for this item
+            const existingCartItem = editCart.find(item => item.背番号 === backNumber);
+            const cartQuantity = existingCartItem ? existingCartItem.quantity : 0;
+            
+            const remainingAvailable = Math.max(0, available - cartQuantity);
+            
+            let statusClass, statusText;
+            
+            if (quantity > 0 && remainingAvailable >= quantity) {
+                statusClass = 'text-green-600';
+                statusText = `Available: ${remainingAvailable}`;
+            } else if (quantity > 0 && remainingAvailable < quantity) {
+                statusClass = 'text-red-600';
+                statusText = `Insufficient! Available: ${remainingAvailable}, Requested: ${quantity}`;
+            } else {
+                statusClass = 'text-blue-600';
+                statusText = `Available: ${remainingAvailable}`;
+            }
+            
+            if (cartQuantity > 0) {
+                statusText += ` (${cartQuantity} in edit cart)`;
+            }
+            
+            resultDiv.innerHTML = `<span class="${statusClass} text-xs font-medium">${statusText}</span>`;
+            
+        } else {
+            resultDiv.innerHTML = '<span class="text-red-600 text-xs">Item not found in inventory</span>';
+        }
+        
+    } catch (error) {
+        console.error('Error checking inventory:', error);
+        resultDiv.innerHTML = '<span class="text-orange-600 text-xs">Error checking inventory</span>';
+    }
+}
+
+/**
+ * Add single item to edit cart
+ */
+window.addSingleItemToRequest = function(requestId) {
+    const partNumber = document.getElementById('editModal品番').value.trim();
+    const backNumber = document.getElementById('editModal背番号').value.trim();
+    const quantity = parseInt(document.getElementById('editModalQuantity').value);
+    
+    // Validation
+    if (!partNumber || !backNumber || !quantity) {
+        alert('Please fill in all fields');
+        return;
+    }
+    
+    if (quantity <= 0) {
+        alert('Quantity must be greater than 0');
+        return;
+    }
+    
+    // Check if item already exists in edit cart
+    const existingItemIndex = editCart.findIndex(item => item.背番号 === backNumber);
+    if (existingItemIndex !== -1) {
+        if (confirm(`Item ${backNumber} already exists in edit cart. Do you want to update the quantity?`)) {
+            editCart[existingItemIndex].quantity = quantity;
+            editCart[existingItemIndex].品番 = partNumber;
+        } else {
+            return;
+        }
+    } else {
+        // Add new item to edit cart
+        editCart.push({
+            品番: partNumber,
+            背番号: backNumber,
+            quantity: quantity,
+            addedAt: new Date().toISOString()
+        });
+    }
+    
+    currentEditRequestId = requestId;
+    updateEditCartDisplay();
+    cancelAddSingleItem();
+    showToast(`Item ${backNumber} added to edit cart!`, 'success');
+};
+
+/**
+ * Update edit cart display
+ */
+function updateEditCartDisplay() {
+    const cartDiv = document.getElementById('editAddedItemsCart');
+    const cartItemsList = document.getElementById('editCartItemsList');
+    const cartItemCount = document.getElementById('editCartItemCount');
+    
+    cartItemCount.textContent = `(${editCart.length} items)`;
+    
+    if (editCart.length === 0) {
+        cartDiv.classList.add('hidden');
+        return;
+    }
+    
+    cartDiv.classList.remove('hidden');
+    
+    cartItemsList.innerHTML = editCart.map(item => `
+        <div class="flex items-center justify-between p-3 bg-white rounded-lg border">
+            <div class="flex-1">
+                <div class="flex items-center space-x-4">
+                    <span class="font-medium text-gray-900">${item.背番号}</span>
+                    <span class="text-gray-600">${item.品番}</span>
+                    <span class="text-sm text-gray-500">Qty: ${item.quantity}</span>
+                </div>
+            </div>
+            <button onclick="removeFromEditCart('${item.背番号}')" class="text-red-500 hover:text-red-700">
+                <i class="ri-delete-bin-line"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+/**
+ * Remove item from edit cart
+ */
+window.removeFromEditCart = function(backNumber) {
+    if (confirm(`Remove ${backNumber} from edit cart?`)) {
+        editCart = editCart.filter(item => item.背番号 !== backNumber);
+        updateEditCartDisplay();
+        showToast(`Item ${backNumber} removed from edit cart`, 'info');
+    }
+};
+
+/**
+ * Clear edit cart
+ */
+window.clearEditCart = function() {
+    if (confirm('Clear all items from edit cart?')) {
+        editCart = [];
+        updateEditCartDisplay();
+        showToast('Edit cart cleared', 'info');
+    }
+};
+
+/**
+ * Submit added items to existing request
+ */
+window.submitAddedItems = async function(requestId) {
+    if (editCart.length === 0) {
+        alert('No items in edit cart to add');
+        return;
+    }
+    
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userName = await getUserFullName(currentUser.username || 'Unknown User');
+        
+        const requestData = {
+            action: 'addItemsToRequest',
+            requestId: requestId,
+            data: {
+                items: editCart.map(item => ({
+                    品番: item.品番,
+                    背番号: item.背番号,
+                    quantity: parseInt(item.quantity)
+                }))
+            },
+            userName: userName
+        };
+        
+        console.log('📤 Adding items to existing request:', requestData);
+        
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Clear edit cart and close modal
+            editCart = [];
+            currentEditRequestId = null;
+            closeNodaModal();
+            
+            // Show success message
+            alert(`Items added successfully!\nAdded Items: ${result.addedItems}\nFailed Items: ${result.failedItems || 0}`);
+            
+            // Reload data
+            loadNodaData();
+        } else {
+            throw new Error(result.error || 'Failed to add items to request');
+        }
+        
+    } catch (error) {
+        console.error('Error adding items to request:', error);
+        alert('Error adding items to request: ' + error.message);
+    }
+};
+
+/**
+ * Trigger CSV upload for edit mode
+ */
+window.triggerEditCsvUpload = function() {
+    document.getElementById('editCsvFileInput').click();
+};
+
+/**
+ * Handle CSV file upload for edit mode
+ */
+window.handleEditCsvUpload = function(input) {
+    const file = input.files[0];
+    if (!file) return;
+    
+    if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        parseEditCsvAndAddToCart(e.target.result);
+    };
+    reader.readAsText(file, 'Shift_JIS'); // JIS encoding
+};
+
+/**
+ * Parse CSV and add to edit cart
+ */
+async function parseEditCsvAndAddToCart(csvData) {
+    try {
+        const lines = csvData.trim().split('\n');
+        
+        if (lines.length === 0) {
+            alert('CSV file is empty');
+            return;
+        }
+        
+        // Parse header to detect format
+        const header = lines[0].trim();
+        let isBackNumberFormat = false;
+        
+        if (header.includes('背番号') || header.includes('back')) {
+            isBackNumberFormat = true;
+            console.log('📊 Detected 背番号-based CSV format');
+        } else if (header.includes('品番') || header.includes('part')) {
+            isBackNumberFormat = false;
+            console.log('📊 Detected 品番-based CSV format');
+        } else {
+            alert('Invalid CSV format. Header must contain either 品番 or 背番号');
+            return;
+        }
+        
+        const dataLines = lines.slice(1);
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const line of dataLines) {
+            const columns = line.split(',').map(col => col.trim());
+            
+            if (columns.length < 3) {
+                console.warn('Skipping line with insufficient columns:', line);
+                failCount++;
+                continue;
+            }
+            
+            const date = columns[0];
+            const itemCode = columns[1];
+            const quantity = parseInt(columns[2]);
+            
+            if (!itemCode || !quantity || quantity <= 0) {
+                console.warn('Skipping invalid line:', line);
+                failCount++;
+                continue;
+            }
+            
+            try {
+                let 品番, 背番号;
+                
+                if (isBackNumberFormat) {
+                    背番号 = itemCode;
+                    // Lookup 品番 from 背番号
+                    const lookupResponse = await fetch(`${BASE_URL}api/noda-requests`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'lookupMasterData',
+                            背番号: 背番号
+                        })
+                    });
+                    const lookupResult = await lookupResponse.json();
+                    品番 = lookupResult.success && lookupResult.data ? lookupResult.data.品番 : '';
+                } else {
+                    品番 = itemCode;
+                    // Lookup 背番号 from 品番
+                    const lookupResponse = await fetch(`${BASE_URL}api/noda-requests`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'lookupMasterData',
+                            品番: 品番
+                        })
+                    });
+                    const lookupResult = await lookupResponse.json();
+                    背番号 = lookupResult.success && lookupResult.data ? lookupResult.data.背番号 : '';
+                }
+                
+                if (!品番 || !背番号) {
+                    console.warn(`Could not resolve item code: ${itemCode}`);
+                    failCount++;
+                    continue;
+                }
+                
+                // Check if item already exists in edit cart
+                const existingItemIndex = editCart.findIndex(item => item.背番号 === 背番号);
+                if (existingItemIndex !== -1) {
+                    editCart[existingItemIndex].quantity += quantity;
+                } else {
+                    editCart.push({
+                        品番: 品番,
+                        背番号: 背番号,
+                        quantity: quantity,
+                        addedAt: new Date().toISOString()
+                    });
+                }
+                
+                successCount++;
+                
+            } catch (error) {
+                console.error(`Error processing line: ${line}`, error);
+                failCount++;
+            }
+        }
+        
+        updateEditCartDisplay();
+        showToast(`CSV processed: ${successCount} items added, ${failCount} failed`, successCount > 0 ? 'success' : 'error');
+        
+    } catch (error) {
+        console.error('Error parsing CSV:', error);
+        alert('Error parsing CSV file: ' + error.message);
+    }
+}
