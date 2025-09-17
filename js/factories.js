@@ -3290,7 +3290,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                             <td>${item.背番号 ?? "-"}</td>
                             <td>${item.Worker_Name ?? "-"}</td>
                             <td>${item.Date ?? "-"}</td>
-                            <td>${total}</td>
+                            <td>${processQuantity.toLocaleString()}</td>
                             <td class="${totalNG > 0 ? 'text-red-600 font-medium' : ''}">${totalNG}</td>
                             <td class="working-hours">${workingHours === 'N/A' ? workingHours : workingHours + ' hrs'}</td>
                             <td>
