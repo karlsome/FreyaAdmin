@@ -1779,25 +1779,37 @@ function loadPage(page) {
               return true;
             });
 
-            // Use a reliable source for field structure - check the entire dataset for a good sample
-            let referenceItem = null;
+            // Define headers based on the current tab
+            let headers, dataFields;
             
-            // Try to find a record with a proper 品番 field
-            for (let item of filteredMasterData) {
-              if (item && item.品番 && typeof item.品番 === 'string' && item.品番.trim() !== '') {
-                referenceItem = item;
-                break;
+            if (currentMasterTab === 'materialDB') {
+              // 材料DB headers based on MongoDB structure
+              dataFields = ['品名', 'length', '材料背番号', '色', '材料', '原材料品番', '備考', '次工程', '材料品番', '粘着品番', '受注先コード', 'ロール温度', '離型紙幅', '粘着幅'];
+              headers = [
+                ...dataFields.map(field => ({ key: field, label: field })),
+                { key: "imageURL", label: "画像" }
+              ];
+            } else {
+              // 内装品DB headers (existing logic)
+              // Use a reliable source for field structure - check the entire dataset for a good sample
+              let referenceItem = null;
+              
+              // Try to find a record with a proper 品番 field
+              for (let item of filteredMasterData) {
+                if (item && item.品番 && typeof item.品番 === 'string' && item.品番.trim() !== '') {
+                  referenceItem = item;
+                  break;
+                }
               }
-            }
-            
-            // If no good reference found, use predefined field structure
-            if (!referenceItem) {
-              console.warn('No proper reference item found, using default field structure');
-              referenceItem = {
-                品番: '',
-                モデル: '',
-                背番号: '',
-                品名: '',
+              
+              // If no good reference found, use predefined field structure
+              if (!referenceItem) {
+                console.warn('No proper reference item found, using default field structure');
+                referenceItem = {
+                  品番: '',
+                  モデル: '',
+                  背番号: '',
+                  品名: '',
                 形状: '',
                 'R/L': '',
                 色: '',
@@ -1819,12 +1831,13 @@ function loadPage(page) {
               };
             }
 
-            // Get all fields except _id and imageURL, then add imageURL at the end
-            const dataFields = Object.keys(referenceItem).filter(k => k !== "_id" && k !== "imageURL");
-            const headers = [
+            // Get all fields except _id and imageURL for 内装品DB, then add imageURL at the end
+            dataFields = Object.keys(referenceItem).filter(k => k !== "_id" && k !== "imageURL");
+            headers = [
               ...dataFields.map(field => ({ key: field, label: field })),
               { key: "imageURL", label: "画像" }
             ];
+          }
 
             const getSortArrow = (col) => {
               if (masterSortState.column !== col) return '';

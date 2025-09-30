@@ -2107,6 +2107,9 @@ async function loadFactoryPage(factoryName) {
 function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, slitData, topDefects }) {
     const mainContent = document.getElementById("mainContent");
 
+    // Set global factory name for use in manufacturing lot search
+    window.currentFactoryName = factoryName;
+
     mainContent.innerHTML = `
         <!-- Page Header -->
         <div class="flex items-center justify-between mb-6">
@@ -2157,6 +2160,19 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
                            style="background: transparent;" />
                 </div>
             </div>
+        </div>
+
+        <!-- 製造ロット -->
+        <div>
+            <label class="block text-sm font-medium mb-1">製造ロット</label>
+            <div class="relative">
+                <input type="text" 
+                       id="filterManufacturingLot" 
+                       class="p-2 border rounded outline-none focus:border-blue-500" 
+                       placeholder="例: 241227 (minimum 3 characters)" 
+                       minlength="3" />
+            </div>
+        </div>
         </div>
 
         <!-- Apply Filters -->
@@ -2232,7 +2248,16 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         const to = document.getElementById("filterToDate").value;
         const partNumbers = getPartNumberTags();
         const serialNumbers = getSerialNumberTags();
-        loadProductionByPeriod(factoryName, from, to, partNumbers, serialNumbers);
+        const manufacturingLot = document.getElementById("filterManufacturingLot").value.trim();
+        
+        // Check if manufacturing lot search is being used
+        if (manufacturingLot && manufacturingLot.length >= 3) {
+            // Use manufacturing lot search instead of regular production search
+            loadProductionByManufacturingLot(manufacturingLot, partNumbers, serialNumbers);
+        } else {
+            // Regular production search
+            loadProductionByPeriod(factoryName, from, to, partNumbers, serialNumbers);
+        }
     });
 
     // Load default data for today
@@ -2243,6 +2268,11 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
 
     // Run translations
     applyLanguage();
+
+    // Setup event listeners for manufacturing lot search and tag inputs
+    setTimeout(() => {
+        setupAllEventListeners();
+    }, 100);
 
     // Render charts
     renderFactoryCharts({ pressData, srsData, slitData, kensaData });
@@ -2416,6 +2446,229 @@ function showSidebarFromElement(el) {
         
         // Show a simple error message to user
         alert('データの読み込みに失敗しました。開発者コンソールでエラーを確認してください。');
+    }
+}
+
+/**
+ * Shows the right-side detail sidebar specifically for PSA process (materialRequestDB) records.
+ * @param {Object} item - The PSA process record data
+ */
+function showPSASidebar(item) {
+    const sidebar = document.getElementById("detailSidebar");
+    const backdrop = document.getElementById("sidebarBackdrop");
+    const content = document.getElementById("sidebarContent");
+
+    console.log('PSA item data:', item);
+
+    // Extract lot numbers from PrintLog
+    const lotNumbers = item.PrintLog && item.PrintLog.length > 0 
+        ? item.PrintLog[0].lotNumbers?.join(', ') || 'なし'
+        : 'なし';
+
+    // Extract print details
+    const printLog = item.PrintLog?.[0] || {};
+    const printTimestamp = printLog.timestamp 
+        ? new Date(printLog.timestamp).toLocaleString('ja-JP')
+        : 'なし';
+
+    // Calculate labels printed
+    const totalLabels = item.TotalLabelsPrintedForOrder || 0;
+
+    content.innerHTML = `
+        <div class="bg-purple-50 p-4 rounded-lg mb-4">
+            <h3 class="text-xl font-bold text-purple-800 mb-2">PSA Process Details</h3>
+            <p class="text-sm text-purple-600">Material Request Database Record</p>
+        </div>
+
+        <div class="space-y-4">
+            <!-- Basic Information -->
+            <div class="bg-white p-4 rounded-lg border">
+                <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="ri-information-line mr-2"></i>基本情報
+                </h4>
+                <div class="grid grid-cols-1 gap-3">
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">品番:</span>
+                        <span class="text-gray-900">${item.品番 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">材料品番:</span>
+                        <span class="text-gray-900">${item.材料品番 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">材料背番号:</span>
+                        <span class="text-gray-900">${item.材料背番号 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">工場:</span>
+                        <span class="text-gray-900">${printLog.factory || 'なし'}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Production Information -->
+            <div class="bg-white p-4 rounded-lg border">
+                <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="ri-factory-line mr-2"></i>生産情報
+                </h4>
+                <div class="grid grid-cols-1 gap-3">
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">作業日:</span>
+                        <span class="text-gray-900">${item.作業日 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">生産数:</span>
+                        <span class="text-gray-900 font-semibold">${item.生産数 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">生産順番:</span>
+                        <span class="text-gray-900">${item.生産順番 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">納期:</span>
+                        <span class="text-gray-900">${item.納期 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">作業時間:</span>
+                        <span class="text-gray-900">${item.作業時間 || 'なし'} 時間</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">人員数:</span>
+                        <span class="text-gray-900">${item.人員数 || 'なし'} 人</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Technical Specifications -->
+            <div class="bg-white p-4 rounded-lg border">
+                <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="ri-settings-3-line mr-2"></i>技術仕様
+                </h4>
+                <div class="grid grid-cols-1 gap-3">
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">幅:</span>
+                        <span class="text-gray-900">${item.幅 || 'なし'} mm</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">型番:</span>
+                        <span class="text-gray-900">${item.型番 || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">加工条件管理番号:</span>
+                        <span class="text-gray-900">${item.加工条件管理番号 || 'なし'}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lot Information -->
+            <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                <h4 class="font-semibold text-blue-800 mb-3 flex items-center">
+                    <i class="ri-barcode-line mr-2"></i>ロット情報
+                </h4>
+                <div class="grid grid-cols-1 gap-3">
+                    <div class="flex justify-between">
+                        <span class="font-medium text-blue-600">ロット番号:</span>
+                        <span class="text-blue-900 font-semibold">${lotNumbers}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-blue-600">印刷枚数:</span>
+                        <span class="text-blue-900">${printLog.count || 0} 枚</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-blue-600">総印刷枚数:</span>
+                        <span class="text-blue-900 font-semibold">${totalLabels} 枚</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-blue-600">印刷者:</span>
+                        <span class="text-blue-900">${printLog.printedBy || 'なし'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-blue-600">印刷日時:</span>
+                        <span class="text-blue-900">${printTimestamp}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-blue-600">機械:</span>
+                        <span class="text-blue-900">${printLog.machine || 'なし'}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Information -->
+            <div class="bg-white p-4 rounded-lg border">
+                <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="ri-check-line mr-2"></i>ステータス情報
+                </h4>
+                <div class="grid grid-cols-1 gap-3">
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">STATUS:</span>
+                        <span class="px-3 py-1 rounded-full text-sm font-medium ${
+                            item.STATUS === 'Completed' ? 'bg-green-100 text-green-800' :
+                            item.STATUS === 'In Progress' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-gray-100 text-gray-800'
+                        }">
+                            ${item.STATUS || 'なし'}
+                        </span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">完了日時:</span>
+                        <span class="text-gray-900">
+                            ${item.CompletionTimestamp 
+                                ? new Date(item.CompletionTimestamp).toLocaleString('ja-JP')
+                                : 'なし'
+                            }
+                        </span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-600">最終印刷日時:</span>
+                        <span class="text-gray-900">
+                            ${item.LastPrintTimestamp 
+                                ? new Date(item.LastPrintTimestamp).toLocaleString('ja-JP')
+                                : 'なし'
+                            }
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Close Button -->
+            <div class="pt-4 border-t">
+                <button onclick="closeSidebar()" class="w-full bg-purple-600 text-white py-2 px-4 rounded hover:bg-purple-700 transition-colors">
+                    閉じる
+                </button>
+            </div>
+        </div>
+    `;
+
+    // Show sidebar
+    sidebar.classList.remove("translate-x-full");
+    backdrop.classList.remove("hidden");
+    document.body.style.overflow = "hidden";
+}
+
+/**
+ * Helper to show the PSA sidebar with details for a clicked PSA element (row).
+ * @param {HTMLElement} el - The element containing encoded PSA item data
+ */
+function showPSASidebarFromElement(el) {
+    try {
+        const encodedData = el.dataset.item;
+        
+        console.log('PSA Raw encoded data length:', encodedData.length);
+        
+        const decodedData = decodeURIComponent(encodedData);
+        console.log('PSA Decoded data preview:', decodedData.substring(0, 600) + '...');
+        
+        const item = JSON.parse(decodedData);
+        
+        console.log('PSA Complete item parsed successfully');
+        showPSASidebar(item);
+        
+    } catch (error) {
+        console.error('Error parsing PSA item data:', error);
+        console.error('Problematic PSA encoded data:', el.dataset.item);
+        
+        // Show a simple error message to user
+        alert('PSAデータの読み込みに失敗しました。開発者コンソールでエラーを確認してください。');
     }
 }
 
@@ -2750,6 +3003,7 @@ function validateInputs() {
 function closeSidebar() {
     document.getElementById("detailSidebar").classList.add("translate-x-full");
     document.getElementById("sidebarBackdrop").classList.add("hidden");
+    document.body.style.overflow = ""; // Restore scrolling
 }
 
 // Ensure sidebar closes when clicking outside (desktop and mobile)
@@ -3420,6 +3674,194 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
       console.error("Error loading production data:", err);
       container.innerHTML = `<p class="text-red-500">Failed to load production data</p>`;
     }
+}
+
+/**
+ * Loads production data by searching manufacturing lot across multiple collections
+ * @param {string} manufacturingLot - Manufacturing lot to search for
+ * @param {array} partNumbers - Part numbers to filter
+ * @param {array} serialNumbers - Serial numbers to filter
+ */
+async function loadProductionByManufacturingLot(manufacturingLot, partNumbers = [], serialNumbers = []) {
+    const container = document.getElementById("dailyProduction");
+    container.innerHTML = "Searching manufacturing lot data...";
+
+    try {
+        const response = await fetch(`${BASE_URL}api/search-manufacturing-lot`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                manufacturingLot: manufacturingLot,
+                partNumbers: partNumbers,
+                serialNumbers: serialNumbers
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || "Failed to search manufacturing lot");
+        }
+
+        renderManufacturingLotResults(data.results, manufacturingLot);
+
+    } catch (err) {
+        console.error("Error searching manufacturing lot:", err);
+        container.innerHTML = `<p class="text-red-500">Failed to search manufacturing lot: ${err.message}</p>`;
+    }
+}
+
+/**
+ * Renders the manufacturing lot search results grouped by process
+ */
+function renderManufacturingLotResults(results, searchTerm) {
+    const container = document.getElementById("dailyProduction");
+    
+    if (!results || Object.keys(results).length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8">
+                <i class="ri-search-line text-3xl text-gray-400 mb-2 block"></i>
+                <p class="text-gray-500">No results found for manufacturing lot: <strong>${searchTerm}</strong></p>
+            </div>
+        `;
+        return;
+    }
+
+    const processOrder = ["Kensa", "Press", "SRS", "Slit", "PSA"];
+    const processLabels = {
+        "Kensa": "Kensa Process",
+        "Press": "Press Process", 
+        "SRS": "SRS Process",
+        "Slit": "Slit Process",
+        "PSA": "PSA Process"
+    };
+
+    container.innerHTML = `
+        <div class="mb-6">
+            <h3 class="text-xl font-semibold mb-2">Manufacturing Lot Search Results</h3>
+            <p class="text-gray-600">Search term: <strong>${searchTerm}</strong></p>
+            <p class="text-sm text-gray-500 mt-1">
+                <i class="ri-information-line"></i> 
+                Searching across ALL factories and dates
+            </p>
+        </div>
+        
+        ${processOrder.map(processName => {
+            const processData = results[processName];
+            if (!processData || processData.length === 0) return '';
+
+            const bgClassMap = {
+                Kensa: "bg-yellow-50",
+                Press: "bg-green-50", 
+                SRS: "bg-gray-100",
+                Slit: "bg-blue-50",
+                PSA: "bg-purple-50"
+            };
+            const bgClass = bgClassMap[processName] || "bg-white";
+
+            return `
+                <div class="bg-white p-4 rounded-xl shadow mb-6">
+                    <div class="bg-gradient-to-r ${bgClass} px-6 py-4 border-b rounded-t-xl">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <div class="w-3 h-3 rounded-full ${
+                                    processName === 'Kensa' ? 'bg-yellow-500' :
+                                    processName === 'Press' ? 'bg-green-500' :
+                                    processName === 'SRS' ? 'bg-gray-500' :
+                                    processName === 'Slit' ? 'bg-blue-500' :
+                                    'bg-purple-500'
+                                }"></div>
+                                <h4 class="text-lg font-semibold">${processLabels[processName]}</h4>
+                            </div>
+                            <div class="text-sm text-gray-600">
+                                ${processData.length} records found
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b">
+                                <tr>
+                                    ${processName === 'PSA' ? `
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">品番</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">材料品番</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">材料背番号</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">作業日</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">生産数</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">ロット番号</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">工場</th>
+                                    ` : `
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">品番</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">背番号</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">作業者</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">日付</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">Total</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">Total NG</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">製造ロット/材料ロット</th>
+                                        <th class="px-4 py-3 text-left font-medium text-gray-700">コメント</th>
+                                    `}
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${processData.map((item, index) => {
+                                    const isEvenRow = index % 2 === 0;
+                                    
+                                    if (processName === 'PSA') {
+                                        const lotNumbers = item.PrintLog && item.PrintLog.length > 0 
+                                            ? item.PrintLog[0].lotNumbers?.join(', ') || '-'
+                                            : '-';
+                                        
+                                        // Encode PSA item data for sidebar
+                                        const encodedPSAData = encodeURIComponent(JSON.stringify(item));
+                                        
+                                        return `
+                                            <tr class="cursor-pointer hover:bg-blue-50 transition-colors ${isEvenRow ? 'bg-gray-50/50' : 'bg-white'}"
+                                                onclick='showPSASidebarFromElement(this)'
+                                                data-item='${encodedPSAData}'>
+                                                <td class="px-4 py-3 font-medium text-gray-900">${item.品番 || '-'}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.材料品番 || '-'}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.材料背番号 || '-'}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.作業日 || '-'}</td>
+                                                <td class="px-4 py-3 font-medium text-gray-900">${item.生産数 || '-'}</td>
+                                                <td class="px-4 py-3 text-blue-600 font-medium">${lotNumbers}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.PrintLog?.[0]?.factory || '-'}</td>
+                                            </tr>
+                                        `;
+                                    } else {
+                                        const encodedData = safeEncodeItemData(item);
+                                        const processQuantity = item.Process_Quantity ?? 0;
+                                        const totalNG = item.Total_NG ?? 0;
+                                        const lotField = item.製造ロット || item.材料ロット || '-';
+                                        
+                                        return `
+                                            <tr class="cursor-pointer hover:bg-blue-50 transition-colors ${isEvenRow ? 'bg-gray-50/50' : 'bg-white'}"
+                                                onclick='showSidebarFromElement(this)'
+                                                data-item='${encodedData.encodedItem}'
+                                                data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
+                                                <td class="px-4 py-3 font-medium text-gray-900">${item.品番 || '-'}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.背番号 || '-'}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.Worker_Name || '-'}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.Date || '-'}</td>
+                                                <td class="px-4 py-3 font-medium text-gray-900">${processQuantity.toLocaleString()}</td>
+                                                <td class="px-4 py-3 ${totalNG > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}">${totalNG}</td>
+                                                <td class="px-4 py-3 text-blue-600 font-medium">${lotField}</td>
+                                                <td class="px-4 py-3 text-gray-700">${item.Comment || '-'}</td>
+                                            </tr>
+                                        `;
+                                    }
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }).filter(Boolean).join('')}
+    `;
 }
 
 
@@ -4574,3 +5016,72 @@ function setupTagInputsAfterDelay() {
 
 // Export the setup function so it can be called from other places
 window.setupTagInputEventListeners = setupTagInputEventListeners;
+
+// Manufacturing lot search debounce functionality
+let manufacturingLotSearchTimeout;
+
+/**
+ * Debounced search function for manufacturing lot
+ */
+function debounceManufacturingLotSearch(partNumbers, serialNumbers) {
+    clearTimeout(manufacturingLotSearchTimeout);
+    
+    manufacturingLotSearchTimeout = setTimeout(() => {
+        const manufacturingLot = document.getElementById("filterManufacturingLot").value.trim();
+        
+        if (manufacturingLot && manufacturingLot.length >= 3) {
+            loadProductionByManufacturingLot(manufacturingLot, partNumbers, serialNumbers);
+        }
+    }, 500); // 500ms delay
+}
+
+/**
+ * Setup manufacturing lot search event listeners
+ */
+function setupManufacturingLotSearch() {
+    const manufacturingLotInput = document.getElementById("filterManufacturingLot");
+    
+    if (manufacturingLotInput && !manufacturingLotInput.hasEventListeners) {
+        manufacturingLotInput.hasEventListeners = true;
+        
+        manufacturingLotInput.addEventListener('input', (e) => {
+            const value = e.target.value.trim();
+            
+            if (value.length >= 3) {
+                // Get current filter values (factory and dates not required for manufacturing lot search)
+                const partNumbers = getPartNumberTags();
+                const serialNumbers = getSerialNumberTags();
+                
+                debounceManufacturingLotSearch(partNumbers, serialNumbers);
+            } else if (value.length === 0) {
+                // Clear search results when input is empty
+                const container = document.getElementById("dailyProduction");
+                if (container) {
+                    container.innerHTML = '<p class="text-gray-500">Enter manufacturing lot (minimum 3 characters) to search across all factories</p>';
+                }
+            }
+        });
+        
+        manufacturingLotInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const applyBtn = document.getElementById("applyFilterBtn");
+                if (applyBtn) {
+                    applyBtn.click();
+                }
+            }
+        });
+    }
+}
+
+// Enhanced setup function that includes manufacturing lot search
+function setupAllEventListeners() {
+    setupTagInputEventListeners();
+    setupManufacturingLotSearch();
+}
+
+// Update the DOMContentLoaded event listener
+document.addEventListener('DOMContentLoaded', setupAllEventListeners);
+
+// Also export the enhanced setup function
+window.setupAllEventListeners = setupAllEventListeners;
