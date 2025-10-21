@@ -1686,14 +1686,19 @@ function loadPage(page) {
 
           async function loadMasterDB() {
             try {
-              const collectionName = currentMasterTab; // Use current tab as collection name
+              // Map tab to actual collection name
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : currentMasterTab;
+              
+              // For materialDB (materialMasterDB2), filter by 工程名 = 粘着工程
+              const query = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              
               const res = await fetch(BASE_URL + "queries", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   dbName: "Sasaki_Coating_MasterDB",
                   collectionName: collectionName,
-                  query: {},
+                  query: query,
                   projection: {}
                 })
               });
@@ -1707,6 +1712,9 @@ function loadPage(page) {
               document.getElementById("masterTableContainer").innerHTML = `<div class="text-center py-8"><p class="text-red-500">データの読み込みに失敗しました</p></div>`;
             }
           }
+
+          // Make loadMasterDB globally accessible for sidebar operations
+          window.loadMasterDB = loadMasterDB;
 
           // Tab switching function
           window.switchMasterTab = function(tabName) {
@@ -1783,12 +1791,32 @@ function loadPage(page) {
             let headers, dataFields;
             
             if (currentMasterTab === 'materialDB') {
-              // 材料DB headers based on MongoDB structure
-              dataFields = ['品名', 'length', '材料背番号', '色', '材料', '原材料品番', '備考', '次工程', '材料品番', '粘着品番', '受注先コード', 'ロール温度', '離型紙幅', '粘着幅'];
-              headers = [
-                ...dataFields.map(field => ({ key: field, label: field })),
-                { key: "imageURL", label: "画像" }
+              // 材料DB headers - ordered as requested
+              // Priority fields: 品番, 品名, ラベル品番, NMOJI_色コード (as 色), 梱包数, 仕様, 型番, ロール温度, 画像, NMOJI_ユーザー (as 次工程), 原材料品番
+              const priorityFields = [
+                { key: '品番', label: '品番' },
+                { key: '品名', label: '品名' },
+                { key: 'ラベル品番', label: 'ラベル品番' },
+                { key: 'NMOJI_色コード', label: '色' },
+                { key: '梱包数', label: '梱包数' },
+                { key: '仕様', label: '仕様' },
+                { key: '型番', label: '型番' },
+                { key: 'ロール温度', label: 'ロール温度' },
+                { key: 'imageURL', label: '画像' },
+                { key: 'NMOJI_ユーザー', label: '次工程' },
+                { key: '原材料品番', label: '原材料品番' }
               ];
+              
+              // Get all other fields from the first data item (excluding priority fields, _id, and imageURL)
+              const priorityFieldKeys = priorityFields.map(f => f.key);
+              const sampleItem = cleanPageData.length > 0 ? cleanPageData[0] : {};
+              const otherFields = Object.keys(sampleItem)
+                .filter(key => !priorityFieldKeys.includes(key) && key !== '_id' && key !== 'imageURL')
+                .map(key => ({ key, label: key }));
+              
+              // Combine priority fields + other fields (imageURL is already in priorityFields)
+              headers = [...priorityFields, ...otherFields];
+              dataFields = headers.filter(h => h.key !== 'imageURL').map(h => h.key);
             } else {
               // 内装品DB headers (existing logic)
               // Use a reliable source for field structure - check the entire dataset for a good sample
@@ -1865,18 +1893,24 @@ function loadPage(page) {
                   <tbody class="bg-white divide-y divide-gray-200">
                     ${cleanPageData.map((row, index) => `
                       <tr class="hover:bg-gray-50 cursor-pointer transition-colors" onclick='showMasterSidebarFromRow(this)' data-index='${index}'>
-                        ${dataFields.map(field => {
-                          const value = row[field];
-                          const displayValue = (value === null || value === undefined || value === '') ? "-" : value;
-                          const isMainField = field === "品番" || field === "品名" || field === "材料品番" || field === "材料";
-                          return `<td class="px-3 py-2 text-sm ${isMainField ? 'font-medium text-blue-600 hover:text-blue-800' : 'text-gray-900'}">${displayValue}</td>`;
-                        }).join('')}
-                        <td class="px-3 py-2 text-sm">
-                          ${row.imageURL 
-                            ? '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800"><i class="ri-image-line mr-1"></i>あり</span>'
-                            : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600"><i class="ri-image-off-line mr-1"></i>なし</span>'
+                        ${headers.map(h => {
+                          if (h.key === 'imageURL') {
+                            // Render image column
+                            return `<td class="px-3 py-2 text-sm">
+                              ${row.imageURL 
+                                ? '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800"><i class="ri-image-line mr-1"></i>あり</span>'
+                                : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600"><i class="ri-image-off-line mr-1"></i>なし</span>'
+                              }
+                            </td>`;
+                          } else {
+                            // Render data field
+                            const value = row[h.key];
+                            const displayValue = (value === null || value === undefined || value === '') ? "-" : value;
+                            // Highlight main fields for both tabs
+                            const isMainField = h.key === "品番" || h.key === "品名" || h.key === "材料品番" || h.key === "材料" || h.key === "ラベル品番" || h.key === "原材料品番";
+                            return `<td class="px-3 py-2 text-sm ${isMainField ? 'font-medium text-blue-600 hover:text-blue-800' : 'text-gray-900'}">${displayValue}</td>`;
                           }
-                        </td>
+                        }).join('')}
                       </tr>
                     `).join('')}
                   </tbody>
@@ -2199,13 +2233,16 @@ function loadPage(page) {
 
               console.log("Record data being inserted:", recordData);
 
+              // Map tab to actual collection name
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : currentMasterTab;
+
               // Insert record to database using the existing queries endpoint
               const insertRes = await fetch(BASE_URL + "queries", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   dbName: "Sasaki_Coating_MasterDB",
-                  collectionName: currentMasterTab,
+                  collectionName: collectionName,
                   insertData: recordData
                 })
               });
@@ -2238,7 +2275,7 @@ function loadPage(page) {
                     label: "main",
                     recordId: recordId,
                     username,
-                    collectionName: currentMasterTab
+                    collectionName: collectionName
                   })
                 });
                 

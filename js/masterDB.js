@@ -68,7 +68,9 @@ async function confirmMasterInsert() {
   if (!records?.length) return alert("No data to insert");
 
   // Get current tab to determine which collection to insert into
-  const collectionName = window.currentMasterTab || 'masterDB';
+  // Map materialDB tab to materialMasterDB2 collection
+  const currentTab = window.currentMasterTab || 'masterDB';
+  const collectionName = currentTab === 'materialDB' ? 'materialMasterDB2' : currentTab;
 
   let successCount = 0;
   let failCount = 0;
@@ -104,7 +106,12 @@ async function confirmMasterInsert() {
   }
 
   alert(`✅ Success: ${successCount} inserted\n❌ Failed: ${failCount}`);
-  loadPage("masterDB"); // Refresh view
+  // Reload data without switching tabs by calling loadMasterDB if available
+  if (typeof loadMasterDB === 'function') {
+    loadMasterDB();
+  } else {
+    loadPage("masterDB"); // Fallback
+  }
 }
 
 /**
@@ -194,7 +201,9 @@ function showMasterSidebar(data) {
 
     try {
       // Get current tab to determine which collection to update
-      const collectionName = window.currentMasterTab || 'masterDB';
+      // Map materialDB tab to materialMasterDB2 collection
+      const currentTab = window.currentMasterTab || 'masterDB';
+      const collectionName = currentTab === 'materialDB' ? 'materialMasterDB2' : currentTab;
       
       const res = await fetch(BASE_URL + "updateMasterRecord", {
         method: "POST",
@@ -212,7 +221,12 @@ function showMasterSidebar(data) {
 
       alert("Updated successfully.");
       closeMasterSidebar();
-      loadPage("masterDB");
+      // Reload data without switching tabs by calling loadMasterDB if available
+      if (typeof loadMasterDB === 'function') {
+        loadMasterDB();
+      } else {
+        loadPage("masterDB");
+      }
     } catch (err) {
       alert("Update failed.");
       console.error(err);
@@ -230,7 +244,9 @@ document.getElementById("masterImageUploadInput").addEventListener("change", asy
 
       try {
         // Get current tab to determine which collection to update
-        const collectionName = window.currentMasterTab || 'masterDB';
+        // Map materialDB tab to materialMasterDB2 collection
+        const currentTab = window.currentMasterTab || 'masterDB';
+        const collectionName = currentTab === 'materialDB' ? 'materialMasterDB2' : currentTab;
         
         const res = await fetch(BASE_URL + "uploadMasterImage", {
           method: "POST",
@@ -291,7 +307,9 @@ async function triggerMasterImageUpload(recordId) {
       const downloadURL = await snapshot.ref.getDownloadURL();
 
       // Get current tab to determine which collection to update
-      const collectionName = window.currentMasterTab || 'masterDB';
+      // Map materialDB tab to materialMasterDB2 collection
+      const currentTab = window.currentMasterTab || 'masterDB';
+      const collectionName = currentTab === 'materialDB' ? 'materialMasterDB2' : currentTab;
 
       // Save to masterDB record
       await fetch(BASE_URL + "/updateMasterRecord", {
@@ -306,7 +324,12 @@ async function triggerMasterImageUpload(recordId) {
       });
 
       alert("Image uploaded successfully!");
-      loadPage("masterDB");
+      // Reload data without switching tabs by calling loadMasterDB if available
+      if (typeof loadMasterDB === 'function') {
+        loadMasterDB();
+      } else {
+        loadPage("masterDB");
+      }
 
     } catch (err) {
       console.error("Firebase upload failed:", err);
