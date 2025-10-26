@@ -173,11 +173,11 @@ async function loadAnalyticsData() {
         const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
         
         if (!fromDate || !toDate) {
-            throw new Error('Please select both from and to dates');
+            throw new Error(t('pleaseSelectDates'));
         }
-        
+
         if (new Date(fromDate) > new Date(toDate)) {
-            throw new Error('From date cannot be later than to date');
+            throw new Error(t('fromDateCannotBeLater'));
         }
         
         console.log(`📊 Loading analytics data from ${fromDate} to ${toDate}`, 
@@ -275,7 +275,7 @@ function updateDateRangeDisplay(fromDate, toDate, selectedFactory = null, select
  */
 function renderAnalytics() {
     if (!analyticsData || !analyticsData.summary || analyticsData.summary.length === 0) {
-        showAnalyticsErrorState('No data available for the selected date range');
+        showAnalyticsErrorState(t('noDataAvailable'));
         return;
     }
     
