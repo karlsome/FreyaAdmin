@@ -200,18 +200,18 @@ function renderNodaTable() {
                         ${t('type')} ${getNodaSortArrow('requestType')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('status')">
-                        Status ${getNodaSortArrow('status')}
+                        ${t('status')} ${getNodaSortArrow('status')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('品番')">
-                        Items ${getNodaSortArrow('品番')}
+                        ${t('items')} ${getNodaSortArrow('品番')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('pickupDate')">
-                        Pickup Date ${getNodaSortArrow('pickupDate')}
+                        ${t('pickupDate').replace(':', '')} ${getNodaSortArrow('pickupDate')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('createdAt')">
-                        Created ${getNodaSortArrow('createdAt')}
+                        ${t('createdAt')} ${getNodaSortArrow('createdAt')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700">Actions</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('actions')}</th>
                 </tr>
             </thead>
             <tbody>
@@ -233,9 +233,9 @@ function renderNodaTable() {
                         
                         itemsDisplay = `
                             <div class="text-xs">
-                                <div class="font-medium">${totalItems} items</div>
+                                <div class="font-medium">${totalItems} ${t('items')}</div>
                                 <div class="text-gray-500">
-                                    ${completedItems} done, ${pendingItems} pending
+                                    ${completedItems} ${t('done')}, ${pendingItems} ${t('statusPending').toLowerCase()}
                                 </div>
                             </div>
                         `;
@@ -244,7 +244,7 @@ function renderNodaTable() {
                         itemsDisplay = `
                             <div class="text-xs">
                                 <div class="font-medium">${item.品番}</div>
-                                <div class="text-gray-500">${item.背番号} (Qty: ${item.quantity})</div>
+                                <div class="text-gray-500">${item.背番号} (${t('qty')}: ${item.quantity})</div>
                             </div>
                         `;
                     }
@@ -303,19 +303,19 @@ function renderNodaTable() {
 function getNodaStatusInfo(status) {
     switch (status) {
         case 'pending':
-            return { text: 'Pending', icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
+            return { text: t('statusPending'), icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
         case 'in-progress':
-            return { text: 'In Progress', icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
+            return { text: t('statusInProgress'), icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
         case 'active':
-            return { text: 'Active', icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
+            return { text: t('statusActive'), icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
         case 'completed':
-            return { text: 'Completed', icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
+            return { text: t('statusComplete'), icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
         case 'complete':
-            return { text: 'Complete', icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
+            return { text: t('statusComplete'), icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
         case 'failed':
-            return { text: 'Failed', icon: 'ri-close-circle-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
+            return { text: t('statusFailed'), icon: 'ri-close-circle-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
         default:
-            return { text: 'Unknown', icon: 'ri-question-line', badgeClass: 'bg-gray-100 text-gray-800', rowClass: '' };
+            return { text: t('statusUnknown'), icon: 'ri-question-line', badgeClass: 'bg-gray-100 text-gray-800', rowClass: '' };
     }
 }
 
