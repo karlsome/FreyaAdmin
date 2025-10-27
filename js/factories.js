@@ -1769,7 +1769,44 @@ window.enhancedTemperatureTest = enhancedTemperatureTest;
  */
 async function renderFactoryCards() {
     const container = document.getElementById("factoryCards");
-    container.innerHTML = "Loading factories...";
+    
+    // Show animated loading state
+    container.innerHTML = `
+      <div class="col-span-full flex flex-col items-center justify-center py-16 space-y-6">
+        <!-- Animated Spinner -->
+        <div class="relative">
+          <div class="w-20 h-20 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+          <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+            <i class="ri-factory-line text-3xl text-blue-600"></i>
+          </div>
+        </div>
+        
+        <!-- Loading Text with Pulse Animation -->
+        <div class="text-center space-y-2">
+          <h3 class="text-xl font-semibold text-gray-700 animate-pulse" data-i18n="loadingFactories">
+            Loading Factory Data...
+          </h3>
+          <p class="text-sm text-gray-500 animate-pulse" data-i18n="pleaseWait">
+            Please wait while we fetch the latest information
+          </p>
+        </div>
+        
+        <!-- Skeleton Cards Preview -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full mt-8">
+          ${[1, 2, 3].map(() => `
+            <div class="bg-white rounded-lg border border-gray-200 p-6 animate-pulse">
+              <div class="h-6 bg-gray-200 rounded w-1/2 mb-4"></div>
+              <div class="space-y-3">
+                <div class="h-4 bg-gray-200 rounded w-3/4"></div>
+                <div class="h-4 bg-gray-200 rounded w-2/3"></div>
+                <div class="h-4 bg-gray-200 rounded w-1/2"></div>
+              </div>
+              <div class="mt-4 h-10 bg-gray-200 rounded"></div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
   
     // Initialize sample factory data if needed
     await initializeSampleFactoryData();
