@@ -180,7 +180,7 @@ function renderNodaTable() {
         container.innerHTML = `
             <div class="p-8 text-center text-gray-500">
                 <i class="ri-inbox-line text-4xl mb-4"></i>
-                <p>No picking requests found matching your criteria.</p>
+                <p>${t('noPickingRequestsFound')}</p>
             </div>
         `;
         return;
@@ -194,24 +194,24 @@ function renderNodaTable() {
             <thead class="bg-gray-50 border-b">
                 <tr>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('requestNumber')">
-                        Request # ${getNodaSortArrow('requestNumber')}
+                        ${t('requestNumber')} ${getNodaSortArrow('requestNumber')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('requestType')">
-                        Type ${getNodaSortArrow('requestType')}
+                        ${t('type')} ${getNodaSortArrow('requestType')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('status')">
-                        Status ${getNodaSortArrow('status')}
+                        ${t('status')} ${getNodaSortArrow('status')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('品番')">
-                        Items ${getNodaSortArrow('品番')}
+                        ${t('items')} ${getNodaSortArrow('品番')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('pickupDate')">
-                        Pickup Date ${getNodaSortArrow('pickupDate')}
+                        ${t('pickupDate').replace(':', '')} ${getNodaSortArrow('pickupDate')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('createdAt')">
-                        Created ${getNodaSortArrow('createdAt')}
+                        ${t('createdAt')} ${getNodaSortArrow('createdAt')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700">Actions</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('actions')}</th>
                 </tr>
             </thead>
             <tbody>
@@ -233,9 +233,9 @@ function renderNodaTable() {
                         
                         itemsDisplay = `
                             <div class="text-xs">
-                                <div class="font-medium">${totalItems} items</div>
+                                <div class="font-medium">${totalItems} ${t('items')}</div>
                                 <div class="text-gray-500">
-                                    ${completedItems} done, ${pendingItems} pending
+                                    ${completedItems} ${t('done')}, ${pendingItems} ${t('statusPending').toLowerCase()}
                                 </div>
                             </div>
                         `;
@@ -244,7 +244,7 @@ function renderNodaTable() {
                         itemsDisplay = `
                             <div class="text-xs">
                                 <div class="font-medium">${item.品番}</div>
-                                <div class="text-gray-500">${item.背番号} (Qty: ${item.quantity})</div>
+                                <div class="text-gray-500">${item.背番号} (${t('qty')}: ${item.quantity})</div>
                             </div>
                         `;
                     }
@@ -303,19 +303,19 @@ function renderNodaTable() {
 function getNodaStatusInfo(status) {
     switch (status) {
         case 'pending':
-            return { text: 'Pending', icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
+            return { text: t('statusPending'), icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
         case 'in-progress':
-            return { text: 'In Progress', icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
+            return { text: t('statusInProgress'), icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
         case 'active':
-            return { text: 'Active', icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
+            return { text: t('statusActive'), icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
         case 'completed':
-            return { text: 'Completed', icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
+            return { text: t('statusComplete'), icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
         case 'complete':
-            return { text: 'Complete', icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
+            return { text: t('statusComplete'), icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
         case 'failed':
-            return { text: 'Failed', icon: 'ri-close-circle-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
+            return { text: t('statusFailed'), icon: 'ri-close-circle-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
         default:
-            return { text: 'Unknown', icon: 'ri-question-line', badgeClass: 'bg-gray-100 text-gray-800', rowClass: '' };
+            return { text: t('statusUnknown'), icon: 'ri-question-line', badgeClass: 'bg-gray-100 text-gray-800', rowClass: '' };
     }
 }
 
@@ -351,7 +351,7 @@ function updateNodaPagination(paginationInfo) {
     const nextBtn = document.getElementById('nodaNextPage');
     
     if (!paginationInfo || paginationInfo.totalItems === 0) {
-        pageInfo.textContent = 'No items to display';
+        pageInfo.textContent = t('noItemsToDisplay');
         pageNumbers.innerHTML = '';
         prevBtn.disabled = true;
         nextBtn.disabled = true;
@@ -432,7 +432,7 @@ function updateNodaFilterOptions(options) {
     // Update part number filter
     const partNumberFilter = document.getElementById('nodaPartNumberFilter');
     const currentPartNumber = partNumberFilter.value;
-    partNumberFilter.innerHTML = '<option value="">All Part Numbers</option>';
+    partNumberFilter.innerHTML = `<option value="">${t('allPartNumbers')}</option>`;
     options.partNumbers.forEach(partNumber => {
         const option = document.createElement('option');
         option.value = partNumber;
@@ -444,7 +444,7 @@ function updateNodaFilterOptions(options) {
     // Update back number filter
     const backNumberFilter = document.getElementById('nodaBackNumberFilter');
     const currentBackNumber = backNumberFilter.value;
-    backNumberFilter.innerHTML = '<option value="">All Back Numbers</option>';
+    backNumberFilter.innerHTML = `<option value="">${t('allBackNumbers')}</option>`;
     options.backNumbers.forEach(backNumber => {
         const option = document.createElement('option');
         option.value = backNumber;
@@ -768,7 +768,7 @@ function showAutoGenerationNotification(fieldName, value) {
     notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-pulse';
     notification.innerHTML = `
         <i class="ri-information-line mr-1"></i>
-        Auto-generated ${fieldName}: ${value}
+        ${t('autoGenerated')} ${fieldName}: ${value}
     `;
     
     document.body.appendChild(notification);
@@ -814,7 +814,7 @@ async function checkModalInventoryAvailability() {
                 resultDiv.innerHTML = `
                     <span class="${isEnough ? 'text-green-600' : 'text-red-600'}">
                         <i class="ri-${isEnough ? 'checkbox-circle' : 'error-warning'}-line mr-1"></i>
-                        Available: ${available} ${quantity > 0 ? `(${isEnough ? 'Sufficient' : 'Insufficient'})` : ''}
+                        ${t('availableQuantity')}: ${available} ${quantity > 0 ? `(${isEnough ? t('sufficient') : t('insufficient')})` : ''}
                     </span>
                 `;
                 
@@ -830,7 +830,7 @@ async function checkModalInventoryAvailability() {
                     }
                 }
             } else {
-                resultDiv.innerHTML = '<span class="text-red-600"><i class="ri-error-warning-line mr-1"></i>Not found in inventory</span>';
+                resultDiv.innerHTML = `<span class="text-red-600"><i class="ri-error-warning-line mr-1"></i>${t('itemNotFoundInInventory')}</span>`;
                 const backNumberInput = document.getElementById('modalNodaBackNumber');
                 backNumberInput.classList.remove('border-green-500');
                 backNumberInput.classList.add('border-red-500');
@@ -838,7 +838,7 @@ async function checkModalInventoryAvailability() {
         }
     } catch (error) {
         console.error('Error checking inventory:', error);
-        resultDiv.innerHTML = '<span class="text-red-600"><i class="ri-error-warning-line mr-1"></i>Error checking inventory</span>';
+        resultDiv.innerHTML = `<span class="text-red-600"><i class="ri-error-warning-line mr-1"></i>${t('errorCheckingInventory')}</span>`;
     }
 }
 
@@ -904,14 +904,14 @@ async function handleNodaAddFormSubmit(event) {
         console.log('📦 Inventory check result:', inventoryResult);
         
         if (!inventoryResult.success) {
-            alert('❌ Inventory Error: Item not found in inventory database.\n\nPlease check the back number and try again.');
+            alert(t('alertInventoryError'));
             showFieldError('modalNodaBackNumber', 'Not found in inventory');
             return false;
         }
         
         const available = inventoryResult.inventory.runningQuantity;
         if (available < quantity) {
-            alert(`❌ Insufficient Inventory!\n\nRequested: ${quantity}\nAvailable: ${available}\n\nPlease reduce the quantity or check inventory levels.`);
+            alert(`${t('alertInsufficientInventory')}\n\n${t('alertRequested')} ${quantity}\n${t('alertAvailable')} ${available}\n\n${t('alertReduceQuantity')}`);
             showFieldError('modalNodaQuantity', 'Insufficient inventory');
             return false;
         }
@@ -920,7 +920,7 @@ async function handleNodaAddFormSubmit(event) {
         
     } catch (error) {
         console.error('❌ Error checking inventory:', error);
-        alert('❌ Error checking inventory: ' + error.message);
+        alert(t('alertErrorCheckingInventory') + error.message);
         return false;
     }
     
@@ -962,7 +962,7 @@ async function handleNodaAddFormSubmit(event) {
         
         if (result.success) {
             // Show success message with request details
-            alert(`✅ Request Created Successfully!\n\nRequest Number: ${result.data.requestNumber}\nPart Number: ${partNumber}\nBack Number: ${backNumber}\nQuantity: ${quantity}`);
+            alert(`${t('alertRequestCreatedSuccess')}\n\n${t('alertRequestNumber')} ${result.data.requestNumber}\n${t('partNumber')}: ${partNumber}\n${t('backNumber')}: ${backNumber}\n${t('quantity')}: ${quantity}`);
             
             // Close modal and refresh only the NODA data (not the entire page)
             closeNodaAddModal();
@@ -970,12 +970,12 @@ async function handleNodaAddFormSubmit(event) {
             console.log('✅ NODA data refreshed');
         } else {
             console.error('❌ Request creation failed:', result.error);
-            alert('❌ Error creating request: ' + (result.error || 'Unknown error'));
+            alert(t('alertErrorCreatingRequest') + (result.error || t('unknownError')));
         }
         
     } catch (error) {
         console.error('❌ Error creating request:', error);
-        alert('❌ Error creating request: ' + error.message);
+        alert(t('alertErrorCreatingRequest') + error.message);
     } finally {
         // Re-enable submit button
         submitBtn.disabled = false;
@@ -1387,15 +1387,15 @@ window.exportNodaData = async function() {
             if (result.success) {
                 downloadNodaCsv(result.data);
             } else {
-                alert('Error exporting data: ' + result.error);
+                alert(t('alertErrorExportingData') + result.error);
             }
         } else {
-            alert('Error exporting data');
+            alert(t('alertErrorExportingData'));
         }
         
     } catch (error) {
         console.error('Error exporting data:', error);
-        alert('Error exporting data: ' + error.message);
+        alert(t('alertErrorExportingData') + error.message);
     }
 };
 
@@ -1404,7 +1404,7 @@ window.exportNodaData = async function() {
  */
 function downloadNodaCsv(data) {
     if (data.length === 0) {
-        alert('No data to export');
+        alert(t('alertNoDataToExport'));
         return;
     }
     
@@ -1456,13 +1456,13 @@ window.openNodaDetail = async function(requestId) {
             if (result.success) {
                 showNodaDetailModal(result.data, false); // false = view mode
             } else {
-                alert('Error loading request details: ' + result.error);
+                alert(t('alertErrorLoadingRequestDetails') + result.error);
             }
         }
         
     } catch (error) {
         console.error('Error loading request details:', error);
-        alert('Error loading request details: ' + error.message);
+        alert(t('alertErrorLoadingRequestDetails') + error.message);
     }
 };
 
@@ -1487,13 +1487,13 @@ window.editNodaRequest = async function(requestId) {
             if (result.success) {
                 showNodaDetailModal(result.data, true); // true = edit mode
             } else {
-                alert('Error loading request details: ' + result.error);
+                alert(t('alertErrorLoadingRequestDetails') + result.error);
             }
         }
         
     } catch (error) {
         console.error('Error loading request details:', error);
-        alert('Error loading request details: ' + error.message);
+        alert(t('alertErrorLoadingRequestDetails') + error.message);
     }
 };
 
@@ -1871,12 +1871,12 @@ window.saveNodaRequest = async function(requestId) {
     
     // Validation
     if (!updatedData.品番 || !updatedData.背番号 || !updatedData.date || !updatedData.quantity) {
-        alert('Please fill in all fields');
+        alert(t('alertFillAllFields'));
         return;
     }
     
     if (updatedData.quantity <= 0) {
-        alert('Quantity must be greater than 0');
+        alert(t('alertQuantityGreaterThanZero'));
         return;
     }
     
@@ -1896,16 +1896,16 @@ window.saveNodaRequest = async function(requestId) {
         const result = await response.json();
         
         if (result.success) {
-            alert('Request updated successfully!');
+            alert(t('alertRequestUpdatedSuccess'));
             closeNodaModal();
             loadNodaData();
         } else {
-            alert('Error updating request: ' + (result.error || 'Unknown error'));
+            alert(t('alertErrorUpdatingRequest') + (result.error || t('unknownError')));
         }
         
     } catch (error) {
         console.error('Error updating request:', error);
-        alert('Error updating request: ' + error.message);
+        alert(t('alertErrorUpdatingRequest') + error.message);
     }
 };
 
@@ -1913,7 +1913,7 @@ window.saveNodaRequest = async function(requestId) {
  * Delete NODA request
  */
 window.deleteNodaRequest = async function(requestId) {
-    if (!confirm('Are you sure you want to delete this request?')) {
+    if (!confirm(t('alertConfirmDeleteRequest'))) {
         return;
     }
     
@@ -1937,15 +1937,15 @@ window.deleteNodaRequest = async function(requestId) {
         const result = await response.json();
         
         if (result.success) {
-            alert('Request deleted successfully!');
+            alert(t('alertRequestDeletedSuccess'));
             loadNodaData();
         } else {
-            alert('Error deleting request: ' + (result.error || 'Unknown error'));
+            alert(t('alertErrorDeletingRequest') + (result.error || t('unknownError')));
         }
         
     } catch (error) {
         console.error('Error deleting request:', error);
-        alert('Error deleting request: ' + error.message);
+        alert(t('alertErrorDeletingRequest') + error.message);
     }
 };
 
@@ -2137,19 +2137,19 @@ async function addItemToCart() {
     
     // Validation
     if (!partNumber || !backNumber || !quantity || !pickupDate) {
-        alert('Please fill in all fields');
+        alert(t('alertFillAllFields'));
         return;
     }
     
     if (quantity <= 0) {
-        alert('Quantity must be greater than 0');
+        alert(t('alertQuantityGreaterThanZero'));
         return;
     }
     
     // Check if item already exists in cart
     const existingItemIndex = nodaCart.findIndex(item => item.背番号 === backNumber);
     if (existingItemIndex !== -1) {
-        if (confirm(`Item ${backNumber} already exists in cart. Do you want to update the quantity?`)) {
+        if (confirm(t('alertItemExistsInCart').replace('{backNumber}', backNumber))) {
             nodaCart[existingItemIndex].quantity = quantity;
             nodaCart[existingItemIndex].品番 = partNumber; // Update part number in case it changed
         } else {
@@ -2172,13 +2172,13 @@ async function addItemToCart() {
             const result = await response.json();
             
             if (!result.success || !result.inventory) {
-                alert('Item not found in inventory');
+                alert(t('alertItemNotFoundInInventory'));
                 return;
             }
             
             const availableQuantity = result.inventory.availableQuantity || 0;
             if (availableQuantity < quantity) {
-                alert(`Insufficient inventory. Available: ${availableQuantity}, Requested: ${quantity}`);
+                alert(`${t('alertInsufficientInventory')} ${t('alertAvailable')}: ${availableQuantity}, ${t('alertRequested')}: ${quantity}`);
                 return;
             }
             
@@ -2192,7 +2192,7 @@ async function addItemToCart() {
             });
         } catch (error) {
             console.error('Error checking inventory:', error);
-            alert('Error checking inventory. Please try again.');
+            alert(t('alertErrorCheckingInventoryTryAgain'));
             return;
         }
     }
@@ -2203,18 +2203,18 @@ async function addItemToCart() {
     resetModalForm();
     
     // Show success message
-    showToast(`Item ${backNumber} added to cart successfully!`, 'success');
+    showToast(t('alertItemAddedToCart').replace('{backNumber}', backNumber), 'success');
 }
 
 /**
  * Remove item from cart
  */
 function removeFromCart(backNumber) {
-    if (confirm(`Are you sure you want to remove ${backNumber} from the cart?`)) {
+    if (confirm(t('alertConfirmRemoveFromCart').replace('{backNumber}', backNumber))) {
         nodaCart = nodaCart.filter(item => item.背番号 !== backNumber);
         saveCartToStorage();
         updateCartDisplay();
-        showToast(`Item ${backNumber} removed from cart`, 'info');
+        showToast(t('alertItemRemovedFromCart').replace('{backNumber}', backNumber), 'info');
     }
 }
 
@@ -2226,8 +2226,8 @@ function updateCartDisplay() {
     const cartItemCount = document.getElementById('cartItemCount');
     const proceedToReviewBtn = document.getElementById('proceedToReviewBtn');
     
-    // Update item count
-    cartItemCount.textContent = `${nodaCart.length} items`;
+    // Update item count - using innerHTML to preserve the data-i18n structure
+    cartItemCount.innerHTML = `<span>${nodaCart.length}</span> <span data-i18n="items">${t('items')}</span>`;
     
     // Enable/disable proceed button
     proceedToReviewBtn.disabled = nodaCart.length === 0;
@@ -2265,13 +2265,13 @@ function updateCartDisplay() {
  */
 function proceedToReview() {
     if (nodaCart.length === 0) {
-        alert('Please add at least one item to the cart');
+        alert(t('alertAddAtLeastOneItem'));
         return;
     }
     
     const pickupDate = document.getElementById('bulkPickupDate').value;
     if (!pickupDate) {
-        alert('Please select a pickup date');
+        alert(t('alertSelectPickupDate'));
         return;
     }
     
@@ -2372,13 +2372,13 @@ async function submitBulkRequest() {
     const backToReviewBtn = document.getElementById('backToReviewBtn');
     
     if (nodaCart.length === 0) {
-        alert('No items in cart to submit');
+        alert(t('alertNoItemsToSubmit'));
         return;
     }
     
     const pickupDate = document.getElementById('bulkPickupDate').value;
     if (!pickupDate) {
-        alert('Please select a pickup date');
+        alert(t('alertSelectPickupDate'));
         return;
     }
     
@@ -2422,17 +2422,17 @@ async function submitBulkRequest() {
             closeNodaAddModal();
             
             // Show success message
-            alert(`Bulk request submitted successfully!\nRequest Number: ${result.bulkRequestNumber}\nProcessed Items: ${result.processedItems}\nFailed Items: ${result.failedItems}`);
+            alert(`${t('alertBulkRequestSubmitted')}\n${t('alertRequestNumber')}: ${result.bulkRequestNumber}\n${t('alertProcessedItems')}: ${result.processedItems}\n${t('alertFailedItems')}: ${result.failedItems}`);
             
             // Reload data
             loadNodaData();
         } else {
-            throw new Error(result.error || 'Failed to submit bulk request');
+            throw new Error(result.error || t('alertFailedSubmitBulkRequest'));
         }
         
     } catch (error) {
         console.error('Error submitting bulk request:', error);
-        alert('Error submitting bulk request: ' + error.message);
+        alert(t('alertErrorSubmittingBulkRequest') + error.message);
     } finally {
         // Hide progress
         submitProgress.classList.add('hidden');
@@ -2811,7 +2811,7 @@ window.updateLineItemStatus = async function(requestId, lineNumber, newStatus) {
         
     } catch (error) {
         console.error('Error updating line item status:', error);
-        alert('Error updating line item status: ' + error.message);
+        alert(t('alertErrorUpdatingLineItem') + error.message);
     }
 };
 
@@ -2819,7 +2819,7 @@ window.updateLineItemStatus = async function(requestId, lineNumber, newStatus) {
  * Mark line item as completed
  */
 window.markLineItemCompleted = async function(requestId, lineNumber) {
-    if (confirm(`Mark line item ${lineNumber} as completed?`)) {
+    if (confirm(t('alertMarkLineItemCompleted').replace('{lineNumber}', lineNumber))) {
         await updateLineItemStatus(requestId, lineNumber, 'completed');
     }
 };
@@ -3090,19 +3090,19 @@ window.addSingleItemToRequest = function(requestId) {
     
     // Validation
     if (!partNumber || !backNumber || !quantity) {
-        alert('Please fill in all fields');
+        alert(t('alertFillAllFields'));
         return;
     }
     
     if (quantity <= 0) {
-        alert('Quantity must be greater than 0');
+        alert(t('alertQuantityGreaterThanZero'));
         return;
     }
     
     // Check if item already exists in edit cart
     const existingItemIndex = editCart.findIndex(item => item.背番号 === backNumber);
     if (existingItemIndex !== -1) {
-        if (confirm(`Item ${backNumber} already exists in edit cart. Do you want to update the quantity?`)) {
+        if (confirm(t('alertItemExistsInEditCart').replace('{backNumber}', backNumber))) {
             editCart[existingItemIndex].quantity = quantity;
             editCart[existingItemIndex].品番 = partNumber;
         } else {
@@ -3132,7 +3132,7 @@ function updateEditCartDisplay() {
     const cartItemsList = document.getElementById('editCartItemsList');
     const cartItemCount = document.getElementById('editCartItemCount');
     
-    cartItemCount.textContent = `(${editCart.length} items)`;
+    cartItemCount.textContent = `(${editCart.length} ${t('items')})`;
     
     if (editCart.length === 0) {
         cartDiv.classList.add('hidden');
@@ -3161,10 +3161,10 @@ function updateEditCartDisplay() {
  * Remove item from edit cart
  */
 window.removeFromEditCart = function(backNumber) {
-    if (confirm(`Remove ${backNumber} from edit cart?`)) {
+    if (confirm(t('alertConfirmRemoveFromEditCart').replace('{backNumber}', backNumber))) {
         editCart = editCart.filter(item => item.背番号 !== backNumber);
         updateEditCartDisplay();
-        showToast(`Item ${backNumber} removed from edit cart`, 'info');
+        showToast(t('alertItemRemovedFromEditCart').replace('{backNumber}', backNumber), 'info');
     }
 };
 
@@ -3172,10 +3172,10 @@ window.removeFromEditCart = function(backNumber) {
  * Clear edit cart
  */
 window.clearEditCart = function() {
-    if (confirm('Clear all items from edit cart?')) {
+    if (confirm(t('alertConfirmClearEditCart'))) {
         editCart = [];
         updateEditCartDisplay();
-        showToast('Edit cart cleared', 'info');
+        showToast(t('alertEditCartCleared'), 'info');
     }
 };
 
@@ -3184,7 +3184,7 @@ window.clearEditCart = function() {
  */
 window.submitAddedItems = async function(requestId) {
     if (editCart.length === 0) {
-        alert('No items in edit cart to add');
+        alert(t('alertNoItemsInEditCart'));
         return;
     }
     
@@ -3224,17 +3224,17 @@ window.submitAddedItems = async function(requestId) {
             closeNodaModal();
             
             // Show success message
-            alert(`Items added successfully!\nAdded Items: ${result.addedItems}\nFailed Items: ${result.failedItems || 0}`);
+            alert(`${t('alertItemsAddedSuccess')}\n${t('alertAddedItems')}: ${result.addedItems}\n${t('alertFailedItems')}: ${result.failedItems || 0}`);
             
             // Reload data
             loadNodaData();
         } else {
-            throw new Error(result.error || 'Failed to add items to request');
+            throw new Error(result.error || t('alertFailedAddItems'));
         }
         
     } catch (error) {
         console.error('Error adding items to request:', error);
-        alert('Error adding items to request: ' + error.message);
+        alert(t('alertErrorAddingItems') + error.message);
     }
 };
 
@@ -3253,7 +3253,7 @@ window.handleEditCsvUpload = function(input) {
     if (!file) return;
     
     if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-        alert('Please select a CSV file');
+        alert(t('alertSelectCsvFile'));
         return;
     }
     
@@ -3272,7 +3272,7 @@ async function parseEditCsvAndAddToCart(csvData) {
         const lines = csvData.trim().split('\n');
         
         if (lines.length === 0) {
-            alert('CSV file is empty');
+            alert(t('alertCsvFileEmpty'));
             return;
         }
         
@@ -3287,7 +3287,7 @@ async function parseEditCsvAndAddToCart(csvData) {
             isBackNumberFormat = false;
             console.log('📊 Detected 品番-based CSV format');
         } else {
-            alert('Invalid CSV format. Header must contain either 品番 or 背番号');
+            alert(t('alertInvalidCsvFormat'));
             return;
         }
         
@@ -3373,10 +3373,10 @@ async function parseEditCsvAndAddToCart(csvData) {
         }
         
         updateEditCartDisplay();
-        showToast(`CSV processed: ${successCount} items added, ${failCount} failed`, successCount > 0 ? 'success' : 'error');
+        showToast(t('alertCsvProcessed').replace('{success}', successCount).replace('{failed}', failCount), successCount > 0 ? 'success' : 'error');
         
     } catch (error) {
         console.error('Error parsing CSV:', error);
-        alert('Error parsing CSV file: ' + error.message);
+        alert(t('alertErrorParsingCsv') + error.message);
     }
 }

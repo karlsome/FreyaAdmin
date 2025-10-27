@@ -3,7 +3,7 @@
  */
 function handleMasterCSVUpload() {
   const file = document.getElementById("csvUploadInput").files[0];
-  if (!file) return alert("No file selected");
+  if (!file) return alert(t('noFileSelected'));
 
   const reader = new FileReader();
   reader.onload = function (e) {
@@ -22,7 +22,7 @@ function handleMasterCSVUpload() {
         displayCSVPreview(results.data);
       },
       error: function (err) {
-        alert("CSV parsing error: " + err.message);
+        alert(`${t('csvParsingError')}: ${err.message}`);
       }
     });
   };
@@ -38,7 +38,7 @@ function displayCSVPreview(data) {
   const keys = Object.keys(preview[0]);
 
   const html = `
-    <p class="text-sm text-gray-600 mb-2">Preview (first 5 rows):</p>
+    <p class="text-sm text-gray-600 mb-2">${t('csvPreviewTitle')}</p>
     <table class="w-full text-sm border mb-2">
       <thead class="bg-gray-100">
         <tr>${keys.map(k => `<th class="px-2 py-1">${k}</th>`).join("")}</tr>
@@ -49,7 +49,7 @@ function displayCSVPreview(data) {
         `).join("")}
       </tbody>
     </table>
-    <button class="bg-green-500 text-white px-4 py-2 rounded" onclick="confirmMasterInsert()">Insert All to DB</button>
+    <button class="bg-green-500 text-white px-4 py-2 rounded" onclick="confirmMasterInsert()">${t('insertAllToDatabase')}</button>
   `;
 
   window._csvMasterRecords = data;
@@ -65,7 +65,7 @@ async function confirmMasterInsert() {
   const role = currentUser.role || "guest";
   const username = currentUser.username;
 
-  if (!records?.length) return alert("No data to insert");
+  if (!records?.length) return alert(t('noDataToInsert'));
 
   // Get current tab to determine which collection to insert into
   // Map materialDB tab to materialMasterDB2 collection
@@ -105,7 +105,7 @@ async function confirmMasterInsert() {
     }
   }
 
-  alert(`✅ Success: ${successCount} inserted\n❌ Failed: ${failCount}`);
+  alert(t('insertSuccessMessage').replace('{successCount}', successCount).replace('{failCount}', failCount));
   // Reload data without switching tabs by calling loadMasterDB if available
   if (typeof loadMasterDB === 'function') {
     loadMasterDB();
@@ -219,7 +219,7 @@ function showMasterSidebar(data) {
       const result = await res.json();
       if (!res.ok || !result.success) throw new Error(result.error || "Failed to update");
 
-      alert("Updated successfully.");
+      alert(t('updatedSuccessfully'));
       closeMasterSidebar();
       // Reload data without switching tabs by calling loadMasterDB if available
       if (typeof loadMasterDB === 'function') {
@@ -228,7 +228,7 @@ function showMasterSidebar(data) {
         loadPage("masterDB");
       }
     } catch (err) {
-      alert("Update failed.");
+      alert(t('updateFailed'));
       console.error(err);
     }
   };
@@ -263,11 +263,11 @@ document.getElementById("masterImageUploadInput").addEventListener("change", asy
         const result = await res.json();
         if (!res.ok || !result.imageURL) throw new Error(result.error || "Image upload failed");
 
-        alert("Image uploaded successfully.");
+        alert(t('imageUploadedSuccessfully'));
         data.imageURL = result.imageURL;
         showMasterSidebar(data); // Refresh
       } catch (err) {
-        alert("Image upload failed.");
+        alert(t('imageUploadFailed'));
         console.error(err);
       }
     };
@@ -323,7 +323,7 @@ async function triggerMasterImageUpload(recordId) {
         })
       });
 
-      alert("Image uploaded successfully!");
+      alert(t('imageUploadedSuccessfully'));
       // Reload data without switching tabs by calling loadMasterDB if available
       if (typeof loadMasterDB === 'function') {
         loadMasterDB();
@@ -333,7 +333,7 @@ async function triggerMasterImageUpload(recordId) {
 
     } catch (err) {
       console.error("Firebase upload failed:", err);
-      alert("Upload failed.");
+      alert(t('uploadFailed'));
     }
   };
 }

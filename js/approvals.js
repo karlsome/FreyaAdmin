@@ -13,7 +13,7 @@ async function loadFactoryOptions(collection = 'kensaDB') {
         }
 
         // Show loading state
-        factoryFilter.innerHTML = '<option value="">Loading factories...</option>';
+        factoryFilter.innerHTML = `<option value="">${t('loadingFactories')}</option>`;
         factoryFilter.disabled = true;
 
         // Fetch unique factories from the API - use BASE_URL for server communication
@@ -66,8 +66,8 @@ async function loadFactoryOptions(collection = 'kensaDB') {
         const factoryFilter = document.getElementById('factoryFilter');
         if (factoryFilter) {
             factoryFilter.innerHTML = `
-                <option value="" data-i18n="allFactories">All Factories</option>
-                <option value="" disabled>Error loading factories</option>
+                <option value="" data-i18n="allFactories">${t('allFactories')}</option>
+                <option value="" disabled>${t('errorLoadingFactories')}</option>
             `;
             factoryFilter.disabled = false;
         }

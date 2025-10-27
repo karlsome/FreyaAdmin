@@ -2671,10 +2671,10 @@ function loadPage(page) {
                                 <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="status">Status</label>
                                 <select id="nodaStatusFilter" class="w-full p-2 border border-gray-300 rounded-md">
                                     <option value="" data-i18n="allStatuses">All Statuses</option>
-                                    <option value="pending">Pending</option>
-                                    <option value="active">Active</option>
-                                    <option value="complete">Complete</option>
-                                    <option value="failed">Failed</option>
+                                    <option value="pending" data-i18n="statusPending">Pending</option>
+                                    <option value="active" data-i18n="statusActive">Active</option>
+                                    <option value="complete" data-i18n="statusComplete">Complete</option>
+                                    <option value="failed" data-i18n="statusFailed">Failed</option>
                                 </select>
                             </div>
                             <div>
@@ -2704,7 +2704,7 @@ function loadPage(page) {
                             </div>
                         </div>
                         <div class="mt-4">
-                            <input type="text" id="nodaSearchInput" placeholder="Search requests..." class="w-full p-2 border border-gray-300 rounded-md">
+                            <input type="text" id="nodaSearchInput" data-i18n-placeholder="searchRequests" placeholder="Search requests..." class="w-full p-2 border border-gray-300 rounded-md">
                         </div>
                     </div>
 
@@ -2716,7 +2716,7 @@ function loadPage(page) {
                                     <i class="ri-time-line text-2xl text-yellow-600"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Pending</p>
+                                    <p class="text-sm text-gray-600" data-i18n="statusPending">Pending</p>
                                     <p id="nodaPendingCount" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -2727,7 +2727,7 @@ function loadPage(page) {
                                     <i class="ri-play-line text-2xl text-blue-600"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Active</p>
+                                    <p class="text-sm text-gray-600" data-i18n="statusActive">Active</p>
                                     <p id="nodaActiveCount" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -2738,7 +2738,7 @@ function loadPage(page) {
                                     <i class="ri-checkbox-circle-line text-2xl text-green-600"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Complete</p>
+                                    <p class="text-sm text-gray-600" data-i18n="statusComplete">Complete</p>
                                     <p id="nodaCompleteCount" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -2749,7 +2749,7 @@ function loadPage(page) {
                                     <i class="ri-close-circle-line text-2xl text-red-600"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Failed</p>
+                                    <p class="text-sm text-gray-600" data-i18n="statusFailed">Failed</p>
                                     <p id="nodaFailedCount" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -2759,14 +2759,14 @@ function loadPage(page) {
                     <!-- Add New Request Button (Role-based) -->
                     <div id="nodaAddRequestSection" class="flex justify-end" style="display: none;">
                         <button onclick="openNodaAddModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                            <i class="ri-add-line mr-2"></i>New Request
+                            <i class="ri-add-line mr-2"></i><span data-i18n="newRequest">New Request</span>
                         </button>
                     </div>
 
                     <!-- Data Table -->
                     <div class="bg-white rounded-lg border border-gray-200">
                         <div class="p-4 border-b border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900">Picking Requests</h3>
+                            <h3 class="text-lg font-semibold text-gray-900" data-i18n="pickingRequests">Picking Requests</h3>
                         </div>
                         
                         <div class="overflow-x-auto">
@@ -2810,7 +2810,7 @@ function loadPage(page) {
                         <div class="bg-white rounded-lg max-w-4xl w-full max-h-screen overflow-y-auto">
                             <div class="p-6 border-b border-gray-200">
                                 <div class="flex items-center justify-between">
-                                    <h3 class="text-lg font-semibold">Picking Request Details</h3>
+                                    <h3 class="text-lg font-semibold" data-i18n="pickingRequestDetails">Picking Request Details</h3>
                                     <button onclick="closeNodaModal()" class="text-gray-400 hover:text-gray-600">
                                         <i class="ri-close-line text-xl"></i>
                                     </button>
@@ -2829,7 +2829,7 @@ function loadPage(page) {
                         <div class="bg-white rounded-lg max-w-4xl w-full max-h-screen overflow-y-auto">
                             <div class="p-6 border-b border-gray-200">
                                 <div class="flex items-center justify-between">
-                                    <h3 class="text-lg font-semibold">Bulk Picking Request</h3>
+                                    <h3 class="text-lg font-semibold" data-i18n="bulkPickingRequest">Bulk Picking Request</h3>
                                     <button onclick="closeNodaAddModal()" class="text-gray-400 hover:text-gray-600">
                                         <i class="ri-close-line text-xl"></i>
                                     </button>
@@ -2838,17 +2838,17 @@ function loadPage(page) {
                                 <div class="mt-4 flex items-center space-x-4">
                                     <div id="step1Indicator" class="flex items-center text-blue-600">
                                         <div class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-medium">1</div>
-                                        <span class="ml-2 text-sm font-medium">Add Items</span>
+                                        <span class="ml-2 text-sm font-medium" data-i18n="addItems">Add Items</span>
                                     </div>
                                     <div class="flex-1 h-px bg-gray-300"></div>
                                     <div id="step2Indicator" class="flex items-center text-gray-400">
                                         <div class="w-8 h-8 bg-gray-300 text-white rounded-full flex items-center justify-center text-sm font-medium">2</div>
-                                        <span class="ml-2 text-sm font-medium">Review Cart</span>
+                                        <span class="ml-2 text-sm font-medium" data-i18n="reviewCart">Review Cart</span>
                                     </div>
                                     <div class="flex-1 h-px bg-gray-300"></div>
                                     <div id="step3Indicator" class="flex items-center text-gray-400">
                                         <div class="w-8 h-8 bg-gray-300 text-white rounded-full flex items-center justify-center text-sm font-medium">3</div>
-                                        <span class="ml-2 text-sm font-medium">Submit</span>
+                                        <span class="ml-2 text-sm font-medium" data-i18n="submit">Submit</span>
                                     </div>
                                 </div>
                             </div>
@@ -2859,7 +2859,7 @@ function loadPage(page) {
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <!-- Shared Pickup Date -->
                                         <div class="md:col-span-2">
-                                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                            <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="pickupDateAllItems">
                                                 Pickup Date (All Items) *
                                             </label>
                                             <input type="date" id="bulkPickupDate" class="w-full p-3 border border-gray-300 rounded-md" required>
@@ -2867,24 +2867,24 @@ function loadPage(page) {
                                     </div>
                                     
                                     <div class="border-t pt-6">
-                                        <h4 class="text-md font-medium text-gray-900 mb-4">Add Item to Cart</h4>
+                                        <h4 class="text-md font-medium text-gray-900 mb-4" data-i18n="addItemToCart">Add Item to Cart</h4>
                                         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                                             <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">品番 *</label>
-                                                <input type="text" id="modalNodaPartNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter part number">
+                                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="partNumber">品番 *</label>
+                                                <input type="text" id="modalNodaPartNumber" class="w-full p-3 border border-gray-300 rounded-md" data-i18n-placeholder="enterPartNumber" placeholder="Enter part number">
                                             </div>
                                             <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">背番号 *</label>
-                                                <input type="text" id="modalNodaBackNumber" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter back number">
+                                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="backNumber">背番号 *</label>
+                                                <input type="text" id="modalNodaBackNumber" class="w-full p-3 border border-gray-300 rounded-md" data-i18n-placeholder="enterBackNumber" placeholder="Enter back number">
                                                 <div id="modalInventoryCheckResult" class="mt-1 text-sm"></div>
                                             </div>
                                             <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Quantity *</label>
-                                                <input type="number" id="modalNodaQuantity" min="1" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Qty">
+                                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="quantity">Quantity *</label>
+                                                <input type="number" id="modalNodaQuantity" min="1" class="w-full p-3 border border-gray-300 rounded-md" data-i18n-placeholder="qtyPlaceholder" placeholder="Qty">
                                             </div>
                                             <div class="flex items-end">
                                                 <button type="button" onclick="addItemToCart()" class="w-full px-4 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-                                                    <i class="ri-add-line mr-2"></i>Add to Cart
+                                                    <i class="ri-add-line mr-2"></i><span data-i18n="addToCart">Add to Cart</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -2893,23 +2893,23 @@ function loadPage(page) {
                                     <!-- Cart Items Display -->
                                     <div class="border-t pt-6">
                                         <div class="flex items-center justify-between mb-4">
-                                            <h4 class="text-md font-medium text-gray-900">Cart Items</h4>
-                                            <span id="cartItemCount" class="text-sm text-gray-500">0 items</span>
+                                            <h4 class="text-md font-medium text-gray-900" data-i18n="cartItems">Cart Items</h4>
+                                            <span id="cartItemCount" class="text-sm text-gray-500"><span>0</span> <span data-i18n="items">items</span></span>
                                         </div>
                                         <div id="cartItemsList" class="space-y-2 max-h-40 overflow-y-auto">
                                             <div class="text-center text-gray-500 py-8">
                                                 <i class="ri-shopping-cart-line text-4xl text-gray-300"></i>
-                                                <p class="mt-2 text-sm">No items in cart</p>
+                                                <p class="mt-2 text-sm" data-i18n="noItemsInCart">No items in cart</p>
                                             </div>
                                         </div>
                                     </div>
 
                                     <div class="flex justify-between pt-6 border-t">
                                         <button type="button" onclick="closeNodaAddModal()" class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-                                            Cancel
+                                            <span data-i18n="cancel">Cancel</span>
                                         </button>
                                         <button type="button" id="proceedToReviewBtn" onclick="proceedToReview()" disabled class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-300">
-                                            Review Cart <i class="ri-arrow-right-line ml-2"></i>
+                                            <span data-i18n="proceedToReview">Review Cart</span> <i class="ri-arrow-right-line ml-2"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -2917,21 +2917,21 @@ function loadPage(page) {
                                 <!-- Step 2: Review Cart -->
                                 <div id="reviewCartStep" class="space-y-6 hidden">
                                     <div class="bg-gray-50 p-4 rounded-lg">
-                                        <h4 class="text-md font-medium text-gray-900 mb-2">Pickup Date</h4>
+                                        <h4 class="text-md font-medium text-gray-900 mb-2" data-i18n="pickupDate">Pickup Date</h4>
                                         <p id="reviewPickupDate" class="text-gray-700"></p>
                                     </div>
                                     
                                     <div>
-                                        <h4 class="text-md font-medium text-gray-900 mb-4">Items to Request</h4>
+                                        <h4 class="text-md font-medium text-gray-900 mb-4" data-i18n="itemsToRequest">Items to Request</h4>
                                         <div class="overflow-x-auto">
                                             <table class="min-w-full border border-gray-200">
                                                 <thead class="bg-gray-50">
                                                     <tr>
-                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">品番</th>
-                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">背番号</th>
-                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Available</th>
-                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="partNumber">品番</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="backNumber">背番号</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="quantity">Quantity</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="available">Available</th>
+                                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase" data-i18n="status">Status</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody id="reviewTableBody" class="bg-white divide-y divide-gray-200">
@@ -2942,10 +2942,10 @@ function loadPage(page) {
 
                                     <div class="flex justify-between pt-6 border-t">
                                         <button type="button" onclick="backToAddItems()" class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-                                            <i class="ri-arrow-left-line mr-2"></i>Back to Add Items
+                                            <i class="ri-arrow-left-line mr-2"></i><span data-i18n="backToAddItems">Back to Add Items</span>
                                         </button>
                                         <button type="button" onclick="proceedToSubmit()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                                            Proceed to Submit <i class="ri-arrow-right-line ml-2"></i>
+                                            <span data-i18n="proceedToSubmit">Proceed to Submit</span> <i class="ri-arrow-right-line ml-2"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -2956,18 +2956,18 @@ function loadPage(page) {
                                         <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                                             <i class="ri-check-line text-2xl text-green-600"></i>
                                         </div>
-                                        <h4 class="text-lg font-medium text-gray-900 mb-2">Ready to Submit</h4>
-                                        <p class="text-gray-600">Your bulk picking request is ready to be submitted.</p>
+                                        <h4 class="text-lg font-medium text-gray-900 mb-2" data-i18n="readyToSubmit">Ready to Submit</h4>
+                                        <p class="text-gray-600" data-i18n="bulkPickingRequestReady">Your bulk picking request is ready to be submitted.</p>
                                     </div>
 
                                     <div class="bg-gray-50 p-4 rounded-lg">
                                         <div class="grid grid-cols-2 gap-4 text-sm">
                                             <div>
-                                                <span class="font-medium text-gray-700">Pickup Date:</span>
+                                                <span class="font-medium text-gray-700" data-i18n="pickupDate">Pickup Date:</span>
                                                 <span id="submitPickupDate" class="text-gray-900"></span>
                                             </div>
                                             <div>
-                                                <span class="font-medium text-gray-700">Total Items:</span>
+                                                <span class="font-medium text-gray-700" data-i18n="totalItems">Total Items:</span>
                                                 <span id="submitTotalItems" class="text-gray-900"></span>
                                             </div>
                                         </div>
@@ -2976,16 +2976,16 @@ function loadPage(page) {
                                     <div id="submitProgress" class="hidden">
                                         <div class="text-center">
                                             <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                                            <p class="mt-2 text-sm text-gray-600">Submitting bulk request...</p>
+                                            <p class="mt-2 text-sm text-gray-600" data-i18n="submittingBulkRequest">Submitting bulk request...</p>
                                         </div>
                                     </div>
 
                                     <div class="flex justify-between pt-6 border-t">
                                         <button type="button" id="backToReviewBtn" onclick="backToReview()" class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-                                            <i class="ri-arrow-left-line mr-2"></i>Back to Review
+                                            <i class="ri-arrow-left-line mr-2"></i><span data-i18n="backToReview">Back to Review</span>
                                         </button>
                                         <button type="button" id="submitBulkRequestBtn" onclick="submitBulkRequest()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                                            <i class="ri-send-plane-line mr-2"></i>Submit Bulk Request
+                                            <i class="ri-send-plane-line mr-2"></i><span data-i18n="submitBulkRequest">Submit Bulk Request</span>
                                         </button>
                                     </div>
                                 </div>
@@ -2998,6 +2998,13 @@ function loadPage(page) {
             // Initialize NODA system
             if (typeof initializeNodaSystem === 'function') {
                 initializeNodaSystem();
+            }
+            
+            // Apply language translations
+            if (typeof applyLanguageEnhanced === 'function') {
+                applyLanguageEnhanced();
+            } else if (typeof applyLanguage === 'function') {
+                applyLanguage();
             }
             break;
 
@@ -3042,7 +3049,7 @@ function loadPage(page) {
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="search">Search</label>
-                                <input type="text" id="inventorySearchInput" class="w-full p-2 border border-gray-300 rounded-md" placeholder="Search inventory...">
+                                <input type="text" id="inventorySearchInput" class="w-full p-2 border border-gray-300 rounded-md" data-i18n-placeholder="searchInventory" placeholder="Search inventory...">
                             </div>
                             <div>
                                 <button onclick="applyInventoryFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
@@ -3060,7 +3067,7 @@ function loadPage(page) {
                                     <i class="ri-archive-line text-blue-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Total Items</p>
+                                    <p class="text-sm text-gray-600" data-i18n="totalItems">Total Items</p>
                                     <p id="inventoryTotalItems" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -3071,7 +3078,7 @@ function loadPage(page) {
                                     <i class="ri-checkbox-circle-line text-green-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Physical Stock</p>
+                                    <p class="text-sm text-gray-600" data-i18n="physicalStock">Physical Stock</p>
                                     <p id="inventoryPhysicalStock" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -3082,7 +3089,7 @@ function loadPage(page) {
                                     <i class="ri-time-line text-yellow-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Reserved Stock</p>
+                                    <p class="text-sm text-gray-600" data-i18n="reservedStock">Reserved Stock</p>
                                     <p id="inventoryReservedStock" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -3093,7 +3100,7 @@ function loadPage(page) {
                                     <i class="ri-check-line text-purple-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Available Stock</p>
+                                    <p class="text-sm text-gray-600" data-i18n="availableStock">Available Stock</p>
                                     <p id="inventoryAvailableStock" class="text-2xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
@@ -3103,7 +3110,7 @@ function loadPage(page) {
                     <!-- Data Table -->
                     <div class="bg-white rounded-lg border border-gray-200">
                         <div class="p-4 border-b border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900">Inventory Items</h3>
+                            <h3 class="text-lg font-semibold text-gray-900" data-i18n="inventoryItems">Inventory Items</h3>
                         </div>
                         
                         <div class="overflow-x-auto">
@@ -3116,7 +3123,7 @@ function loadPage(page) {
                         <div class="px-6 py-4 border-t border-gray-200">
                             <div class="flex items-center justify-between">
                                 <div class="flex items-center space-x-2">
-                                    <label class="text-sm text-gray-500">Items per page</label>
+                                    <label class="text-sm text-gray-500" data-i18n="itemsPerPage">Items per page</label>
                                     <select id="inventoryItemsPerPage" class="border border-gray-300 rounded px-2 py-1 text-sm">
                                         <option value="10">10</option>
                                         <option value="25">25</option>
@@ -3147,7 +3154,7 @@ function loadPage(page) {
                         <div class="bg-white rounded-lg max-w-6xl w-full max-h-screen overflow-y-auto">
                             <div class="p-6 border-b border-gray-200">
                                 <div class="flex items-center justify-between">
-                                    <h3 class="text-lg font-semibold">Inventory Transactions</h3>
+                                    <h3 class="text-lg font-semibold" data-i18n="inventoryTransactions">Inventory Transactions</h3>
                                     <button onclick="closeInventoryTransactionsModal()" class="text-gray-400 hover:text-gray-600">
                                         <i class="ri-close-line text-xl"></i>
                                     </button>
@@ -3166,7 +3173,7 @@ function loadPage(page) {
                         <div class="bg-white rounded-lg max-w-md w-full">
                             <div class="p-6 border-b border-gray-200">
                                 <div class="flex items-center justify-between">
-                                    <h3 class="text-lg font-semibold">Add Inventory</h3>
+                                    <h3 class="text-lg font-semibold" data-i18n="addInventory">Add Inventory</h3>
                                     <button onclick="closeInventoryAddModal()" class="text-gray-400 hover:text-gray-600">
                                         <i class="ri-close-line text-xl"></i>
                                     </button>
@@ -3175,26 +3182,26 @@ function loadPage(page) {
                             <div class="p-6">
                                 <form id="addInventoryForm" class="space-y-4">
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">品番 (Part Number) *</label>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="partNumber">品番 (Part Number) *</label>
                                         <input type="text" id="addInventory品番" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" required>
                                     </div>
                                     
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">背番号 (Back Number) *</label>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="backNumber">背番号 (Back Number) *</label>
                                         <input type="text" id="addInventory背番号" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" required>
                                     </div>
                                     
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Quantity to Add *</label>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="quantityToAdd">Quantity to Add *</label>
                                         <input type="number" id="addInventoryQuantity" min="1" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" required>
                                     </div>
                                     
                                     <div class="flex items-center justify-end space-x-4 pt-4">
                                         <button type="button" onclick="closeInventoryAddModal()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
-                                            Cancel
+                                            <span data-i18n="cancel">Cancel</span>
                                         </button>
                                         <button type="submit" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors">
-                                            <i class="ri-add-line mr-2"></i>Add Inventory
+                                            <i class="ri-add-line mr-2"></i><span data-i18n="addInventory">Add Inventory</span>
                                         </button>
                                     </div>
                                 </form>
@@ -3207,6 +3214,13 @@ function loadPage(page) {
             // Initialize inventory system
             if (typeof initializeInventorySystem === 'function') {
                 initializeInventorySystem();
+            }
+            
+            // Apply language translations
+            if (typeof applyLanguageEnhanced === 'function') {
+                applyLanguageEnhanced();
+            } else if (typeof applyLanguage === 'function') {
+                applyLanguage();
             }
             break;
 

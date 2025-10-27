@@ -15,7 +15,7 @@ async function loadUserTable() {
     renderUserTable(allUsers);
     } catch (err) {
     console.error("Failed to load users:", err);
-    document.getElementById("userTableContainer").innerHTML = `<p class="text-red-600">Failed to load users</p>`;
+    document.getElementById("userTableContainer").innerHTML = `<p class="text-red-600">${t('failedToLoadUsers')}</p>`;
     }
 }
          function renderUserTable(users) {
@@ -29,8 +29,8 @@ async function loadUserTable() {
     <table class="w-full text-sm border">
         <thead class="bg-gray-100">
         <tr>
-            ${headers.map(h => `<th class="px-4 py-2">${h.charAt(0).toUpperCase() + h.slice(1)}</th>`).join("")}
-            <th class='px-4 py-2'>Actions</th>
+            ${headers.map(h => `<th class="px-4 py-2">${t(h)}</th>`).join("")}
+            <th class='px-4 py-2'>${t('actions')}</th>
         </tr>
         </thead>
         <tbody>
@@ -67,7 +67,7 @@ async function loadUserTable() {
                                     `).join('')}
                                 </div>
                                 <select class="border p-1 rounded text-xs" onchange="addFactoryTag('${u._id}', this.value); this.value='';">
-                                    <option value="">工場を追加</option>
+                                    <option value="">${t('addFactory')}</option>
                                     ${["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"].map(f => 
                                         `<option value="${f}">${f}</option>`
                                     ).join("")}
@@ -81,9 +81,9 @@ async function loadUserTable() {
                 </td>
             `).join("")}
             <td class="px-4 py-2" id="actions-${u._id}">
-                <button class="text-blue-600 hover:underline" onclick="startEditingUser('${u._id}')">Edit</button>
-                <button class="ml-2 text-yellow-600 hover:underline" onclick="resetPassword('${u._id}')">Reset Password</button>
-                <button class="ml-2 text-red-600 hover:underline" onclick="deleteUser('${u._id}')">Delete</button>
+                <button class="text-blue-600 hover:underline" onclick="startEditingUser('${u._id}')">${t('edit')}</button>
+                <button class="ml-2 text-yellow-600 hover:underline" onclick="resetPassword('${u._id}')">${t('resetPassword')}</button>
+                <button class="ml-2 text-red-600 hover:underline" onclick="deleteUser('${u._id}')">${t('delete')}</button>
             </td>
             </tr>`;
         }).join("")}

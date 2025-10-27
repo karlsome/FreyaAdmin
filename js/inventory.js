@@ -156,7 +156,7 @@ function renderInventoryTable() {
         container.innerHTML = `
             <div class="p-8 text-center text-gray-500">
                 <i class="ri-inbox-line text-4xl mb-4"></i>
-                <p>No inventory items found matching your criteria.</p>
+                <p>${t('noInventoryItemsFound')}</p>
             </div>
         `;
         return;
@@ -167,24 +167,24 @@ function renderInventoryTable() {
             <thead class="bg-gray-50 border-b">
                 <tr>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('品番')">
-                        品番 ${getInventorySortArrow('品番')}
+                        ${t('partNumber')} ${getInventorySortArrow('品番')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('背番号')">
-                        背番号 ${getInventorySortArrow('背番号')}
+                        ${t('serialNumber')} ${getInventorySortArrow('背番号')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('physicalQuantity')">
-                        Physical Stock ${getInventorySortArrow('physicalQuantity')}
+                        ${t('physicalStock')} ${getInventorySortArrow('physicalQuantity')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('reservedQuantity')">
-                        Reserved Stock ${getInventorySortArrow('reservedQuantity')}
+                        ${t('reservedStock')} ${getInventorySortArrow('reservedQuantity')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('availableQuantity')">
-                        Available Stock ${getInventorySortArrow('availableQuantity')}
+                        ${t('availableStock')} ${getInventorySortArrow('availableQuantity')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('lastUpdated')">
-                        Last Updated ${getInventorySortArrow('lastUpdated')}
+                        ${t('lastUpdated')} ${getInventorySortArrow('lastUpdated')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700">Actions</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('actions')}</th>
                 </tr>
             </thead>
             <tbody>
@@ -218,7 +218,7 @@ function renderInventoryTable() {
                                 ${lastUpdated}
                             </td>
                             <td class="px-4 py-3" onclick="event.stopPropagation()">
-                                <button onclick="openInventoryTransactions('${item.背番号}')" class="text-blue-600 hover:text-blue-800" title="View Transactions">
+                                <button onclick="openInventoryTransactions('${item.背番号}')" class="text-blue-600 hover:text-blue-800" title="${t('viewTransactions')}">
                                     <i class="ri-history-line"></i>
                                 </button>
                             </td>
@@ -277,7 +277,7 @@ function updateInventoryPagination(paginationInfo) {
     const nextBtn = document.getElementById('inventoryNextPage');
     
     if (!paginationInfo || paginationInfo.totalItems === 0) {
-        pageInfo.textContent = 'No items to display';
+        pageInfo.textContent = t('noItemsToDisplay');
         pageNumbers.innerHTML = '';
         prevBtn.disabled = true;
         nextBtn.disabled = true;
@@ -358,7 +358,7 @@ function updateInventoryFilterOptions(options) {
     // Update part number filter
     const partNumberFilter = document.getElementById('inventoryPartNumberFilter');
     const currentPartNumber = partNumberFilter.value;
-    partNumberFilter.innerHTML = '<option value="">All Part Numbers</option>';
+    partNumberFilter.innerHTML = `<option value="">${t('allPartNumbers')}</option>`;
     options.partNumbers.forEach(partNumber => {
         const option = document.createElement('option');
         option.value = partNumber;
@@ -366,11 +366,11 @@ function updateInventoryFilterOptions(options) {
         if (partNumber === currentPartNumber) option.selected = true;
         partNumberFilter.appendChild(option);
     });
-    
+
     // Update back number filter
     const backNumberFilter = document.getElementById('inventoryBackNumberFilter');
     const currentBackNumber = backNumberFilter.value;
-    backNumberFilter.innerHTML = '<option value="">All Back Numbers</option>';
+    backNumberFilter.innerHTML = `<option value="">${t('allBackNumbers')}</option>`;
     options.backNumbers.forEach(backNumber => {
         const option = document.createElement('option');
         option.value = backNumber;
@@ -385,7 +385,7 @@ function updateInventoryFilterOptions(options) {
  */
 function showInventoryLoadingState() {
     const container = document.getElementById('inventoryTableContainer');
-    container.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>Loading inventory...</div>';
+    container.innerHTML = `<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>${t('loadingInventory')}</div>`;
 }
 
 /**
@@ -416,7 +416,7 @@ window.openInventoryTransactions = async function(backNumber) {
         content.innerHTML = `
             <div class="p-8 text-center text-gray-500">
                 <i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>
-                Loading transactions...
+                ${t('loadingTransactions')}
             </div>
         `;
         
@@ -468,7 +468,7 @@ function renderInventoryTransactions(transactions, backNumber) {
         content.innerHTML = `
             <div class="p-8 text-center text-gray-500">
                 <i class="ri-inbox-line text-4xl mb-4"></i>
-                <p>No transactions found for ${backNumber}</p>
+                <p>${t('noTransactionsFound')} ${backNumber}</p>
             </div>
         `;
         return;
@@ -483,41 +483,41 @@ function renderInventoryTransactions(transactions, backNumber) {
         <div class="space-y-6">
             <!-- Current State Summary -->
             <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                <h4 class="text-lg font-semibold text-blue-900 mb-3">Current State - ${backNumber}</h4>
+                <h4 class="text-lg font-semibold text-blue-900 mb-3">${t('currentState')} - ${backNumber}</h4>
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div class="text-center">
-                        <p class="text-sm text-blue-600">品番</p>
+                        <p class="text-sm text-blue-600">${t('partNumber')}</p>
                         <p class="text-lg font-bold text-blue-900">${currentItem.品番}</p>
                     </div>
                     <div class="text-center">
-                        <p class="text-sm text-green-600">Physical Stock</p>
+                        <p class="text-sm text-green-600">${t('physicalStock')}</p>
                         <p class="text-lg font-bold text-green-700">${currentItem.physicalQuantity || 0}</p>
                     </div>
                     <div class="text-center">
-                        <p class="text-sm text-yellow-600">Reserved Stock</p>
+                        <p class="text-sm text-yellow-600">${t('reservedStock')}</p>
                         <p class="text-lg font-bold text-yellow-700">${currentItem.reservedQuantity || 0}</p>
                     </div>
                     <div class="text-center">
-                        <p class="text-sm text-purple-600">Available Stock</p>
+                        <p class="text-sm text-purple-600">${t('availableStock')}</p>
                         <p class="text-lg font-bold text-purple-700">${currentItem.availableQuantity || currentItem.runningQuantity || 0}</p>
                     </div>
                 </div>
             </div>
-            
+
             <!-- Transaction History -->
             <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-4">Transaction History</h4>
+                <h4 class="text-lg font-semibold text-gray-900 mb-4">${t('transactionHistory')}</h4>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm border border-gray-200 rounded-lg">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th class="px-4 py-3 text-left font-medium text-gray-700">Date/Time</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-700">Action</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-700">Physical</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-700">Reserved</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-700">Available</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-700">Source</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-700">Note</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-700">${t('dateTime')}</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-700">${t('action')}</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-700">${t('physical')}</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-700">${t('reserved')}</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-700">${t('available')}</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-700">${t('source')}</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-700">${t('note')}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -537,7 +537,7 @@ function renderInventoryTransactions(transactions, backNumber) {
                                         <td class="px-4 py-3 text-green-600 font-medium">${transaction.physicalQuantity || transaction.runningQuantity || 0}</td>
                                         <td class="px-4 py-3 text-yellow-600 font-medium">${transaction.reservedQuantity || 0}</td>
                                         <td class="px-4 py-3 text-purple-600 font-medium">${transaction.availableQuantity || transaction.runningQuantity || 0}</td>
-                                        <td class="px-4 py-3 text-gray-600 text-xs">${transaction.source || 'System'}</td>
+                                        <td class="px-4 py-3 text-gray-600 text-xs">${transaction.source || t('system')}</td>
                                         <td class="px-4 py-3 text-gray-600 text-xs">${transaction.note || transaction.migrationNote || '-'}</td>
                                     </tr>
                                 `;
@@ -725,10 +725,10 @@ function showInventoryAutoGenerationNotification(fieldName, value) {
     // Create notification element
     const notification = document.createElement('div');
     notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity duration-300';
-    notification.textContent = `${fieldName} auto-filled: ${value}`;
-    
+    notification.textContent = `${fieldName} ${t('autoFilled')}: ${value}`;
+
     document.body.appendChild(notification);
-    
+
     // Remove after 3 seconds
     setTimeout(() => {
         notification.style.opacity = '0';
@@ -752,19 +752,19 @@ async function handleInventoryAddFormSubmit(event) {
     
     // Validate required fields
     let hasErrors = false;
-    
+
     if (!partNumber) {
-        showInventoryFieldError('addInventory品番', '品番 is required');
+        showInventoryFieldError('addInventory品番', t('partNumberRequired'));
         hasErrors = true;
     }
-    
+
     if (!backNumber) {
-        showInventoryFieldError('addInventory背番号', '背番号 is required');
+        showInventoryFieldError('addInventory背番号', t('serialNumberRequired'));
         hasErrors = true;
     }
-    
+
     if (!quantity || quantity <= 0) {
-        showInventoryFieldError('addInventoryQuantity', 'Quantity must be greater than 0');
+        showInventoryFieldError('addInventoryQuantity', t('quantityMustBePositive'));
         hasErrors = true;
     }
     
@@ -824,14 +824,14 @@ async function handleInventoryAddFormSubmit(event) {
             }, 500);
             
             // Show success message
-            alert(`Successfully added ${quantity} units to inventory for ${backNumber}`);
+            alert(`${t('successfullyAdded')} ${quantity} ${t('units')} ${backNumber}`);
         } else {
             throw new Error(result.message || 'Failed to add inventory');
         }
-        
+
     } catch (error) {
         console.error('Error adding inventory:', error);
-        alert('Error adding inventory: ' + error.message);
+        alert(`${t('errorAddingInventory')}: ${error.message}`);
     }
 }
 
@@ -935,7 +935,7 @@ window.exportInventoryData = async function() {
  */
 function downloadInventoryCSV(data) {
     if (!data || data.length === 0) {
-        alert('No data to export');
+        alert(t('noDataToExport'));
         return;
     }
     

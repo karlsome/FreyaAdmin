@@ -117,10 +117,10 @@ async function loadEquipmentData() {
     console.error('Error loading equipment data:', error);
     document.getElementById('equipmentContent').innerHTML = `
       <div class="text-red-600 p-4 bg-red-50 rounded-lg border border-red-200">
-        <h3 class="font-semibold mb-2">Error loading equipment data</h3>
-        <p>Please check your connection and try again.</p>
-        <p class="text-sm mt-2">Error: ${error.message}</p>
-        <button onclick="loadEquipmentData()" class="mt-2 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Retry</button>
+        <h3 class="font-semibold mb-2">${t('errorLoadingEquipmentData')}</h3>
+        <p>${t('pleaseCheckConnection')}</p>
+        <p class="text-sm mt-2">${t('error')}: ${error.message}</p>
+        <button onclick="loadEquipmentData()" class="mt-2 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">${t('retry')}</button>
       </div>
     `;
   }
@@ -276,7 +276,7 @@ async function applyEquipmentFilters() {
     
   } catch (error) {
     console.error('Error applying filters:', error);
-    showNotification('Error applying filters. Please try again.', 'error');
+    showNotification(t('errorApplyingFilters'), 'error');
   }
 }
 
