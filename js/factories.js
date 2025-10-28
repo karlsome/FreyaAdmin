@@ -2922,9 +2922,7 @@ function showSidebar(item) {
       dbName: "submittedDB",
       collectionName: processType,
       query: {
-        品番: originalItem["品番"],
-        背番号: originalItem["背番号"],
-        Date: originalItem["Date"]
+        _id: originalItem["_id"]  // ✅ FIXED: Use _id to target exact record
       },
       update: { $set: updatedFields }
     };
