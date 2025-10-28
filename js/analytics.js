@@ -479,6 +479,10 @@ async function calculateCombinedDefectRate() {
         const collections = ['kensaDB', 'pressDB', 'slitDB', 'SRSDB'];
         const defectRates = [];
         
+        // Collect total production and total defects from each collection
+        let totalProductionSum = 0;
+        let totalDefectsSum = 0;
+        
         // Fetch data from each collection
         for (const collection of collections) {
             try {
@@ -504,9 +508,13 @@ async function calculateCombinedDefectRate() {
                 if (response.ok) {
                     const result = await response.json();
                     if (result.success && result.data.summary && result.data.summary[0]) {
-                        const avgDefectRate = result.data.summary[0].avgDefectRate || 0;
-                        defectRates.push(avgDefectRate);
-                        console.log(`📊 ${collection} defect rate:`, avgDefectRate);
+                        const totalProduction = result.data.summary[0].totalProduction || 0;
+                        const totalDefects = result.data.summary[0].totalDefects || 0;
+                        
+                        totalProductionSum += totalProduction;
+                        totalDefectsSum += totalDefects;
+                        
+                        console.log(`📊 ${collection} - Production: ${totalProduction}, Defects: ${totalDefects}`);
                     }
                 }
             } catch (error) {
@@ -514,10 +522,11 @@ async function calculateCombinedDefectRate() {
             }
         }
         
-        // Calculate combined defect rate (sum of all process rates)
-        const combinedRate = defectRates.reduce((sum, rate) => sum + rate, 0);
+        // Calculate combined defect rate: (Total Defects / Total Production) * 100
+        const combinedRate = totalProductionSum > 0 ? (totalDefectsSum / totalProductionSum) * 100 : 0;
         
-        console.log('📊 Individual defect rates:', defectRates);
+        console.log('📊 Total Production (all processes):', totalProductionSum);
+        console.log('📊 Total Defects (all processes):', totalDefectsSum);
         console.log('📊 Combined defect rate:', combinedRate);
         
         // Update display
