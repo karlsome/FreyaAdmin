@@ -298,6 +298,55 @@ function loadPage(page) {
                                 </div>
                             </div>
                         </div>
+                        
+                        <!-- New KPI Cards -->
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-emerald-100 rounded-lg">
+                                    <i class="ri-check-double-line text-emerald-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600">First Pass Yield</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="firstPassYieldCount">0%</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-orange-100 rounded-lg">
+                                    <i class="ri-time-fill text-orange-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600">Peak Hour</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="peakHourCount">--:--</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-cyan-100 rounded-lg">
+                                    <i class="ri-product-hunt-line text-cyan-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600">Top Product</p>
+                                    <p class="text-lg font-bold text-gray-900 analytics-count" id="topProductCount" style="font-size: 0.9rem;">---</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-pink-100 rounded-lg">
+                                    <i class="ri-tools-line text-pink-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600">Equipment Used</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="equipmentCountCount">0</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Charts Grid -->
@@ -350,9 +399,75 @@ function loadPage(page) {
                             </div>
                         </div>
                         
+                        <!-- NEW ANALYTICS CHARTS -->
+                        
+                        <!-- Hourly Production Heatmap -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Hourly Production Pattern</h3>
+                            <div class="h-80">
+                                <canvas id="hourlyProductionChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Top/Bottom Products -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Top & Bottom Products</h3>
+                            <div class="h-80">
+                                <canvas id="topBottomProductsChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Defect Trends by Time -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Defect Rate by Hour</h3>
+                            <div class="h-80">
+                                <canvas id="defectsByHourChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Factory Total Defects Comparison -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Total Defects per Factory</h3>
+                            <div class="h-80">
+                                <canvas id="factoryDefectsChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Top 5 Defects per Factory -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Top 5 Defects per Factory</h3>
+                            <div class="h-80">
+                                <canvas id="factoryTop5DefectsChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Worker Quality Leaderboard -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Worker Quality Leaderboard</h3>
+                            <div class="h-80">
+                                <canvas id="workerQualityChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Equipment Downtime Analysis -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Equipment Performance</h3>
+                            <div class="h-80">
+                                <canvas id="equipmentDowntimeChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Factory Performance Radar -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Factory Performance Comparison</h3>
+                            <div class="h-80">
+                                <canvas id="factoryRadarChart"></canvas>
+                            </div>
+                        </div>
+                        
                         <!-- Temperature Trend Chart -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="temperatureTrend">🌡️ Temperature Trend</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="temperatureTrend">Temperature Trend</h3>
                             <div class="h-80">
                                 <canvas id="temperatureTrendChart"></canvas>
                             </div>
@@ -360,9 +475,49 @@ function loadPage(page) {
                         
                         <!-- Humidity Trend Chart -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="humidityTrend">💧 Humidity Trend</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="humidityTrend">Humidity Trend</h3>
                             <div class="h-80">
                                 <canvas id="humidityTrendChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <!-- Top 5 Defect Parts per Factory -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200 col-span-full">
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Top 5 Defect Parts per Factory</h3>
+                            <div id="topDefectPartsByFactory" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <!-- Will be populated by renderTopDefectPartsByFactory() -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Defect Part Details Modal -->
+                    <div id="defectPartDetailsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50" style="display: none;">
+                        <div class="bg-white rounded-lg shadow-xl max-w-7xl w-full mx-4 max-h-[90vh] flex flex-col">
+                            <!-- Modal Header -->
+                            <div class="flex items-center justify-between p-6 border-b border-gray-200">
+                                <div>
+                                    <h2 class="text-xl font-bold text-gray-900" id="defectPartModalTitle">Defect Details</h2>
+                                    <p class="text-sm text-gray-600 mt-1" id="defectPartModalSubtitle"></p>
+                                </div>
+                                <button onclick="closeDefectPartDetailsModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Modal Body -->
+                            <div class="flex-1 overflow-auto p-6">
+                                <div id="defectPartDetailsContent">
+                                    <div class="text-center py-8 text-gray-500">Loading...</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Modal Footer -->
+                            <div class="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+                                <button onclick="closeDefectPartDetailsModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                    Close
+                                </button>
                             </div>
                         </div>
                     </div>
