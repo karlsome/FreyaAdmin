@@ -306,7 +306,7 @@ function loadPage(page) {
                                     <i class="ri-check-double-line text-emerald-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm font-medium text-gray-600">First Pass Yield</p>
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="firstPassYield">First Pass Yield</p>
                                     <p class="text-2xl font-bold text-gray-900 analytics-count" id="firstPassYieldCount">0%</p>
                                 </div>
                             </div>
@@ -318,7 +318,7 @@ function loadPage(page) {
                                     <i class="ri-time-fill text-orange-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm font-medium text-gray-600">Peak Hour</p>
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="peakProductionHour">Peak Hour</p>
                                     <p class="text-2xl font-bold text-gray-900 analytics-count" id="peakHourCount">--:--</p>
                                 </div>
                             </div>
@@ -330,7 +330,7 @@ function loadPage(page) {
                                     <i class="ri-product-hunt-line text-cyan-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm font-medium text-gray-600">Top Product</p>
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="mostProducedPart">Top Product</p>
                                     <p class="text-lg font-bold text-gray-900 analytics-count" id="topProductCount" style="font-size: 0.9rem;">---</p>
                                 </div>
                             </div>
@@ -342,7 +342,7 @@ function loadPage(page) {
                                     <i class="ri-tools-line text-pink-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
-                                    <p class="text-sm font-medium text-gray-600">Equipment Used</p>
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="equipmentCount">Equipment Used</p>
                                     <p class="text-2xl font-bold text-gray-900 analytics-count" id="equipmentCountCount">0</p>
                                 </div>
                             </div>
@@ -403,7 +403,7 @@ function loadPage(page) {
                         
                         <!-- Hourly Production Heatmap -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Hourly Production Pattern</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="hourlyProductionPattern">Hourly Production Pattern</h3>
                             <div class="h-80">
                                 <canvas id="hourlyProductionChart"></canvas>
                             </div>
@@ -411,7 +411,7 @@ function loadPage(page) {
                         
                         <!-- Top/Bottom Products -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Top & Bottom Products</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="topBottomProducts">Top & Bottom Products</h3>
                             <div class="h-80">
                                 <canvas id="topBottomProductsChart"></canvas>
                             </div>
@@ -419,7 +419,7 @@ function loadPage(page) {
                         
                         <!-- Defect Trends by Time -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Defect Rate by Hour</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="defectRateByHour">Defect Rate by Hour</h3>
                             <div class="h-80">
                                 <canvas id="defectsByHourChart"></canvas>
                             </div>
@@ -427,7 +427,7 @@ function loadPage(page) {
                         
                         <!-- Factory Total Defects Comparison -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Total Defects per Factory</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="totalDefectsPerFactory">Total Defects per Factory</h3>
                             <div class="h-80">
                                 <canvas id="factoryDefectsChart"></canvas>
                             </div>
@@ -435,7 +435,7 @@ function loadPage(page) {
                         
                         <!-- Top 5 Defects per Factory -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Top 5 Defects per Factory</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="top5DefectsPerFactory">Top 5 Defects per Factory</h3>
                             <div class="h-80">
                                 <canvas id="factoryTop5DefectsChart"></canvas>
                             </div>
@@ -443,7 +443,7 @@ function loadPage(page) {
                         
                         <!-- Worker Quality Leaderboard -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Worker Quality Leaderboard</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="workerQualityLeaderboard">Worker Quality Leaderboard</h3>
                             <div class="h-80">
                                 <canvas id="workerQualityChart"></canvas>
                             </div>
@@ -451,7 +451,7 @@ function loadPage(page) {
                         
                         <!-- Equipment Downtime Analysis -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Equipment Performance</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="equipmentPerformance">Equipment Performance</h3>
                             <div class="h-80">
                                 <canvas id="equipmentDowntimeChart"></canvas>
                             </div>
@@ -459,7 +459,7 @@ function loadPage(page) {
                         
                         <!-- Factory Performance Radar -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Factory Performance Comparison</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="factoryPerformanceComparison">Factory Performance Comparison</h3>
                             <div class="h-80">
                                 <canvas id="factoryRadarChart"></canvas>
                             </div>
@@ -483,7 +483,7 @@ function loadPage(page) {
                         
                         <!-- Top 5 Defect Parts per Factory -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200 col-span-full">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4">Top 5 Defect Parts per Factory</h3>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="top5DefectsPerFactory">Top 5 Defect Parts per Factory</h3>
                             <div id="topDefectPartsByFactory" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 <!-- Will be populated by renderTopDefectPartsByFactory() -->
                             </div>
@@ -496,7 +496,7 @@ function loadPage(page) {
                             <!-- Modal Header -->
                             <div class="flex items-center justify-between p-6 border-b border-gray-200">
                                 <div>
-                                    <h2 class="text-xl font-bold text-gray-900" id="defectPartModalTitle">Defect Details</h2>
+                                    <h2 class="text-xl font-bold text-gray-900" id="defectPartModalTitle" data-i18n="defectDetails">Defect Details</h2>
                                     <p class="text-sm text-gray-600 mt-1" id="defectPartModalSubtitle"></p>
                                 </div>
                                 <button onclick="closeDefectPartDetailsModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
@@ -515,7 +515,7 @@ function loadPage(page) {
                             
                             <!-- Modal Footer -->
                             <div class="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
-                                <button onclick="closeDefectPartDetailsModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                                <button onclick="closeDefectPartDetailsModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors" data-i18n="close">
                                     Close
                                 </button>
                             </div>

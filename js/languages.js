@@ -388,6 +388,77 @@ const translations = {
       thisMonth: "This Month",
       lastMonth: "Last Month",
       
+      // New Analytics Charts & Features
+      hourlyProductionPattern: "Hourly Production Pattern",
+      topBottomProducts: "Top & Bottom Products",
+      defectRateByHour: "Defect Rate by Hour",
+      totalDefectsPerFactory: "Total Defects per Factory",
+      top5DefectsPerFactory: "Top 5 Defects per Factory",
+      workerQualityLeaderboard: "Worker Quality Leaderboard",
+      equipmentPerformance: "Equipment Performance",
+      factoryPerformanceComparison: "Factory Performance Comparison",
+      
+      // New KPI Cards
+      firstPassYield: "First Pass Yield",
+      peakProductionHour: "Peak Production Hour",
+      mostProducedPart: "Most Produced Part",
+      equipmentCount: "Equipment Count",
+      
+      // Modal and UI Elements
+      defectDetails: "Defect Details",
+      serial: "Serial",
+      loadingDetailedRecords: "Loading detailed records...",
+      showingRecords: "Showing",
+      records: "records",
+      record: "record",
+      noDetailedRecordsFound: "No detailed records found",
+      errorLoadingDetails: "Error loading details",
+      clickToSort: "Click to sort by",
+      close: "Close",
+      
+      // Table Headers (Dynamic)
+      date: "Date",
+      factory: "Factory",
+      partNumber: "Part Number", 
+      serialNumber: "Serial Number",
+      workerName: "Worker Name",
+      equipment: "Equipment",
+      processQuantity: "Process Quantity",
+      totalNG: "Total NG",
+      cycleTime: "Cycle Time",
+      counter: "Counter",
+      units: "units",
+      
+      // Chart Data Labels
+      productionVolume: "Production Volume",
+      defectCount: "Defect Count",
+      hourOfDay: "Hour of Day",
+      defectRatePercentage: "Defect Rate (%)",
+      efficiency: "Efficiency",
+      downtime: "Downtime",
+      utilization: "Utilization",
+      topProducts: "Top Products",
+      bottomProducts: "Bottom Products",
+      mostProduced: "Most Produced",
+      leastProduced: "Least Produced",
+      
+      // Status Messages
+      noDefectPartsDataAvailable: "No defect parts data available for the selected period",
+      loadingDefectPartsData: "Loading defect parts data...",
+      errorLoadingDefectParts: "Error loading defect parts data",
+      noDataAvailable: "No data available",
+      
+      // Time and Measurements
+      hours: "hours",
+      hour: "hour",
+      am: "AM",
+      pm: "PM",
+      pieces: "pieces",
+      rate: "rate",
+      average: "average",
+      maximum: "maximum",
+      minimum: "minimum",
+      
       // SCNA Work Order
       scna: "SCNA",
       scnaTitle: "SCNA Management",
@@ -1250,6 +1321,77 @@ const translations = {
       today: "今日",
       thisMonth: "今月",
       lastMonth: "先月",
+      
+      // New Analytics Charts & Features
+      hourlyProductionPattern: "時間別生産パターン",
+      topBottomProducts: "上位・下位製品",
+      defectRateByHour: "時間別不良率",
+      totalDefectsPerFactory: "工場別総不良数",
+      top5DefectsPerFactory: "工場別上位5不良部品",
+      workerQualityLeaderboard: "作業者品質ランキング",
+      equipmentPerformance: "設備パフォーマンス",
+      factoryPerformanceComparison: "工場パフォーマンス比較",
+      
+      // New KPI Cards
+      firstPassYield: "初回合格率",
+      peakProductionHour: "生産ピーク時間",
+      mostProducedPart: "最多生産部品",
+      equipmentCount: "設備数",
+      
+      // Modal and UI Elements
+      defectDetails: "不良詳細",
+      serial: "シリアル",
+      loadingDetailedRecords: "詳細記録を読み込み中...",
+      showingRecords: "表示中",
+      records: "件",
+      record: "件",
+      noDetailedRecordsFound: "詳細記録が見つかりません",
+      errorLoadingDetails: "詳細の読み込みエラー",
+      clickToSort: "クリックしてソート",
+      close: "閉じる",
+      
+      // Table Headers (Dynamic)
+      date: "日付",
+      factory: "工場",
+      partNumber: "品番", 
+      serialNumber: "背番号",
+      workerName: "作業者名",
+      equipment: "設備",
+      processQuantity: "加工数量",
+      totalNG: "総不良数",
+      cycleTime: "サイクルタイム",
+      counter: "カウンター",
+      units: "個",
+      
+      // Chart Data Labels
+      productionVolume: "生産量",
+      defectCount: "不良数",
+      hourOfDay: "時刻",
+      defectRatePercentage: "不良率 (%)",
+      efficiency: "効率",
+      downtime: "ダウンタイム",
+      utilization: "稼働率",
+      topProducts: "上位製品",
+      bottomProducts: "下位製品",
+      mostProduced: "最多生産",
+      leastProduced: "最少生産",
+      
+      // Status Messages
+      noDefectPartsDataAvailable: "選択期間の不良部品データがありません",
+      loadingDefectPartsData: "不良部品データを読み込み中...",
+      errorLoadingDefectParts: "不良部品データの読み込みエラー",
+      noDataAvailable: "データがありません",
+      
+      // Time and Measurements
+      hours: "時間",
+      hour: "時",
+      am: "午前",
+      pm: "午後",
+      pieces: "個",
+      rate: "率",
+      average: "平均",
+      maximum: "最大",
+      minimum: "最小",
       
       // SCNA Work Order
       scna: "SCNA",

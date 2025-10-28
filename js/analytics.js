@@ -1861,7 +1861,8 @@ async function renderTopDefectPartsByFactory() {
     const container = document.getElementById('topDefectPartsByFactory');
     if (!container) return;
 
-    container.innerHTML = '<p class="text-gray-500 text-center py-4">Loading defect parts data...</p>';
+    const loadingMsg = typeof window.t === 'function' ? window.t('loadingDefectPartsData') : 'Loading defect parts data...';
+    container.innerHTML = `<p class="text-gray-500 text-center py-4">${loadingMsg}</p>`;
 
     try {
         // Get current date range and filters
@@ -1921,7 +1922,8 @@ async function renderTopDefectPartsByFactory() {
 
         // Render the data
         if (factoryPartsData.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 text-center py-8">No defect parts data available for the selected period</p>';
+            const noDataMsg = typeof window.t === 'function' ? window.t('noDefectPartsDataAvailable') : 'No defect parts data available for the selected period';
+            container.innerHTML = `<p class="text-gray-500 text-center py-8">${noDataMsg}</p>`;
             return;
         }
 
@@ -1976,7 +1978,8 @@ async function renderTopDefectPartsByFactory() {
 
     } catch (error) {
         console.error('Error loading top defect parts:', error);
-        container.innerHTML = '<p class="text-red-500 text-center py-4">Error loading defect parts data</p>';
+        const errorMsg = typeof window.t === 'function' ? window.t('errorLoadingDefectParts') : 'Error loading defect parts data';
+        container.innerHTML = `<p class="text-red-500 text-center py-4">${errorMsg}</p>`;
     }
 }
 
@@ -2025,15 +2028,23 @@ async function showDefectPartDetails(factory, partNumber, serialNumber, totalDef
     modal.style.display = 'flex';
     modal.classList.remove('hidden');
     
-    // Update title
-    modalTitle.textContent = `Defect Details: ${partNumber}`;
+    // Update title with translation
+    const defectDetailsText = typeof window.t === 'function' ? window.t('defectDetails') : 'Defect Details';
+    modalTitle.textContent = `${defectDetailsText}: ${partNumber}`;
+    
+    // Update subtitle with translation
+    const serialText = typeof window.t === 'function' ? window.t('serial') : 'Serial';
+    const defectsText = typeof window.t === 'function' ? window.t('defects') : 'defects';
+    const unitsText = typeof window.t === 'function' ? window.t('units') : 'units';
+    
     const subtitle = serialNumber ? 
-        `${factory} - Serial: ${serialNumber} | ${totalDefects} defects / ${totalProduction} units` :
-        `${factory} | ${totalDefects} defects / ${totalProduction} units`;
+        `${factory} - ${serialText}: ${serialNumber} | ${totalDefects} ${defectsText} / ${totalProduction} ${unitsText}` :
+        `${factory} | ${totalDefects} ${defectsText} / ${totalProduction} ${unitsText}`;
     modalSubtitle.textContent = subtitle;
     
     // Show loading state
-    modalContent.innerHTML = '<div class="text-center py-8 text-gray-500">Loading detailed records...</div>';
+    const loadingMsg = typeof window.t === 'function' ? window.t('loadingDetailedRecords') : 'Loading detailed records...';
+    modalContent.innerHTML = `<div class="text-center py-8 text-gray-500">${loadingMsg}</div>`;
     
     try {
         // Get filters
@@ -2071,7 +2082,8 @@ async function showDefectPartDetails(factory, partNumber, serialNumber, totalDef
         
     } catch (error) {
         console.error('Error loading defect part details:', error);
-        modalContent.innerHTML = `<div class="text-center py-8 text-red-500">Error loading details: ${error.message}</div>`;
+        const errorMsg = typeof window.t === 'function' ? window.t('errorLoadingDetails') : 'Error loading details';
+        modalContent.innerHTML = `<div class="text-center py-8 text-red-500">${errorMsg}: ${error.message}</div>`;
     }
 }
 
@@ -2214,7 +2226,8 @@ function renderDefectPartDetailsTable(data) {
     const { records, totalRecords } = data;
     
     if (!records || records.length === 0) {
-        modalContent.innerHTML = '<div class="text-center py-8 text-gray-500">No detailed records found</div>';
+        const noRecordsMsg = typeof window.t === 'function' ? window.t('noDetailedRecordsFound') : 'No detailed records found';
+        modalContent.innerHTML = `<div class="text-center py-8 text-gray-500">${noRecordsMsg}</div>`;
         return;
     }
     
@@ -2255,10 +2268,16 @@ function renderDefectPartDetailsTable(data) {
         ...otherFields
     ];
     
+    // Get translations
+    const showingText = typeof window.t === 'function' ? window.t('showingRecords') : 'Showing';
+    const recordsText = typeof window.t === 'function' 
+        ? (totalRecords !== 1 ? window.t('records') : window.t('record'))
+        : (totalRecords !== 1 ? 'records' : 'record');
+    
     // Build table HTML
     let html = `
         <div class="mb-4 text-sm text-gray-600">
-            Showing ${totalRecords} record${totalRecords !== 1 ? 's' : ''}
+            ${showingText} ${totalRecords} ${recordsText}
         </div>
         <div class="overflow-auto border border-gray-200 rounded-lg">
             <table class="min-w-full divide-y divide-gray-200">
@@ -2288,10 +2307,12 @@ function renderDefectPartDetailsTable(data) {
             : '↕';
         const sortClass = isSortedField ? 'bg-blue-100' : 'hover:bg-gray-100';
         
+        const clickToSortText = typeof window.t === 'function' ? window.t('clickToSort') : 'Click to sort by';
+        
         html += `
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase tracking-wider whitespace-nowrap border-r border-gray-200 last:border-r-0 cursor-pointer ${sortClass} transition-colors"
                 onclick="sortTableData('${field}')"
-                title="Click to sort by ${displayName}">
+                title="${clickToSortText} ${displayName}">
                 <div class="flex items-center justify-between">
                     <span>${displayName}</span>
                     <span class="ml-1 text-gray-400 font-mono">${sortIcon}</span>
