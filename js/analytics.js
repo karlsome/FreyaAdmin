@@ -2141,12 +2141,75 @@ function getAllFieldNames(records) {
     return Array.from(fieldSet);
 }
 
+// Global variables for table sorting
+let currentTableData = null;
+let currentSortField = null;
+let currentSortDirection = 'asc';
+
+/**
+ * Sort table data by field
+ */
+function sortTableData(field) {
+    if (!currentTableData || !currentTableData.records) return;
+    
+    // Toggle sort direction if clicking the same field
+    if (currentSortField === field) {
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSortField = field;
+        currentSortDirection = 'asc';
+    }
+    
+    // Sort the records
+    const sortedRecords = [...currentTableData.records].sort((a, b) => {
+        const flatA = flattenRecord(a);
+        const flatB = flattenRecord(b);
+        
+        let valueA = flatA[field];
+        let valueB = flatB[field];
+        
+        // Handle null/undefined values
+        if (valueA === null || valueA === undefined || valueA === '') valueA = '';
+        if (valueB === null || valueB === undefined || valueB === '') valueB = '';
+        
+        // Convert to comparable values
+        if (field === 'Date' && valueA && valueB) {
+            valueA = new Date(valueA).getTime();
+            valueB = new Date(valueB).getTime();
+        } else if (typeof valueA === 'number' && typeof valueB === 'number') {
+            // Already numbers
+        } else if (!isNaN(parseFloat(valueA)) && !isNaN(parseFloat(valueB))) {
+            // Convert to numbers if possible
+            valueA = parseFloat(valueA);
+            valueB = parseFloat(valueB);
+        } else {
+            // String comparison
+            valueA = String(valueA).toLowerCase();
+            valueB = String(valueB).toLowerCase();
+        }
+        
+        // Compare values
+        let result = 0;
+        if (valueA < valueB) result = -1;
+        else if (valueA > valueB) result = 1;
+        
+        return currentSortDirection === 'asc' ? result : -result;
+    });
+    
+    // Update the data and re-render
+    currentTableData.records = sortedRecords;
+    renderDefectPartDetailsTable(currentTableData);
+}
+
 /**
  * Render defect part details table with dynamic headers
  */
 function renderDefectPartDetailsTable(data) {
     const modalContent = document.getElementById('defectPartDetailsContent');
     if (!modalContent) return;
+    
+    // Store data globally for sorting
+    currentTableData = data;
     
     const { records, totalRecords } = data;
     
@@ -2203,7 +2266,7 @@ function renderDefectPartDetailsTable(data) {
                     <tr>
     `;
     
-    // Add headers
+    // Add sortable headers
     orderedFields.forEach(field => {
         let displayName = field;
         
@@ -2218,7 +2281,23 @@ function renderDefectPartDetailsTable(data) {
             displayName = field.replace('APPROVALHISTORY.', 'Approval-');
         }
         
-        html += `<th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase tracking-wider whitespace-nowrap border-r border-gray-200 last:border-r-0">${displayName}</th>`;
+        // Add sort indicator
+        const isSortedField = currentSortField === field;
+        const sortIcon = isSortedField 
+            ? (currentSortDirection === 'asc' ? '↑' : '↓')
+            : '↕';
+        const sortClass = isSortedField ? 'bg-blue-100' : 'hover:bg-gray-100';
+        
+        html += `
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase tracking-wider whitespace-nowrap border-r border-gray-200 last:border-r-0 cursor-pointer ${sortClass} transition-colors"
+                onclick="sortTableData('${field}')"
+                title="Click to sort by ${displayName}">
+                <div class="flex items-center justify-between">
+                    <span>${displayName}</span>
+                    <span class="ml-1 text-gray-400 font-mono">${sortIcon}</span>
+                </div>
+            </th>
+        `;
     });
     
     html += `
@@ -2234,22 +2313,23 @@ function renderDefectPartDetailsTable(data) {
         
         orderedFields.forEach(field => {
             let value = flattenedRecord[field];
+            let displayValue = value;
             
-            // Format value
+            // Format display value
             if (value === null || value === undefined || value === '') {
-                value = '-';
+                displayValue = '-';
             } else if (field === 'Date' && value) {
-                // Format date
+                // Format date (date only, no time)
                 const date = new Date(value);
-                value = date.toLocaleDateString('ja-JP') + ' ' + date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                displayValue = date.toLocaleDateString('ja-JP');
             } else if (typeof value === 'number') {
-                value = value.toLocaleString();
+                displayValue = value.toLocaleString();
             } else if (typeof value === 'object') {
                 // This shouldn't happen with flattened records, but just in case
-                value = JSON.stringify(value);
+                displayValue = JSON.stringify(value);
             } else if (typeof value === 'string' && value.length > 50) {
                 // Truncate very long strings
-                value = value.substring(0, 47) + '...';
+                displayValue = value.substring(0, 47) + '...';
             }
             
             // Highlight defect values and counters
@@ -2257,7 +2337,7 @@ function renderDefectPartDetailsTable(data) {
             const isHighValue = isDefectField && parseFloat(value) > 0;
             const cellClass = isHighValue ? 'text-red-600 font-semibold' : 'text-gray-900';
             
-            html += `<td class="px-3 py-2 text-sm ${cellClass} whitespace-nowrap border-r border-gray-100 last:border-r-0" title="${value}">${value}</td>`;
+            html += `<td class="px-3 py-2 text-sm ${cellClass} whitespace-nowrap border-r border-gray-100 last:border-r-0" title="${displayValue}">${displayValue}</td>`;
         });
         
         html += `</tr>`;
@@ -2286,3 +2366,4 @@ window.loadAnalyticsData = loadAnalyticsData;
 window.handleRangeChange = handleRangeChange;
 window.showDefectPartDetails = showDefectPartDetails;
 window.closeDefectPartDetailsModal = closeDefectPartDetailsModal;
+window.sortTableData = sortTableData;
