@@ -33,7 +33,7 @@ function initializeAnalytics() {
     document.getElementById('analyticsCollectionFilter').addEventListener('change', handleCollectionChange);
     
     // Load factory options first, then load data
-    loadFactoryOptions().then(() => {
+    loadAnalyticsFactoryOptions().then(() => {
         loadAnalyticsData();
     });
 }
@@ -90,43 +90,47 @@ function handleCollectionChange() {
     document.getElementById('analyticsFactoryFilter').value = '';
     
     // Load new factory options for the selected collection
-    loadFactoryOptions().then(() => {
+    loadAnalyticsFactoryOptions().then(() => {
         loadAnalyticsData();
     });
 }
 
 /**
- * Load factory options for the filter dropdown
+ * Load factory options for the analytics filter dropdown
  */
-async function loadFactoryOptions() {
+async function loadAnalyticsFactoryOptions() {
     try {
-        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
-        const factoryAccess = getFactoryAccessForUser();
-        const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
+        console.log('📋 Loading factory options from Master DB...');
+        console.log('🔗 API URL:', BASE_URL + 'api/masterdb/factories');
         
-        const response = await fetch(BASE_URL + 'api/approval-factories', {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                collectionName: selectedCollection,
-                userRole: currentUser.role,
-                factoryAccess: factoryAccess
-            })
+        const response = await fetch(BASE_URL + 'api/masterdb/factories', {
+            method: "GET",
+            headers: { "Content-Type": "application/json" }
         });
+
+        console.log('📥 Response status:', response.status, response.statusText);
 
         if (response.ok) {
             const result = await response.json();
-            if (result.success && result.factories) {
-                updateFactoryFilterOptions(result.factories);
+            console.log('📊 Factory API result:', result);
+            
+            if (result.success && result.data && Array.isArray(result.data)) {
+                console.log(`✅ Loaded ${result.count} factories from Master DB:`, result.data);
+                updateFactoryFilterOptions(result.data);
+                return true;
+            } else {
+                console.warn('⚠️ Unexpected response structure:', result);
             }
         } else {
-            // Fallback: load from data
-            console.log('Factory API not available, will load from data');
+            const errorText = await response.text();
+            console.error('❌ Failed to load factories from Master DB:', response.status, errorText);
         }
         
+        return false;
+        
     } catch (error) {
-        console.error('Error loading factory options:', error);
-        // Fallback will be handled when data loads
+        console.error('❌ Error loading factory options:', error);
+        return false;
     }
 }
 
@@ -134,8 +138,16 @@ async function loadFactoryOptions() {
  * Update factory filter dropdown options
  */
 function updateFactoryFilterOptions(factories) {
+    console.log('🏭 Updating factory filter options with:', factories);
+    
     const factorySelect = document.getElementById('analyticsFactoryFilter');
-    if (!factorySelect) return;
+    
+    if (!factorySelect) {
+        console.error('❌ Factory filter element not found! Element ID: analyticsFactoryFilter');
+        return;
+    }
+    
+    console.log('✅ Factory filter element found:', factorySelect);
     
     // Save the currently selected value
     const currentSelection = factorySelect.value;
@@ -144,12 +156,18 @@ function updateFactoryFilterOptions(factories) {
     factorySelect.innerHTML = '<option value="">全工場</option>';
     
     // Add factory options
-    factories.forEach(factory => {
-        const option = document.createElement('option');
-        option.value = factory;
-        option.textContent = factory;
-        factorySelect.appendChild(option);
-    });
+    if (Array.isArray(factories) && factories.length > 0) {
+        factories.forEach(factory => {
+            const option = document.createElement('option');
+            option.value = factory;
+            option.textContent = factory;
+            factorySelect.appendChild(option);
+        });
+        
+        console.log(`✅ Added ${factories.length} factory options to dropdown`);
+    } else {
+        console.warn('⚠️ No factories to add to dropdown');
+    }
     
     // Restore the previously selected value if it still exists in the new options
     if (currentSelection && factories.includes(currentSelection)) {
@@ -224,7 +242,8 @@ async function loadAnalyticsData() {
         const factorySelect = document.getElementById('analyticsFactoryFilter');
         if (factorySelect && factorySelect.options.length <= 1) {
             if (result.data.factoryStats && result.data.factoryStats.length > 0) {
-                const factories = result.data.factoryStats.map(f => f._id).filter(f => f);
+                const factories = result.data.factoryStats.map(f => f.factory).filter(f => f);
+                console.log('🏭 Extracted factories from factoryStats:', factories);
                 updateFactoryFilterOptions(factories);
             }
         }
