@@ -86,6 +86,9 @@ function handleRangeChange() {
 function handleCollectionChange() {
     console.log('📊 Collection changed, reloading factory options and data...');
     
+    // Update defect rate label immediately when collection changes
+    updateDefectRateLabel();
+    
     // Reset factory filter when collection changes
     document.getElementById('analyticsFactoryFilter').value = '';
     
@@ -355,6 +358,10 @@ function renderSummaryCards() {
     document.getElementById('totalProductionCount').textContent = summary.totalProduction?.toLocaleString() || '0';
     document.getElementById('totalDefectsCount').textContent = summary.totalDefects?.toLocaleString() || '0';
     document.getElementById('avgDefectRateCount').textContent = `${summary.avgDefectRate?.toFixed(2) || '0.00'}%`;
+    
+    // Update defect rate label based on selected collection
+    updateDefectRateLabel();
+    
     document.getElementById('totalFactoriesCount').textContent = summary.totalFactories || '0';
     document.getElementById('totalWorkersCount').textContent = summary.totalWorkers || '0';
     document.getElementById('avgCycleTimeCount').textContent = `${summary.avgCycleTime?.toFixed(1) || '0.0'}分`;
@@ -382,6 +389,9 @@ function renderSummaryCards() {
     // Equipment Count
     const equipmentCount = analyticsData.equipmentStats?.length || 0;
     document.getElementById('equipmentCountCount').textContent = equipmentCount;
+    
+    // Combined Defect Rate (sum of all process defect rates)
+    calculateCombinedDefectRate();
 }
 
 /**
@@ -411,6 +421,112 @@ function findTopProduct(data) {
     // This will be calculated from backend data if available
     // For now, return placeholder
     return 'See Chart';
+}
+
+/**
+ * Update defect rate label based on selected collection
+ */
+function updateDefectRateLabel() {
+    const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
+    // Use a more specific selector to target the defect rate card (not combined defect rate)
+    const defectRateLabel = document.querySelector('#avgDefectRateCount').parentElement.querySelector('[data-i18n]');
+    
+    console.log('🏷️ Updating defect rate label for collection:', selectedCollection);
+    
+    if (!defectRateLabel) {
+        console.warn('🏷️ Defect rate label element not found');
+        return;
+    }
+    
+    // Define collection-specific translation keys
+    const collectionLabelKeys = {
+        'kensaDB': 'inspectionDefectRate',
+        'pressDB': 'pressDefectRate', 
+        'slitDB': 'slitDefectRate',
+        'SRSDB': 'srsDefectRate'
+    };
+    
+    // Get the appropriate translation key
+    const labelKey = collectionLabelKeys[selectedCollection] || 'defectRate';
+    
+    // Update the label text using translation system
+    const newLabel = typeof window.t === 'function' ? window.t(labelKey) : defectRateLabel.textContent;
+    console.log('🏷️ Updating label from', defectRateLabel.textContent, 'to', newLabel);
+    defectRateLabel.textContent = newLabel;
+    
+    // Update the data-i18n attribute for future translations
+    defectRateLabel.setAttribute('data-i18n', labelKey);
+}
+
+/**
+ * Calculate combined defect rate across all processes
+ */
+async function calculateCombinedDefectRate() {
+    try {
+        const fromDate = document.getElementById('analyticsFromDate')?.value;
+        const toDate = document.getElementById('analyticsToDate')?.value;
+        const selectedFactory = document.getElementById('analyticsFactoryFilter')?.value;
+        
+        if (!fromDate || !toDate) {
+            document.getElementById('combinedDefectRateCount').textContent = '0.00%';
+            return;
+        }
+        
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const factoryAccess = getFactoryAccessForUser();
+        
+        // Collections to check for defect rates
+        const collections = ['kensaDB', 'pressDB', 'slitDB', 'SRSDB'];
+        const defectRates = [];
+        
+        // Fetch data from each collection
+        for (const collection of collections) {
+            try {
+                const requestBody = {
+                    fromDate,
+                    toDate,
+                    userRole: currentUser.role,
+                    factoryAccess: factoryAccess,
+                    collectionName: collection
+                };
+                
+                // Add factory filter if selected
+                if (selectedFactory) {
+                    requestBody.factoryFilter = selectedFactory;
+                }
+                
+                const response = await fetch(BASE_URL + 'api/analytics-data', {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success && result.data.summary && result.data.summary[0]) {
+                        const avgDefectRate = result.data.summary[0].avgDefectRate || 0;
+                        defectRates.push(avgDefectRate);
+                        console.log(`📊 ${collection} defect rate:`, avgDefectRate);
+                    }
+                }
+            } catch (error) {
+                console.warn(`Failed to fetch data from ${collection}:`, error);
+            }
+        }
+        
+        // Calculate combined defect rate (sum of all process rates)
+        const combinedRate = defectRates.reduce((sum, rate) => sum + rate, 0);
+        
+        console.log('📊 Individual defect rates:', defectRates);
+        console.log('📊 Combined defect rate:', combinedRate);
+        
+        // Update display
+        document.getElementById('combinedDefectRateCount').textContent = `${combinedRate.toFixed(2)}%`;
+        
+    } catch (error) {
+        console.error('Error calculating combined defect rate:', error);
+        document.getElementById('combinedDefectRateCount').textContent = '0.00%';
+    }
 }
 
 /**
@@ -1030,6 +1146,14 @@ window.exportAnalyticsData = function() {
     csvContent += "総生産量," + analyticsData.summary.totalProduction + "\n";
     csvContent += "総不良数," + analyticsData.summary.totalDefects + "\n";
     csvContent += "平均不良率," + analyticsData.summary.avgDefectRate.toFixed(2) + "%\n";
+    
+    // Add combined defect rate if available
+    const combinedDefectRateElement = document.getElementById('combinedDefectRateCount');
+    if (combinedDefectRateElement) {
+        const combinedDefectRateText = combinedDefectRateElement.textContent || '0.00%';
+        csvContent += "総合不良率," + combinedDefectRateText + "\n";
+    }
+    
     csvContent += "工場数," + analyticsData.summary.totalFactories + "\n";
     csvContent += "作業者数," + analyticsData.summary.totalWorkers + "\n";
     csvContent += "平均サイクルタイム," + analyticsData.summary.avgCycleTime.toFixed(1) + "分\n\n";

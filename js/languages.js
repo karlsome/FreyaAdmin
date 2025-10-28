@@ -343,6 +343,10 @@ const translations = {
       totalProduction: "Total Production",
       totalDefects: "Total Defects",
       defectRate: "Defect Rate",
+      inspectionDefectRate: "Inspection Defect Rate",
+      pressDefectRate: "Press Defect Rate", 
+      slitDefectRate: "Slit Defect Rate",
+      srsDefectRate: "SRS Defect Rate",
       factoryCount: "Factory Count",
       workerCount: "Worker Count",
       avgCycleTime: "Avg Cycle Time",
@@ -403,6 +407,7 @@ const translations = {
       peakProductionHour: "Peak Production Hour",
       mostProducedPart: "Most Produced Part",
       equipmentCount: "Equipment Count",
+      combinedDefectRate: "Combined Defect Rate",
       
       // Modal and UI Elements
       defectDetails: "Defect Details",
@@ -1277,6 +1282,10 @@ const translations = {
       totalProduction: "総生産量",
       totalDefects: "総不良数",
       defectRate: "不良率",
+      inspectionDefectRate: "検査不良率",
+      pressDefectRate: "プレス不良率",
+      slitDefectRate: "スリット不良率", 
+      srsDefectRate: "SRS不良率",
       factoryCount: "工場数",
       workerCount: "作業者数",
       avgCycleTime: "平均サイクルタイム",
@@ -1337,6 +1346,7 @@ const translations = {
       peakProductionHour: "生産ピーク時間",
       mostProducedPart: "最多生産部品",
       equipmentCount: "設備数",
+      combinedDefectRate: "総合不良率",
       
       // Modal and UI Elements
       defectDetails: "不良詳細",

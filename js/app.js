@@ -265,6 +265,18 @@ function loadPage(page) {
                         
                         <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
                             <div class="flex items-center">
+                                <div class="p-2 bg-amber-100 rounded-lg">
+                                    <i class="ri-pie-chart-line text-amber-600 text-xl"></i>
+                                </div>
+                                <div class="ml-4">
+                                    <p class="text-sm font-medium text-gray-600" data-i18n="combinedDefectRate">Combined Defect Rate</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="combinedDefectRateCount">0.00%</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                            <div class="flex items-center">
                                 <div class="p-2 bg-green-100 rounded-lg">
                                     <i class="ri-building-line text-green-600 text-xl"></i>
                                 </div>
