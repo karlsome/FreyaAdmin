@@ -1,13 +1,13 @@
 /**
  * Enhanced Analytics System for FreyaAdmin
  * Provides comprehensive insights from kensaDB with date range controls
+ * Updated: 2025-10-29 - Added data validation for factory-process combinations
  */
-
-
 
 // Global variables for analytics
 let analyticsData = [];
 let currentAnalyticsRange = 'last30'; // Default range
+let combinedDefectRateCalculated = false; // Flag to prevent recalculation
 let analyticsCharts = {}; // Store chart instances
 
 /**
@@ -273,6 +273,9 @@ async function loadAnalyticsData() {
         // Render all analytics
         renderAnalytics();
         
+        // Calculate Combined Defect Rate only once (on first successful load)
+        calculateCombinedDefectRate();
+        
     } catch (error) {
         console.error('❌ Error loading analytics data:', error);
         showAnalyticsErrorState(error.message);
@@ -312,39 +315,70 @@ function updateDateRangeDisplay(fromDate, toDate, selectedFactory = null, select
  * Render all analytics components
  */
 function renderAnalytics() {
-    if (!analyticsData || !analyticsData.summary || analyticsData.summary.length === 0) {
+    // Basic data structure check
+    if (!analyticsData) {
         showAnalyticsErrorState(t('noDataAvailable'));
         return;
     }
     
     console.log('📊 Rendering analytics with data:', analyticsData);
     
+    // Check if data exists for selected factory-process combination
+    const hasValidData = validateAnalyticsData();
+    
+    // If validation fails due to factory-process mismatch, show specific no data message
+    if (!hasValidData) {
+        showChartsNoDataState();
+        // Still show KPI cards with available data
+        try {
+            renderSummaryCards();
+        } catch (error) {
+            console.warn('Error rendering summary cards:', error);
+        }
+        
+        // Hide loading state
+        const loader = document.getElementById('analyticsLoader');
+        if (loader) loader.style.display = 'none';
+        
+        // Restore card opacity
+        document.querySelectorAll('.analytics-card').forEach(card => {
+            card.style.opacity = '1';
+        });
+        
+        return;
+    }
+    
     try {
-        // Render summary cards
+        // Render summary cards (always show)
         renderSummaryCards();
         
-        // Render existing charts
-        renderProductionTrendChart();
-        renderQualityTrendChart();
-        renderFactoryComparisonChart();
-        renderDefectDistributionChart();
-        renderWorkerPerformanceChart();
-        renderProcessEfficiencyChart();
-        renderTemperatureTrendChart();
-        renderHumidityTrendChart();
-        
-        // Render NEW charts
-        renderHourlyProductionChart();
-        renderTopBottomProductsChart();
-        renderDefectsByHourChart();
-        renderFactoryDefectsChart();
-        renderFactoryTop5DefectsChart();
-        renderWorkerQualityChart();
-        renderEquipmentDowntimeChart();
-        renderFactoryRadarChart();
-        
-        // Render lists
-        renderTopDefectPartsByFactory();
+        if (hasValidData) {
+            // Render existing charts
+            renderProductionTrendChart();
+            renderQualityTrendChart();
+            renderFactoryComparisonChart();
+            renderDefectDistributionChart();
+            renderWorkerPerformanceChart();
+            renderProcessEfficiencyChart();
+            renderTemperatureTrendChart();
+            renderHumidityTrendChart();
+            
+            // Render NEW charts
+            renderHourlyProductionChart();
+            renderTopBottomProductsChart();
+            renderDefectsByHourChart();
+            renderFactoryDefectsChart();
+            renderFactoryTop5DefectsChart();
+            renderWorkerQualityChart();
+            renderEquipmentDowntimeChart();
+            renderFactoryRadarChart();
+            
+            // Render lists
+            renderTopDefectPartsByFactory();
+        } else {
+            // Show "no data" message for charts when data doesn't exist for selected factory-process
+            showChartsNoDataState();
+        }
         
         // Hide loading state
         const loader = document.getElementById('analyticsLoader');
@@ -359,6 +393,65 @@ function renderAnalytics() {
         console.error('Error rendering analytics:', error);
         showAnalyticsErrorState('Error rendering charts: ' + error.message);
     }
+}
+
+/**
+ * Validate if analytics data has actual records for selected factory-process combination
+ */
+function validateAnalyticsData() {
+    const selectedFactory = document.getElementById('analyticsFactoryFilter')?.value;
+    const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
+    
+    // If no specific factory is selected, show all data
+    if (!selectedFactory) {
+        return true;
+    }
+    
+    console.log(`🔍 Validating data for factory "${selectedFactory}" in collection "${selectedCollection}"`);
+    console.log('📊 Analytics data structure:', analyticsData);
+    
+    // Check multiple data indicators to determine if there's meaningful data
+    const dailyTrend = analyticsData.dailyTrend || [];
+    const factoryStats = analyticsData.factoryStats || [];
+    const summary = analyticsData.summary && analyticsData.summary[0] ? analyticsData.summary[0] : {};
+    
+    // Check if dailyTrend has meaningful data
+    const hasProductionData = dailyTrend.length > 0 && dailyTrend.some(record => {
+        return (record.totalProduction > 0 || record.totalDefects > 0);
+    });
+    
+    // Check if factory exists in factoryStats and has data
+    const hasFactoryStats = factoryStats.length > 0 && factoryStats.some(stat => {
+        return stat.factory === selectedFactory && (stat.totalProduction > 0 || stat.totalDefects > 0);
+    });
+    
+    // Check if summary has meaningful data
+    const hasSummaryData = (summary.totalProduction > 0 || summary.totalDefects > 0);
+    
+    // Additional check: if we have temperature/humidity data
+    const temperatureData = analyticsData.temperatureTrend || [];
+    const humidityData = analyticsData.humidityTrend || [];
+    const hasEnvironmentalData = temperatureData.length > 0 || humidityData.length > 0;
+    
+    const validationResult = {
+        hasProductionData,
+        hasFactoryStats,
+        hasSummaryData,
+        hasEnvironmentalData,
+        dailyTrendCount: dailyTrend.length,
+        factoryStatsCount: factoryStats.length,
+        selectedFactory,
+        selectedCollection
+    };
+    
+    console.log(`🔍 Data validation results:`, validationResult);
+    
+    // Consider data valid if we have meaningful production data OR factory stats with data
+    const isValid = hasProductionData || (hasFactoryStats && hasSummaryData);
+    
+    console.log(`🔍 Final validation result: ${isValid ? 'VALID' : 'NO DATA'}`);
+    
+    return isValid;
 }
 
 /**
@@ -406,8 +499,11 @@ function renderSummaryCards() {
     const equipmentCount = analyticsData.equipmentStats?.length || 0;
     document.getElementById('equipmentCountCount').textContent = equipmentCount;
     
-    // Combined Defect Rate (sum of all process defect rates)
-    calculateCombinedDefectRate();
+    // Combined Defect Rate: Preserve existing value if already calculated, otherwise show placeholder
+    if (!combinedDefectRateCalculated) {
+        document.getElementById('combinedDefectRateCount').textContent = '計算中...';
+    }
+    // If already calculated, don't touch the value - it should remain the same
 }
 
 /**
@@ -478,6 +574,12 @@ function updateDefectRateLabel() {
  * Calculate combined defect rate across all processes
  */
 async function calculateCombinedDefectRate() {
+    // Skip calculation if already done
+    if (combinedDefectRateCalculated) {
+        console.log('📊 Combined Defect Rate already calculated, skipping...');
+        return;
+    }
+    
     try {
         const fromDate = document.getElementById('analyticsFromDate')?.value;
         const toDate = document.getElementById('analyticsToDate')?.value;
@@ -510,10 +612,8 @@ async function calculateCombinedDefectRate() {
                     collectionName: collection
                 };
                 
-                // Add factory filter if selected
-                if (selectedFactory) {
-                    requestBody.factoryFilter = selectedFactory;
-                }
+                // NOTE: Do NOT add factory filter for Combined Defect Rate
+                // This should always show the rate across ALL factories and ALL processes
                 
                 const response = await fetch(BASE_URL + 'api/analytics-data', {
                     method: "POST",
@@ -547,6 +647,10 @@ async function calculateCombinedDefectRate() {
         
         // Update display
         document.getElementById('combinedDefectRateCount').textContent = `${combinedRate.toFixed(2)}%`;
+        
+        // Mark as calculated to prevent future recalculations
+        combinedDefectRateCalculated = true;
+        console.log('📊 Combined Defect Rate calculation complete - will not recalculate');
         
     } catch (error) {
         console.error('Error calculating combined defect rate:', error);
@@ -1125,6 +1229,11 @@ function showAnalyticsLoadingState() {
     });
     
     document.querySelectorAll('.analytics-count').forEach(count => {
+        // Preserve Combined Defect Rate if already calculated
+        if (count.id === 'combinedDefectRateCount' && combinedDefectRateCalculated) {
+            // Don't overwrite the already calculated value
+            return;
+        }
         count.textContent = '...';
     });
     
@@ -1142,6 +1251,11 @@ function showAnalyticsErrorState(message) {
     });
     
     document.querySelectorAll('.analytics-count').forEach(count => {
+        // Preserve Combined Defect Rate if already calculated
+        if (count.id === 'combinedDefectRateCount' && combinedDefectRateCalculated) {
+            // Don't overwrite the already calculated value
+            return;
+        }
         count.textContent = 'エラー';
     });
     
@@ -1150,6 +1264,80 @@ function showAnalyticsErrorState(message) {
     // Hide loading spinner
     const loader = document.getElementById('analyticsLoader');
     if (loader) loader.style.display = 'none';
+}
+
+/**
+ * Show "no data found" state for charts while preserving KPI cards
+ */
+function showChartsNoDataState() {
+    const selectedFactory = document.getElementById('analyticsFactoryFilter')?.value;
+    const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
+    
+    // Collection display names
+    const collectionDisplayNames = {
+        'kensaDB': '検査',
+        'pressDB': 'プレス',
+        'slitDB': 'スリット',
+        'SRSDB': 'SRS'
+    };
+    
+    const collectionName = collectionDisplayNames[selectedCollection] || selectedCollection;
+    const noDataMessage = t('noDataFound') || `${selectedFactory}工場の${collectionName}プロセスのデータが見つかりません`;
+    
+    console.log(`📊 Showing no data state for factory "${selectedFactory}" in collection "${selectedCollection}"`);
+    
+    // List of chart canvas IDs to show no data message
+    const chartCanvasIds = [
+        'productionTrendChart',
+        'qualityTrendChart',
+        'factoryComparisonChart',
+        'defectDistributionChart',
+        'workerPerformanceChart',
+        'processEfficiencyChart',
+        'temperatureTrendChart',
+        'humidityTrendChart',
+        'hourlyProductionChart',
+        'topBottomProductsChart',
+        'defectsByHourChart',
+        'factoryDefectsChart',
+        'factoryTop5DefectsChart',
+        'workerQualityChart',
+        'equipmentDowntimeChart',
+        'factoryRadarChart'
+    ];
+    
+    // Destroy existing charts and show no data message
+    chartCanvasIds.forEach(canvasId => {
+        const canvas = document.getElementById(canvasId);
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            
+            // Destroy existing chart if it exists
+            const chartKey = canvasId.replace('Chart', '');
+            if (analyticsCharts[chartKey]) {
+                analyticsCharts[chartKey].destroy();
+                analyticsCharts[chartKey] = null;
+            }
+            
+            // Clear canvas and show no data message
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#6B7280';
+            ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(noDataMessage, canvas.width / 2, canvas.height / 2);
+        }
+    });
+    
+    // Clear defect parts list
+    const defectPartsContainer = document.getElementById('topDefectPartsContainer');
+    if (defectPartsContainer) {
+        defectPartsContainer.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: #6B7280;">
+                ${noDataMessage}
+            </div>
+        `;
+    }
 }
 
 /**

@@ -409,6 +409,9 @@ const translations = {
       equipmentCount: "Equipment Count",
       combinedDefectRate: "Combined Defect Rate",
       
+      // Data validation messages
+      noDataFound: "No data found for selected factory and process",
+      
       // Modal and UI Elements
       defectDetails: "Defect Details",
       serial: "Serial",
@@ -1347,6 +1350,9 @@ const translations = {
       mostProducedPart: "最多生産部品",
       equipmentCount: "設備数",
       combinedDefectRate: "総合不良率",
+      
+      // Data validation messages
+      noDataFound: "選択された工場とプロセスのデータが見つかりません",
       
       // Modal and UI Elements
       defectDetails: "不良詳細",
