@@ -103,30 +103,46 @@ function handleCollectionChange() {
  */
 async function loadAnalyticsFactoryOptions() {
     try {
-        console.log('📋 Loading factory options from Master DB...');
-        console.log('🔗 API URL:', BASE_URL + 'api/masterdb/factories');
+        console.log('📋 Loading factory options from all collections...');
         
-        const response = await fetch(BASE_URL + 'api/masterdb/factories', {
-            method: "GET",
-            headers: { "Content-Type": "application/json" }
+        const collections = ['kensaDB', 'pressDB', 'SRSDB', 'slitDB'];
+        const response = await fetch(BASE_URL + 'api/factories/batch', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ collections })
         });
 
         console.log('📥 Response status:', response.status, response.statusText);
 
         if (response.ok) {
             const result = await response.json();
-            console.log('📊 Factory API result:', result);
+            console.log('📊 Batch factory API result:', result);
             
-            if (result.success && result.data && Array.isArray(result.data)) {
-                console.log(`✅ Loaded ${result.count} factories from Master DB:`, result.data);
-                updateFactoryFilterOptions(result.data);
+            if (result.success && result.results) {
+                // Combine all factories from all collections and remove duplicates
+                const allFactories = new Set();
+                
+                Object.keys(result.results).forEach(collection => {
+                    if (result.results[collection].factories) {
+                        result.results[collection].factories.forEach(factory => {
+                            // Only add non-null, non-empty factories
+                            if (factory && factory.trim() !== '') {
+                                allFactories.add(factory.trim());
+                            }
+                        });
+                    }
+                });
+                
+                const uniqueFactories = Array.from(allFactories).sort();
+                console.log(`✅ Combined ${uniqueFactories.length} unique factories from all collections:`, uniqueFactories);
+                updateFactoryFilterOptions(uniqueFactories);
                 return true;
             } else {
                 console.warn('⚠️ Unexpected response structure:', result);
             }
         } else {
             const errorText = await response.text();
-            console.error('❌ Failed to load factories from Master DB:', response.status, errorText);
+            console.error('❌ Failed to load factories from batch endpoint:', response.status, errorText);
         }
         
         return false;

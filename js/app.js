@@ -2599,28 +2599,66 @@ function loadPage(page) {
                 }
               });
 
-              // Determine API endpoints based on current tab
-              let apiEndpoints;
+              // Load factories from batch endpoint first
+              try {
+                const collections = ['kensaDB', 'pressDB', 'SRSDB', 'slitDB'];
+                const factoryResponse = await fetch(`${BASE_URL}api/factories/batch`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ collections })
+                });
+
+                if (factoryResponse.ok) {
+                  const factoryResult = await factoryResponse.json();
+                  
+                  if (factoryResult.success && factoryResult.results) {
+                    // Combine all factories from all collections and remove duplicates
+                    const allFactories = new Set();
+                    
+                    Object.keys(factoryResult.results).forEach(collection => {
+                      if (factoryResult.results[collection].factories) {
+                        factoryResult.results[collection].factories.forEach(factory => {
+                          // Only add non-null, non-empty factories
+                          if (factory && factory.trim() !== '') {
+                            allFactories.add(factory.trim());
+                          }
+                        });
+                      }
+                    });
+                    
+                    const uniqueFactories = Array.from(allFactories).sort();
+                    console.log(`✅ Master DB: Combined ${uniqueFactories.length} unique factories from all collections:`, uniqueFactories);
+                    populateMasterDropdown('filterFactory', uniqueFactories, 'All Factory');
+                  }
+                } else {
+                  console.error('❌ Failed to load factories from batch endpoint');
+                  populateMasterDropdown('filterFactory', [], 'All Factory');
+                }
+              } catch (error) {
+                console.error('❌ Error loading factories from batch endpoint:', error);
+                populateMasterDropdown('filterFactory', [], 'All Factory');
+              }
+
+              // Determine other API endpoints based on current tab (excluding factories)
+              let otherEndpoints;
               if (currentMasterTab === '内製品DB') {
                 // For Master DB (内製品DB)
-                apiEndpoints = [
-                  { endpoint: 'api/masterdb/factories', selectId: 'filterFactory', label: 'All Factory' },
+                otherEndpoints = [
                   { endpoint: 'api/masterdb/rl', selectId: 'filterRL', label: 'All R/L' },
                   { endpoint: 'api/masterdb/colors', selectId: 'filterColor', label: 'All Color' },
                   { endpoint: 'api/masterdb/equipment', selectId: 'filterProcess', label: 'All Equipment' }
                 ];
               } else {
                 // For Material DB (材料DB) - use similar endpoints or create new ones
-                apiEndpoints = [
-                  { endpoint: 'api/masterdb/factories', selectId: 'filterFactory', label: 'All Factory' },
+                otherEndpoints = [
                   { endpoint: 'api/masterdb/rl', selectId: 'filterRL', label: 'All R/L' },
                   { endpoint: 'api/masterdb/colors', selectId: 'filterColor', label: 'All Color' },
                   { endpoint: 'api/masterdb/materials', selectId: 'filterProcess', label: 'All Material' }
                 ];
               }
 
-              // Load all filter values in parallel for better performance
-              const promises = apiEndpoints.map(async ({ endpoint, selectId, label }) => {
+              // Load all other filter values in parallel for better performance
+              const promises = otherEndpoints.map(async ({ endpoint, selectId, label }) => {
                 try {
                   const response = await fetch(`${BASE_URL}${endpoint}`);
                   const data = await response.json();
