@@ -8,6 +8,7 @@
 let analyticsData = [];
 let currentAnalyticsRange = 'last30'; // Default range
 let combinedDefectRateCalculated = false; // Flag to prevent recalculation
+let lastCalculatedDateRange = null; // Track the date range for combined defect rate
 let analyticsCharts = {}; // Store chart instances
 
 /**
@@ -574,12 +575,6 @@ function updateDefectRateLabel() {
  * Calculate combined defect rate across all processes
  */
 async function calculateCombinedDefectRate() {
-    // Skip calculation if already done
-    if (combinedDefectRateCalculated) {
-        console.log('📊 Combined Defect Rate already calculated, skipping...');
-        return;
-    }
-    
     try {
         const fromDate = document.getElementById('analyticsFromDate')?.value;
         const toDate = document.getElementById('analyticsToDate')?.value;
@@ -588,6 +583,21 @@ async function calculateCombinedDefectRate() {
         if (!fromDate || !toDate) {
             document.getElementById('combinedDefectRateCount').textContent = '0.00%';
             return;
+        }
+        
+        // Create a unique key for the current date range
+        const currentDateRange = `${fromDate}_${toDate}`;
+        
+        // Check if already calculated for this specific date range
+        if (combinedDefectRateCalculated && lastCalculatedDateRange === currentDateRange) {
+            console.log('📊 Combined Defect Rate already calculated for this date range, skipping...');
+            return;
+        }
+        
+        // If date range changed, allow recalculation
+        if (lastCalculatedDateRange !== currentDateRange) {
+            console.log('📊 Date range changed, recalculating Combined Defect Rate...');
+            combinedDefectRateCalculated = false;
         }
         
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
@@ -648,9 +658,10 @@ async function calculateCombinedDefectRate() {
         // Update display
         document.getElementById('combinedDefectRateCount').textContent = `${combinedRate.toFixed(2)}%`;
         
-        // Mark as calculated to prevent future recalculations
+        // Store the date range and mark as calculated
+        lastCalculatedDateRange = currentDateRange;
         combinedDefectRateCalculated = true;
-        console.log('📊 Combined Defect Rate calculation complete - will not recalculate');
+        console.log(`📊 Combined Defect Rate calculation complete for ${fromDate} to ${toDate} - will not recalculate unless date range changes`);
         
     } catch (error) {
         console.error('Error calculating combined defect rate:', error);
