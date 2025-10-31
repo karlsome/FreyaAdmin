@@ -38,6 +38,122 @@ const SENSOR_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes for sensor data
 const apiCallTimestamps = new Map();
 const API_RATE_LIMIT = 60 * 1000; // 1 minute between calls per factory
 
+// ==================== DYNAMIC FILTER SYSTEM ====================
+
+/**
+ * Process schemas with field definitions for dynamic filtering
+ * Each field has: type, label, operators, and optional config
+ */
+const PROCESS_SCHEMAS = {
+    kensaDB: {
+        品番: { type: 'text', label: '品番', operators: ['equals', 'contains'], group: 'basic' },
+        背番号: { type: 'text', label: '背番号', operators: ['equals', 'contains'], group: 'basic' },
+        モデル: { type: 'select', label: 'モデル', operators: ['equals', 'in'], group: 'basic', autoPopulate: true },
+        Worker_Name: { type: 'select', label: 'Worker Name', operators: ['equals', 'in'], group: 'worker', autoPopulate: true },
+        設備: { type: 'select', label: '設備', operators: ['equals', 'in'], group: 'equipment', autoPopulate: true },
+        製造ロット: { type: 'text', label: '製造ロット', operators: ['equals', 'contains'], group: 'basic' },
+        Date: { type: 'date', label: 'Date', operators: ['equals', 'range'], group: 'basic' },
+        Time_start: { type: 'time', label: 'Time Start', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Time_end: { type: 'time', label: 'Time End', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Total: { type: 'number', label: 'Total', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Total_NG: { type: 'number', label: 'Total NG', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Process_Quantity: { type: 'number', label: 'Process Quantity', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Remaining_Quantity: { type: 'number', label: 'Remaining Quantity', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Cycle_Time: { type: 'number', label: 'Cycle Time', operators: ['equals', 'range', 'greater', 'less'], group: 'performance' },
+        Spare: { type: 'number', label: 'Spare', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        approvalStatus: { type: 'select', label: 'Approval Status', operators: ['equals', 'in'], group: 'status', 
+            options: ['pending', 'hancho_approved', 'fully_approved', 'correction_needed'] }
+    },
+    pressDB: {
+        品番: { type: 'text', label: '品番', operators: ['equals', 'contains'], group: 'basic' },
+        背番号: { type: 'text', label: '背番号', operators: ['equals', 'contains'], group: 'basic' },
+        モデル: { type: 'select', label: 'モデル', operators: ['equals', 'in'], group: 'basic', autoPopulate: true },
+        Worker_Name: { type: 'select', label: 'Worker Name', operators: ['equals', 'in'], group: 'worker', autoPopulate: true },
+        設備: { type: 'select', label: '設備', operators: ['equals', 'in'], group: 'equipment', autoPopulate: true },
+        製造ロット: { type: 'text', label: '製造ロット', operators: ['equals', 'contains'], group: 'basic' },
+        Date: { type: 'date', label: 'Date', operators: ['equals', 'range'], group: 'basic' },
+        Time_start: { type: 'time', label: 'Time Start', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Time_end: { type: 'time', label: 'Time End', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Total: { type: 'number', label: 'Total', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Total_NG: { type: 'number', label: 'Total NG', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Process_Quantity: { type: 'number', label: 'Process Quantity', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Cycle_Time: { type: 'number', label: 'Cycle Time', operators: ['equals', 'range', 'greater', 'less'], group: 'performance' },
+        approvalStatus: { type: 'select', label: 'Approval Status', operators: ['equals', 'in'], group: 'status', 
+            options: ['pending', 'hancho_approved', 'fully_approved', 'correction_needed'] }
+    },
+    SRSDB: {
+        品番: { type: 'text', label: '品番', operators: ['equals', 'contains'], group: 'basic' },
+        背番号: { type: 'text', label: '背番号', operators: ['equals', 'contains'], group: 'basic' },
+        モデル: { type: 'select', label: 'モデル', operators: ['equals', 'in'], group: 'basic', autoPopulate: true },
+        Worker_Name: { type: 'select', label: 'Worker Name', operators: ['equals', 'in'], group: 'worker', autoPopulate: true },
+        設備: { type: 'select', label: '設備', operators: ['equals', 'in'], group: 'equipment', autoPopulate: true },
+        製造ロット: { type: 'text', label: '製造ロット', operators: ['equals', 'contains'], group: 'basic' },
+        Date: { type: 'date', label: 'Date', operators: ['equals', 'range'], group: 'basic' },
+        Time_start: { type: 'time', label: 'Time Start', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Time_end: { type: 'time', label: 'Time End', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Total: { type: 'number', label: 'Total', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Total_NG: { type: 'number', label: 'Total NG', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Process_Quantity: { type: 'number', label: 'Process Quantity', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Cycle_Time: { type: 'number', label: 'Cycle Time', operators: ['equals', 'range', 'greater', 'less'], group: 'performance' },
+        approvalStatus: { type: 'select', label: 'Approval Status', operators: ['equals', 'in'], group: 'status', 
+            options: ['pending', 'hancho_approved', 'fully_approved', 'correction_needed'] }
+    },
+    slitDB: {
+        品番: { type: 'text', label: '品番', operators: ['equals', 'contains'], group: 'basic' },
+        背番号: { type: 'text', label: '背番号', operators: ['equals', 'contains'], group: 'basic' },
+        モデル: { type: 'select', label: 'モデル', operators: ['equals', 'in'], group: 'basic', autoPopulate: true },
+        Worker_Name: { type: 'select', label: 'Worker Name', operators: ['equals', 'in'], group: 'worker', autoPopulate: true },
+        設備: { type: 'select', label: '設備', operators: ['equals', 'in'], group: 'equipment', autoPopulate: true },
+        製造ロット: { type: 'text', label: '製造ロット', operators: ['equals', 'contains'], group: 'basic' },
+        Date: { type: 'date', label: 'Date', operators: ['equals', 'range'], group: 'basic' },
+        Time_start: { type: 'time', label: 'Time Start', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Time_end: { type: 'time', label: 'Time End', operators: ['equals', 'range', 'greater', 'less'], group: 'time' },
+        Total: { type: 'number', label: 'Total', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Total_NG: { type: 'number', label: 'Total NG', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Process_Quantity: { type: 'number', label: 'Process Quantity', operators: ['equals', 'range', 'greater', 'less'], group: 'quantity' },
+        Cycle_Time: { type: 'number', label: 'Cycle Time', operators: ['equals', 'range', 'greater', 'less'], group: 'performance' },
+        approvalStatus: { type: 'select', label: 'Approval Status', operators: ['equals', 'in'], group: 'status', 
+            options: ['pending', 'hancho_approved', 'fully_approved', 'correction_needed'] }
+    }
+};
+
+/**
+ * Computed filter definitions for special logic filters
+ */
+const COMPUTED_FILTERS = {
+    defect_rate_high: {
+        label: 'High Defect Rate (>2%)',
+        description: 'Total_NG / Total > 0.02',
+        compute: (Total_NG, Total) => (Total_NG / Total) > 0.02
+    },
+    overtime_work: {
+        label: 'Overtime Work (>2 hours)',
+        description: 'Time_end - Time_start > 2 hours',
+        compute: (Time_start, Time_end) => {
+            const start = new Date(`2000-01-01T${Time_start}`);
+            const end = new Date(`2000-01-01T${Time_end}`);
+            const diffHours = (end - start) / (1000 * 60 * 60);
+            return diffHours > 2;
+        }
+    },
+    low_efficiency: {
+        label: 'Low Efficiency (<80% of target)',
+        description: 'Process_Quantity < Total * 0.8',
+        compute: (Process_Quantity, Total) => Process_Quantity < (Total * 0.8)
+    },
+    high_spare_usage: {
+        label: 'High Spare Usage (>5)',
+        description: 'Spare > 5',
+        compute: (Spare) => Spare > 5
+    }
+};
+
+// Global state for active filters
+let activeFilters = [];
+let filterDropdownCache = new Map(); // Cache for dropdown options
+
+// ==================== END DYNAMIC FILTER SYSTEM ====================
+
 /**
  * Fetch physical sensor data from tempHumidityDB
  */
@@ -1764,6 +1880,860 @@ async function enhancedTemperatureTest() {
 window.testMultipleWeatherAPIs = testMultipleWeatherAPIs;
 window.enhancedTemperatureTest = enhancedTemperatureTest;
 
+// ==================== DYNAMIC FILTER FUNCTIONS ====================
+
+/**
+ * Fetch distinct values for dropdown population
+ */
+async function fetchDistinctValues(collection, field, factory) {
+    const cacheKey = `${collection}_${field}_${factory}`;
+    
+    // Check cache first
+    if (filterDropdownCache.has(cacheKey)) {
+        const cached = filterDropdownCache.get(cacheKey);
+        if (Date.now() - cached.timestamp < 5 * 60 * 1000) { // 5 minute cache
+            return cached.values;
+        }
+    }
+    
+    try {
+        // Special handling for モデル field - fetch from Master DB instead
+        if (field === 'モデル') {
+            const response = await fetch(`${BASE_URL}api/distinct`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dbName: 'Sasaki_Coating_MasterDB',
+                    collectionName: 'masterDB',
+                    field: 'モデル',
+                    filter: {} // No factory filter for Master DB
+                })
+            });
+            
+            if (!response.ok) throw new Error('Failed to fetch モデル values from Master DB');
+            
+            const data = await response.json();
+            const values = data.values || [];
+            
+            // Cache the results
+            filterDropdownCache.set(cacheKey, {
+                values: values,
+                timestamp: Date.now()
+            });
+            
+            return values;
+        }
+        
+        // Standard field handling - fetch from process collection
+        const response = await fetch(`${BASE_URL}api/distinct`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: collection,
+                field: field,
+                filter: { 工場: factory }
+            })
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch distinct values');
+        
+        const data = await response.json();
+        const values = data.values || [];
+        
+        // Cache the results
+        filterDropdownCache.set(cacheKey, {
+            values: values,
+            timestamp: Date.now()
+        });
+        
+        return values;
+    } catch (error) {
+        console.error(`Error fetching distinct values for ${field}:`, error);
+        return [];
+    }
+}
+
+/**
+ * Fetch 背番号 values for a given モデル from Master DB
+ */
+async function getSerialNumbersForModel(modelValue) {
+    const cacheKey = `model_to_serial_${modelValue}`;
+    
+    // Check cache first
+    if (filterDropdownCache.has(cacheKey)) {
+        const cached = filterDropdownCache.get(cacheKey);
+        if (Date.now() - cached.timestamp < 5 * 60 * 1000) { // 5 minute cache
+            return cached.values;
+        }
+    }
+    
+    try {
+        console.log(`🔍 Fetching 背番号 for モデル: ${modelValue}`);
+        
+        const response = await fetch(`${BASE_URL}queries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'Sasaki_Coating_MasterDB',
+                collectionName: 'masterDB',
+                query: { 'モデル': modelValue }
+            })
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch serial numbers from Master DB');
+        
+        const records = await response.json();
+        const serialNumbers = [...new Set(records.map(r => r.背番号).filter(s => s))];
+        
+        console.log(`✅ Found ${serialNumbers.length} unique 背番号 for モデル: ${modelValue}`);
+        
+        // Cache the results
+        filterDropdownCache.set(cacheKey, {
+            values: serialNumbers,
+            timestamp: Date.now()
+        });
+        
+        return serialNumbers;
+    } catch (error) {
+        console.error(`Error fetching 背番号 for モデル ${modelValue}:`, error);
+        return [];
+    }
+}
+
+/**
+ * Build MongoDB query from active filters (ASYNC - handles モデル filter)
+ */
+async function buildDynamicQuery(filters, baseQuery = {}) {
+    const query = { ...baseQuery };
+    
+    // Process filters sequentially to handle async operations
+    for (const filter of filters) {
+        const { field, operator, value, value2, collection } = filter;
+        
+        // Skip if no value provided
+        if (value === undefined || value === null || value === '') continue;
+        
+        // Special handling for モデル field - convert to 背番号 lookup
+        if (field === 'モデル') {
+            const modelValues = Array.isArray(value) ? value : [value];
+            let allSerialNumbers = [];
+            
+            // Fetch 背番号 for each モデル value
+            for (const modelValue of modelValues) {
+                const serialNumbers = await getSerialNumbersForModel(modelValue);
+                allSerialNumbers = allSerialNumbers.concat(serialNumbers);
+            }
+            
+            // Remove duplicates
+            allSerialNumbers = [...new Set(allSerialNumbers)];
+            
+            if (allSerialNumbers.length > 0) {
+                // Add as 背番号 filter
+                if (query['背番号']) {
+                    // If 背番号 already exists, merge with $in
+                    if (query['背番号'].$in) {
+                        query['背番号'].$in = [...new Set([...query['背番号'].$in, ...allSerialNumbers])];
+                    } else {
+                        query['背番号'] = { $in: allSerialNumbers };
+                    }
+                } else {
+                    query['背番号'] = { $in: allSerialNumbers };
+                }
+                console.log(`✅ Converted モデル filter to 背番号 filter with ${allSerialNumbers.length} values`);
+            }
+            continue;
+        }
+        
+        // Standard field handling
+        switch (operator) {
+            case 'equals':
+                query[field] = value;
+                break;
+                
+            case 'contains':
+                query[field] = { $regex: value, $options: 'i' };
+                break;
+                
+            case 'in':
+                // Handle multiple selections (for dropdowns)
+                const values = Array.isArray(value) ? value : [value];
+                query[field] = { $in: values };
+                break;
+                
+            case 'greater':
+                query[field] = { $gt: parseFloat(value) };
+                break;
+                
+            case 'less':
+                query[field] = { $lt: parseFloat(value) };
+                break;
+                
+            case 'range':
+                if (value && value2) {
+                    query[field] = { 
+                        $gte: parseFloat(value) || value, 
+                        $lte: parseFloat(value2) || value2 
+                    };
+                } else if (value) {
+                    query[field] = { $gte: parseFloat(value) || value };
+                } else if (value2) {
+                    query[field] = { $lte: parseFloat(value2) || value2 };
+                }
+                break;
+        }
+    }
+    
+    return query;
+}
+
+/**
+ * Apply computed filters (post-query filtering in JavaScript)
+ */
+function applyComputedFilters(data, computedFilters) {
+    if (!computedFilters || computedFilters.length === 0) return data;
+    
+    return data.filter(item => {
+        return computedFilters.every(filterName => {
+            const computed = COMPUTED_FILTERS[filterName];
+            if (!computed) return true;
+            
+            // Extract required fields for the computation
+            switch (filterName) {
+                case 'defect_rate_high':
+                    return computed.compute(item.Total_NG || 0, item.Total || 1);
+                case 'overtime_work':
+                    return computed.compute(item.Time_start, item.Time_end);
+                case 'low_efficiency':
+                    return computed.compute(item.Process_Quantity || 0, item.Total || 1);
+                case 'high_spare_usage':
+                    return computed.compute(item.Spare || 0);
+                default:
+                    return true;
+            }
+        });
+    });
+}
+
+/**
+ * Generate dynamic filter UI
+ */
+function generateFilterUI(factoryName) {
+    return `
+        <div id="dynamicFilterContainer" class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
+            <!-- Basic Filters (Always Visible) -->
+            <div class="p-4 border-b border-gray-200">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <!-- Date Range -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">From</label>
+                        <input type="date" id="filterDateFrom" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">To</label>
+                        <input type="date" id="filterDateTo" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    
+                    <!-- Part Number Tags -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Part Number</label>
+                        <div class="tag-input-container border border-gray-300 rounded-md focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text" onclick="focusPartNumberInput()">
+                            <div id="partNumberTags" class="flex flex-wrap gap-1"></div>
+                            <input type="text" id="partNumberInput" class="flex-1 min-w-[120px] border-none outline-none text-sm" placeholder="例: GN200-A0400 (Enter)" onkeydown="handlePartNumberKeydown(event)" onblur="handlePartNumberBlur(event)">
+                        </div>
+                    </div>
+                    
+                    <!-- Serial Number Tags -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
+                        <div class="tag-input-container border border-gray-300 rounded-md focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text" onclick="focusSerialNumberInput()">
+                            <div id="serialNumberTags" class="flex flex-wrap gap-1"></div>
+                            <input type="text" id="serialNumberInput" class="flex-1 min-w-[120px] border-none outline-none text-sm" placeholder="例: DR042 (Enter)" onkeydown="handleSerialNumberKeydown(event)" onblur="handleSerialNumberBlur(event)">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Advanced Filters (Collapsible) -->
+            <div class="p-4">
+                <button onclick="toggleAdvancedFilters()" class="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 hover:text-gray-900">
+                    <span class="flex items-center gap-2">
+                        <i class="ri-filter-3-line"></i>
+                        Advanced Filters
+                        <span id="activeFilterCount" class="hidden bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full"></span>
+                    </span>
+                    <i id="advancedFilterIcon" class="ri-arrow-down-s-line text-lg transition-transform"></i>
+                </button>
+                
+                <div id="advancedFilterPanel" class="hidden mt-4 space-y-4">
+                    <!-- Dynamic Filter Rows Container -->
+                    <div id="filterRowsContainer" class="space-y-3">
+                        <!-- Filters will be added here dynamically -->
+                    </div>
+                    
+                    <!-- Add Filter Button -->
+                    <button onclick="addFilterRow()" class="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-md border border-blue-200 transition-colors">
+                        <i class="ri-add-line"></i>
+                        Add Filter
+                    </button>
+                    
+                    <!-- Computed Filters -->
+                    <div class="border-t pt-4">
+                        <h4 class="text-sm font-medium text-gray-700 mb-3">Special Filters</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            ${Object.entries(COMPUTED_FILTERS).map(([key, filter]) => `
+                                <label class="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                                    <input type="checkbox" id="computed_${key}" value="${key}" onchange="updateActiveFilters()" class="rounded text-blue-600 focus:ring-blue-500">
+                                    <div class="flex-1">
+                                        <div class="text-sm font-medium text-gray-700">${filter.label}</div>
+                                        <div class="text-xs text-gray-500">${filter.description}</div>
+                                    </div>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
+                    <!-- Filter Presets -->
+                    <div class="border-t pt-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-sm font-medium text-gray-700">Filter Presets</h4>
+                            <button onclick="saveFilterPreset()" class="text-xs text-blue-600 hover:text-blue-700">
+                                <i class="ri-save-line"></i> Save Current
+                            </button>
+                        </div>
+                        <div id="filterPresetsContainer" class="flex flex-wrap gap-2">
+                            <!-- Presets will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Active Filters Display -->
+            <div id="activeFiltersDisplay" class="hidden px-4 pb-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-medium text-gray-600">Active Filters:</span>
+                    <button onclick="clearAllFilters()" class="text-xs text-red-600 hover:text-red-700">
+                        <i class="ri-close-circle-line"></i> Clear All
+                    </button>
+                </div>
+                <div id="activeFilterBadges" class="flex flex-wrap gap-2">
+                    <!-- Active filter badges will appear here -->
+                </div>
+            </div>
+            
+            <!-- Apply Button -->
+            <div class="px-4 pb-4 pt-2 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+                <button onclick="applyDynamicFilters()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
+                    <i class="ri-filter-line"></i>
+                    Apply Filters
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Toggle advanced filters panel
+ */
+window.toggleAdvancedFilters = function() {
+    const panel = document.getElementById('advancedFilterPanel');
+    const icon = document.getElementById('advancedFilterIcon');
+    
+    if (panel.classList.contains('hidden')) {
+        panel.classList.remove('hidden');
+        icon.classList.add('rotate-180');
+    } else {
+        panel.classList.add('hidden');
+        icon.classList.remove('rotate-180');
+    }
+};
+
+/**
+ * Add a new filter row
+ */
+window.addFilterRow = function(field = '', operator = '', value = '', value2 = '') {
+    const container = document.getElementById('filterRowsContainer');
+    const filterId = `filter_${Date.now()}`;
+    
+    // Get all available fields from all process schemas
+    const allFields = {};
+    Object.entries(PROCESS_SCHEMAS).forEach(([collection, schema]) => {
+        Object.entries(schema).forEach(([fieldName, fieldConfig]) => {
+            if (!allFields[fieldName]) {
+                allFields[fieldName] = {
+                    ...fieldConfig,
+                    collections: [collection]
+                };
+            } else if (!allFields[fieldName].collections.includes(collection)) {
+                allFields[fieldName].collections.push(collection);
+            }
+        });
+    });
+    
+    const filterRow = document.createElement('div');
+    filterRow.id = filterId;
+    filterRow.className = 'flex items-start gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200';
+    filterRow.innerHTML = `
+        <div class="flex-1 grid grid-cols-1 md:grid-cols-4 gap-2">
+            <!-- Field Selection -->
+            <select id="${filterId}_field" onchange="updateFilterOperators('${filterId}')" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                <option value="">Select Field...</option>
+                <optgroup label="Basic">
+                    ${Object.entries(allFields).filter(([_, config]) => config.group === 'basic').map(([fieldName, config]) => 
+                        `<option value="${fieldName}" ${field === fieldName ? 'selected' : ''}>${config.label}</option>`
+                    ).join('')}
+                </optgroup>
+                <optgroup label="Quantity & Performance">
+                    ${Object.entries(allFields).filter(([_, config]) => ['quantity', 'performance'].includes(config.group)).map(([fieldName, config]) => 
+                        `<option value="${fieldName}" ${field === fieldName ? 'selected' : ''}>${config.label}</option>`
+                    ).join('')}
+                </optgroup>
+                <optgroup label="Time">
+                    ${Object.entries(allFields).filter(([_, config]) => config.group === 'time').map(([fieldName, config]) => 
+                        `<option value="${fieldName}" ${field === fieldName ? 'selected' : ''}>${config.label}</option>`
+                    ).join('')}
+                </optgroup>
+                <optgroup label="Worker & Equipment">
+                    ${Object.entries(allFields).filter(([_, config]) => ['worker', 'equipment'].includes(config.group)).map(([fieldName, config]) => 
+                        `<option value="${fieldName}" ${field === fieldName ? 'selected' : ''}>${config.label}</option>`
+                    ).join('')}
+                </optgroup>
+                <optgroup label="Status">
+                    ${Object.entries(allFields).filter(([_, config]) => config.group === 'status').map(([fieldName, config]) => 
+                        `<option value="${fieldName}" ${field === fieldName ? 'selected' : ''}>${config.label}</option>`
+                    ).join('')}
+                </optgroup>
+            </select>
+            
+            <!-- Operator Selection -->
+            <select id="${filterId}_operator" onchange="updateFilterInputs('${filterId}')" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                <option value="">Select Operator...</option>
+            </select>
+            
+            <!-- Value Input(s) -->
+            <div id="${filterId}_valueContainer" class="md:col-span-2 flex gap-2">
+                <input type="text" id="${filterId}_value" placeholder="Value..." class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" value="${value}">
+            </div>
+        </div>
+        
+        <!-- Remove Button -->
+        <button onclick="removeFilterRow('${filterId}')" class="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors">
+            <i class="ri-delete-bin-line"></i>
+        </button>
+    `;
+    
+    container.appendChild(filterRow);
+    
+    // Initialize operators if field is pre-selected
+    if (field) {
+        updateFilterOperators(filterId);
+        if (operator) {
+            document.getElementById(`${filterId}_operator`).value = operator;
+            updateFilterInputs(filterId);
+        }
+    }
+    
+    return filterId;
+};
+
+/**
+ * Update filter operators based on selected field
+ */
+window.updateFilterOperators = async function(filterId) {
+    const fieldSelect = document.getElementById(`${filterId}_field`);
+    const operatorSelect = document.getElementById(`${filterId}_operator`);
+    const selectedField = fieldSelect.value;
+    
+    operatorSelect.innerHTML = '<option value="">Select Operator...</option>';
+    
+    if (!selectedField) return;
+    
+    // Find field config from any schema
+    let fieldConfig = null;
+    for (const schema of Object.values(PROCESS_SCHEMAS)) {
+        if (schema[selectedField]) {
+            fieldConfig = schema[selectedField];
+            break;
+        }
+    }
+    
+    if (!fieldConfig) return;
+    
+    // Add operators
+    fieldConfig.operators.forEach(op => {
+        const option = document.createElement('option');
+        option.value = op;
+        option.textContent = op.charAt(0).toUpperCase() + op.slice(1);
+        operatorSelect.appendChild(option);
+    });
+    
+    // Auto-select first operator
+    if (fieldConfig.operators.length > 0) {
+        operatorSelect.value = fieldConfig.operators[0];
+        updateFilterInputs(filterId);
+    }
+};
+
+/**
+ * Update filter input fields based on operator and field type
+ */
+window.updateFilterInputs = async function(filterId) {
+    const fieldSelect = document.getElementById(`${filterId}_field`);
+    const operatorSelect = document.getElementById(`${filterId}_operator`);
+    const valueContainer = document.getElementById(`${filterId}_valueContainer`);
+    
+    const selectedField = fieldSelect.value;
+    const selectedOperator = operatorSelect.value;
+    
+    if (!selectedField || !selectedOperator) return;
+    
+    // Find field config
+    let fieldConfig = null;
+    let fieldCollection = null;
+    for (const [collection, schema] of Object.entries(PROCESS_SCHEMAS)) {
+        if (schema[selectedField]) {
+            fieldConfig = schema[selectedField];
+            fieldCollection = collection;
+            break;
+        }
+    }
+    
+    if (!fieldConfig) return;
+    
+    const currentFactory = document.querySelector('[data-factory-name]')?.dataset.factoryName || '第二工場';
+    
+    // Generate appropriate inputs based on field type and operator
+    if (selectedOperator === 'range') {
+        valueContainer.innerHTML = `
+            <input type="${fieldConfig.type === 'date' ? 'date' : fieldConfig.type === 'time' ? 'time' : 'number'}" 
+                   id="${filterId}_value" 
+                   placeholder="Min..." 
+                   class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+            <span class="flex items-center text-gray-500">to</span>
+            <input type="${fieldConfig.type === 'date' ? 'date' : fieldConfig.type === 'time' ? 'time' : 'number'}" 
+                   id="${filterId}_value2" 
+                   placeholder="Max..." 
+                   class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+        `;
+    } else if (fieldConfig.type === 'select') {
+        // Dropdown with auto-populated options
+        const selectInput = document.createElement('select');
+        selectInput.id = `${filterId}_value`;
+        selectInput.className = 'flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm';
+        
+        if (selectedOperator === 'in') {
+            selectInput.multiple = true;
+            selectInput.size = 4;
+        }
+        
+        // Add loading option
+        selectInput.innerHTML = '<option value="">Loading...</option>';
+        valueContainer.innerHTML = '';
+        valueContainer.appendChild(selectInput);
+        
+        // Fetch options
+        if (fieldConfig.autoPopulate) {
+            try {
+                const options = await fetchDistinctValues(fieldCollection, selectedField, currentFactory);
+                selectInput.innerHTML = `<option value="">Select ${fieldConfig.label}...</option>`;
+                options.forEach(opt => {
+                    if (opt) {
+                        const option = document.createElement('option');
+                        option.value = opt;
+                        option.textContent = opt;
+                        selectInput.appendChild(option);
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading options:', error);
+                selectInput.innerHTML = '<option value="">Error loading options</option>';
+            }
+        } else if (fieldConfig.options) {
+            selectInput.innerHTML = `<option value="">Select ${fieldConfig.label}...</option>`;
+            fieldConfig.options.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt;
+                option.textContent = opt;
+                selectInput.appendChild(option);
+            });
+        }
+    } else {
+        // Standard input
+        const inputType = fieldConfig.type === 'number' ? 'number' : 
+                         fieldConfig.type === 'date' ? 'date' : 
+                         fieldConfig.type === 'time' ? 'time' : 'text';
+        
+        valueContainer.innerHTML = `
+            <input type="${inputType}" 
+                   id="${filterId}_value" 
+                   placeholder="Enter ${fieldConfig.label}..." 
+                   class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+        `;
+    }
+};
+
+/**
+ * Remove a filter row
+ */
+window.removeFilterRow = function(filterId) {
+    const row = document.getElementById(filterId);
+    if (row) {
+        row.remove();
+        updateActiveFilters();
+    }
+};
+
+/**
+ * Update active filters display
+ */
+window.updateActiveFilters = function() {
+    const filterRows = document.querySelectorAll('[id^="filter_"]');
+    const activeFiltersDisplay = document.getElementById('activeFiltersDisplay');
+    const activeFilterBadges = document.getElementById('activeFilterBadges');
+    const activeFilterCount = document.getElementById('activeFilterCount');
+    
+    let count = 0;
+    let badges = '';
+    
+    // Count regular filters
+    filterRows.forEach(row => {
+        const fieldSelect = row.querySelector('[id$="_field"]');
+        const operatorSelect = row.querySelector('[id$="_operator"]');
+        const valueInput = row.querySelector('[id$="_value"]');
+        
+        if (fieldSelect?.value && operatorSelect?.value && valueInput?.value) {
+            count++;
+            const fieldConfig = Object.values(PROCESS_SCHEMAS).find(s => s[fieldSelect.value])?.[fieldSelect.value];
+            badges += `
+                <span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">
+                    ${fieldConfig?.label || fieldSelect.value}: ${operatorSelect.value} "${valueInput.value}"
+                    <button onclick="removeFilterRow('${row.id}')" class="hover:text-blue-900">
+                        <i class="ri-close-line"></i>
+                    </button>
+                </span>
+            `;
+        }
+    });
+    
+    // Count computed filters
+    Object.keys(COMPUTED_FILTERS).forEach(key => {
+        const checkbox = document.getElementById(`computed_${key}`);
+        if (checkbox?.checked) {
+            count++;
+            badges += `
+                <span class="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded">
+                    ${COMPUTED_FILTERS[key].label}
+                    <button onclick="document.getElementById('computed_${key}').checked = false; updateActiveFilters();" class="hover:text-purple-900">
+                        <i class="ri-close-line"></i>
+                    </button>
+                </span>
+            `;
+        }
+    });
+    
+    if (count > 0) {
+        activeFiltersDisplay.classList.remove('hidden');
+        activeFilterBadges.innerHTML = badges;
+        activeFilterCount.classList.remove('hidden');
+        activeFilterCount.textContent = count;
+    } else {
+        activeFiltersDisplay.classList.add('hidden');
+        activeFilterCount.classList.add('hidden');
+    }
+};
+
+/**
+ * Clear all active filters
+ */
+window.clearAllFilters = function() {
+    // Remove all filter rows
+    document.getElementById('filterRowsContainer').innerHTML = '';
+    
+    // Uncheck all computed filters
+    Object.keys(COMPUTED_FILTERS).forEach(key => {
+        const checkbox = document.getElementById(`computed_${key}`);
+        if (checkbox) checkbox.checked = false;
+    });
+    
+    updateActiveFilters();
+};
+
+/**
+ * Apply dynamic filters and reload data
+ */
+window.applyDynamicFilters = function() {
+    const factoryName = document.querySelector('[data-factory-name]')?.dataset.factoryName;
+    if (!factoryName) {
+        console.error('Factory name not found');
+        return;
+    }
+    
+    // Collect all filter data
+    const filters = [];
+    const filterRows = document.querySelectorAll('[id^="filter_"]');
+    
+    filterRows.forEach(row => {
+        const fieldSelect = row.querySelector('[id$="_field"]');
+        const operatorSelect = row.querySelector('[id$="_operator"]');
+        const valueInput = row.querySelector('[id$="_value"]');
+        const value2Input = row.querySelector('[id$="_value2"]');
+        
+        if (fieldSelect?.value && operatorSelect?.value && valueInput?.value) {
+            const filterData = {
+                field: fieldSelect.value,
+                operator: operatorSelect.value,
+                value: valueInput.value,
+                value2: value2Input?.value || null
+            };
+            
+            // Handle multiple selections for dropdowns
+            if (valueInput.multiple) {
+                filterData.value = Array.from(valueInput.selectedOptions).map(opt => opt.value);
+            }
+            
+            filters.push(filterData);
+        }
+    });
+    
+    // Collect computed filters
+    const computedFilters = [];
+    Object.keys(COMPUTED_FILTERS).forEach(key => {
+        const checkbox = document.getElementById(`computed_${key}`);
+        if (checkbox?.checked) {
+            computedFilters.push(key);
+        }
+    });
+    
+    // Store filters globally
+    activeFilters = filters;
+    window.activeComputedFilters = computedFilters;
+    
+    // Get date range and part/serial numbers
+    const from = document.getElementById('filterDateFrom').value;
+    const to = document.getElementById('filterDateTo').value;
+    const partNumbers = getPartNumberTags();
+    const serialNumbers = getSerialNumberTags();
+    
+    // Reload data with filters
+    loadProductionByPeriod(factoryName, from, to, partNumbers, serialNumbers);
+    
+    // Update active filters display
+    updateActiveFilters();
+};
+
+/**
+ * Save current filter configuration as preset
+ */
+window.saveFilterPreset = function() {
+    const presetName = prompt('Enter a name for this filter preset:');
+    if (!presetName) return;
+    
+    const filters = [];
+    const filterRows = document.querySelectorAll('[id^="filter_"]');
+    
+    filterRows.forEach(row => {
+        const fieldSelect = row.querySelector('[id$="_field"]');
+        const operatorSelect = row.querySelector('[id$="_operator"]');
+        const valueInput = row.querySelector('[id$="_value"]');
+        const value2Input = row.querySelector('[id$="_value2"]');
+        
+        if (fieldSelect?.value && operatorSelect?.value) {
+            filters.push({
+                field: fieldSelect.value,
+                operator: operatorSelect.value,
+                value: valueInput?.value || '',
+                value2: value2Input?.value || ''
+            });
+        }
+    });
+    
+    // Get computed filters
+    const computedFilters = [];
+    Object.keys(COMPUTED_FILTERS).forEach(key => {
+        if (document.getElementById(`computed_${key}`)?.checked) {
+            computedFilters.push(key);
+        }
+    });
+    
+    // Save to localStorage
+    const presets = JSON.parse(localStorage.getItem('filterPresets') || '{}');
+    presets[presetName] = {
+        filters,
+        computedFilters,
+        timestamp: Date.now()
+    };
+    localStorage.setItem('filterPresets', JSON.stringify(presets));
+    
+    loadFilterPresets();
+    alert('Filter preset saved!');
+};
+
+/**
+ * Load filter presets from localStorage
+ */
+function loadFilterPresets() {
+    const container = document.getElementById('filterPresetsContainer');
+    if (!container) return;
+    
+    const presets = JSON.parse(localStorage.getItem('filterPresets') || '{}');
+    
+    if (Object.keys(presets).length === 0) {
+        container.innerHTML = '<span class="text-xs text-gray-500">No saved presets</span>';
+        return;
+    }
+    
+    container.innerHTML = Object.entries(presets).map(([name, preset]) => `
+        <button onclick="applyFilterPreset('${name}')" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-md transition-colors flex items-center gap-2">
+            <i class="ri-filter-2-line"></i>
+            ${name}
+            <button onclick="event.stopPropagation(); deleteFilterPreset('${name}')" class="ml-1 text-red-600 hover:text-red-700">
+                <i class="ri-close-line"></i>
+            </button>
+        </button>
+    `).join('');
+}
+
+/**
+ * Apply a saved filter preset
+ */
+window.applyFilterPreset = function(presetName) {
+    const presets = JSON.parse(localStorage.getItem('filterPresets') || '{}');
+    const preset = presets[presetName];
+    
+    if (!preset) return;
+    
+    // Clear existing filters
+    clearAllFilters();
+    
+    // Add filter rows with preset data
+    preset.filters.forEach(filter => {
+        addFilterRow(filter.field, filter.operator, filter.value, filter.value2);
+    });
+    
+    // Apply computed filters
+    preset.computedFilters.forEach(key => {
+        const checkbox = document.getElementById(`computed_${key}`);
+        if (checkbox) checkbox.checked = true;
+    });
+    
+    updateActiveFilters();
+};
+
+/**
+ * Delete a filter preset
+ */
+window.deleteFilterPreset = function(presetName) {
+    if (!confirm(`Delete preset "${presetName}"?`)) return;
+    
+    const presets = JSON.parse(localStorage.getItem('filterPresets') || '{}');
+    delete presets[presetName];
+    localStorage.setItem('filterPresets', JSON.stringify(presets));
+    
+    loadFilterPresets();
+};
+
+// ==================== END DYNAMIC FILTER FUNCTIONS ====================
+
 /**
  * Renders the dashboard cards for each factory, showing total, NG, and defect rate.
  */
@@ -2150,11 +3120,14 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
     mainContent.innerHTML = `
         <!-- Page Header -->
         <div class="flex items-center justify-between mb-6">
-        <h2 class="text-2xl font-semibold">${factoryName} - ${translations[currentLang].factoryOverview}</h2>
+        <h2 class="text-2xl font-semibold" data-factory-name="${factoryName}">${factoryName} - ${translations[currentLang].factoryOverview}</h2>
         </div>
 
-        <!-- Filters -->
-        <div class="flex flex-wrap items-end gap-4 mb-6">
+        <!-- Dynamic Filter System -->
+        ${generateFilterUI(factoryName)}
+
+        <!-- Legacy Filters (Hidden but functional for backward compatibility) -->
+        <div class="hidden flex flex-wrap items-end gap-4 mb-6">
         <!-- From Date -->
         <div>
             <label class="block text-sm font-medium mb-1" data-i18n="from">From</label>
@@ -2297,10 +3270,23 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         }
     });
 
-    // Load default data for today
+    // Initialize dynamic filters with today's date
     const today = new Date().toISOString().split("T")[0];
-    document.getElementById("filterFromDate").value = today;
-    document.getElementById("filterToDate").value = today;
+    document.getElementById("filterDateFrom").value = today;
+    document.getElementById("filterDateTo").value = today;
+    
+    // Also set legacy fields for backward compatibility
+    if (document.getElementById("filterFromDate")) {
+        document.getElementById("filterFromDate").value = today;
+    }
+    if (document.getElementById("filterToDate")) {
+        document.getElementById("filterToDate").value = today;
+    }
+    
+    // Load filter presets
+    loadFilterPresets();
+    
+    // Load default data for today
     loadProductionByPeriod(factoryName, today, today, [], []);
 
     // Run translations
@@ -3081,8 +4067,9 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
   
     const isSingleDay = from === to;
   
-    const getQuery = (start, end) => {
-      const query = {
+    const getQuery = async (start, end, collection) => {
+      // Base query with factory and date
+      const baseQuery = {
         工場: factory,
         Date: {
           $gte: new Date(start).toISOString().split("T")[0],
@@ -3090,14 +4077,30 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
         }
       };
       
-      // Handle multiple part numbers
+      // Handle multiple part numbers (legacy)
       if (partNumbers && partNumbers.length > 0) {
-        query["品番"] = { $in: partNumbers };
+        baseQuery["品番"] = { $in: partNumbers };
       }
       
-      // Handle multiple serial numbers
+      // Handle multiple serial numbers (legacy)
       if (serialNumbers && serialNumbers.length > 0) {
-        query["背番号"] = { $in: serialNumbers };
+        baseQuery["背番号"] = { $in: serialNumbers };
+      }
+      
+      // Apply dynamic filters if any
+      let query = baseQuery;
+      if (activeFilters && activeFilters.length > 0) {
+        // Filter only the filters relevant to this collection
+        // IMPORTANT: Always include モデル filter for all collections
+        const collectionFilters = activeFilters.filter(filter => {
+          if (filter.field === 'モデル') return true; // モデル applies to all
+          const schema = PROCESS_SCHEMAS[collection];
+          return schema && schema[filter.field];
+        });
+        
+        if (collectionFilters.length > 0) {
+          query = await buildDynamicQuery(collectionFilters, baseQuery);
+        }
       }
       
       return query;
@@ -3110,20 +4113,29 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
         const monthStart = new Date(dateObj); monthStart.setDate(dateObj.getDate() - 29);
   
         const [dailyResults, weeklyResults, monthlyResults] = await Promise.all(
-          [from, weekStart, monthStart].map((start) =>
-            Promise.all(processes.map(proc =>
-              fetch(BASE_URL + "queries", {
+          [from, weekStart, monthStart].map(async (start) =>
+            Promise.all(processes.map(async (proc) => {
+              const query = await getQuery(start, dateObj, proc.collection);
+              return fetch(BASE_URL + "queries", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   dbName: "submittedDB",
                   collectionName: proc.collection,
-                  query: getQuery(start, dateObj)
+                  query: query
                 })
-              }).then(res => res.json())
-            ))
+              }).then(res => res.json());
+            }))
           )
         );
+        
+        // Apply computed filters if any
+        const computedFilters = window.activeComputedFilters || [];
+        if (computedFilters.length > 0) {
+          dailyResults = dailyResults.map(processResults => applyComputedFilters(processResults, computedFilters));
+          weeklyResults = weeklyResults.map(processResults => applyComputedFilters(processResults, computedFilters));
+          monthlyResults = monthlyResults.map(processResults => applyComputedFilters(processResults, computedFilters));
+        }
   
         const dataBySection = {
           Daily: dailyResults,
@@ -3485,17 +4497,24 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
         const summaryByProcess = [];
         const fullDataByProcess = [];
   
-        const resultsByProcess = await Promise.all(processes.map(proc =>
-          fetch(BASE_URL + "queries", {
+        let resultsByProcess = await Promise.all(processes.map(async (proc) => {
+          const query = await getQuery(from, to, proc.collection);
+          return fetch(BASE_URL + "queries", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               dbName: "submittedDB",
               collectionName: proc.collection,
-              query: getQuery(from, to)
+              query: query
             })
-          }).then(res => res.json())
-        ));
+          }).then(res => res.json());
+        }));
+        
+        // Apply computed filters if any
+        const computedFilters = window.activeComputedFilters || [];
+        if (computedFilters.length > 0) {
+          resultsByProcess = resultsByProcess.map(processResults => applyComputedFilters(processResults, computedFilters));
+        }
   
         let sortState = { process: null, column: null, direction: 1 };
   
