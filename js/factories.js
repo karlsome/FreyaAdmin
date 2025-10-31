@@ -4112,7 +4112,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
         const weekStart = new Date(dateObj); weekStart.setDate(dateObj.getDate() - 6);
         const monthStart = new Date(dateObj); monthStart.setDate(dateObj.getDate() - 29);
   
-        const [dailyResults, weeklyResults, monthlyResults] = await Promise.all(
+        let [dailyResults, weeklyResults, monthlyResults] = await Promise.all(
           [from, weekStart, monthStart].map(async (start) =>
             Promise.all(processes.map(async (proc) => {
               const query = await getQuery(start, dateObj, proc.collection);
