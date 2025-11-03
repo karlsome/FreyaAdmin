@@ -2159,7 +2159,7 @@ function generateFilterUI(factoryName) {
                 <button onclick="toggleAdvancedFilters()" class="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 hover:text-gray-900">
                     <span class="flex items-center gap-2">
                         <i class="ri-filter-3-line"></i>
-                        Advanced Filters
+                        <span data-i18n="advancedFilters">Advanced Filters</span>
                         <span id="activeFilterCount" class="hidden bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full"></span>
                     </span>
                     <i id="advancedFilterIcon" class="ri-arrow-down-s-line text-lg transition-transform"></i>
@@ -2174,12 +2174,12 @@ function generateFilterUI(factoryName) {
                     <!-- Add Filter Button -->
                     <button onclick="addFilterRow()" class="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-md border border-blue-200 transition-colors">
                         <i class="ri-add-line"></i>
-                        Add Filter
+                        <span data-i18n="addFilter">Add Filter</span>
                     </button>
                     
                     <!-- Computed Filters -->
                     <div class="border-t pt-4">
-                        <h4 class="text-sm font-medium text-gray-700 mb-3">Special Filters</h4>
+                        <h4 class="text-sm font-medium text-gray-700 mb-3" data-i18n="specialFilters">Special Filters</h4>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
                             ${Object.entries(COMPUTED_FILTERS).map(([key, filter]) => `
                                 <label class="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
@@ -2196,9 +2196,9 @@ function generateFilterUI(factoryName) {
                     <!-- Filter Presets -->
                     <div class="border-t pt-4">
                         <div class="flex items-center justify-between mb-3">
-                            <h4 class="text-sm font-medium text-gray-700">Filter Presets</h4>
+                            <h4 class="text-sm font-medium text-gray-700" data-i18n="filterPresets">Filter Presets</h4>
                             <button onclick="saveFilterPreset()" class="text-xs text-blue-600 hover:text-blue-700">
-                                <i class="ri-save-line"></i> Save Current
+                                <i class="ri-save-line"></i> <span data-i18n="saveCurrent">Save Current</span>
                             </button>
                         </div>
                         <div id="filterPresetsContainer" class="flex flex-wrap gap-2">
@@ -2211,9 +2211,9 @@ function generateFilterUI(factoryName) {
             <!-- Active Filters Display -->
             <div id="activeFiltersDisplay" class="hidden px-4 pb-4">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="text-xs font-medium text-gray-600">Active Filters:</span>
+                    <span class="text-xs font-medium text-gray-600" data-i18n="activeFilters">Active Filters:</span>
                     <button onclick="clearAllFilters()" class="text-xs text-red-600 hover:text-red-700">
-                        <i class="ri-close-circle-line"></i> Clear All
+                        <i class="ri-close-circle-line"></i> <span data-i18n="clearAll">Clear All</span>
                     </button>
                 </div>
                 <div id="activeFilterBadges" class="flex flex-wrap gap-2">
@@ -2225,7 +2225,7 @@ function generateFilterUI(factoryName) {
             <div class="px-4 pb-4 pt-2 border-t border-gray-200 bg-gray-50 rounded-b-lg">
                 <button onclick="applyDynamicFilters()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
                     <i class="ri-filter-line"></i>
-                    Apply Filters
+                    <span data-i18n="applyFilters">Apply Filters</span>
                 </button>
             </div>
         </div>
@@ -2270,6 +2270,9 @@ window.addFilterRow = function(field = '', operator = '', value = '', value2 = '
         });
     });
     
+    const currentLang = localStorage.getItem("lang") || "en";
+    const t = translations[currentLang];
+    
     const filterRow = document.createElement('div');
     filterRow.id = filterId;
     filterRow.className = 'flex items-start gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200';
@@ -2277,7 +2280,7 @@ window.addFilterRow = function(field = '', operator = '', value = '', value2 = '
         <div class="flex-1 grid grid-cols-1 md:grid-cols-4 gap-2">
             <!-- Field Selection -->
             <select id="${filterId}_field" onchange="updateFilterOperators('${filterId}')" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
-                <option value="">Select Field...</option>
+                <option value="">${t.selectField || 'Select Field...'}</option>
                 <optgroup label="Basic">
                     ${Object.entries(allFields).filter(([_, config]) => config.group === 'basic').map(([fieldName, config]) => 
                         `<option value="${fieldName}" ${field === fieldName ? 'selected' : ''}>${config.label}</option>`
@@ -2307,12 +2310,12 @@ window.addFilterRow = function(field = '', operator = '', value = '', value2 = '
             
             <!-- Operator Selection -->
             <select id="${filterId}_operator" onchange="updateFilterInputs('${filterId}')" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
-                <option value="">Select Operator...</option>
+                <option value="">${t.selectOperator || 'Select Operator...'}</option>
             </select>
             
             <!-- Value Input(s) -->
             <div id="${filterId}_valueContainer" class="md:col-span-2 flex gap-2">
-                <input type="text" id="${filterId}_value" placeholder="Value..." class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" value="${value}">
+                <input type="text" id="${filterId}_value" placeholder="${t.enterValue || 'Value...'}" class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" value="${value}">
             </div>
         </div>
         
@@ -2344,7 +2347,10 @@ window.updateFilterOperators = async function(filterId) {
     const operatorSelect = document.getElementById(`${filterId}_operator`);
     const selectedField = fieldSelect.value;
     
-    operatorSelect.innerHTML = '<option value="">Select Operator...</option>';
+    const currentLang = localStorage.getItem("lang") || "en";
+    const t = translations[currentLang];
+    
+    operatorSelect.innerHTML = `<option value="">${t.selectOperator || 'Select Operator...'}</option>`;
     
     if (!selectedField) return;
     
@@ -2359,11 +2365,21 @@ window.updateFilterOperators = async function(filterId) {
     
     if (!fieldConfig) return;
     
+    // Operator translations mapping
+    const operatorLabels = {
+        'equals': t.equals || 'Equals',
+        'contains': t.contains || 'Contains',
+        'greater': t.greaterThan || 'Greater Than',
+        'less': t.lessThan || 'Less Than',
+        'range': t.range || 'Range',
+        'in': t.in || 'In'
+    };
+    
     // Add operators
     fieldConfig.operators.forEach(op => {
         const option = document.createElement('option');
         option.value = op;
-        option.textContent = op.charAt(0).toUpperCase() + op.slice(1);
+        option.textContent = operatorLabels[op] || op.charAt(0).toUpperCase() + op.slice(1);
         operatorSelect.appendChild(option);
     });
     
@@ -2665,7 +2681,9 @@ window.saveFilterPreset = function() {
     localStorage.setItem('filterPresets', JSON.stringify(presets));
     
     loadFilterPresets();
-    alert('Filter preset saved!');
+    const currentLang = localStorage.getItem("lang") || "en";
+    const t = translations[currentLang];
+    alert(t.filterPresetSaved || 'Filter preset saved!');
 };
 
 /**

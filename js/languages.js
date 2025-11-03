@@ -185,6 +185,13 @@ const translations = {
       selectAtLeastOneField: "Please select at least one field to update.",
       provideValuesForSelected: "Please provide values for all selected fields or uncheck them.",
       
+      // Factory Overview - Advanced Filters
+      specialFilters: "Special Filters",
+      filterPresets: "Filter Presets",
+      saveCurrent: "Save Current",
+      clearAll: "Clear All",
+      filterPresetSaved: "Filter preset saved!",
+      
       // Equipment
       equipmentTitle: "Equipment Management",
       equipmentFilter: "Equipment Filter (by Factory)",
@@ -1187,6 +1194,13 @@ const translations = {
       batchUpdateFailed: "レコードの更新に失敗しました: {error}",
       selectAtLeastOneField: "更新するフィールドを少なくとも1つ選択してください。",
       provideValuesForSelected: "選択したすべてのフィールドに値を入力するか、チェックを外してください。",
+      
+      // Factory Overview - Advanced Filters
+      specialFilters: "特殊フィルター",
+      filterPresets: "フィルタープリセット",
+      saveCurrent: "現在を保存",
+      clearAll: "すべてクリア",
+      filterPresetSaved: "フィルタープリセットが保存されました！",
       
       // Equipment
       equipmentTitle: "設備管理",
