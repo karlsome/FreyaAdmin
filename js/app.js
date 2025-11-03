@@ -1803,8 +1803,13 @@ function loadPage(page) {
                             <i class="ri-close-line"></i> Cancel
                           </button>
                         </div>
-                        <div class="flex gap-2">
-                          <input type="text" id="batchEditActiveInput" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter new value..." />
+                        <div class="flex gap-2 items-start">
+                          <div class="flex-1">
+                            <input type="text" id="batchEditActiveInput" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter new value..." />
+                            <p id="customValueWarning" class="hidden text-xs text-amber-600 mt-1 flex items-center gap-1">
+                              <i class="ri-alert-line"></i> Adding new custom value
+                            </p>
+                          </div>
                           <button onclick="addFieldToChangesList()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-1 text-sm font-medium">
                             <i class="ri-check-line"></i> Add
                           </button>
@@ -3511,10 +3516,13 @@ function loadPage(page) {
               
               case 'select':
                 if (schema.autoPopulate) {
-                  // Replace input with select element
-                  const selectHTML = `<select id="batchEditActiveInput" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">Loading options...</option>
-                  </select>`;
+                  // Replace input with select element + hidden text input for new values
+                  const selectHTML = `
+                    <select id="batchEditActiveInput" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="handleBatchEditSelectChange('${field}')">
+                      <option value="">Loading options...</option>
+                    </select>
+                    <input type="text" id="batchEditCustomInput" class="hidden flex-1 px-3 py-2 border-2 border-amber-400 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500" placeholder="Enter custom value..." />
+                  `;
                   input.outerHTML = selectHTML;
                   
                   // Load dropdown options
@@ -3523,11 +3531,25 @@ function loadPage(page) {
                     const select = document.getElementById('batchEditActiveInput');
                     if (select) {
                       select.innerHTML = '<option value="">Select new value...</option>' +
-                        values.map(v => `<option value="${v}">${v}</option>`).join('');
+                        values.map(v => `<option value="${v}">${v}</option>`).join('') +
+                        '<option value="__ADD_NEW__" class="font-semibold text-green-700">➕ Add New Value</option>';
                       
                       // If editing existing change, set the value
                       if (batchEditChanges[field] !== undefined) {
-                        select.value = batchEditChanges[field];
+                        const existingValue = batchEditChanges[field];
+                        // Check if it's an existing option
+                        if (values.includes(existingValue)) {
+                          select.value = existingValue;
+                        } else {
+                          // It's a custom value, show custom input
+                          select.value = '__ADD_NEW__';
+                          const customInput = document.getElementById('batchEditCustomInput');
+                          if (customInput) {
+                            customInput.value = existingValue;
+                            select.classList.add('hidden');
+                            customInput.classList.remove('hidden');
+                          }
+                        }
                       }
                     }
                   }, 0);
@@ -3564,11 +3586,61 @@ function loadPage(page) {
           };
 
           /**
+           * Handle select dropdown change - show custom input if "Add New Value" selected
+           */
+          window.handleBatchEditSelectChange = function(field) {
+            const select = document.getElementById('batchEditActiveInput');
+            const customInput = document.getElementById('batchEditCustomInput');
+            const warningText = document.getElementById('customValueWarning');
+            
+            if (!select || !customInput) return;
+            
+            if (select.value === '__ADD_NEW__') {
+              // User selected "Add New Value" - show custom input
+              const schema = masterFieldSchemas[field];
+              const fieldLabel = schema ? schema.label : field;
+              
+              // Show warning for certain fields
+              if (field === '工場' || field === 'Factory') {
+                alert(`⚠️ You are adding a NEW value for "${fieldLabel}".\n\nPlease double-check the spelling to avoid duplicates.`);
+              }
+              
+              // Hide select, show custom input
+              select.classList.add('hidden');
+              customInput.classList.remove('hidden');
+              
+              // Show warning text
+              if (warningText) warningText.classList.remove('hidden');
+              
+              // Focus and clear
+              customInput.focus();
+              customInput.value = '';
+            } else {
+              // Regular value selected, hide warning
+              if (warningText) warningText.classList.add('hidden');
+            }
+          };
+
+          /**
            * Cancel field edit - hide active section
            */
           window.cancelFieldEdit = function() {
-            document.getElementById('batchEditActiveSection').classList.add('hidden');
+            const section = document.getElementById('batchEditActiveSection');
+            if (section) section.classList.add('hidden');
             currentEditingField = null;
+            
+            // Reset any custom inputs
+            const customInput = document.getElementById('batchEditCustomInput');
+            const select = document.getElementById('batchEditActiveInput');
+            const warningText = document.getElementById('customValueWarning');
+            
+            if (customInput && select) {
+              customInput.classList.add('hidden');
+              select.classList.remove('hidden');
+            }
+            
+            // Hide warning text
+            if (warningText) warningText.classList.add('hidden');
           };
 
           /**
@@ -3577,15 +3649,42 @@ function loadPage(page) {
           window.addFieldToChangesList = async function() {
             if (!currentEditingField) return;
             
+            const field = currentEditingField;
+            const schema = masterFieldSchemas[field];
+            
+            // Get value from either the select or custom input
+            let newValue = '';
             const input = document.getElementById('batchEditActiveInput');
-            if (!input) {
+            const customInput = document.getElementById('batchEditCustomInput');
+            
+            // Check if custom input is visible (user is adding new value)
+            if (customInput && !customInput.classList.contains('hidden')) {
+              newValue = customInput.value.trim();
+              
+              // Show warning for new custom values
+              if (newValue !== '') {
+                const confirmCustom = confirm(
+                  `⚠️ You are adding a NEW custom value for "${schema.label}":\n\n` +
+                  `"${newValue}"\n\n` +
+                  `This value doesn't exist in the current records.\n` +
+                  `Make sure the spelling is correct to avoid duplicates.\n\n` +
+                  `Continue?`
+                );
+                if (!confirmCustom) return;
+              }
+            } else if (input) {
+              // Regular input or select
+              newValue = input.value.trim();
+              
+              // If select shows "Add New Value" but custom input not shown, invalid state
+              if (newValue === '__ADD_NEW__') {
+                alert('Please enter a custom value or select a different option.');
+                return;
+              }
+            } else {
               console.error('❌ Input element not found');
               return;
             }
-            
-            const newValue = input.value.trim();
-            const field = currentEditingField;
-            const schema = masterFieldSchemas[field];
             
             // Check if empty
             if (newValue === '') {
@@ -3593,8 +3692,9 @@ function loadPage(page) {
               if (!confirmEmpty) return;
             }
             
-            // Special validation for 工場 field
-            if (field === '工場') {
+            // Special validation for 工場 field (only if not from custom input - we already warned)
+            const isCustomValue = customInput && !customInput.classList.contains('hidden');
+            if (field === '工場' && !isCustomValue && newValue !== '') {
               const isValid = await validateFactoryField(newValue);
               if (!isValid) {
                 return; // Validation function shows its own alerts
