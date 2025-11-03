@@ -3283,6 +3283,10 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         document.getElementById("filterToDate").value = today;
     }
     
+    // Re-render existing tags (in case user navigated back)
+    renderPartNumberTags();
+    renderSerialNumberTags();
+    
     // Load filter presets
     loadFilterPresets();
     
