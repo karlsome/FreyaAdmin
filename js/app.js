@@ -263,14 +263,19 @@ function loadPage(page) {
                             </div>
                         </div>
                         
-                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors duration-200" 
+                             onclick="recalculateCombinedDefectRate()" 
+                             title="クリックして再計算 (Click to recalculate)">
                             <div class="flex items-center">
                                 <div class="p-2 bg-amber-100 rounded-lg">
                                     <i class="ri-pie-chart-line text-amber-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
                                     <p class="text-sm font-medium text-gray-600" data-i18n="combinedDefectRate">Combined Defect Rate</p>
-                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="combinedDefectRateCount">0.00%</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count hover:text-blue-600 transition-colors" id="combinedDefectRateCount">0.00%</p>
+                                </div>
+                                <div class="ml-auto">
+                                    <i class="ri-refresh-line text-gray-400 text-sm"></i>
                                 </div>
                             </div>
                         </div>
