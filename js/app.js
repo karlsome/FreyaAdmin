@@ -1726,6 +1726,19 @@ function loadPage(page) {
                     Add Filter
                   </button>
 
+                  <!-- Active Filters Display -->
+                  <div id="masterActiveFiltersDisplay" class="hidden mt-4 pt-4 border-t border-gray-200">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-xs font-medium text-gray-600">Active Filters:</span>
+                      <button onclick="clearAllMasterFilters()" class="text-xs text-red-600 hover:text-red-700 font-medium">
+                        <i class="ri-close-circle-line"></i> Clear All
+                      </button>
+                    </div>
+                    <div id="masterActiveFilterBadges" class="flex flex-wrap gap-2">
+                      <!-- Active filter badges will appear here -->
+                    </div>
+                  </div>
+
                   <!-- Apply Filters Button -->
                   <div class="mt-6 pt-6 border-t border-gray-200">
                     <button onclick="applyMasterAdvancedFilters()" class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center">
@@ -2887,15 +2900,15 @@ function loadPage(page) {
               if (fieldSchema.type === 'date') {
                 valueContainer.innerHTML = `
                   <div class="flex gap-2">
-                    <input type="date" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-                    <input type="date" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+                    <input type="date" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="updateMasterActiveFiltersDisplay()" />
+                    <input type="date" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="updateMasterActiveFiltersDisplay()" />
                   </div>
                 `;
               } else {
                 valueContainer.innerHTML = `
                   <div class="flex gap-2">
-                    <input type="number" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="From..." />
-                    <input type="number" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="To..." />
+                    <input type="number" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="From..." oninput="updateMasterActiveFiltersDisplay()" />
+                    <input type="number" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="To..." oninput="updateMasterActiveFiltersDisplay()" />
                   </div>
                 `;
               }
@@ -2906,7 +2919,7 @@ function loadPage(page) {
             if (operator === 'in' || (fieldSchema.type === 'select' && fieldSchema.autoPopulate)) {
               const values = await fetchMasterDistinctValues(field);
               valueContainer.innerHTML = `
-                <select class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ${operator === 'in' ? 'multiple' : ''}>
+                <select class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ${operator === 'in' ? 'multiple' : ''} onchange="updateMasterActiveFiltersDisplay()">
                   <option value="">Select...</option>
                   ${values.map(v => `<option value="${v}">${v}</option>`).join('')}
                 </select>
@@ -2917,13 +2930,13 @@ function loadPage(page) {
             // Default inputs based on type
             switch (fieldSchema.type) {
               case 'number':
-                valueContainer.innerHTML = `<input type="number" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter number..." />`;
+                valueContainer.innerHTML = `<input type="number" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter number..." oninput="updateMasterActiveFiltersDisplay()" />`;
                 break;
               case 'date':
-                valueContainer.innerHTML = `<input type="date" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />`;
+                valueContainer.innerHTML = `<input type="date" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="updateMasterActiveFiltersDisplay()" />`;
                 break;
               default:
-                valueContainer.innerHTML = `<input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter value..." />`;
+                valueContainer.innerHTML = `<input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter value..." oninput="updateMasterActiveFiltersDisplay()" />`;
             }
           }
 
@@ -3116,7 +3129,7 @@ function loadPage(page) {
           };
 
           /**
-           * Update active filters count badge
+           * Update active filters count badge and display
            */
           function updateMasterActiveFiltersCount() {
             const container = document.getElementById('masterFilterRowsContainer');
@@ -3136,7 +3149,119 @@ function loadPage(page) {
             } else {
               badge.classList.add('hidden');
             }
+
+            // Update active filters display
+            updateMasterActiveFiltersDisplay();
           }
+
+          /**
+           * Update active filters display with badges
+           */
+          window.updateMasterActiveFiltersDisplay = function() {
+            const filterRows = document.querySelectorAll('[id^="master-filter-"]');
+            const activeFiltersDisplay = document.getElementById('masterActiveFiltersDisplay');
+            const activeFilterBadges = document.getElementById('masterActiveFilterBadges');
+            
+            let count = 0;
+            let badges = '';
+            
+            // Generate badges for each active filter
+            filterRows.forEach(row => {
+              const fieldSelect = row.querySelector('.master-filter-field');
+              const operatorSelect = row.querySelector('.master-filter-operator');
+              const valueInput = row.querySelector('.master-filter-value');
+              const valueFrom = row.querySelector('.master-filter-value-from');
+              const valueTo = row.querySelector('.master-filter-value-to');
+              
+              if (fieldSelect?.value && operatorSelect?.value) {
+                const field = fieldSelect.value;
+                const operator = operatorSelect.value;
+                const fieldSchema = masterFieldSchemas[field];
+                
+                let displayValue = '';
+                
+                // Handle range operator
+                if (operator === 'range' && valueFrom && valueTo) {
+                  const from = valueFrom.value;
+                  const to = valueTo.value;
+                  if (from && to) {
+                    displayValue = `${from} to ${to}`;
+                    count++;
+                  } else {
+                    return; // Skip incomplete ranges
+                  }
+                }
+                // Handle 'in' operator (multi-select)
+                else if (operator === 'in') {
+                  const select = row.querySelector('.master-filter-value');
+                  const selectedOptions = Array.from(select?.selectedOptions || []).map(opt => opt.value).filter(v => v);
+                  if (selectedOptions.length > 0) {
+                    displayValue = selectedOptions.length > 2 
+                      ? `${selectedOptions.slice(0, 2).join(', ')}... (+${selectedOptions.length - 2})`
+                      : selectedOptions.join(', ');
+                    count++;
+                  } else {
+                    return; // Skip empty selections
+                  }
+                }
+                // Handle regular operators
+                else {
+                  const value = valueInput?.value;
+                  if (value) {
+                    displayValue = value;
+                    count++;
+                  } else {
+                    return; // Skip empty values
+                  }
+                }
+                
+                // Operator display names
+                const operatorNames = {
+                  'equals': 'equals',
+                  'contains': 'contains',
+                  'range': 'range',
+                  'greater': '>',
+                  'less': '<',
+                  'in': 'in'
+                };
+                
+                badges += `
+                  <span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-md">
+                    <span class="font-medium">${fieldSchema?.label || field}:</span>
+                    <span class="text-blue-600">${operatorNames[operator]}</span>
+                    <span class="text-blue-800">"${displayValue}"</span>
+                    <button onclick="removeMasterFilterRow('${row.id}')" class="ml-1 hover:text-blue-900 hover:bg-blue-200 rounded p-0.5">
+                      <i class="ri-close-line text-sm"></i>
+                    </button>
+                  </span>
+                `;
+              }
+            });
+            
+            // Show or hide the active filters section
+            if (count > 0) {
+              activeFiltersDisplay.classList.remove('hidden');
+              activeFilterBadges.innerHTML = badges;
+            } else {
+              activeFiltersDisplay.classList.add('hidden');
+              activeFilterBadges.innerHTML = '';
+            }
+          };
+
+          /**
+           * Clear all active filters
+           */
+          window.clearAllMasterFilters = function() {
+            // Remove all filter rows
+            const container = document.getElementById('masterFilterRowsContainer');
+            container.innerHTML = '';
+            
+            // Update display
+            updateMasterActiveFiltersCount();
+            
+            // Reload data without filters
+            loadMasterDB();
+          };
 
           // ==================== END ADVANCED FILTER SYSTEM ====================
 
