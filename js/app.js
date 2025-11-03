@@ -1653,17 +1653,17 @@ function loadPage(page) {
             </div>
 
             <!-- CSV Upload Section -->
-            <div class="bg-white p-6 rounded-lg shadow-sm mb-6 border">
+            <div class="bg-white p-4 rounded-lg shadow-sm mb-4 border">
               <div class="flex items-center space-x-4">
                 <div>
-                  <label class="block text-base font-medium text-gray-700 mb-3" data-i18n="csvFile">CSV File</label>
-                  <input type="file" id="csvUploadInput" accept=".csv" class="text-base file:mr-4 file:py-3 file:px-6 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:font-medium" />
+                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="csvFile">CSVファイル</label>
+                  <input type="file" id="csvUploadInput" accept=".csv" class="text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:font-medium" />
                 </div>
-                <button class="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-base font-medium" onclick="handleMasterCSVUpload()">
-                  <i class="ri-upload-line mr-2"></i><span data-i18n="uploadPreview">Upload & Preview</span>
+                <button class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm font-medium mt-6" onclick="handleMasterCSVUpload()">
+                  <i class="ri-upload-line mr-2"></i><span data-i18n="uploadPreview">アップロード & プレビュー</span>
                 </button>
               </div>
-              <div id="csvPreviewContainer" class="mt-6"></div>
+              <div id="csvPreviewContainer" class="mt-4"></div>
             </div>
 
             <!-- Filters Section -->
@@ -1701,48 +1701,48 @@ function loadPage(page) {
             </div>
 
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-blue-100 rounded-lg">
-                    <i class="ri-database-line text-blue-600 text-xl"></i>
+                  <div class="p-2 bg-blue-100 rounded-lg">
+                    <i class="ri-database-line text-blue-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">総件数</p>
-                    <p class="text-3xl font-bold text-gray-900" id="totalMasterCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">総件数</p>
+                    <p class="text-2xl font-bold text-gray-900" id="totalMasterCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-green-100 rounded-lg">
-                    <i class="ri-image-line text-green-600 text-xl"></i>
+                  <div class="p-2 bg-green-100 rounded-lg">
+                    <i class="ri-image-line text-green-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">画像あり</p>
-                    <p class="text-3xl font-bold text-gray-900" id="withImageCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">画像あり</p>
+                    <p class="text-2xl font-bold text-gray-900" id="withImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-yellow-100 rounded-lg">
-                    <i class="ri-image-off-line text-yellow-600 text-xl"></i>
+                  <div class="p-2 bg-yellow-100 rounded-lg">
+                    <i class="ri-image-off-line text-yellow-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">画像なし</p>
-                    <p class="text-3xl font-bold text-gray-900" id="withoutImageCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">画像なし</p>
+                    <p class="text-2xl font-bold text-gray-900" id="withoutImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-purple-100 rounded-lg">
-                    <i class="ri-filter-line text-purple-600 text-xl"></i>
+                  <div class="p-2 bg-purple-100 rounded-lg">
+                    <i class="ri-filter-line text-purple-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">表示中</p>
-                    <p class="text-3xl font-bold text-gray-900" id="filteredCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">表示中</p>
+                    <p class="text-2xl font-bold text-gray-900" id="filteredCount">0</p>
                   </div>
                 </div>
               </div>
