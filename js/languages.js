@@ -124,6 +124,67 @@ const translations = {
       recordAddedSuccessfully: "New record added successfully!",
       failedToAddRecord: "Failed to add record: ",
       
+      // Master DB - Advanced Filters
+      advancedFilters: "Advanced Filters",
+      addFilter: "Add Filter",
+      selectField: "Select Field",
+      selectOperator: "Select Operator",
+      enterValue: "Enter Value",
+      removeFilter: "Remove Filter",
+      applyFilters: "Apply Filters",
+      clearAllFilters: "Clear All",
+      activeFilters: "Active Filters:",
+      equals: "Equals",
+      contains: "Contains",
+      greaterThan: "Greater Than",
+      lessThan: "Less Than",
+      range: "Range",
+      in: "In (comma-separated)",
+      matchAnyTag: "Match ANY tag (OR)",
+      matchAllTags: "Match ALL tags (AND)",
+      clearAllTags: "Clear all tags",
+      
+      // Master DB - Batch Edit
+      batchEdit: "Batch Edit",
+      batchEditRecords: "Batch Edit Master Records",
+      editingRecords: "Editing {count} filtered records",
+      availableFields: "Available Fields:",
+      editing: "Editing:",
+      addChange: "Add",
+      changesToApply: "Changes to Apply:",
+      noChangesYet: "No changes yet. Click field tags above to start editing.",
+      preview: "Preview",
+      showingRecordsPreview: "(showing {shown} of {total} total records)",
+      documentOf: "Document {current} of {total}",
+      changesWillBeApplied: "Changes will be applied to {count} records",
+      updateRecords: "Update Records",
+      addingNewCustomValue: "Adding new custom value",
+      addNewValue: "➕ Add New Value",
+      batchEditInstructions: 'Click field tags to edit • <span class="text-red-600">Red</span> = Old • <span class="text-green-600">Green</span> = New',
+      enterNewValue: "Enter new value...",
+      addingCustomValue: "Adding new custom value",
+      noChangesYet: "No changes yet. Click field tags above to start editing.",
+      changesWillBeApplied: "Changes will be applied to",
+      filteredRecords: "filtered records",
+      records: "records",
+      showing: "showing",
+      of: "of",
+      totalRecords: "total records",
+      enterCustomValuePrompt: "Please enter a custom value or select a different option.",
+      
+      // Batch Edit Warnings & Alerts
+      emptyValueWarning: "⚠️ The new value for \"{field}\" is empty.\n\nThis will clear the field for all {count} records.\n\nContinue?",
+      customValueWarning: "⚠️ You are adding a NEW custom value for \"{field}\":\n\n\"{value}\"\n\nThis value doesn't exist in the current records.\nMake sure the spelling is correct to avoid duplicates.\n\nContinue?",
+      factoryValidationWarning: "⚠️ You are adding a NEW value for \"{field}\".\n\nPlease double-check the spelling to avoid duplicates.",
+      factoryNotFoundSuggestion: "⚠️ Factory \"{value}\" not found in existing records.\n\nDid you mean: \"{suggestion}\"?\n\nClick OK to use \"{suggestion}\" or Cancel to enter a different value.",
+      factoryNotFoundConfirm: "⚠️ Factory \"{value}\" not found in existing records.\n\nAre you sure you want to use this new value?",
+      noChangesToApply: "⚠️ No changes to apply. Please add at least one field change.",
+      batchUpdateConfirm: "Are you sure you want to update {count} record(s)?\n\nChanges:\n{changes}\n\nThis action cannot be undone.",
+      batchUpdateSuccess: "✅ Successfully updated {count} record(s)!",
+      batchUpdateFailed: "Failed to update records: {error}",
+      selectAtLeastOneField: "Please select at least one field to update.",
+      provideValuesForSelected: "Please provide values for all selected fields or uncheck them.",
+      
       // Equipment
       equipmentTitle: "Equipment Management",
       equipmentFilter: "Equipment Filter (by Factory)",
@@ -1066,6 +1127,67 @@ const translations = {
       recordAddedSuccessfully: "新規レコードが正常に追加されました！",
       failedToAddRecord: "レコードの追加に失敗しました: ",
       
+      // Master DB - Advanced Filters
+      advancedFilters: "詳細フィルター",
+      addFilter: "フィルターを追加",
+      selectField: "フィールドを選択",
+      selectOperator: "演算子を選択",
+      enterValue: "値を入力",
+      removeFilter: "フィルターを削除",
+      applyFilters: "フィルターを適用",
+      clearAllFilters: "すべてクリア",
+      activeFilters: "有効なフィルター:",
+      equals: "と等しい",
+      contains: "を含む",
+      greaterThan: "より大きい",
+      lessThan: "より小さい",
+      range: "範囲",
+      in: "含む (カンマ区切り)",
+      matchAnyTag: "いずれかのタグに一致 (OR)",
+      matchAllTags: "すべてのタグに一致 (AND)",
+      clearAllTags: "すべてのタグをクリア",
+      
+      // Master DB - Batch Edit
+      batchEdit: "一括編集",
+      batchEditRecords: "Master レコード一括編集",
+      editingRecords: "{count}件のフィルター済みレコードを編集中",
+      availableFields: "利用可能なフィールド:",
+      editing: "編集中:",
+      addChange: "追加",
+      changesToApply: "適用する変更:",
+      noChangesYet: "まだ変更がありません。上のフィールドタグをクリックして編集を開始してください。",
+      preview: "プレビュー",
+      showingRecordsPreview: "(合計{total}件中{shown}件を表示)",
+      documentOf: "ドキュメント {current}/{total}",
+      changesWillBeApplied: "{count}件のレコードに変更が適用されます",
+      updateRecords: "レコードを更新",
+      addingNewCustomValue: "新しいカスタム値を追加中",
+      addNewValue: "➕ 新しい値を追加",
+      batchEditInstructions: 'フィールドタグをクリックして編集 • <span class="text-red-600">赤</span> = 古い値 • <span class="text-green-600">緑</span> = 新しい値',
+      enterNewValue: "新しい値を入力...",
+      addingCustomValue: "新しいカスタム値を追加中",
+      noChangesYet: "まだ変更がありません。上のフィールドタグをクリックして編集を開始してください。",
+      changesWillBeApplied: "変更が適用されます",
+      filteredRecords: "フィルターされたレコード",
+      records: "件のレコード",
+      showing: "表示中",
+      of: "件中",
+      totalRecords: "件の合計レコード",
+      enterCustomValuePrompt: "カスタム値を入力するか、別のオプションを選択してください。",
+      
+      // Batch Edit Warnings & Alerts
+      emptyValueWarning: "⚠️ \"{field}\"の新しい値が空です。\n\n{count}件のレコードのフィールドがクリアされます。\n\n続行しますか？",
+      customValueWarning: "⚠️ \"{field}\"に新しいカスタム値を追加しています:\n\n\"{value}\"\n\nこの値は現在のレコードに存在しません。\n重複を避けるため、スペルが正しいことを確認してください。\n\n続行しますか？",
+      factoryValidationWarning: "⚠️ \"{field}\"に新しい値を追加しています。\n\n重複を避けるため、スペルを再確認してください。",
+      factoryNotFoundSuggestion: "⚠️ 工場 \"{value}\" が既存のレコードに見つかりません。\n\nもしかして: \"{suggestion}\"?\n\nOKをクリックして\"{suggestion}\"を使用するか、キャンセルして別の値を入力してください。",
+      factoryNotFoundConfirm: "⚠️ 工場 \"{value}\" が既存のレコードに見つかりません。\n\nこの新しい値を使用してもよろしいですか？",
+      noChangesToApply: "⚠️ 適用する変更がありません。少なくとも1つのフィールド変更を追加してください。",
+      batchUpdateConfirm: "{count}件のレコードを更新してもよろしいですか？\n\n変更内容:\n{changes}\n\nこの操作は元に戻せません。",
+      batchUpdateSuccess: "✅ {count}件のレコードを正常に更新しました！",
+      batchUpdateFailed: "レコードの更新に失敗しました: {error}",
+      selectAtLeastOneField: "更新するフィールドを少なくとも1つ選択してください。",
+      provideValuesForSelected: "選択したすべてのフィールドに値を入力するか、チェックを外してください。",
+      
       // Equipment
       equipmentTitle: "設備管理",
       equipmentFilter: "設備フィルター（工場別）",
@@ -1893,11 +2015,19 @@ const translations = {
   }
   
   function applyLanguage() {
+    // Keys that should always use innerHTML instead of textContent
+    const htmlKeys = ['batchEditInstructions'];
+    
     // Apply translations to elements with data-i18n attributes
     document.querySelectorAll("[data-i18n]").forEach(el => {
       const key = el.getAttribute("data-i18n");
       if (translations[currentLang][key]) {
-        el.textContent = translations[currentLang][key];
+        // Use innerHTML for elements that contain HTML tags or are in the htmlKeys list
+        if (htmlKeys.includes(key) || translations[currentLang][key].includes('<')) {
+          el.innerHTML = translations[currentLang][key];
+        } else {
+          el.textContent = translations[currentLang][key];
+        }
       }
     });
   

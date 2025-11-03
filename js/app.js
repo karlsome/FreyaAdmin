@@ -1698,11 +1698,11 @@ function loadPage(page) {
                     <span data-i18n="search">Search</span>
                     <div class="flex items-center gap-3">
                       <select id="searchLogicMode" onchange="applyMasterFilters()" class="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500">
-                        <option value="OR">Match ANY tag (OR)</option>
-                        <option value="AND">Match ALL tags (AND)</option>
+                        <option value="OR" data-i18n="matchAnyTag">Match ANY tag (OR)</option>
+                        <option value="AND" data-i18n="matchAllTags">Match ALL tags (AND)</option>
                       </select>
                       <button id="clearSearchTagsBtn" onclick="clearAllMasterSearchTags()" class="hidden text-xs text-red-600 hover:text-red-800 font-medium">
-                        Clear all tags
+                        <span data-i18n="clearAllTags">Clear all tags</span>
                       </button>
                     </div>
                   </label>
@@ -1719,7 +1719,7 @@ function loadPage(page) {
               <button id="masterAdvancedFiltersToggle" onclick="toggleMasterAdvancedFilters()" class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
                 <div class="flex items-center">
                   <i class="ri-filter-3-line text-blue-600 text-xl mr-3"></i>
-                  <span class="font-medium text-gray-900">Advanced Filters</span>
+                  <span class="font-medium text-gray-900" data-i18n="advancedFilters">Advanced Filters</span>
                   <span id="masterActiveFiltersCount" class="ml-3 px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-semibold hidden">0</span>
                 </div>
                 <i id="masterAdvancedFiltersIcon" class="ri-arrow-down-s-line text-gray-400 text-2xl transform transition-transform"></i>
@@ -1736,15 +1736,15 @@ function loadPage(page) {
                   <!-- Add Filter Button -->
                   <button onclick="addMasterFilterRow()" class="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center">
                     <i class="ri-add-line mr-1"></i>
-                    Add Filter
+                    <span data-i18n="addFilter">Add Filter</span>
                   </button>
 
                   <!-- Active Filters Display -->
                   <div id="masterActiveFiltersDisplay" class="hidden mt-4 pt-4 border-t border-gray-200">
                     <div class="flex items-center justify-between mb-2">
-                      <span class="text-xs font-medium text-gray-600">Active Filters:</span>
+                      <span class="text-xs font-medium text-gray-600" data-i18n="activeFilters">Active Filters:</span>
                       <button onclick="clearAllMasterFilters()" class="text-xs text-red-600 hover:text-red-700 font-medium">
-                        <i class="ri-close-circle-line"></i> Clear All
+                        <i class="ri-close-circle-line"></i> <span data-i18n="clearAllFilters">Clear All</span>
                       </button>
                     </div>
                     <div id="masterActiveFilterBadges" class="flex flex-wrap gap-2">
@@ -1764,7 +1764,7 @@ function loadPage(page) {
                   <div id="masterBatchEditButtonContainer" class="hidden mt-3">
                     <button onclick="openMasterBatchEditModal()" class="w-full bg-amber-600 text-white py-3 px-6 rounded-lg hover:bg-amber-700 transition-colors font-medium flex items-center justify-center">
                       <i class="ri-edit-box-line mr-2"></i>
-                      Batch Edit (<span id="masterBatchEditCount">0</span> records)
+                      <span data-i18n="batchEdit">Batch Edit</span> (<span id="masterBatchEditCount">0</span> <span data-i18n="records">records</span>)
                     </button>
                   </div>
                 </div>
@@ -1777,8 +1777,8 @@ function loadPage(page) {
                 <!-- Modal Header -->
                 <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-green-50">
                   <div>
-                    <h3 class="text-xl font-bold text-gray-900">Batch Edit Master Records</h3>
-                    <p class="text-sm text-gray-600 mt-1">Editing <span id="batchEditRecordCount" class="font-semibold text-blue-600">0</span> filtered records</p>
+                    <h3 class="text-xl font-bold text-gray-900" data-i18n="batchEditRecords">Batch Edit Master Records</h3>
+                    <p class="text-sm text-gray-600 mt-1"><span data-i18n="editing">Editing</span> <span id="batchEditRecordCount" class="font-semibold text-blue-600">0</span> <span data-i18n="filteredRecords">filtered records</span></p>
                   </div>
                   <button onclick="closeMasterBatchEditModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
                     <i class="ri-close-line text-2xl"></i>
@@ -1794,7 +1794,7 @@ function loadPage(page) {
                       <div class="flex items-start">
                         <i class="ri-information-line text-blue-600 text-lg mr-2"></i>
                         <div class="text-xs text-blue-800">
-                          <p class="font-medium mb-1">Click field tags to edit • <span class="text-red-600">Red</span> = Old • <span class="text-green-600">Green</span> = New</p>
+                          <p class="font-medium mb-1" data-i18n="batchEditInstructions">Click field tags to edit • <span class="text-red-600">Red</span> = Old • <span class="text-green-600">Green</span> = New</p>
                         </div>
                       </div>
                     </div>
@@ -1802,7 +1802,7 @@ function loadPage(page) {
                     <!-- Field Tags (Scrollable) -->
                     <div class="p-4 overflow-y-auto flex-1">
                       <div class="mb-4">
-                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Available Fields:</label>
+                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide" data-i18n="availableFields">Available Fields:</label>
                         <div id="batchEditFieldTags" class="flex flex-wrap gap-2">
                           <!-- Field tags will be inserted here -->
                         </div>
@@ -1811,29 +1811,29 @@ function loadPage(page) {
                       <!-- Active Edit Section -->
                       <div id="batchEditActiveSection" class="hidden mb-4 p-4 bg-gray-50 rounded-lg border-2 border-blue-300">
                         <div class="flex items-center justify-between mb-3">
-                          <label class="text-sm font-semibold text-gray-700">Editing: <span id="activeFieldLabel" class="text-blue-600"></span></label>
+                          <label class="text-sm font-semibold text-gray-700"><span data-i18n="editing">Editing</span>: <span id="activeFieldLabel" class="text-blue-600"></span></label>
                           <button onclick="cancelFieldEdit()" class="text-xs text-gray-500 hover:text-gray-700">
-                            <i class="ri-close-line"></i> Cancel
+                            <i class="ri-close-line"></i> <span data-i18n="cancel">Cancel</span>
                           </button>
                         </div>
                         <div class="flex gap-2 items-start">
                           <div class="flex-1">
-                            <input type="text" id="batchEditActiveInput" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter new value..." />
+                            <input type="text" id="batchEditActiveInput" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" data-i18n-placeholder="enterNewValue" placeholder="Enter new value..." />
                             <p id="customValueWarning" class="hidden text-xs text-amber-600 mt-1 flex items-center gap-1">
-                              <i class="ri-alert-line"></i> Adding new custom value
+                              <i class="ri-alert-line"></i> <span data-i18n="addingCustomValue">Adding new custom value</span>
                             </p>
                           </div>
                           <button onclick="addFieldToChangesList()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-1 text-sm font-medium">
-                            <i class="ri-check-line"></i> Add
+                            <i class="ri-check-line"></i> <span data-i18n="addChange">Add</span>
                           </button>
                         </div>
                       </div>
 
                       <!-- Changes List -->
                       <div class="mb-4">
-                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Changes to Apply:</label>
+                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide" data-i18n="changesToApply">Changes to Apply:</label>
                         <div id="batchEditChangesList" class="space-y-2">
-                          <p class="text-xs text-gray-400 italic">No changes yet. Click field tags above to start editing.</p>
+                          <p class="text-xs text-gray-400 italic" data-i18n="noChangesYet">No changes yet. Click field tags above to start editing.</p>
                         </div>
                       </div>
                     </div>
@@ -1845,7 +1845,7 @@ function loadPage(page) {
                     <div class="p-4 bg-green-50 border-b border-green-200">
                       <h4 class="text-sm font-semibold text-gray-700 flex items-center">
                         <i class="ri-eye-line text-green-600 mr-2"></i>
-                        Preview <span id="batchEditPreviewInfo" class="ml-2 text-xs font-normal text-gray-600">(showing 5 of 0 total records)</span>
+                        <span data-i18n="preview">Preview</span> <span id="batchEditPreviewInfo" class="ml-2 text-xs font-normal text-gray-600">(showing 5 of 0 total records)</span>
                       </h4>
                     </div>
 
@@ -1860,14 +1860,15 @@ function loadPage(page) {
                 <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
                   <p class="text-xs text-gray-600">
                     <i class="ri-alert-line text-amber-600"></i>
-                    Changes will be applied to <strong id="footerRecordCount">0</strong> records
+                    <span data-i18n="changesWillBeApplied">Changes will be applied to</span> <strong id="footerRecordCount">0</strong> <span data-i18n="records">records</span>
                   </p>
                   <div class="flex gap-3">
                     <button onclick="closeMasterBatchEditModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors font-medium text-sm">
-                      Cancel
+                      <span data-i18n="cancel">Cancel</span>
                     </button>
                     <button onclick="confirmMasterBatchEdit()" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2 text-sm">
                       <i class="ri-check-line"></i>
+                      <span data-i18n="updateRecords">Update Records</span>
                       Update Records
                     </button>
                   </div>
@@ -2947,16 +2948,19 @@ function loadPage(page) {
             const filterRow = document.createElement('div');
             filterRow.id = filterId;
             filterRow.className = 'flex gap-2 items-start';
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
             filterRow.innerHTML = `
               <select class="master-filter-field flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="onMasterFieldChange('${filterId}')">
-                <option value="">Select Field...</option>
+                <option value="">${t.selectField}</option>
                 ${fields.map(f => `<option value="${f}">${masterFieldSchemas[f].label}</option>`).join('')}
               </select>
               <select class="master-filter-operator flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" disabled>
-                <option value="">Select Operator...</option>
+                <option value="">${t.selectOperator}</option>
               </select>
               <div class="master-filter-value-container flex-1">
-                <input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Value..." disabled />
+                <input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="${t.enterValue}" disabled />
               </div>
               <button onclick="removeMasterFilterRow('${filterId}')" class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                 <i class="ri-delete-bin-line text-lg"></i>
@@ -2999,17 +3003,20 @@ function loadPage(page) {
             const fieldSchema = masterFieldSchemas[selectedField];
             
             // Populate operators
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
             const operatorOptions = {
-              'equals': 'Equals',
-              'contains': 'Contains',
-              'range': 'Range',
-              'greater': 'Greater Than',
-              'less': 'Less Than',
-              'in': 'In List'
+              'equals': t.equals,
+              'contains': t.contains,
+              'range': t.range,
+              'greater': t.greaterThan,
+              'less': t.lessThan,
+              'in': t.in
             };
 
             operatorSelect.disabled = false;
-            operatorSelect.innerHTML = '<option value="">Select Operator...</option>' +
+            operatorSelect.innerHTML = `<option value="">${t.selectOperator}</option>` +
               fieldSchema.operators.map(op => `<option value="${op}" ${op === 'equals' ? 'selected' : ''}>${operatorOptions[op]}</option>`).join('');
 
             // Update value input based on field type
@@ -3475,10 +3482,13 @@ function loadPage(page) {
             if (footerCount) footerCount.textContent = batchEditRecords.length;
             
             // Update preview info
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
             const previewInfo = document.getElementById('batchEditPreviewInfo');
             if (previewInfo) {
               const previewCount = Math.min(5, batchEditRecords.length);
-              previewInfo.textContent = `(showing ${previewCount} of ${batchEditRecords.length} total records)`;
+              previewInfo.textContent = `(${t.showing || 'showing'} ${previewCount} ${t.of || 'of'} ${batchEditRecords.length} ${t.totalRecords || 'total records'})`;
             }
             
             // Generate field tags (left panel)
@@ -3491,14 +3501,31 @@ function loadPage(page) {
             // Clear changes list
             const changesList = document.getElementById('batchEditChangesList');
             if (changesList) {
-              changesList.innerHTML = '<p class="text-xs text-gray-400 italic">No changes yet. Click field tags above to start editing.</p>';
+              const noChangesMsg = t.noChangesYet || 'No changes yet. Click field tags above to start editing.';
+              changesList.innerHTML = `<p class="text-xs text-gray-400 italic">${noChangesMsg}</p>`;
             }
             
             // Generate preview cards (right panel)
             generatePreviewCards();
             
-            // Show modal
+            // Show modal first
             document.getElementById('masterBatchEditModal').classList.remove('hidden');
+            
+            // Then apply translations after modal is visible
+            setTimeout(() => {
+              if (typeof window.applyLanguageEnhanced === 'function') {
+                window.applyLanguageEnhanced();
+              }
+              
+              // Force update the instructions element specifically
+              const instructionsEl = document.querySelector('[data-i18n="batchEditInstructions"]');
+              if (instructionsEl) {
+                const currentLang = localStorage.getItem("lang") || "en";
+                if (translations[currentLang] && translations[currentLang].batchEditInstructions) {
+                  instructionsEl.innerHTML = translations[currentLang].batchEditInstructions;
+                }
+              }
+            }, 50);
           };
 
           /**
@@ -3656,7 +3683,10 @@ function loadPage(page) {
               
               // Show warning for certain fields
               if (field === '工場' || field === 'Factory') {
-                alert(`⚠️ You are adding a NEW value for "${fieldLabel}".\n\nPlease double-check the spelling to avoid duplicates.`);
+                const currentLang = localStorage.getItem("lang") || "en";
+                const t = translations[currentLang];
+                const message = t.factoryValidationWarning.replace('{field}', fieldLabel);
+                alert(message);
               }
               
               // Hide select, show custom input
@@ -3711,19 +3741,19 @@ function loadPage(page) {
             const input = document.getElementById('batchEditActiveInput');
             const customInput = document.getElementById('batchEditCustomInput');
             
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
             // Check if custom input is visible (user is adding new value)
             if (customInput && !customInput.classList.contains('hidden')) {
               newValue = customInput.value.trim();
               
               // Show warning for new custom values
               if (newValue !== '') {
-                const confirmCustom = confirm(
-                  `⚠️ You are adding a NEW custom value for "${schema.label}":\n\n` +
-                  `"${newValue}"\n\n` +
-                  `This value doesn't exist in the current records.\n` +
-                  `Make sure the spelling is correct to avoid duplicates.\n\n` +
-                  `Continue?`
-                );
+                const message = t.customValueWarning
+                  .replace('{field}', schema.label)
+                  .replace('{value}', newValue);
+                const confirmCustom = confirm(message);
                 if (!confirmCustom) return;
               }
             } else if (input) {
@@ -3732,7 +3762,7 @@ function loadPage(page) {
               
               // If select shows "Add New Value" but custom input not shown, invalid state
               if (newValue === '__ADD_NEW__') {
-                alert('Please enter a custom value or select a different option.');
+                alert(t.enterCustomValuePrompt || 'Please enter a custom value or select a different option.');
                 return;
               }
             } else {
@@ -3742,7 +3772,12 @@ function loadPage(page) {
             
             // Check if empty
             if (newValue === '') {
-              const confirmEmpty = confirm(`⚠️ The new value for "${schema.label}" is empty.\n\nThis will clear the field for all ${batchEditRecords.length} records.\n\nContinue?`);
+              const currentLang = localStorage.getItem("lang") || "en";
+              const t = translations[currentLang];
+              const message = t.emptyValueWarning
+                .replace('{field}', schema.label)
+                .replace('{count}', batchEditRecords.length);
+              const confirmEmpty = confirm(message);
               if (!confirmEmpty) return;
             }
             
@@ -3930,6 +3965,9 @@ function loadPage(page) {
            * Validate factory field with nearest match suggestion
            */
           async function validateFactoryField(newValue) {
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
             // Load existing factories if not cached
             if (existingFactories.length === 0) {
               try {
@@ -3950,11 +3988,12 @@ function loadPage(page) {
             const nearest = findNearestMatch(newValue, existingFactories);
             
             if (nearest) {
-              const useNearest = confirm(
-                `⚠️ Factory "${newValue}" not found in existing records.\n\n` +
-                `Did you mean: "${nearest}"?\n\n` +
-                `Click OK to use "${nearest}" or Cancel to enter a different value.`
-              );
+              const message = t.factoryNotFoundSuggestion
+                .replace('{value}', newValue)
+                .replace('{suggestion}', nearest)
+                .replace('{suggestion}', nearest); // Replace twice for both occurrences
+              
+              const useNearest = confirm(message);
               
               if (useNearest) {
                 // Update input with nearest match
@@ -3963,10 +4002,8 @@ function loadPage(page) {
                 return false; // Return false to not add yet, user should click Add again
               }
             } else {
-              const continueAnyway = confirm(
-                `⚠️ Factory "${newValue}" not found in existing records.\n\n` +
-                `Are you sure you want to use this new value?`
-              );
+              const message = t.factoryNotFoundConfirm.replace('{value}', newValue);
+              const continueAnyway = confirm(message);
               
               if (!continueAnyway) return false;
             }
@@ -4025,9 +4062,12 @@ function loadPage(page) {
            * Confirm and execute batch edit
            */
           window.confirmMasterBatchEdit = async function() {
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
             // Check if any changes
             if (Object.keys(batchEditChanges).length === 0) {
-              alert('⚠️ No changes to apply. Please add at least one field change.');
+              alert(t.noChangesToApply);
               return;
             }
             
@@ -4042,10 +4082,9 @@ function loadPage(page) {
               return `  • ${schema.label} → ${value}`;
             }).join('\n');
             
-            const confirmMessage = 
-              `Are you sure you want to update ${recordCount} record(s)?\n\n` +
-              `Changes:\n${changesSummary}\n\n` +
-              `This action cannot be undone.`;
+            const confirmMessage = t.batchUpdateConfirm
+              .replace('{count}', recordCount)
+              .replace('{changes}', changesSummary);
             
             if (!confirm(confirmMessage)) {
               return;
@@ -4085,10 +4124,14 @@ function loadPage(page) {
                 })
               });
               
+              const currentLang = localStorage.getItem("lang") || "en";
+              const t = translations[currentLang];
+              
               const result = await response.json();
               
               if (response.ok && result.success) {
-                alert(`✅ Successfully updated ${result.modifiedCount} record(s)!`);
+                const message = t.batchUpdateSuccess.replace('{count}', result.modifiedCount);
+                alert(message);
                 
                 // Close modal
                 closeMasterBatchEditModal();
@@ -4101,7 +4144,10 @@ function loadPage(page) {
               
             } catch (error) {
               console.error('❌ Batch update error:', error);
-              alert(`Failed to update records: ${error.message}`);
+              const currentLang = localStorage.getItem("lang") || "en";
+              const t = translations[currentLang];
+              const message = t.batchUpdateFailed.replace('{error}', error.message);
+              alert(message);
             }
           };
 
