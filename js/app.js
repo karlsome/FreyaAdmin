@@ -1700,6 +1700,43 @@ function loadPage(page) {
               </div>
             </div>
 
+            <!-- Advanced Filters Section -->
+            <div class="bg-white rounded-lg shadow-sm mb-6 border">
+              <!-- Collapsible Header -->
+              <button id="masterAdvancedFiltersToggle" onclick="toggleMasterAdvancedFilters()" class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
+                <div class="flex items-center">
+                  <i class="ri-filter-3-line text-blue-600 text-xl mr-3"></i>
+                  <span class="font-medium text-gray-900">Advanced Filters</span>
+                  <span id="masterActiveFiltersCount" class="ml-3 px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-semibold hidden">0</span>
+                </div>
+                <i id="masterAdvancedFiltersIcon" class="ri-arrow-down-s-line text-gray-400 text-2xl transform transition-transform"></i>
+              </button>
+
+              <!-- Expandable Content -->
+              <div id="masterAdvancedFiltersContent" class="hidden border-t border-gray-200">
+                <div class="p-6">
+                  <!-- Dynamic Filter Rows Container -->
+                  <div id="masterFilterRowsContainer" class="space-y-3 mb-4">
+                    <!-- Filter rows will be added here dynamically -->
+                  </div>
+
+                  <!-- Add Filter Button -->
+                  <button onclick="addMasterFilterRow()" class="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center">
+                    <i class="ri-add-line mr-1"></i>
+                    Add Filter
+                  </button>
+
+                  <!-- Apply Filters Button -->
+                  <div class="mt-6 pt-6 border-t border-gray-200">
+                    <button onclick="applyMasterAdvancedFilters()" class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center">
+                      <i class="ri-filter-line mr-2"></i>
+                      Apply Filters
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Stats Cards -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
               <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
@@ -1894,6 +1931,22 @@ function loadPage(page) {
             window.currentMasterTab = currentMasterTab; // Update global variable
             updateMasterTabStyles();
             currentMasterPage = 1; // Reset to first page
+            
+            // Clear advanced filter cache and reset fields for new tab
+            masterFilterDropdownCache.clear();
+            masterFieldSchemas = {};
+            
+            // Clear existing filter rows
+            const container = document.getElementById('masterFilterRowsContainer');
+            if (container) {
+              container.innerHTML = '';
+            }
+            
+            // Re-fetch field schemas for new tab
+            fetchMasterFieldNames().then(() => {
+              console.log('✅ Field schemas loaded for new tab');
+            });
+            
             loadMasterDB();
             loadMasterFilters();
           };
@@ -2585,6 +2638,508 @@ function loadPage(page) {
             renderMasterTable();
           }
 
+          // ==================== ADVANCED FILTER SYSTEM FOR MASTER DB ====================
+
+          // Global state for master advanced filters
+          let masterActiveFilters = [];
+          let masterFilterDropdownCache = new Map();
+          let masterFieldSchemas = {}; // Dynamic schemas based on actual data
+
+          /**
+           * Toggle advanced filters section
+           */
+          window.toggleMasterAdvancedFilters = function() {
+            const content = document.getElementById('masterAdvancedFiltersContent');
+            const icon = document.getElementById('masterAdvancedFiltersIcon');
+            
+            if (content.classList.contains('hidden')) {
+              content.classList.remove('hidden');
+              icon.classList.add('rotate-180');
+              
+              // Initialize with one filter row if empty
+              if (!document.getElementById('masterFilterRowsContainer').hasChildNodes.length) {
+                addMasterFilterRow();
+              }
+            } else {
+              content.classList.add('hidden');
+              icon.classList.remove('rotate-180');
+            }
+          };
+
+          /**
+           * Fetch all unique field names from current collection
+           */
+          async function fetchMasterFieldNames() {
+            try {
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              const query = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              
+              console.log(`📋 Fetching sample documents to determine fields from ${collectionName}...`);
+              
+              const res = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dbName: "Sasaki_Coating_MasterDB",
+                  collectionName: collectionName,
+                  query: query
+                })
+              });
+
+              const sampleData = await res.json();
+              
+              if (!sampleData || sampleData.length === 0) {
+                console.warn('No data found in collection');
+                return {};
+              }
+
+              // Gather all unique field names from all documents
+              const allFields = new Set();
+              sampleData.forEach(doc => {
+                Object.keys(doc).forEach(key => {
+                  if (key !== '_id' && key !== 'imageURL') {
+                    allFields.add(key);
+                  }
+                });
+              });
+
+              console.log(`✅ Found ${allFields.size} unique fields:`, Array.from(allFields));
+
+              // Determine field types from sample data
+              const schemas = {};
+              Array.from(allFields).forEach(field => {
+                // Sample values to determine type
+                const sampleValues = sampleData
+                  .map(doc => doc[field])
+                  .filter(val => val !== null && val !== undefined && val !== '')
+                  .slice(0, 100); // Sample first 100 non-empty values
+
+                if (sampleValues.length === 0) {
+                  schemas[field] = { type: 'text', label: field, operators: ['equals', 'contains'] };
+                  return;
+                }
+
+                // Determine type based on values
+                const firstValue = sampleValues[0];
+                
+                // Check if it's a number
+                if (typeof firstValue === 'number' || !isNaN(Number(firstValue))) {
+                  schemas[field] = { 
+                    type: 'number', 
+                    label: field, 
+                    operators: ['equals', 'range', 'greater', 'less'] 
+                  };
+                }
+                // Check if it's a date-like field
+                else if (field.toLowerCase().includes('date') || field === 'Date') {
+                  schemas[field] = { 
+                    type: 'date', 
+                    label: field, 
+                    operators: ['equals', 'range'] 
+                  };
+                }
+                // Check if it has limited unique values (good candidate for select)
+                else {
+                  const uniqueCount = new Set(sampleValues).size;
+                  if (uniqueCount <= 50) { // If 50 or fewer unique values, use dropdown
+                    schemas[field] = { 
+                      type: 'select', 
+                      label: field, 
+                      operators: ['equals', 'in'],
+                      autoPopulate: true 
+                    };
+                  } else {
+                    schemas[field] = { 
+                      type: 'text', 
+                      label: field, 
+                      operators: ['equals', 'contains'] 
+                    };
+                  }
+                }
+              });
+
+              masterFieldSchemas = schemas;
+              console.log('✅ Generated field schemas:', masterFieldSchemas);
+              
+              return schemas;
+
+            } catch (error) {
+              console.error('❌ Error fetching field names:', error);
+              return {};
+            }
+          }
+
+          /**
+           * Add a new filter row
+           */
+          window.addMasterFilterRow = async function() {
+            // Ensure we have field schemas
+            if (Object.keys(masterFieldSchemas).length === 0) {
+              await fetchMasterFieldNames();
+            }
+
+            const container = document.getElementById('masterFilterRowsContainer');
+            const filterId = `master-filter-${Date.now()}`;
+            const fields = Object.keys(masterFieldSchemas).sort();
+
+            const filterRow = document.createElement('div');
+            filterRow.id = filterId;
+            filterRow.className = 'flex gap-2 items-start';
+            filterRow.innerHTML = `
+              <select class="master-filter-field flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="onMasterFieldChange('${filterId}')">
+                <option value="">Select Field...</option>
+                ${fields.map(f => `<option value="${f}">${masterFieldSchemas[f].label}</option>`).join('')}
+              </select>
+              <select class="master-filter-operator flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" disabled>
+                <option value="">Select Operator...</option>
+              </select>
+              <div class="master-filter-value-container flex-1">
+                <input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Value..." disabled />
+              </div>
+              <button onclick="removeMasterFilterRow('${filterId}')" class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                <i class="ri-delete-bin-line text-lg"></i>
+              </button>
+            `;
+
+            container.appendChild(filterRow);
+            updateMasterActiveFiltersCount();
+          };
+
+          /**
+           * Remove a filter row
+           */
+          window.removeMasterFilterRow = function(filterId) {
+            const row = document.getElementById(filterId);
+            if (row) {
+              row.remove();
+              updateMasterActiveFiltersCount();
+            }
+          };
+
+          /**
+           * Handle field selection change
+           */
+          window.onMasterFieldChange = function(filterId) {
+            const row = document.getElementById(filterId);
+            const fieldSelect = row.querySelector('.master-filter-field');
+            const operatorSelect = row.querySelector('.master-filter-operator');
+            const valueContainer = row.querySelector('.master-filter-value-container');
+            
+            const selectedField = fieldSelect.value;
+            
+            if (!selectedField) {
+              operatorSelect.disabled = true;
+              operatorSelect.innerHTML = '<option value="">Select Operator...</option>';
+              valueContainer.innerHTML = '<input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm" placeholder="Value..." disabled />';
+              return;
+            }
+
+            const fieldSchema = masterFieldSchemas[selectedField];
+            
+            // Populate operators
+            const operatorOptions = {
+              'equals': 'Equals',
+              'contains': 'Contains',
+              'range': 'Range',
+              'greater': 'Greater Than',
+              'less': 'Less Than',
+              'in': 'In List'
+            };
+
+            operatorSelect.disabled = false;
+            operatorSelect.innerHTML = '<option value="">Select Operator...</option>' +
+              fieldSchema.operators.map(op => `<option value="${op}" ${op === 'equals' ? 'selected' : ''}>${operatorOptions[op]}</option>`).join('');
+
+            // Update value input based on field type
+            updateMasterValueInput(filterId, selectedField, 'equals');
+
+            // Trigger operator change to set up value input
+            operatorSelect.onchange = () => onMasterOperatorChange(filterId);
+            onMasterOperatorChange(filterId);
+          };
+
+          /**
+           * Handle operator selection change
+           */
+          window.onMasterOperatorChange = function(filterId) {
+            const row = document.getElementById(filterId);
+            const fieldSelect = row.querySelector('.master-filter-field');
+            const operatorSelect = row.querySelector('.master-filter-operator');
+            
+            const selectedField = fieldSelect.value;
+            const selectedOperator = operatorSelect.value;
+            
+            if (selectedField && selectedOperator) {
+              updateMasterValueInput(filterId, selectedField, selectedOperator);
+            }
+          };
+
+          /**
+           * Update value input based on field type and operator
+           */
+          async function updateMasterValueInput(filterId, field, operator) {
+            const row = document.getElementById(filterId);
+            const valueContainer = row.querySelector('.master-filter-value-container');
+            const fieldSchema = masterFieldSchemas[field];
+
+            // For 'range' operator, show two inputs
+            if (operator === 'range') {
+              if (fieldSchema.type === 'date') {
+                valueContainer.innerHTML = `
+                  <div class="flex gap-2">
+                    <input type="date" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+                    <input type="date" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+                  </div>
+                `;
+              } else {
+                valueContainer.innerHTML = `
+                  <div class="flex gap-2">
+                    <input type="number" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="From..." />
+                    <input type="number" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="To..." />
+                  </div>
+                `;
+              }
+              return;
+            }
+
+            // For 'in' operator or select type with autoPopulate
+            if (operator === 'in' || (fieldSchema.type === 'select' && fieldSchema.autoPopulate)) {
+              const values = await fetchMasterDistinctValues(field);
+              valueContainer.innerHTML = `
+                <select class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ${operator === 'in' ? 'multiple' : ''}>
+                  <option value="">Select...</option>
+                  ${values.map(v => `<option value="${v}">${v}</option>`).join('')}
+                </select>
+              `;
+              return;
+            }
+
+            // Default inputs based on type
+            switch (fieldSchema.type) {
+              case 'number':
+                valueContainer.innerHTML = `<input type="number" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter number..." />`;
+                break;
+              case 'date':
+                valueContainer.innerHTML = `<input type="date" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />`;
+                break;
+              default:
+                valueContainer.innerHTML = `<input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter value..." />`;
+            }
+          }
+
+          /**
+           * Fetch distinct values for a field (with caching)
+           */
+          async function fetchMasterDistinctValues(field) {
+            const cacheKey = `${currentMasterTab}_${field}`;
+            const cached = masterFilterDropdownCache.get(cacheKey);
+            const now = Date.now();
+
+            if (cached && (now - cached.timestamp < 300000)) { // 5 minutes cache
+              return cached.values;
+            }
+
+            try {
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              const filter = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              
+              const res = await fetch(BASE_URL + "api/distinct", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dbName: "Sasaki_Coating_MasterDB",
+                  collectionName: collectionName,
+                  field: field,
+                  filter: filter
+                })
+              });
+
+              const result = await res.json();
+              const values = result.values || [];
+              
+              masterFilterDropdownCache.set(cacheKey, {
+                values: values,
+                timestamp: now
+              });
+
+              return values;
+            } catch (error) {
+              console.error(`Error fetching distinct values for ${field}:`, error);
+              return [];
+            }
+          }
+
+          /**
+           * Build MongoDB query from advanced filters
+           */
+          async function buildMasterDynamicQuery() {
+            const container = document.getElementById('masterFilterRowsContainer');
+            const rows = container.querySelectorAll('[id^="master-filter-"]');
+            const query = {};
+
+            for (const row of rows) {
+              const fieldSelect = row.querySelector('.master-filter-field');
+              const operatorSelect = row.querySelector('.master-filter-operator');
+              
+              const field = fieldSelect.value;
+              const operator = operatorSelect.value;
+
+              if (!field || !operator) continue;
+
+              const valueInput = row.querySelector('.master-filter-value');
+              const valueFrom = row.querySelector('.master-filter-value-from');
+              const valueTo = row.querySelector('.master-filter-value-to');
+
+              let value;
+
+              // Handle different input types
+              if (operator === 'range' && valueFrom && valueTo) {
+                const from = valueFrom.value;
+                const to = valueTo.value;
+                if (from && to) {
+                  query[field] = { $gte: from, $lte: to };
+                }
+                continue;
+              }
+
+              if (operator === 'in') {
+                const select = row.querySelector('.master-filter-value');
+                value = Array.from(select.selectedOptions).map(opt => opt.value).filter(v => v);
+                if (value.length > 0) {
+                  query[field] = { $in: value };
+                }
+                continue;
+              }
+
+              value = valueInput?.value;
+              if (!value) continue;
+
+              // Apply operator
+              switch (operator) {
+                case 'equals':
+                  query[field] = value;
+                  break;
+                case 'contains':
+                  query[field] = { $regex: value, $options: 'i' };
+                  break;
+                case 'greater':
+                  query[field] = { $gt: parseFloat(value) };
+                  break;
+                case 'less':
+                  query[field] = { $lt: parseFloat(value) };
+                  break;
+              }
+            }
+
+            console.log('🔍 Built master query:', query);
+            return query;
+          }
+
+          /**
+           * Apply advanced filters
+           */
+          window.applyMasterAdvancedFilters = async function() {
+            try {
+              // Build query from advanced filters
+              const advancedQuery = await buildMasterDynamicQuery();
+              
+              // Combine with basic filters
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              const baseQuery = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              
+              // Add basic filter values if they exist
+              const factory = document.getElementById("filterFactory").value;
+              const rl = document.getElementById("filterRL").value;
+              const color = document.getElementById("filterColor").value;
+              const process = document.getElementById("filterProcess").value;
+
+              if (factory) {
+                advancedQuery["工場"] = factory;
+              }
+              if (rl) {
+                advancedQuery["R/L"] = rl;
+              }
+              if (color) {
+                advancedQuery["色"] = color;
+              }
+              if (process) {
+                if (currentMasterTab === 'materialDB') {
+                  advancedQuery["材料"] = process;
+                } else {
+                  advancedQuery["加工設備"] = process;
+                }
+              }
+
+              const finalQuery = { ...baseQuery, ...advancedQuery };
+              
+              console.log('🔍 Applying advanced filters with query:', finalQuery);
+
+              // Fetch filtered data
+              const res = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dbName: "Sasaki_Coating_MasterDB",
+                  collectionName: collectionName,
+                  query: finalQuery
+                })
+              });
+
+              masterData = await res.json();
+              
+              // Apply search keyword filter on client side
+              const keyword = document.getElementById("masterSearchInput").value.toLowerCase();
+              if (keyword) {
+                filteredMasterData = masterData.filter(item => {
+                  const searchableFields = Object.keys(item).filter(k => 
+                    k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
+                  );
+                  return searchableFields.some(key => 
+                    (item[key] || "").toLowerCase().includes(keyword)
+                  );
+                });
+              } else {
+                filteredMasterData = [...masterData];
+              }
+
+              currentMasterPage = 1;
+              updateMasterStats();
+              renderMasterTable();
+              updateMasterActiveFiltersCount();
+
+              console.log(`✅ Applied filters: ${filteredMasterData.length} results`);
+
+            } catch (error) {
+              console.error('❌ Error applying advanced filters:', error);
+              alert('Failed to apply filters. Please try again.');
+            }
+          };
+
+          /**
+           * Update active filters count badge
+           */
+          function updateMasterActiveFiltersCount() {
+            const container = document.getElementById('masterFilterRowsContainer');
+            const rows = container.querySelectorAll('[id^="master-filter-"]');
+            
+            let activeCount = 0;
+            rows.forEach(row => {
+              const field = row.querySelector('.master-filter-field').value;
+              const operator = row.querySelector('.master-filter-operator').value;
+              if (field && operator) activeCount++;
+            });
+
+            const badge = document.getElementById('masterActiveFiltersCount');
+            if (activeCount > 0) {
+              badge.textContent = activeCount;
+              badge.classList.remove('hidden');
+            } else {
+              badge.classList.add('hidden');
+            }
+          }
+
+          // ==================== END ADVANCED FILTER SYSTEM ====================
+
           async function loadMasterFilters() {
             try {
               
@@ -2734,6 +3289,11 @@ function loadPage(page) {
 
           loadMasterDB();
           loadMasterFilters();
+          
+          // Initialize field schemas for advanced filters
+          fetchMasterFieldNames().then(() => {
+            console.log('✅ Master DB field schemas initialized');
+          });
           
           // Make currentMasterTab globally accessible
           window.currentMasterTab = currentMasterTab;
