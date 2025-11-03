@@ -26,12 +26,21 @@ function initializeAnalytics() {
     document.getElementById('analyticsToDate').value = today.toISOString().split('T')[0];
     
     // Event listeners
-    document.getElementById('refreshAnalyticsBtn').addEventListener('click', loadAnalyticsData);
+    document.getElementById('refreshAnalyticsBtn').addEventListener('click', () => {
+        loadAnalyticsData();
+        // Also recalculate combined defect rate when refresh is clicked
+        setTimeout(() => {
+            recalculateCombinedDefectRate();
+        }, 1000); // Wait for data to load
+    });
     document.getElementById('analyticsFromDate').addEventListener('change', loadAnalyticsData);
     document.getElementById('analyticsToDate').addEventListener('change', loadAnalyticsData);
     document.getElementById('analyticsRangeSelect').addEventListener('change', handleRangeChange);
     document.getElementById('analyticsFactoryFilter').addEventListener('change', loadAnalyticsData);
     document.getElementById('analyticsCollectionFilter').addEventListener('change', handleCollectionChange);
+    
+    // Make combined defect rate clickable to recalculate
+    document.getElementById('combinedDefectRateCount')?.addEventListener('click', recalculateCombinedDefectRate);
     
     // Load factory options first, then load data
     loadAnalyticsFactoryOptions().then(() => {
@@ -569,6 +578,32 @@ function updateDefectRateLabel() {
     
     // Update the data-i18n attribute for future translations
     defectRateLabel.setAttribute('data-i18n', labelKey);
+}
+
+/**
+ * Force recalculate combined defect rate (user-triggered)
+ */
+async function recalculateCombinedDefectRate() {
+    console.log('🔄 User requested combined defect rate recalculation...');
+    
+    // Reset calculation flags to force recalculation
+    combinedDefectRateCalculated = false;
+    lastCalculatedDateRange = null;
+    
+    // Show loading state
+    const element = document.getElementById('combinedDefectRateCount');
+    if (element) {
+        element.textContent = '計算中...';
+        element.classList.add('text-blue-600');
+    }
+    
+    // Calculate
+    await calculateCombinedDefectRate();
+    
+    // Remove loading state
+    if (element) {
+        element.classList.remove('text-blue-600');
+    }
 }
 
 /**
@@ -2736,3 +2771,4 @@ window.handleRangeChange = handleRangeChange;
 window.showDefectPartDetails = showDefectPartDetails;
 window.closeDefectPartDetailsModal = closeDefectPartDetailsModal;
 window.sortTableData = sortTableData;
+window.recalculateCombinedDefectRate = recalculateCombinedDefectRate;

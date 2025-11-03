@@ -263,14 +263,19 @@ function loadPage(page) {
                             </div>
                         </div>
                         
-                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200">
+                        <div class="analytics-card bg-white p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors duration-200" 
+                             onclick="recalculateCombinedDefectRate()" 
+                             title="クリックして再計算 (Click to recalculate)">
                             <div class="flex items-center">
                                 <div class="p-2 bg-amber-100 rounded-lg">
                                     <i class="ri-pie-chart-line text-amber-600 text-xl"></i>
                                 </div>
                                 <div class="ml-4">
                                     <p class="text-sm font-medium text-gray-600" data-i18n="combinedDefectRate">Combined Defect Rate</p>
-                                    <p class="text-2xl font-bold text-gray-900 analytics-count" id="combinedDefectRateCount">0.00%</p>
+                                    <p class="text-2xl font-bold text-gray-900 analytics-count hover:text-blue-600 transition-colors" id="combinedDefectRateCount">0.00%</p>
+                                </div>
+                                <div class="ml-auto">
+                                    <i class="ri-refresh-line text-gray-400 text-sm"></i>
                                 </div>
                             </div>
                         </div>
@@ -1648,17 +1653,17 @@ function loadPage(page) {
             </div>
 
             <!-- CSV Upload Section -->
-            <div class="bg-white p-6 rounded-lg shadow-sm mb-6 border">
+            <div class="bg-white p-4 rounded-lg shadow-sm mb-4 border">
               <div class="flex items-center space-x-4">
                 <div>
-                  <label class="block text-base font-medium text-gray-700 mb-3" data-i18n="csvFile">CSV File</label>
-                  <input type="file" id="csvUploadInput" accept=".csv" class="text-base file:mr-4 file:py-3 file:px-6 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:font-medium" />
+                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="csvFile">CSVファイル</label>
+                  <input type="file" id="csvUploadInput" accept=".csv" class="text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:font-medium" />
                 </div>
-                <button class="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-base font-medium" onclick="handleMasterCSVUpload()">
-                  <i class="ri-upload-line mr-2"></i><span data-i18n="uploadPreview">Upload & Preview</span>
+                <button class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm font-medium mt-6" onclick="handleMasterCSVUpload()">
+                  <i class="ri-upload-line mr-2"></i><span data-i18n="uploadPreview">アップロード & プレビュー</span>
                 </button>
               </div>
-              <div id="csvPreviewContainer" class="mt-6"></div>
+              <div id="csvPreviewContainer" class="mt-4"></div>
             </div>
 
             <!-- Filters Section -->
@@ -1689,55 +1694,231 @@ function loadPage(page) {
                   </select>
                 </div>
                 <div class="md:col-span-2">
-                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="search">Search</label>
-                  <input type="text" id="masterSearchInput" class="w-full p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500" data-i18n-placeholder="searchPlaceholderMaster" placeholder="Search by part number, model, serial number, product name..." />
+                  <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
+                    <span data-i18n="search">Search</span>
+                    <div class="flex items-center gap-3">
+                      <select id="searchLogicMode" onchange="applyMasterFilters()" class="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500">
+                        <option value="OR" data-i18n="matchAnyTag">Match ANY tag (OR)</option>
+                        <option value="AND" data-i18n="matchAllTags">Match ALL tags (AND)</option>
+                      </select>
+                      <button id="clearSearchTagsBtn" onclick="clearAllMasterSearchTags()" class="hidden text-xs text-red-600 hover:text-red-800 font-medium">
+                        <span data-i18n="clearAllTags">Clear all tags</span>
+                      </button>
+                    </div>
+                  </label>
+                  <div id="masterSearchTags" class="min-h-[3rem] border border-gray-300 rounded-lg p-2 bg-white cursor-text flex flex-wrap gap-2 items-center focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500" onclick="focusMasterSearchInput()">
+                    <input type="text" id="masterSearchInput" class="flex-1 min-w-[200px] outline-none text-base" data-i18n-placeholder="searchPlaceholderMaster" placeholder="Search... (press Enter to add tags)" onkeydown="handleMasterSearchKeydown(event)" onblur="handleMasterSearchBlur(event)" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Advanced Filters Section -->
+            <div class="bg-white rounded-lg shadow-sm mb-6 border">
+              <!-- Collapsible Header -->
+              <button id="masterAdvancedFiltersToggle" onclick="toggleMasterAdvancedFilters()" class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
+                <div class="flex items-center">
+                  <i class="ri-filter-3-line text-blue-600 text-xl mr-3"></i>
+                  <span class="font-medium text-gray-900" data-i18n="advancedFilters">Advanced Filters</span>
+                  <span id="masterActiveFiltersCount" class="ml-3 px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-semibold hidden">0</span>
+                </div>
+                <i id="masterAdvancedFiltersIcon" class="ri-arrow-down-s-line text-gray-400 text-2xl transform transition-transform"></i>
+              </button>
+
+              <!-- Expandable Content -->
+              <div id="masterAdvancedFiltersContent" class="hidden border-t border-gray-200">
+                <div class="p-6">
+                  <!-- Dynamic Filter Rows Container -->
+                  <div id="masterFilterRowsContainer" class="space-y-3 mb-4">
+                    <!-- Filter rows will be added here dynamically -->
+                  </div>
+
+                  <!-- Add Filter Button -->
+                  <button onclick="addMasterFilterRow()" class="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center">
+                    <i class="ri-add-line mr-1"></i>
+                    <span data-i18n="addFilter">Add Filter</span>
+                  </button>
+
+                  <!-- Active Filters Display -->
+                  <div id="masterActiveFiltersDisplay" class="hidden mt-4 pt-4 border-t border-gray-200">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-xs font-medium text-gray-600" data-i18n="activeFilters">Active Filters:</span>
+                      <button onclick="clearAllMasterFilters()" class="text-xs text-red-600 hover:text-red-700 font-medium">
+                        <i class="ri-close-circle-line"></i> <span data-i18n="clearAllFilters">Clear All</span>
+                      </button>
+                    </div>
+                    <div id="masterActiveFilterBadges" class="flex flex-wrap gap-2">
+                      <!-- Active filter badges will appear here -->
+                    </div>
+                  </div>
+
+                  <!-- Apply Filters Button -->
+                  <div class="mt-6 pt-6 border-t border-gray-200">
+                    <button onclick="applyMasterAdvancedFilters()" class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center">
+                      <i class="ri-filter-line mr-2"></i>
+                      Apply Filters
+                    </button>
+                  </div>
+
+                  <!-- Batch Edit Button (shown when filters are applied) -->
+                  <div id="masterBatchEditButtonContainer" class="hidden mt-3">
+                    <button onclick="openMasterBatchEditModal()" class="w-full bg-amber-600 text-white py-3 px-6 rounded-lg hover:bg-amber-700 transition-colors font-medium flex items-center justify-center">
+                      <i class="ri-edit-box-line mr-2"></i>
+                      <span data-i18n="batchEdit">Batch Edit</span> (<span id="masterBatchEditCount">0</span> <span data-i18n="records">records</span>)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Batch Edit Modal -->
+            <div id="masterBatchEditModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+              <div class="bg-white rounded-lg shadow-xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Modal Header -->
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-green-50">
+                  <div>
+                    <h3 class="text-xl font-bold text-gray-900" data-i18n="batchEditRecords">Batch Edit Master Records</h3>
+                    <p class="text-sm text-gray-600 mt-1"><span data-i18n="editing">Editing</span> <span id="batchEditRecordCount" class="font-semibold text-blue-600">0</span> <span data-i18n="filteredRecords">filtered records</span></p>
+                  </div>
+                  <button onclick="closeMasterBatchEditModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                    <i class="ri-close-line text-2xl"></i>
+                  </button>
+                </div>
+
+                <!-- Modal Body - Two Panel Layout -->
+                <div class="flex-1 flex overflow-hidden">
+                  <!-- LEFT PANEL - Field Editor -->
+                  <div class="w-1/2 border-r border-gray-200 flex flex-col">
+                    <!-- Info Box -->
+                    <div class="p-4 bg-blue-50 border-b border-blue-200">
+                      <div class="flex items-start">
+                        <i class="ri-information-line text-blue-600 text-lg mr-2"></i>
+                        <div class="text-xs text-blue-800">
+                          <p class="font-medium mb-1" data-i18n="batchEditInstructions">Click field tags to edit • <span class="text-red-600">Red</span> = Old • <span class="text-green-600">Green</span> = New</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Field Tags (Scrollable) -->
+                    <div class="p-4 overflow-y-auto flex-1">
+                      <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide" data-i18n="availableFields">Available Fields:</label>
+                        <div id="batchEditFieldTags" class="flex flex-wrap gap-2">
+                          <!-- Field tags will be inserted here -->
+                        </div>
+                      </div>
+
+                      <!-- Active Edit Section -->
+                      <div id="batchEditActiveSection" class="hidden mb-4 p-4 bg-gray-50 rounded-lg border-2 border-blue-300">
+                        <div class="flex items-center justify-between mb-3">
+                          <label class="text-sm font-semibold text-gray-700"><span data-i18n="editing">Editing</span>: <span id="activeFieldLabel" class="text-blue-600"></span></label>
+                          <button onclick="cancelFieldEdit()" class="text-xs text-gray-500 hover:text-gray-700">
+                            <i class="ri-close-line"></i> <span data-i18n="cancel">Cancel</span>
+                          </button>
+                        </div>
+                        <div class="flex gap-2 items-start">
+                          <div class="flex-1">
+                            <input type="text" id="batchEditActiveInput" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" data-i18n-placeholder="enterNewValue" placeholder="Enter new value..." />
+                            <p id="customValueWarning" class="hidden text-xs text-amber-600 mt-1 flex items-center gap-1">
+                              <i class="ri-alert-line"></i> <span data-i18n="addingCustomValue">Adding new custom value</span>
+                            </p>
+                          </div>
+                          <button onclick="addFieldToChangesList()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-1 text-sm font-medium">
+                            <i class="ri-check-line"></i> <span data-i18n="addChange">Add</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <!-- Changes List -->
+                      <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide" data-i18n="changesToApply">Changes to Apply:</label>
+                        <div id="batchEditChangesList" class="space-y-2">
+                          <p class="text-xs text-gray-400 italic" data-i18n="noChangesYet">No changes yet. Click field tags above to start editing.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- RIGHT PANEL - Live Preview -->
+                  <div class="w-1/2 flex flex-col bg-gray-50">
+                    <!-- Preview Header -->
+                    <div class="p-4 bg-green-50 border-b border-green-200">
+                      <h4 class="text-sm font-semibold text-gray-700 flex items-center">
+                        <i class="ri-eye-line text-green-600 mr-2"></i>
+                        <span data-i18n="preview">Preview</span> <span id="batchEditPreviewInfo" class="ml-2 text-xs font-normal text-gray-600">(showing 5 of 0 total records)</span>
+                      </h4>
+                    </div>
+
+                    <!-- Preview Cards (Independently Scrollable) -->
+                    <div id="batchEditPreviewContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
+                      <!-- Preview cards will be inserted here -->
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                  <p class="text-xs text-gray-600">
+                    <i class="ri-alert-line text-amber-600"></i>
+                    <span data-i18n="changesWillBeApplied">Changes will be applied to</span> <strong id="footerRecordCount">0</strong> <span data-i18n="records">records</span>
+                  </p>
+                  <div class="flex gap-3">
+                    <button onclick="closeMasterBatchEditModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors font-medium text-sm">
+                      <span data-i18n="cancel">Cancel</span>
+                    </button>
+                    <button onclick="confirmMasterBatchEdit()" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2 text-sm">
+                      <i class="ri-check-line"></i>
+                      <span data-i18n="updateRecords">Update Records</span>
+                      Update Records
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
 
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-blue-100 rounded-lg">
-                    <i class="ri-database-line text-blue-600 text-xl"></i>
+                  <div class="p-2 bg-blue-100 rounded-lg">
+                    <i class="ri-database-line text-blue-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">総件数</p>
-                    <p class="text-3xl font-bold text-gray-900" id="totalMasterCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">総件数</p>
+                    <p class="text-2xl font-bold text-gray-900" id="totalMasterCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-green-100 rounded-lg">
-                    <i class="ri-image-line text-green-600 text-xl"></i>
+                  <div class="p-2 bg-green-100 rounded-lg">
+                    <i class="ri-image-line text-green-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">画像あり</p>
-                    <p class="text-3xl font-bold text-gray-900" id="withImageCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">画像あり</p>
+                    <p class="text-2xl font-bold text-gray-900" id="withImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-yellow-100 rounded-lg">
-                    <i class="ri-image-off-line text-yellow-600 text-xl"></i>
+                  <div class="p-2 bg-yellow-100 rounded-lg">
+                    <i class="ri-image-off-line text-yellow-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">画像なし</p>
-                    <p class="text-3xl font-bold text-gray-900" id="withoutImageCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">画像なし</p>
+                    <p class="text-2xl font-bold text-gray-900" id="withoutImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
                 <div class="flex items-center">
-                  <div class="p-3 bg-purple-100 rounded-lg">
-                    <i class="ri-filter-line text-purple-600 text-xl"></i>
+                  <div class="p-2 bg-purple-100 rounded-lg">
+                    <i class="ri-filter-line text-purple-600 text-lg"></i>
                   </div>
-                  <div class="ml-4">
-                    <p class="text-sm font-medium text-gray-600">表示中</p>
-                    <p class="text-3xl font-bold text-gray-900" id="filteredCount">0</p>
+                  <div class="ml-3">
+                    <p class="text-xs font-medium text-gray-600">表示中</p>
+                    <p class="text-2xl font-bold text-gray-900" id="filteredCount">0</p>
                   </div>
                 </div>
               </div>
@@ -1889,6 +2070,22 @@ function loadPage(page) {
             window.currentMasterTab = currentMasterTab; // Update global variable
             updateMasterTabStyles();
             currentMasterPage = 1; // Reset to first page
+            
+            // Clear advanced filter cache and reset fields for new tab
+            masterFilterDropdownCache.clear();
+            masterFieldSchemas = {};
+            
+            // Clear existing filter rows
+            const container = document.getElementById('masterFilterRowsContainer');
+            if (container) {
+              container.innerHTML = '';
+            }
+            
+            // Re-fetch field schemas for new tab
+            fetchMasterFieldNames().then(() => {
+              console.log('✅ Field schemas loaded for new tab');
+            });
+            
             loadMasterDB();
             loadMasterFilters();
           };
@@ -2529,26 +2726,50 @@ function loadPage(page) {
           });
 
           // Filtering logic
-          document.getElementById("masterSearchInput").addEventListener("input", applyMasterFilters);
+          // Note: Search input now uses tags, so we don't need the input listener
           ["filterFactory", "filterRL", "filterColor", "filterProcess"].forEach(id => {
             document.getElementById(id).addEventListener("change", applyMasterFilters);
           });
 
           function applyMasterFilters() {
-            const keyword = document.getElementById("masterSearchInput").value.toLowerCase();
+            // Get search tags instead of direct input value
+            const searchTags = getMasterSearchTags();
             const factory = document.getElementById("filterFactory").value;
             const rl = document.getElementById("filterRL").value;
             const color = document.getElementById("filterColor").value;
             const process = document.getElementById("filterProcess").value;
+            
+            // Get search logic mode (OR or AND)
+            const logicMode = document.getElementById("searchLogicMode")?.value || "OR";
 
             filteredMasterData = masterData.filter(item => {
               // Dynamic keyword search - search through all text fields
               const searchableFields = Object.keys(item).filter(k => 
                 k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
               );
-              const keywordMatch = !keyword || searchableFields.some(key => 
-                (item[key] || "").toLowerCase().includes(keyword)
-              );
+              
+              // Apply search logic based on mode
+              let keywordMatch = true;
+              
+              if (searchTags.length > 0) {
+                if (logicMode === "OR") {
+                  // OR logic: Match if ANY tag is found
+                  keywordMatch = searchTags.some(tag => {
+                    const keyword = tag.toLowerCase();
+                    return searchableFields.some(key => 
+                      (item[key] || "").toLowerCase().includes(keyword)
+                    );
+                  });
+                } else {
+                  // AND logic: Match if ALL tags are found
+                  keywordMatch = searchTags.every(tag => {
+                    const keyword = tag.toLowerCase();
+                    return searchableFields.some(key => 
+                      (item[key] || "").toLowerCase().includes(keyword)
+                    );
+                  });
+                }
+              }
 
               // Dynamic filtering based on available fields
               let factoryMatch = true;
@@ -2579,6 +2800,1470 @@ function loadPage(page) {
             updateMasterStats();
             renderMasterTable();
           }
+
+          // ==================== ADVANCED FILTER SYSTEM FOR MASTER DB ====================
+
+          // Global state for master advanced filters
+          let masterActiveFilters = [];
+          let masterFilterDropdownCache = new Map();
+          let masterFieldSchemas = {}; // Dynamic schemas based on actual data
+
+          /**
+           * Toggle advanced filters section
+           */
+          window.toggleMasterAdvancedFilters = function() {
+            const content = document.getElementById('masterAdvancedFiltersContent');
+            const icon = document.getElementById('masterAdvancedFiltersIcon');
+            
+            if (content.classList.contains('hidden')) {
+              content.classList.remove('hidden');
+              icon.classList.add('rotate-180');
+              
+              // Initialize with one filter row if empty
+              if (!document.getElementById('masterFilterRowsContainer').hasChildNodes.length) {
+                addMasterFilterRow();
+              }
+            } else {
+              content.classList.add('hidden');
+              icon.classList.remove('rotate-180');
+            }
+          };
+
+          /**
+           * Fetch all unique field names from current collection
+           */
+          async function fetchMasterFieldNames() {
+            try {
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              const query = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              
+              console.log(`📋 Fetching sample documents to determine fields from ${collectionName}...`);
+              
+              const res = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dbName: "Sasaki_Coating_MasterDB",
+                  collectionName: collectionName,
+                  query: query
+                })
+              });
+
+              const sampleData = await res.json();
+              
+              if (!sampleData || sampleData.length === 0) {
+                console.warn('No data found in collection');
+                return {};
+              }
+
+              // Gather all unique field names from all documents
+              const allFields = new Set();
+              sampleData.forEach(doc => {
+                Object.keys(doc).forEach(key => {
+                  if (key !== '_id' && key !== 'imageURL') {
+                    allFields.add(key);
+                  }
+                });
+              });
+
+              console.log(`✅ Found ${allFields.size} unique fields:`, Array.from(allFields));
+
+              // Determine field types from sample data
+              const schemas = {};
+              Array.from(allFields).forEach(field => {
+                // Sample values to determine type
+                const sampleValues = sampleData
+                  .map(doc => doc[field])
+                  .filter(val => val !== null && val !== undefined && val !== '')
+                  .slice(0, 100); // Sample first 100 non-empty values
+
+                if (sampleValues.length === 0) {
+                  schemas[field] = { type: 'text', label: field, operators: ['equals', 'contains'] };
+                  return;
+                }
+
+                // Determine type based on values
+                const firstValue = sampleValues[0];
+                
+                // Check if it's a number
+                if (typeof firstValue === 'number' || !isNaN(Number(firstValue))) {
+                  schemas[field] = { 
+                    type: 'number', 
+                    label: field, 
+                    operators: ['equals', 'range', 'greater', 'less'] 
+                  };
+                }
+                // Check if it's a date-like field
+                else if (field.toLowerCase().includes('date') || field === 'Date') {
+                  schemas[field] = { 
+                    type: 'date', 
+                    label: field, 
+                    operators: ['equals', 'range'] 
+                  };
+                }
+                // Check if it has limited unique values (good candidate for select)
+                else {
+                  const uniqueCount = new Set(sampleValues).size;
+                  if (uniqueCount <= 50) { // If 50 or fewer unique values, use dropdown
+                    schemas[field] = { 
+                      type: 'select', 
+                      label: field, 
+                      operators: ['equals', 'in'],
+                      autoPopulate: true 
+                    };
+                  } else {
+                    schemas[field] = { 
+                      type: 'text', 
+                      label: field, 
+                      operators: ['equals', 'contains'] 
+                    };
+                  }
+                }
+              });
+
+              masterFieldSchemas = schemas;
+              console.log('✅ Generated field schemas:', masterFieldSchemas);
+              
+              return schemas;
+
+            } catch (error) {
+              console.error('❌ Error fetching field names:', error);
+              return {};
+            }
+          }
+
+          /**
+           * Add a new filter row
+           */
+          window.addMasterFilterRow = async function() {
+            // Ensure we have field schemas
+            if (Object.keys(masterFieldSchemas).length === 0) {
+              await fetchMasterFieldNames();
+            }
+
+            const container = document.getElementById('masterFilterRowsContainer');
+            const filterId = `master-filter-${Date.now()}`;
+            const fields = Object.keys(masterFieldSchemas).sort();
+
+            const filterRow = document.createElement('div');
+            filterRow.id = filterId;
+            filterRow.className = 'flex gap-2 items-start';
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
+            filterRow.innerHTML = `
+              <select class="master-filter-field flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="onMasterFieldChange('${filterId}')">
+                <option value="">${t.selectField}</option>
+                ${fields.map(f => `<option value="${f}">${masterFieldSchemas[f].label}</option>`).join('')}
+              </select>
+              <select class="master-filter-operator flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" disabled>
+                <option value="">${t.selectOperator}</option>
+              </select>
+              <div class="master-filter-value-container flex-1">
+                <input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="${t.enterValue}" disabled />
+              </div>
+              <button onclick="removeMasterFilterRow('${filterId}')" class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                <i class="ri-delete-bin-line text-lg"></i>
+              </button>
+            `;
+
+            container.appendChild(filterRow);
+            updateMasterActiveFiltersCount();
+          };
+
+          /**
+           * Remove a filter row
+           */
+          window.removeMasterFilterRow = function(filterId) {
+            const row = document.getElementById(filterId);
+            if (row) {
+              row.remove();
+              updateMasterActiveFiltersCount();
+            }
+          };
+
+          /**
+           * Handle field selection change
+           */
+          window.onMasterFieldChange = function(filterId) {
+            const row = document.getElementById(filterId);
+            const fieldSelect = row.querySelector('.master-filter-field');
+            const operatorSelect = row.querySelector('.master-filter-operator');
+            const valueContainer = row.querySelector('.master-filter-value-container');
+            
+            const selectedField = fieldSelect.value;
+            
+            if (!selectedField) {
+              operatorSelect.disabled = true;
+              operatorSelect.innerHTML = '<option value="">Select Operator...</option>';
+              valueContainer.innerHTML = '<input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm" placeholder="Value..." disabled />';
+              return;
+            }
+
+            const fieldSchema = masterFieldSchemas[selectedField];
+            
+            // Populate operators
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
+            const operatorOptions = {
+              'equals': t.equals,
+              'contains': t.contains,
+              'range': t.range,
+              'greater': t.greaterThan,
+              'less': t.lessThan,
+              'in': t.in
+            };
+
+            operatorSelect.disabled = false;
+            operatorSelect.innerHTML = `<option value="">${t.selectOperator}</option>` +
+              fieldSchema.operators.map(op => `<option value="${op}" ${op === 'equals' ? 'selected' : ''}>${operatorOptions[op]}</option>`).join('');
+
+            // Update value input based on field type
+            updateMasterValueInput(filterId, selectedField, 'equals');
+
+            // Trigger operator change to set up value input
+            operatorSelect.onchange = () => onMasterOperatorChange(filterId);
+            onMasterOperatorChange(filterId);
+          };
+
+          /**
+           * Handle operator selection change
+           */
+          window.onMasterOperatorChange = function(filterId) {
+            const row = document.getElementById(filterId);
+            const fieldSelect = row.querySelector('.master-filter-field');
+            const operatorSelect = row.querySelector('.master-filter-operator');
+            
+            const selectedField = fieldSelect.value;
+            const selectedOperator = operatorSelect.value;
+            
+            if (selectedField && selectedOperator) {
+              updateMasterValueInput(filterId, selectedField, selectedOperator);
+            }
+          };
+
+          /**
+           * Update value input based on field type and operator
+           */
+          async function updateMasterValueInput(filterId, field, operator) {
+            const row = document.getElementById(filterId);
+            const valueContainer = row.querySelector('.master-filter-value-container');
+            const fieldSchema = masterFieldSchemas[field];
+
+            // For 'range' operator, show two inputs
+            if (operator === 'range') {
+              if (fieldSchema.type === 'date') {
+                valueContainer.innerHTML = `
+                  <div class="flex gap-2">
+                    <input type="date" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="updateMasterActiveFiltersDisplay()" />
+                    <input type="date" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="updateMasterActiveFiltersDisplay()" />
+                  </div>
+                `;
+              } else {
+                valueContainer.innerHTML = `
+                  <div class="flex gap-2">
+                    <input type="number" class="master-filter-value-from w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="From..." oninput="updateMasterActiveFiltersDisplay()" />
+                    <input type="number" class="master-filter-value-to w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="To..." oninput="updateMasterActiveFiltersDisplay()" />
+                  </div>
+                `;
+              }
+              return;
+            }
+
+            // For 'in' operator or select type with autoPopulate
+            if (operator === 'in' || (fieldSchema.type === 'select' && fieldSchema.autoPopulate)) {
+              const values = await fetchMasterDistinctValues(field);
+              valueContainer.innerHTML = `
+                <select class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ${operator === 'in' ? 'multiple' : ''} onchange="updateMasterActiveFiltersDisplay()">
+                  <option value="">Select...</option>
+                  ${values.map(v => `<option value="${v}">${v}</option>`).join('')}
+                </select>
+              `;
+              return;
+            }
+
+            // Default inputs based on type
+            switch (fieldSchema.type) {
+              case 'number':
+                valueContainer.innerHTML = `<input type="number" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter number..." oninput="updateMasterActiveFiltersDisplay()" />`;
+                break;
+              case 'date':
+                valueContainer.innerHTML = `<input type="date" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="updateMasterActiveFiltersDisplay()" />`;
+                break;
+              default:
+                valueContainer.innerHTML = `<input type="text" class="master-filter-value w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter value..." oninput="updateMasterActiveFiltersDisplay()" />`;
+            }
+          }
+
+          /**
+           * Fetch distinct values for a field (with caching)
+           */
+          async function fetchMasterDistinctValues(field) {
+            const cacheKey = `${currentMasterTab}_${field}`;
+            const cached = masterFilterDropdownCache.get(cacheKey);
+            const now = Date.now();
+
+            if (cached && (now - cached.timestamp < 300000)) { // 5 minutes cache
+              return cached.values;
+            }
+
+            try {
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              const filter = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              
+              const res = await fetch(BASE_URL + "api/distinct", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dbName: "Sasaki_Coating_MasterDB",
+                  collectionName: collectionName,
+                  field: field,
+                  filter: filter
+                })
+              });
+
+              const result = await res.json();
+              const values = result.values || [];
+              
+              masterFilterDropdownCache.set(cacheKey, {
+                values: values,
+                timestamp: now
+              });
+
+              return values;
+            } catch (error) {
+              console.error(`Error fetching distinct values for ${field}:`, error);
+              return [];
+            }
+          }
+
+          /**
+           * Build MongoDB query from advanced filters
+           */
+          async function buildMasterDynamicQuery() {
+            const container = document.getElementById('masterFilterRowsContainer');
+            const rows = container.querySelectorAll('[id^="master-filter-"]');
+            const query = {};
+
+            for (const row of rows) {
+              const fieldSelect = row.querySelector('.master-filter-field');
+              const operatorSelect = row.querySelector('.master-filter-operator');
+              
+              const field = fieldSelect.value;
+              const operator = operatorSelect.value;
+
+              if (!field || !operator) continue;
+
+              const valueInput = row.querySelector('.master-filter-value');
+              const valueFrom = row.querySelector('.master-filter-value-from');
+              const valueTo = row.querySelector('.master-filter-value-to');
+
+              let value;
+
+              // Handle different input types
+              if (operator === 'range' && valueFrom && valueTo) {
+                const from = valueFrom.value;
+                const to = valueTo.value;
+                if (from && to) {
+                  query[field] = { $gte: from, $lte: to };
+                }
+                continue;
+              }
+
+              if (operator === 'in') {
+                const select = row.querySelector('.master-filter-value');
+                value = Array.from(select.selectedOptions).map(opt => opt.value).filter(v => v);
+                if (value.length > 0) {
+                  query[field] = { $in: value };
+                }
+                continue;
+              }
+
+              value = valueInput?.value;
+              if (!value) continue;
+
+              // Apply operator
+              switch (operator) {
+                case 'equals':
+                  query[field] = value;
+                  break;
+                case 'contains':
+                  query[field] = { $regex: value, $options: 'i' };
+                  break;
+                case 'greater':
+                  query[field] = { $gt: parseFloat(value) };
+                  break;
+                case 'less':
+                  query[field] = { $lt: parseFloat(value) };
+                  break;
+              }
+            }
+
+            console.log('🔍 Built master query:', query);
+            return query;
+          }
+
+          /**
+           * Apply advanced filters
+           */
+          window.applyMasterAdvancedFilters = async function() {
+            try {
+              // Build query from advanced filters
+              const advancedQuery = await buildMasterDynamicQuery();
+              
+              // Combine with basic filters
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              const baseQuery = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              
+              // Add basic filter values if they exist
+              const factory = document.getElementById("filterFactory").value;
+              const rl = document.getElementById("filterRL").value;
+              const color = document.getElementById("filterColor").value;
+              const process = document.getElementById("filterProcess").value;
+
+              if (factory) {
+                advancedQuery["工場"] = factory;
+              }
+              if (rl) {
+                advancedQuery["R/L"] = rl;
+              }
+              if (color) {
+                advancedQuery["色"] = color;
+              }
+              if (process) {
+                if (currentMasterTab === 'materialDB') {
+                  advancedQuery["材料"] = process;
+                } else {
+                  advancedQuery["加工設備"] = process;
+                }
+              }
+
+              const finalQuery = { ...baseQuery, ...advancedQuery };
+              
+              console.log('🔍 Applying advanced filters with query:', finalQuery);
+
+              // Fetch filtered data
+              const res = await fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  dbName: "Sasaki_Coating_MasterDB",
+                  collectionName: collectionName,
+                  query: finalQuery
+                })
+              });
+
+              masterData = await res.json();
+              
+              // Apply search tags filter on client side
+              const searchTags = getMasterSearchTags();
+              const logicMode = document.getElementById("searchLogicMode")?.value || "OR";
+              
+              if (searchTags.length > 0) {
+                filteredMasterData = masterData.filter(item => {
+                  const searchableFields = Object.keys(item).filter(k => 
+                    k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
+                  );
+                  
+                  if (logicMode === "OR") {
+                    // OR logic: Match if ANY tag is found
+                    return searchTags.some(tag => {
+                      const keyword = tag.toLowerCase();
+                      return searchableFields.some(key => 
+                        (item[key] || "").toLowerCase().includes(keyword)
+                      );
+                    });
+                  } else {
+                    // AND logic: Match if ALL tags are found
+                    return searchTags.every(tag => {
+                      const keyword = tag.toLowerCase();
+                      return searchableFields.some(key => 
+                        (item[key] || "").toLowerCase().includes(keyword)
+                      );
+                    });
+                  }
+                });
+              } else {
+                filteredMasterData = [...masterData];
+              }
+
+              currentMasterPage = 1;
+              updateMasterStats();
+              renderMasterTable();
+              updateMasterActiveFiltersCount();
+
+              // Show batch edit button if filters are applied and have results
+              const batchEditButton = document.getElementById('masterBatchEditButtonContainer');
+              const batchEditCount = document.getElementById('masterBatchEditCount');
+              
+              if (Object.keys(advancedQuery).length > 0 && filteredMasterData.length > 0) {
+                batchEditCount.textContent = filteredMasterData.length;
+                batchEditButton.classList.remove('hidden');
+              } else {
+                batchEditButton.classList.add('hidden');
+              }
+
+              console.log(`✅ Applied filters: ${filteredMasterData.length} results`);
+
+            } catch (error) {
+              console.error('❌ Error applying advanced filters:', error);
+              alert('Failed to apply filters. Please try again.');
+            }
+          };
+
+          /**
+           * Update active filters count badge and display
+           */
+          function updateMasterActiveFiltersCount() {
+            const container = document.getElementById('masterFilterRowsContainer');
+            const rows = container.querySelectorAll('[id^="master-filter-"]');
+            
+            let activeCount = 0;
+            rows.forEach(row => {
+              const field = row.querySelector('.master-filter-field').value;
+              const operator = row.querySelector('.master-filter-operator').value;
+              if (field && operator) activeCount++;
+            });
+
+            const badge = document.getElementById('masterActiveFiltersCount');
+            if (activeCount > 0) {
+              badge.textContent = activeCount;
+              badge.classList.remove('hidden');
+            } else {
+              badge.classList.add('hidden');
+            }
+
+            // Update active filters display
+            updateMasterActiveFiltersDisplay();
+          }
+
+          /**
+           * Update active filters display with badges
+           */
+          window.updateMasterActiveFiltersDisplay = function() {
+            const filterRows = document.querySelectorAll('[id^="master-filter-"]');
+            const activeFiltersDisplay = document.getElementById('masterActiveFiltersDisplay');
+            const activeFilterBadges = document.getElementById('masterActiveFilterBadges');
+            
+            let count = 0;
+            let badges = '';
+            
+            // Generate badges for each active filter
+            filterRows.forEach(row => {
+              const fieldSelect = row.querySelector('.master-filter-field');
+              const operatorSelect = row.querySelector('.master-filter-operator');
+              const valueInput = row.querySelector('.master-filter-value');
+              const valueFrom = row.querySelector('.master-filter-value-from');
+              const valueTo = row.querySelector('.master-filter-value-to');
+              
+              if (fieldSelect?.value && operatorSelect?.value) {
+                const field = fieldSelect.value;
+                const operator = operatorSelect.value;
+                const fieldSchema = masterFieldSchemas[field];
+                
+                let displayValue = '';
+                
+                // Handle range operator
+                if (operator === 'range' && valueFrom && valueTo) {
+                  const from = valueFrom.value;
+                  const to = valueTo.value;
+                  if (from && to) {
+                    displayValue = `${from} to ${to}`;
+                    count++;
+                  } else {
+                    return; // Skip incomplete ranges
+                  }
+                }
+                // Handle 'in' operator (multi-select)
+                else if (operator === 'in') {
+                  const select = row.querySelector('.master-filter-value');
+                  const selectedOptions = Array.from(select?.selectedOptions || []).map(opt => opt.value).filter(v => v);
+                  if (selectedOptions.length > 0) {
+                    displayValue = selectedOptions.length > 2 
+                      ? `${selectedOptions.slice(0, 2).join(', ')}... (+${selectedOptions.length - 2})`
+                      : selectedOptions.join(', ');
+                    count++;
+                  } else {
+                    return; // Skip empty selections
+                  }
+                }
+                // Handle regular operators
+                else {
+                  const value = valueInput?.value;
+                  if (value) {
+                    displayValue = value;
+                    count++;
+                  } else {
+                    return; // Skip empty values
+                  }
+                }
+                
+                // Operator display names
+                const operatorNames = {
+                  'equals': 'equals',
+                  'contains': 'contains',
+                  'range': 'range',
+                  'greater': '>',
+                  'less': '<',
+                  'in': 'in'
+                };
+                
+                badges += `
+                  <span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-md">
+                    <span class="font-medium">${fieldSchema?.label || field}:</span>
+                    <span class="text-blue-600">${operatorNames[operator]}</span>
+                    <span class="text-blue-800">"${displayValue}"</span>
+                    <button onclick="removeMasterFilterRow('${row.id}')" class="ml-1 hover:text-blue-900 hover:bg-blue-200 rounded p-0.5">
+                      <i class="ri-close-line text-sm"></i>
+                    </button>
+                  </span>
+                `;
+              }
+            });
+            
+            // Show or hide the active filters section
+            if (count > 0) {
+              activeFiltersDisplay.classList.remove('hidden');
+              activeFilterBadges.innerHTML = badges;
+            } else {
+              activeFiltersDisplay.classList.add('hidden');
+              activeFilterBadges.innerHTML = '';
+            }
+          };
+
+          /**
+           * Clear all active filters
+           */
+          window.clearAllMasterFilters = function() {
+            // Remove all filter rows
+            const container = document.getElementById('masterFilterRowsContainer');
+            container.innerHTML = '';
+            
+            // Update display
+            updateMasterActiveFiltersCount();
+            
+            // Hide batch edit button
+            document.getElementById('masterBatchEditButtonContainer').classList.add('hidden');
+            
+            // Reload data without filters
+            loadMasterDB();
+          };
+
+          // ==================== BATCH EDIT SYSTEM ====================
+
+          // Store filtered records for batch edit
+          let batchEditRecords = [];
+          let batchEditChanges = {}; // Store {fieldName: newValue}
+          let currentEditingField = null;
+          let existingFactories = []; // Cache for factory validation
+
+          /**
+           * Open batch edit modal with two-panel design
+           */
+          window.openMasterBatchEditModal = function() {
+            // Get filtered data
+            batchEditRecords = [...filteredMasterData];
+            
+            if (batchEditRecords.length === 0) {
+              alert('No records to edit. Please apply filters first.');
+              return;
+            }
+
+            // Reset state
+            batchEditChanges = {};
+            currentEditingField = null;
+
+            // Update record counts in multiple places
+            document.getElementById('batchEditRecordCount').textContent = batchEditRecords.length;
+            
+            // Update footer record count
+            const footerCount = document.getElementById('footerRecordCount');
+            if (footerCount) footerCount.textContent = batchEditRecords.length;
+            
+            // Update preview info
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
+            const previewInfo = document.getElementById('batchEditPreviewInfo');
+            if (previewInfo) {
+              const previewCount = Math.min(5, batchEditRecords.length);
+              previewInfo.textContent = `(${t.showing || 'showing'} ${previewCount} ${t.of || 'of'} ${batchEditRecords.length} ${t.totalRecords || 'total records'})`;
+            }
+            
+            // Generate field tags (left panel)
+            generateFieldTags();
+            
+            // Hide active edit section initially
+            const activeSection = document.getElementById('batchEditActiveSection');
+            if (activeSection) activeSection.classList.add('hidden');
+            
+            // Clear changes list
+            const changesList = document.getElementById('batchEditChangesList');
+            if (changesList) {
+              const noChangesMsg = t.noChangesYet || 'No changes yet. Click field tags above to start editing.';
+              changesList.innerHTML = `<p class="text-xs text-gray-400 italic">${noChangesMsg}</p>`;
+            }
+            
+            // Generate preview cards (right panel)
+            generatePreviewCards();
+            
+            // Show modal first
+            document.getElementById('masterBatchEditModal').classList.remove('hidden');
+            
+            // Then apply translations after modal is visible
+            setTimeout(() => {
+              if (typeof window.applyLanguageEnhanced === 'function') {
+                window.applyLanguageEnhanced();
+              }
+              
+              // Force update the instructions element specifically
+              const instructionsEl = document.querySelector('[data-i18n="batchEditInstructions"]');
+              if (instructionsEl) {
+                const currentLang = localStorage.getItem("lang") || "en";
+                if (translations[currentLang] && translations[currentLang].batchEditInstructions) {
+                  instructionsEl.innerHTML = translations[currentLang].batchEditInstructions;
+                }
+              }
+            }, 50);
+          };
+
+          /**
+           * Close batch edit modal
+           */
+          window.closeMasterBatchEditModal = function() {
+            document.getElementById('masterBatchEditModal').classList.add('hidden');
+            batchEditRecords = [];
+            batchEditChanges = {};
+            currentEditingField = null;
+          };
+
+          /**
+           * Generate clickable field tags
+           */
+          function generateFieldTags() {
+            const container = document.getElementById('batchEditFieldTags');
+            
+            // Get all fields from schema (exclude _id and imageURL)
+            const fields = Object.keys(masterFieldSchemas)
+              .filter(f => f !== '_id' && f !== 'imageURL')
+              .sort();
+            
+            let html = '';
+            fields.forEach(field => {
+              const schema = masterFieldSchemas[field];
+              html += `
+                <button 
+                  onclick="handleFieldTagClick('${field}')"
+                  class="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-full text-sm font-medium transition-colors"
+                >
+                  ${schema.label}
+                </button>
+              `;
+            });
+            
+            container.innerHTML = html;
+          }
+
+          /**
+           * Handle field tag click - show active edit section
+           */
+          window.handleFieldTagClick = async function(field) {
+            currentEditingField = field;
+            const schema = masterFieldSchemas[field];
+            const section = document.getElementById('batchEditActiveSection');
+            const fieldNameElem = document.getElementById('activeFieldLabel');
+            const input = document.getElementById('batchEditActiveInput');
+            
+            if (!section || !fieldNameElem || !input) {
+              console.error('❌ Batch edit elements not found');
+              return;
+            }
+            
+            // Update field name display
+            fieldNameElem.textContent = schema.label;
+            
+            // Set input type and attributes based on field type
+            switch (schema.type) {
+              case 'number':
+                input.type = 'number';
+                input.placeholder = 'Enter new number...';
+                break;
+              
+              case 'date':
+                input.type = 'date';
+                input.placeholder = '';
+                break;
+              
+              case 'select':
+                if (schema.autoPopulate) {
+                  // Replace input with select element + hidden text input for new values
+                  const selectHTML = `
+                    <select id="batchEditActiveInput" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="handleBatchEditSelectChange('${field}')">
+                      <option value="">Loading options...</option>
+                    </select>
+                    <input type="text" id="batchEditCustomInput" class="hidden flex-1 px-3 py-2 border-2 border-amber-400 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500" placeholder="Enter custom value..." />
+                  `;
+                  input.outerHTML = selectHTML;
+                  
+                  // Load dropdown options
+                  setTimeout(async () => {
+                    const values = await fetchMasterDistinctValues(field);
+                    const select = document.getElementById('batchEditActiveInput');
+                    if (select) {
+                      select.innerHTML = '<option value="">Select new value...</option>' +
+                        values.map(v => `<option value="${v}">${v}</option>`).join('') +
+                        '<option value="__ADD_NEW__" class="font-semibold text-green-700">➕ Add New Value</option>';
+                      
+                      // If editing existing change, set the value
+                      if (batchEditChanges[field] !== undefined) {
+                        const existingValue = batchEditChanges[field];
+                        // Check if it's an existing option
+                        if (values.includes(existingValue)) {
+                          select.value = existingValue;
+                        } else {
+                          // It's a custom value, show custom input
+                          select.value = '__ADD_NEW__';
+                          const customInput = document.getElementById('batchEditCustomInput');
+                          if (customInput) {
+                            customInput.value = existingValue;
+                            select.classList.add('hidden');
+                            customInput.classList.remove('hidden');
+                          }
+                        }
+                      }
+                    }
+                  }, 0);
+                  
+                  // Show section and exit (since we replaced the element)
+                  section.classList.remove('hidden');
+                  return;
+                } else {
+                  input.type = 'text';
+                  input.placeholder = 'Enter new value...';
+                }
+                break;
+              
+              default:
+                input.type = 'text';
+                input.placeholder = 'Enter new value...';
+            }
+            
+            // If editing existing change, load the value
+            if (batchEditChanges[field] !== undefined) {
+              input.value = batchEditChanges[field];
+            } else {
+              input.value = '';
+            }
+            
+            // Show section
+            section.classList.remove('hidden');
+            
+            // Focus input
+            setTimeout(() => {
+              const focusInput = document.getElementById('batchEditActiveInput');
+              if (focusInput) focusInput.focus();
+            }, 100);
+          };
+
+          /**
+           * Handle select dropdown change - show custom input if "Add New Value" selected
+           */
+          window.handleBatchEditSelectChange = function(field) {
+            const select = document.getElementById('batchEditActiveInput');
+            const customInput = document.getElementById('batchEditCustomInput');
+            const warningText = document.getElementById('customValueWarning');
+            
+            if (!select || !customInput) return;
+            
+            if (select.value === '__ADD_NEW__') {
+              // User selected "Add New Value" - show custom input
+              const schema = masterFieldSchemas[field];
+              const fieldLabel = schema ? schema.label : field;
+              
+              // Show warning for certain fields
+              if (field === '工場' || field === 'Factory') {
+                const currentLang = localStorage.getItem("lang") || "en";
+                const t = translations[currentLang];
+                const message = t.factoryValidationWarning.replace('{field}', fieldLabel);
+                alert(message);
+              }
+              
+              // Hide select, show custom input
+              select.classList.add('hidden');
+              customInput.classList.remove('hidden');
+              
+              // Show warning text
+              if (warningText) warningText.classList.remove('hidden');
+              
+              // Focus and clear
+              customInput.focus();
+              customInput.value = '';
+            } else {
+              // Regular value selected, hide warning
+              if (warningText) warningText.classList.add('hidden');
+            }
+          };
+
+          /**
+           * Cancel field edit - hide active section
+           */
+          window.cancelFieldEdit = function() {
+            const section = document.getElementById('batchEditActiveSection');
+            if (section) section.classList.add('hidden');
+            currentEditingField = null;
+            
+            // Reset any custom inputs
+            const customInput = document.getElementById('batchEditCustomInput');
+            const select = document.getElementById('batchEditActiveInput');
+            const warningText = document.getElementById('customValueWarning');
+            
+            if (customInput && select) {
+              customInput.classList.add('hidden');
+              select.classList.remove('hidden');
+            }
+            
+            // Hide warning text
+            if (warningText) warningText.classList.add('hidden');
+          };
+
+          /**
+           * Add field to changes list
+           */
+          window.addFieldToChangesList = async function() {
+            if (!currentEditingField) return;
+            
+            const field = currentEditingField;
+            const schema = masterFieldSchemas[field];
+            
+            // Get value from either the select or custom input
+            let newValue = '';
+            const input = document.getElementById('batchEditActiveInput');
+            const customInput = document.getElementById('batchEditCustomInput');
+            
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
+            // Check if custom input is visible (user is adding new value)
+            if (customInput && !customInput.classList.contains('hidden')) {
+              newValue = customInput.value.trim();
+              
+              // Show warning for new custom values
+              if (newValue !== '') {
+                const message = t.customValueWarning
+                  .replace('{field}', schema.label)
+                  .replace('{value}', newValue);
+                const confirmCustom = confirm(message);
+                if (!confirmCustom) return;
+              }
+            } else if (input) {
+              // Regular input or select
+              newValue = input.value.trim();
+              
+              // If select shows "Add New Value" but custom input not shown, invalid state
+              if (newValue === '__ADD_NEW__') {
+                alert(t.enterCustomValuePrompt || 'Please enter a custom value or select a different option.');
+                return;
+              }
+            } else {
+              console.error('❌ Input element not found');
+              return;
+            }
+            
+            // Check if empty
+            if (newValue === '') {
+              const currentLang = localStorage.getItem("lang") || "en";
+              const t = translations[currentLang];
+              const message = t.emptyValueWarning
+                .replace('{field}', schema.label)
+                .replace('{count}', batchEditRecords.length);
+              const confirmEmpty = confirm(message);
+              if (!confirmEmpty) return;
+            }
+            
+            // Special validation for 工場 field (only if not from custom input - we already warned)
+            const isCustomValue = customInput && !customInput.classList.contains('hidden');
+            if (field === '工場' && !isCustomValue && newValue !== '') {
+              const isValid = await validateFactoryField(newValue);
+              if (!isValid) {
+                return; // Validation function shows its own alerts
+              }
+            }
+            
+            // Add to changes object
+            batchEditChanges[field] = newValue;
+            
+            // Update changes list display
+            renderChangesList();
+            
+            // Update preview cards
+            updatePreviewsInRealTime();
+            
+            // Hide active section
+            cancelFieldEdit();
+          };
+
+          /**
+           * Render changes list with edit/delete buttons
+           */
+          function renderChangesList() {
+            const container = document.getElementById('batchEditChangesList');
+            
+            const fields = Object.keys(batchEditChanges);
+            
+            if (fields.length === 0) {
+              container.innerHTML = '<p class="text-gray-400 italic text-sm text-center py-4">No changes yet</p>';
+              return;
+            }
+            
+            let html = '<div class="space-y-2">';
+            fields.forEach(field => {
+              const schema = masterFieldSchemas[field];
+              const value = batchEditChanges[field];
+              const displayValue = value === '' ? '<span class="text-red-500 italic">(empty)</span>' : value;
+              
+              html += `
+                <div class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
+                  <div class="flex-1">
+                    <span class="font-medium text-sm">${schema.label}:</span>
+                    <span class="ml-2 text-green-600">${displayValue}</span>
+                  </div>
+                  <div class="flex gap-2">
+                    <button 
+                      onclick="editChangeItem('${field}')"
+                      class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded"
+                    >
+                      Edit
+                    </button>
+                    <button 
+                      onclick="deleteChangeItem('${field}')"
+                      class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-800 rounded"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              `;
+            });
+            html += '</div>';
+            
+            container.innerHTML = html;
+          }
+
+          /**
+           * Edit change item - load back to active section
+           */
+          window.editChangeItem = function(field) {
+            handleFieldTagClick(field);
+          };
+
+          /**
+           * Delete change item
+           */
+          window.deleteChangeItem = function(field) {
+            delete batchEditChanges[field];
+            renderChangesList();
+            updatePreviewsInRealTime();
+          };
+
+          /**
+           * Generate preview cards (first 5 records)
+           */
+          function generatePreviewCards() {
+            const container = document.getElementById('batchEditPreviewContainer');
+            
+            const previewRecords = batchEditRecords.slice(0, 5);
+            const totalCount = batchEditRecords.length;
+            
+            if (previewRecords.length === 0) {
+              container.innerHTML = '<p class="text-gray-400 italic text-center py-8">No records to preview</p>';
+              return;
+            }
+            
+            let html = '';
+            previewRecords.forEach((record, index) => {
+              html += formatDocumentCard(record, index + 1, totalCount);
+            });
+            
+            container.innerHTML = html;
+          }
+
+          /**
+           * Format single document as card
+           */
+          function formatDocumentCard(record, index, total) {
+            const cardId = `preview-card-${index}`;
+            
+            let html = `
+              <div id="${cardId}" class="bg-white border border-gray-300 rounded-lg p-4 mb-3">
+                <div class="flex justify-between items-center mb-3 pb-2 border-b border-gray-200">
+                  <h4 class="font-semibold text-gray-900">Document ${index} of ${total}</h4>
+                  <span class="text-xs text-gray-500">Preview</span>
+                </div>
+                <div class="space-y-2 text-sm">
+            `;
+            
+            // Get all fields
+            const fields = Object.keys(masterFieldSchemas).filter(f => f !== '_id');
+            
+            fields.forEach(field => {
+              const schema = masterFieldSchemas[field];
+              const currentValue = record[field] !== undefined && record[field] !== null ? String(record[field]) : '';
+              const hasChange = batchEditChanges[field] !== undefined;
+              const newValue = hasChange ? batchEditChanges[field] : '';
+              
+              if (hasChange) {
+                // Show old value with red strikethrough and new value in green
+                html += `
+                  <div class="flex justify-between py-1">
+                    <span class="font-medium text-gray-700 w-1/3">${schema.label}:</span>
+                    <span class="w-2/3">
+                      <span class="text-red-600 line-through mr-2">${currentValue || '(empty)'}</span>
+                      <span class="text-green-600 font-semibold">→ ${newValue || '(empty)'}</span>
+                    </span>
+                  </div>
+                `;
+              } else {
+                // Show current value normally
+                html += `
+                  <div class="flex justify-between py-1">
+                    <span class="font-medium text-gray-700 w-1/3">${schema.label}:</span>
+                    <span class="text-gray-900 w-2/3">${currentValue || '(empty)'}</span>
+                  </div>
+                `;
+              }
+            });
+            
+            html += `
+                </div>
+              </div>
+            `;
+            
+            return html;
+          }
+
+          /**
+           * Update preview cards in real-time with changes
+           */
+          function updatePreviewsInRealTime() {
+            const previewRecords = batchEditRecords.slice(0, 5);
+            const totalCount = batchEditRecords.length;
+            
+            previewRecords.forEach((record, index) => {
+              const cardId = `preview-card-${index + 1}`;
+              const cardElem = document.getElementById(cardId);
+              
+              if (cardElem) {
+                // Regenerate card HTML
+                const newHTML = formatDocumentCard(record, index + 1, totalCount);
+                cardElem.outerHTML = newHTML;
+              }
+            });
+          }
+
+          /**
+           * Validate factory field with nearest match suggestion
+           */
+          async function validateFactoryField(newValue) {
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
+            // Load existing factories if not cached
+            if (existingFactories.length === 0) {
+              try {
+                const values = await fetchMasterDistinctValues('工場');
+                existingFactories = values || [];
+              } catch (error) {
+                console.error('Failed to load factory list:', error);
+                existingFactories = [];
+              }
+            }
+            
+            // Check if exact match exists
+            if (existingFactories.includes(newValue)) {
+              return true; // Valid
+            }
+            
+            // Find nearest match
+            const nearest = findNearestMatch(newValue, existingFactories);
+            
+            if (nearest) {
+              const message = t.factoryNotFoundSuggestion
+                .replace('{value}', newValue)
+                .replace('{suggestion}', nearest)
+                .replace('{suggestion}', nearest); // Replace twice for both occurrences
+              
+              const useNearest = confirm(message);
+              
+              if (useNearest) {
+                // Update input with nearest match
+                const input = document.getElementById('batchEditActiveInput');
+                if (input) input.value = nearest;
+                return false; // Return false to not add yet, user should click Add again
+              }
+            } else {
+              const message = t.factoryNotFoundConfirm.replace('{value}', newValue);
+              const continueAnyway = confirm(message);
+              
+              if (!continueAnyway) return false;
+            }
+            
+            return true;
+          }
+
+          /**
+           * Find nearest match using simple string similarity
+           */
+          function findNearestMatch(value, existingValues) {
+            if (!value || existingValues.length === 0) return null;
+            
+            const valueLower = value.toLowerCase();
+            let bestMatch = null;
+            let bestScore = 0;
+            
+            existingValues.forEach(existing => {
+              const existingLower = existing.toLowerCase();
+              
+              // Calculate similarity score
+              let score = 0;
+              
+              // Exact match
+              if (existingLower === valueLower) {
+                score = 100;
+              }
+              // Contains or is contained
+              else if (existingLower.includes(valueLower) || valueLower.includes(existingLower)) {
+                score = 80;
+              }
+              // Same first 3 characters
+              else if (existingLower.substring(0, 3) === valueLower.substring(0, 3)) {
+                score = 60;
+              }
+              // Levenshtein-like: count matching characters
+              else {
+                let matches = 0;
+                for (let char of valueLower) {
+                  if (existingLower.includes(char)) matches++;
+                }
+                score = (matches / Math.max(valueLower.length, existingLower.length)) * 50;
+              }
+              
+              if (score > bestScore) {
+                bestScore = score;
+                bestMatch = existing;
+              }
+            });
+            
+            // Return match only if score is reasonable
+            return bestScore > 40 ? bestMatch : null;
+          }
+
+          /**
+           * Confirm and execute batch edit
+           */
+          window.confirmMasterBatchEdit = async function() {
+            const currentLang = localStorage.getItem("lang") || "en";
+            const t = translations[currentLang];
+            
+            // Check if any changes
+            if (Object.keys(batchEditChanges).length === 0) {
+              alert(t.noChangesToApply);
+              return;
+            }
+            
+            const updates = { ...batchEditChanges };
+            const fieldCount = Object.keys(updates).length;
+            const recordCount = batchEditRecords.length;
+            
+            // Build confirmation message
+            let changesSummary = Object.keys(updates).map(field => {
+              const schema = masterFieldSchemas[field];
+              const value = updates[field] === '' ? '(empty)' : updates[field];
+              return `  • ${schema.label} → ${value}`;
+            }).join('\n');
+            
+            const confirmMessage = t.batchUpdateConfirm
+              .replace('{count}', recordCount)
+              .replace('{changes}', changesSummary);
+            
+            if (!confirm(confirmMessage)) {
+              return;
+            }
+            
+            try {
+              // Get current user
+              const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+              const username = currentUser.username || 'unknown';
+              
+              // Get collection name
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              
+              // Extract record IDs
+              const recordIds = batchEditRecords.map(record => {
+                if (record._id && record._id.$oid) {
+                  return record._id.$oid;
+                }
+                return record._id;
+              }).filter(id => id);
+              
+              console.log('🔄 Batch updating records:', {
+                count: recordIds.length,
+                updates: updates,
+                collection: collectionName
+              });
+              
+              // Send batch update request
+              const response = await fetch(BASE_URL + 'batchUpdateMasterRecords', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recordIds: recordIds,
+                  updates: updates,
+                  username: username,
+                  collectionName: collectionName
+                })
+              });
+              
+              const currentLang = localStorage.getItem("lang") || "en";
+              const t = translations[currentLang];
+              
+              const result = await response.json();
+              
+              if (response.ok && result.success) {
+                const message = t.batchUpdateSuccess.replace('{count}', result.modifiedCount);
+                alert(message);
+                
+                // Close modal
+                closeMasterBatchEditModal();
+                
+                // Reload data
+                applyMasterAdvancedFilters();
+              } else {
+                throw new Error(result.error || 'Update failed');
+              }
+              
+            } catch (error) {
+              console.error('❌ Batch update error:', error);
+              const currentLang = localStorage.getItem("lang") || "en";
+              const t = translations[currentLang];
+              const message = t.batchUpdateFailed.replace('{error}', error.message);
+              alert(message);
+            }
+          };
+
+          // ==================== END BATCH EDIT SYSTEM ====================
+
+          // ==================== MASTER SEARCH TAGS SYSTEM ====================
+
+          let masterSearchTags = [];
+
+          /**
+           * Handle keydown in master search input
+           */
+          window.handleMasterSearchKeydown = function(event) {
+            if (event.key === 'Enter' && event.target.value.trim()) {
+              event.preventDefault();
+              window.addMasterSearchTag(event.target.value.trim());
+              event.target.value = '';
+            } else if (event.key === 'Backspace' && !event.target.value && masterSearchTags.length > 0) {
+              // Remove last tag when backspace is pressed on empty input
+              window.removeMasterSearchTag(masterSearchTags.length - 1);
+            }
+          };
+
+          /**
+           * Handle blur (when user clicks away) - add tag if there's a value
+           */
+          window.handleMasterSearchBlur = function(event) {
+            if (event.target.value.trim()) {
+              window.addMasterSearchTag(event.target.value.trim());
+              event.target.value = '';
+            }
+          };
+
+          /**
+           * Add a search tag
+           */
+          window.addMasterSearchTag = function(value) {
+            if (!masterSearchTags.includes(value)) {
+              masterSearchTags.push(value);
+              renderMasterSearchTags();
+              // Trigger search automatically when tag is added
+              applyMasterFilters();
+            }
+          };
+
+          /**
+           * Remove a search tag by index
+           */
+          window.removeMasterSearchTag = function(index) {
+            masterSearchTags.splice(index, 1);
+            renderMasterSearchTags();
+            // Trigger search automatically when tag is removed
+            applyMasterFilters();
+          };
+
+          /**
+           * Render search tags in the container
+           */
+          function renderMasterSearchTags() {
+            const container = document.getElementById('masterSearchTags');
+            if (!container) return;
+            
+            const input = container.querySelector('input');
+            const clearBtn = document.getElementById('clearSearchTagsBtn');
+            
+            // Remove existing tags
+            container.querySelectorAll('.search-tag').forEach(tag => tag.remove());
+            
+            // Add tags before input
+            masterSearchTags.forEach((tag, index) => {
+              const tagElement = document.createElement('span');
+              tagElement.className = 'search-tag inline-flex items-center gap-1 bg-blue-100 text-blue-800 px-3 py-1.5 rounded-full text-sm font-medium';
+              tagElement.innerHTML = `
+                ${tag}
+                <button type="button" onclick="removeMasterSearchTag(${index})" class="hover:bg-blue-200 rounded-full px-1 ml-1 font-bold text-base leading-none">×</button>
+              `;
+              container.insertBefore(tagElement, input);
+            });
+            
+            // Show/hide clear button based on tag count
+            if (clearBtn) {
+              if (masterSearchTags.length > 0) {
+                clearBtn.classList.remove('hidden');
+              } else {
+                clearBtn.classList.add('hidden');
+              }
+            }
+          }
+
+          /**
+           * Focus the search input when container is clicked
+           */
+          window.focusMasterSearchInput = function() {
+            const input = document.getElementById('masterSearchInput');
+            if (input) input.focus();
+          };
+
+          /**
+           * Get all search tags
+           */
+          function getMasterSearchTags() {
+            return masterSearchTags;
+          }
+
+          /**
+           * Clear all search tags
+           */
+          window.clearAllMasterSearchTags = function() {
+            masterSearchTags = [];
+            renderMasterSearchTags();
+            applyMasterFilters();
+          };
+
+          // ==================== END MASTER SEARCH TAGS SYSTEM ====================
+
+          // ==================== END ADVANCED FILTER SYSTEM ====================
 
           async function loadMasterFilters() {
             try {
@@ -2729,6 +4414,11 @@ function loadPage(page) {
 
           loadMasterDB();
           loadMasterFilters();
+          
+          // Initialize field schemas for advanced filters
+          fetchMasterFieldNames().then(() => {
+            console.log('✅ Master DB field schemas initialized');
+          });
           
           // Make currentMasterTab globally accessible
           window.currentMasterTab = currentMasterTab;
