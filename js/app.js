@@ -1694,8 +1694,21 @@ function loadPage(page) {
                   </select>
                 </div>
                 <div class="md:col-span-2">
-                  <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="search">Search</label>
-                  <input type="text" id="masterSearchInput" class="w-full p-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500" data-i18n-placeholder="searchPlaceholderMaster" placeholder="Search by part number, model, serial number, product name..." />
+                  <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
+                    <span data-i18n="search">Search</span>
+                    <div class="flex items-center gap-3">
+                      <select id="searchLogicMode" onchange="applyMasterFilters()" class="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500">
+                        <option value="OR">Match ANY tag (OR)</option>
+                        <option value="AND">Match ALL tags (AND)</option>
+                      </select>
+                      <button id="clearSearchTagsBtn" onclick="clearAllMasterSearchTags()" class="hidden text-xs text-red-600 hover:text-red-800 font-medium">
+                        Clear all tags
+                      </button>
+                    </div>
+                  </label>
+                  <div id="masterSearchTags" class="min-h-[3rem] border border-gray-300 rounded-lg p-2 bg-white cursor-text flex flex-wrap gap-2 items-center focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500" onclick="focusMasterSearchInput()">
+                    <input type="text" id="masterSearchInput" class="flex-1 min-w-[200px] outline-none text-base" data-i18n-placeholder="searchPlaceholderMaster" placeholder="Search... (press Enter to add tags)" onkeydown="handleMasterSearchKeydown(event)" onblur="handleMasterSearchBlur(event)" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -2712,26 +2725,50 @@ function loadPage(page) {
           });
 
           // Filtering logic
-          document.getElementById("masterSearchInput").addEventListener("input", applyMasterFilters);
+          // Note: Search input now uses tags, so we don't need the input listener
           ["filterFactory", "filterRL", "filterColor", "filterProcess"].forEach(id => {
             document.getElementById(id).addEventListener("change", applyMasterFilters);
           });
 
           function applyMasterFilters() {
-            const keyword = document.getElementById("masterSearchInput").value.toLowerCase();
+            // Get search tags instead of direct input value
+            const searchTags = getMasterSearchTags();
             const factory = document.getElementById("filterFactory").value;
             const rl = document.getElementById("filterRL").value;
             const color = document.getElementById("filterColor").value;
             const process = document.getElementById("filterProcess").value;
+            
+            // Get search logic mode (OR or AND)
+            const logicMode = document.getElementById("searchLogicMode")?.value || "OR";
 
             filteredMasterData = masterData.filter(item => {
               // Dynamic keyword search - search through all text fields
               const searchableFields = Object.keys(item).filter(k => 
                 k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
               );
-              const keywordMatch = !keyword || searchableFields.some(key => 
-                (item[key] || "").toLowerCase().includes(keyword)
-              );
+              
+              // Apply search logic based on mode
+              let keywordMatch = true;
+              
+              if (searchTags.length > 0) {
+                if (logicMode === "OR") {
+                  // OR logic: Match if ANY tag is found
+                  keywordMatch = searchTags.some(tag => {
+                    const keyword = tag.toLowerCase();
+                    return searchableFields.some(key => 
+                      (item[key] || "").toLowerCase().includes(keyword)
+                    );
+                  });
+                } else {
+                  // AND logic: Match if ALL tags are found
+                  keywordMatch = searchTags.every(tag => {
+                    const keyword = tag.toLowerCase();
+                    return searchableFields.some(key => 
+                      (item[key] || "").toLowerCase().includes(keyword)
+                    );
+                  });
+                }
+              }
 
               // Dynamic filtering based on available fields
               let factoryMatch = true;
@@ -3212,16 +3249,33 @@ function loadPage(page) {
 
               masterData = await res.json();
               
-              // Apply search keyword filter on client side
-              const keyword = document.getElementById("masterSearchInput").value.toLowerCase();
-              if (keyword) {
+              // Apply search tags filter on client side
+              const searchTags = getMasterSearchTags();
+              const logicMode = document.getElementById("searchLogicMode")?.value || "OR";
+              
+              if (searchTags.length > 0) {
                 filteredMasterData = masterData.filter(item => {
                   const searchableFields = Object.keys(item).filter(k => 
                     k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
                   );
-                  return searchableFields.some(key => 
-                    (item[key] || "").toLowerCase().includes(keyword)
-                  );
+                  
+                  if (logicMode === "OR") {
+                    // OR logic: Match if ANY tag is found
+                    return searchTags.some(tag => {
+                      const keyword = tag.toLowerCase();
+                      return searchableFields.some(key => 
+                        (item[key] || "").toLowerCase().includes(keyword)
+                      );
+                    });
+                  } else {
+                    // AND logic: Match if ALL tags are found
+                    return searchTags.every(tag => {
+                      const keyword = tag.toLowerCase();
+                      return searchableFields.some(key => 
+                        (item[key] || "").toLowerCase().includes(keyword)
+                      );
+                    });
+                  }
                 });
               } else {
                 filteredMasterData = [...masterData];
@@ -4052,6 +4106,116 @@ function loadPage(page) {
           };
 
           // ==================== END BATCH EDIT SYSTEM ====================
+
+          // ==================== MASTER SEARCH TAGS SYSTEM ====================
+
+          let masterSearchTags = [];
+
+          /**
+           * Handle keydown in master search input
+           */
+          window.handleMasterSearchKeydown = function(event) {
+            if (event.key === 'Enter' && event.target.value.trim()) {
+              event.preventDefault();
+              window.addMasterSearchTag(event.target.value.trim());
+              event.target.value = '';
+            } else if (event.key === 'Backspace' && !event.target.value && masterSearchTags.length > 0) {
+              // Remove last tag when backspace is pressed on empty input
+              window.removeMasterSearchTag(masterSearchTags.length - 1);
+            }
+          };
+
+          /**
+           * Handle blur (when user clicks away) - add tag if there's a value
+           */
+          window.handleMasterSearchBlur = function(event) {
+            if (event.target.value.trim()) {
+              window.addMasterSearchTag(event.target.value.trim());
+              event.target.value = '';
+            }
+          };
+
+          /**
+           * Add a search tag
+           */
+          window.addMasterSearchTag = function(value) {
+            if (!masterSearchTags.includes(value)) {
+              masterSearchTags.push(value);
+              renderMasterSearchTags();
+              // Trigger search automatically when tag is added
+              applyMasterFilters();
+            }
+          };
+
+          /**
+           * Remove a search tag by index
+           */
+          window.removeMasterSearchTag = function(index) {
+            masterSearchTags.splice(index, 1);
+            renderMasterSearchTags();
+            // Trigger search automatically when tag is removed
+            applyMasterFilters();
+          };
+
+          /**
+           * Render search tags in the container
+           */
+          function renderMasterSearchTags() {
+            const container = document.getElementById('masterSearchTags');
+            if (!container) return;
+            
+            const input = container.querySelector('input');
+            const clearBtn = document.getElementById('clearSearchTagsBtn');
+            
+            // Remove existing tags
+            container.querySelectorAll('.search-tag').forEach(tag => tag.remove());
+            
+            // Add tags before input
+            masterSearchTags.forEach((tag, index) => {
+              const tagElement = document.createElement('span');
+              tagElement.className = 'search-tag inline-flex items-center gap-1 bg-blue-100 text-blue-800 px-3 py-1.5 rounded-full text-sm font-medium';
+              tagElement.innerHTML = `
+                ${tag}
+                <button type="button" onclick="removeMasterSearchTag(${index})" class="hover:bg-blue-200 rounded-full px-1 ml-1 font-bold text-base leading-none">×</button>
+              `;
+              container.insertBefore(tagElement, input);
+            });
+            
+            // Show/hide clear button based on tag count
+            if (clearBtn) {
+              if (masterSearchTags.length > 0) {
+                clearBtn.classList.remove('hidden');
+              } else {
+                clearBtn.classList.add('hidden');
+              }
+            }
+          }
+
+          /**
+           * Focus the search input when container is clicked
+           */
+          window.focusMasterSearchInput = function() {
+            const input = document.getElementById('masterSearchInput');
+            if (input) input.focus();
+          };
+
+          /**
+           * Get all search tags
+           */
+          function getMasterSearchTags() {
+            return masterSearchTags;
+          }
+
+          /**
+           * Clear all search tags
+           */
+          window.clearAllMasterSearchTags = function() {
+            masterSearchTags = [];
+            renderMasterSearchTags();
+            applyMasterFilters();
+          };
+
+          // ==================== END MASTER SEARCH TAGS SYSTEM ====================
 
           // ==================== END ADVANCED FILTER SYSTEM ====================
 
