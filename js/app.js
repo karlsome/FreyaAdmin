@@ -1746,6 +1746,113 @@ function loadPage(page) {
                       Apply Filters
                     </button>
                   </div>
+
+                  <!-- Batch Edit Button (shown when filters are applied) -->
+                  <div id="masterBatchEditButtonContainer" class="hidden mt-3">
+                    <button onclick="openMasterBatchEditModal()" class="w-full bg-amber-600 text-white py-3 px-6 rounded-lg hover:bg-amber-700 transition-colors font-medium flex items-center justify-center">
+                      <i class="ri-edit-box-line mr-2"></i>
+                      Batch Edit (<span id="masterBatchEditCount">0</span> records)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Batch Edit Modal -->
+            <div id="masterBatchEditModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+              <div class="bg-white rounded-lg shadow-xl w-full max-w-7xl max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Modal Header -->
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-green-50">
+                  <div>
+                    <h3 class="text-xl font-bold text-gray-900">Batch Edit Master Records</h3>
+                    <p class="text-sm text-gray-600 mt-1">Editing <span id="batchEditRecordCount" class="font-semibold text-blue-600">0</span> filtered records</p>
+                  </div>
+                  <button onclick="closeMasterBatchEditModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                    <i class="ri-close-line text-2xl"></i>
+                  </button>
+                </div>
+
+                <!-- Modal Body - Two Panel Layout -->
+                <div class="flex-1 flex overflow-hidden">
+                  <!-- LEFT PANEL - Field Editor -->
+                  <div class="w-1/2 border-r border-gray-200 flex flex-col">
+                    <!-- Info Box -->
+                    <div class="p-4 bg-blue-50 border-b border-blue-200">
+                      <div class="flex items-start">
+                        <i class="ri-information-line text-blue-600 text-lg mr-2"></i>
+                        <div class="text-xs text-blue-800">
+                          <p class="font-medium mb-1">Click field tags to edit • <span class="text-red-600">Red</span> = Old • <span class="text-green-600">Green</span> = New</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Field Tags (Scrollable) -->
+                    <div class="p-4 overflow-y-auto flex-1">
+                      <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Available Fields:</label>
+                        <div id="batchEditFieldTags" class="flex flex-wrap gap-2">
+                          <!-- Field tags will be inserted here -->
+                        </div>
+                      </div>
+
+                      <!-- Active Edit Section -->
+                      <div id="batchEditActiveSection" class="hidden mb-4 p-4 bg-gray-50 rounded-lg border-2 border-blue-300">
+                        <div class="flex items-center justify-between mb-3">
+                          <label class="text-sm font-semibold text-gray-700">Editing: <span id="activeFieldLabel" class="text-blue-600"></span></label>
+                          <button onclick="cancelFieldEdit()" class="text-xs text-gray-500 hover:text-gray-700">
+                            <i class="ri-close-line"></i> Cancel
+                          </button>
+                        </div>
+                        <div class="flex gap-2">
+                          <input type="text" id="batchEditActiveInput" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter new value..." />
+                          <button onclick="addFieldToChangesList()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-1 text-sm font-medium">
+                            <i class="ri-check-line"></i> Add
+                          </button>
+                        </div>
+                      </div>
+
+                      <!-- Changes List -->
+                      <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Changes to Apply:</label>
+                        <div id="batchEditChangesList" class="space-y-2">
+                          <p class="text-xs text-gray-400 italic">No changes yet. Click field tags above to start editing.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- RIGHT PANEL - Live Preview -->
+                  <div class="w-1/2 flex flex-col bg-gray-50">
+                    <!-- Preview Header -->
+                    <div class="p-4 bg-green-50 border-b border-green-200">
+                      <h4 class="text-sm font-semibold text-gray-700 flex items-center">
+                        <i class="ri-eye-line text-green-600 mr-2"></i>
+                        Preview <span id="batchEditPreviewInfo" class="ml-2 text-xs font-normal text-gray-600">(showing 5 of 0 total records)</span>
+                      </h4>
+                    </div>
+
+                    <!-- Preview Cards (Independently Scrollable) -->
+                    <div id="batchEditPreviewContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
+                      <!-- Preview cards will be inserted here -->
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                  <p class="text-xs text-gray-600">
+                    <i class="ri-alert-line text-amber-600"></i>
+                    Changes will be applied to <strong id="footerRecordCount">0</strong> records
+                  </p>
+                  <div class="flex gap-3">
+                    <button onclick="closeMasterBatchEditModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors font-medium text-sm">
+                      Cancel
+                    </button>
+                    <button onclick="confirmMasterBatchEdit()" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center gap-2 text-sm">
+                      <i class="ri-check-line"></i>
+                      Update Records
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3120,6 +3227,17 @@ function loadPage(page) {
               renderMasterTable();
               updateMasterActiveFiltersCount();
 
+              // Show batch edit button if filters are applied and have results
+              const batchEditButton = document.getElementById('masterBatchEditButtonContainer');
+              const batchEditCount = document.getElementById('masterBatchEditCount');
+              
+              if (Object.keys(advancedQuery).length > 0 && filteredMasterData.length > 0) {
+                batchEditCount.textContent = filteredMasterData.length;
+                batchEditButton.classList.remove('hidden');
+              } else {
+                batchEditButton.classList.add('hidden');
+              }
+
               console.log(`✅ Applied filters: ${filteredMasterData.length} results`);
 
             } catch (error) {
@@ -3259,9 +3377,581 @@ function loadPage(page) {
             // Update display
             updateMasterActiveFiltersCount();
             
+            // Hide batch edit button
+            document.getElementById('masterBatchEditButtonContainer').classList.add('hidden');
+            
             // Reload data without filters
             loadMasterDB();
           };
+
+          // ==================== BATCH EDIT SYSTEM ====================
+
+          // Store filtered records for batch edit
+          let batchEditRecords = [];
+          let batchEditChanges = {}; // Store {fieldName: newValue}
+          let currentEditingField = null;
+          let existingFactories = []; // Cache for factory validation
+
+          /**
+           * Open batch edit modal with two-panel design
+           */
+          window.openMasterBatchEditModal = function() {
+            // Get filtered data
+            batchEditRecords = [...filteredMasterData];
+            
+            if (batchEditRecords.length === 0) {
+              alert('No records to edit. Please apply filters first.');
+              return;
+            }
+
+            // Reset state
+            batchEditChanges = {};
+            currentEditingField = null;
+
+            // Update record counts in multiple places
+            document.getElementById('batchEditRecordCount').textContent = batchEditRecords.length;
+            
+            // Update footer record count
+            const footerCount = document.getElementById('footerRecordCount');
+            if (footerCount) footerCount.textContent = batchEditRecords.length;
+            
+            // Update preview info
+            const previewInfo = document.getElementById('batchEditPreviewInfo');
+            if (previewInfo) {
+              const previewCount = Math.min(5, batchEditRecords.length);
+              previewInfo.textContent = `(showing ${previewCount} of ${batchEditRecords.length} total records)`;
+            }
+            
+            // Generate field tags (left panel)
+            generateFieldTags();
+            
+            // Hide active edit section initially
+            const activeSection = document.getElementById('batchEditActiveSection');
+            if (activeSection) activeSection.classList.add('hidden');
+            
+            // Clear changes list
+            const changesList = document.getElementById('batchEditChangesList');
+            if (changesList) {
+              changesList.innerHTML = '<p class="text-xs text-gray-400 italic">No changes yet. Click field tags above to start editing.</p>';
+            }
+            
+            // Generate preview cards (right panel)
+            generatePreviewCards();
+            
+            // Show modal
+            document.getElementById('masterBatchEditModal').classList.remove('hidden');
+          };
+
+          /**
+           * Close batch edit modal
+           */
+          window.closeMasterBatchEditModal = function() {
+            document.getElementById('masterBatchEditModal').classList.add('hidden');
+            batchEditRecords = [];
+            batchEditChanges = {};
+            currentEditingField = null;
+          };
+
+          /**
+           * Generate clickable field tags
+           */
+          function generateFieldTags() {
+            const container = document.getElementById('batchEditFieldTags');
+            
+            // Get all fields from schema (exclude _id and imageURL)
+            const fields = Object.keys(masterFieldSchemas)
+              .filter(f => f !== '_id' && f !== 'imageURL')
+              .sort();
+            
+            let html = '';
+            fields.forEach(field => {
+              const schema = masterFieldSchemas[field];
+              html += `
+                <button 
+                  onclick="handleFieldTagClick('${field}')"
+                  class="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-full text-sm font-medium transition-colors"
+                >
+                  ${schema.label}
+                </button>
+              `;
+            });
+            
+            container.innerHTML = html;
+          }
+
+          /**
+           * Handle field tag click - show active edit section
+           */
+          window.handleFieldTagClick = async function(field) {
+            currentEditingField = field;
+            const schema = masterFieldSchemas[field];
+            const section = document.getElementById('batchEditActiveSection');
+            const fieldNameElem = document.getElementById('activeFieldLabel');
+            const input = document.getElementById('batchEditActiveInput');
+            
+            if (!section || !fieldNameElem || !input) {
+              console.error('❌ Batch edit elements not found');
+              return;
+            }
+            
+            // Update field name display
+            fieldNameElem.textContent = schema.label;
+            
+            // Set input type and attributes based on field type
+            switch (schema.type) {
+              case 'number':
+                input.type = 'number';
+                input.placeholder = 'Enter new number...';
+                break;
+              
+              case 'date':
+                input.type = 'date';
+                input.placeholder = '';
+                break;
+              
+              case 'select':
+                if (schema.autoPopulate) {
+                  // Replace input with select element
+                  const selectHTML = `<select id="batchEditActiveInput" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">Loading options...</option>
+                  </select>`;
+                  input.outerHTML = selectHTML;
+                  
+                  // Load dropdown options
+                  setTimeout(async () => {
+                    const values = await fetchMasterDistinctValues(field);
+                    const select = document.getElementById('batchEditActiveInput');
+                    if (select) {
+                      select.innerHTML = '<option value="">Select new value...</option>' +
+                        values.map(v => `<option value="${v}">${v}</option>`).join('');
+                      
+                      // If editing existing change, set the value
+                      if (batchEditChanges[field] !== undefined) {
+                        select.value = batchEditChanges[field];
+                      }
+                    }
+                  }, 0);
+                  
+                  // Show section and exit (since we replaced the element)
+                  section.classList.remove('hidden');
+                  return;
+                } else {
+                  input.type = 'text';
+                  input.placeholder = 'Enter new value...';
+                }
+                break;
+              
+              default:
+                input.type = 'text';
+                input.placeholder = 'Enter new value...';
+            }
+            
+            // If editing existing change, load the value
+            if (batchEditChanges[field] !== undefined) {
+              input.value = batchEditChanges[field];
+            } else {
+              input.value = '';
+            }
+            
+            // Show section
+            section.classList.remove('hidden');
+            
+            // Focus input
+            setTimeout(() => {
+              const focusInput = document.getElementById('batchEditActiveInput');
+              if (focusInput) focusInput.focus();
+            }, 100);
+          };
+
+          /**
+           * Cancel field edit - hide active section
+           */
+          window.cancelFieldEdit = function() {
+            document.getElementById('batchEditActiveSection').classList.add('hidden');
+            currentEditingField = null;
+          };
+
+          /**
+           * Add field to changes list
+           */
+          window.addFieldToChangesList = async function() {
+            if (!currentEditingField) return;
+            
+            const input = document.getElementById('batchEditActiveInput');
+            if (!input) {
+              console.error('❌ Input element not found');
+              return;
+            }
+            
+            const newValue = input.value.trim();
+            const field = currentEditingField;
+            const schema = masterFieldSchemas[field];
+            
+            // Check if empty
+            if (newValue === '') {
+              const confirmEmpty = confirm(`⚠️ The new value for "${schema.label}" is empty.\n\nThis will clear the field for all ${batchEditRecords.length} records.\n\nContinue?`);
+              if (!confirmEmpty) return;
+            }
+            
+            // Special validation for 工場 field
+            if (field === '工場') {
+              const isValid = await validateFactoryField(newValue);
+              if (!isValid) {
+                return; // Validation function shows its own alerts
+              }
+            }
+            
+            // Add to changes object
+            batchEditChanges[field] = newValue;
+            
+            // Update changes list display
+            renderChangesList();
+            
+            // Update preview cards
+            updatePreviewsInRealTime();
+            
+            // Hide active section
+            cancelFieldEdit();
+          };
+
+          /**
+           * Render changes list with edit/delete buttons
+           */
+          function renderChangesList() {
+            const container = document.getElementById('batchEditChangesList');
+            
+            const fields = Object.keys(batchEditChanges);
+            
+            if (fields.length === 0) {
+              container.innerHTML = '<p class="text-gray-400 italic text-sm text-center py-4">No changes yet</p>';
+              return;
+            }
+            
+            let html = '<div class="space-y-2">';
+            fields.forEach(field => {
+              const schema = masterFieldSchemas[field];
+              const value = batchEditChanges[field];
+              const displayValue = value === '' ? '<span class="text-red-500 italic">(empty)</span>' : value;
+              
+              html += `
+                <div class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
+                  <div class="flex-1">
+                    <span class="font-medium text-sm">${schema.label}:</span>
+                    <span class="ml-2 text-green-600">${displayValue}</span>
+                  </div>
+                  <div class="flex gap-2">
+                    <button 
+                      onclick="editChangeItem('${field}')"
+                      class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded"
+                    >
+                      Edit
+                    </button>
+                    <button 
+                      onclick="deleteChangeItem('${field}')"
+                      class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-800 rounded"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              `;
+            });
+            html += '</div>';
+            
+            container.innerHTML = html;
+          }
+
+          /**
+           * Edit change item - load back to active section
+           */
+          window.editChangeItem = function(field) {
+            handleFieldTagClick(field);
+          };
+
+          /**
+           * Delete change item
+           */
+          window.deleteChangeItem = function(field) {
+            delete batchEditChanges[field];
+            renderChangesList();
+            updatePreviewsInRealTime();
+          };
+
+          /**
+           * Generate preview cards (first 5 records)
+           */
+          function generatePreviewCards() {
+            const container = document.getElementById('batchEditPreviewContainer');
+            
+            const previewRecords = batchEditRecords.slice(0, 5);
+            const totalCount = batchEditRecords.length;
+            
+            if (previewRecords.length === 0) {
+              container.innerHTML = '<p class="text-gray-400 italic text-center py-8">No records to preview</p>';
+              return;
+            }
+            
+            let html = '';
+            previewRecords.forEach((record, index) => {
+              html += formatDocumentCard(record, index + 1, totalCount);
+            });
+            
+            container.innerHTML = html;
+          }
+
+          /**
+           * Format single document as card
+           */
+          function formatDocumentCard(record, index, total) {
+            const cardId = `preview-card-${index}`;
+            
+            let html = `
+              <div id="${cardId}" class="bg-white border border-gray-300 rounded-lg p-4 mb-3">
+                <div class="flex justify-between items-center mb-3 pb-2 border-b border-gray-200">
+                  <h4 class="font-semibold text-gray-900">Document ${index} of ${total}</h4>
+                  <span class="text-xs text-gray-500">Preview</span>
+                </div>
+                <div class="space-y-2 text-sm">
+            `;
+            
+            // Get all fields
+            const fields = Object.keys(masterFieldSchemas).filter(f => f !== '_id');
+            
+            fields.forEach(field => {
+              const schema = masterFieldSchemas[field];
+              const currentValue = record[field] !== undefined && record[field] !== null ? String(record[field]) : '';
+              const hasChange = batchEditChanges[field] !== undefined;
+              const newValue = hasChange ? batchEditChanges[field] : '';
+              
+              if (hasChange) {
+                // Show old value with red strikethrough and new value in green
+                html += `
+                  <div class="flex justify-between py-1">
+                    <span class="font-medium text-gray-700 w-1/3">${schema.label}:</span>
+                    <span class="w-2/3">
+                      <span class="text-red-600 line-through mr-2">${currentValue || '(empty)'}</span>
+                      <span class="text-green-600 font-semibold">→ ${newValue || '(empty)'}</span>
+                    </span>
+                  </div>
+                `;
+              } else {
+                // Show current value normally
+                html += `
+                  <div class="flex justify-between py-1">
+                    <span class="font-medium text-gray-700 w-1/3">${schema.label}:</span>
+                    <span class="text-gray-900 w-2/3">${currentValue || '(empty)'}</span>
+                  </div>
+                `;
+              }
+            });
+            
+            html += `
+                </div>
+              </div>
+            `;
+            
+            return html;
+          }
+
+          /**
+           * Update preview cards in real-time with changes
+           */
+          function updatePreviewsInRealTime() {
+            const previewRecords = batchEditRecords.slice(0, 5);
+            const totalCount = batchEditRecords.length;
+            
+            previewRecords.forEach((record, index) => {
+              const cardId = `preview-card-${index + 1}`;
+              const cardElem = document.getElementById(cardId);
+              
+              if (cardElem) {
+                // Regenerate card HTML
+                const newHTML = formatDocumentCard(record, index + 1, totalCount);
+                cardElem.outerHTML = newHTML;
+              }
+            });
+          }
+
+          /**
+           * Validate factory field with nearest match suggestion
+           */
+          async function validateFactoryField(newValue) {
+            // Load existing factories if not cached
+            if (existingFactories.length === 0) {
+              try {
+                const values = await fetchMasterDistinctValues('工場');
+                existingFactories = values || [];
+              } catch (error) {
+                console.error('Failed to load factory list:', error);
+                existingFactories = [];
+              }
+            }
+            
+            // Check if exact match exists
+            if (existingFactories.includes(newValue)) {
+              return true; // Valid
+            }
+            
+            // Find nearest match
+            const nearest = findNearestMatch(newValue, existingFactories);
+            
+            if (nearest) {
+              const useNearest = confirm(
+                `⚠️ Factory "${newValue}" not found in existing records.\n\n` +
+                `Did you mean: "${nearest}"?\n\n` +
+                `Click OK to use "${nearest}" or Cancel to enter a different value.`
+              );
+              
+              if (useNearest) {
+                // Update input with nearest match
+                const input = document.getElementById('batchEditActiveInput');
+                if (input) input.value = nearest;
+                return false; // Return false to not add yet, user should click Add again
+              }
+            } else {
+              const continueAnyway = confirm(
+                `⚠️ Factory "${newValue}" not found in existing records.\n\n` +
+                `Are you sure you want to use this new value?`
+              );
+              
+              if (!continueAnyway) return false;
+            }
+            
+            return true;
+          }
+
+          /**
+           * Find nearest match using simple string similarity
+           */
+          function findNearestMatch(value, existingValues) {
+            if (!value || existingValues.length === 0) return null;
+            
+            const valueLower = value.toLowerCase();
+            let bestMatch = null;
+            let bestScore = 0;
+            
+            existingValues.forEach(existing => {
+              const existingLower = existing.toLowerCase();
+              
+              // Calculate similarity score
+              let score = 0;
+              
+              // Exact match
+              if (existingLower === valueLower) {
+                score = 100;
+              }
+              // Contains or is contained
+              else if (existingLower.includes(valueLower) || valueLower.includes(existingLower)) {
+                score = 80;
+              }
+              // Same first 3 characters
+              else if (existingLower.substring(0, 3) === valueLower.substring(0, 3)) {
+                score = 60;
+              }
+              // Levenshtein-like: count matching characters
+              else {
+                let matches = 0;
+                for (let char of valueLower) {
+                  if (existingLower.includes(char)) matches++;
+                }
+                score = (matches / Math.max(valueLower.length, existingLower.length)) * 50;
+              }
+              
+              if (score > bestScore) {
+                bestScore = score;
+                bestMatch = existing;
+              }
+            });
+            
+            // Return match only if score is reasonable
+            return bestScore > 40 ? bestMatch : null;
+          }
+
+          /**
+           * Confirm and execute batch edit
+           */
+          window.confirmMasterBatchEdit = async function() {
+            // Check if any changes
+            if (Object.keys(batchEditChanges).length === 0) {
+              alert('⚠️ No changes to apply. Please add at least one field change.');
+              return;
+            }
+            
+            const updates = { ...batchEditChanges };
+            const fieldCount = Object.keys(updates).length;
+            const recordCount = batchEditRecords.length;
+            
+            // Build confirmation message
+            let changesSummary = Object.keys(updates).map(field => {
+              const schema = masterFieldSchemas[field];
+              const value = updates[field] === '' ? '(empty)' : updates[field];
+              return `  • ${schema.label} → ${value}`;
+            }).join('\n');
+            
+            const confirmMessage = 
+              `Are you sure you want to update ${recordCount} record(s)?\n\n` +
+              `Changes:\n${changesSummary}\n\n` +
+              `This action cannot be undone.`;
+            
+            if (!confirm(confirmMessage)) {
+              return;
+            }
+            
+            try {
+              // Get current user
+              const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+              const username = currentUser.username || 'unknown';
+              
+              // Get collection name
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
+              
+              // Extract record IDs
+              const recordIds = batchEditRecords.map(record => {
+                if (record._id && record._id.$oid) {
+                  return record._id.$oid;
+                }
+                return record._id;
+              }).filter(id => id);
+              
+              console.log('🔄 Batch updating records:', {
+                count: recordIds.length,
+                updates: updates,
+                collection: collectionName
+              });
+              
+              // Send batch update request
+              const response = await fetch(BASE_URL + 'batchUpdateMasterRecords', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  recordIds: recordIds,
+                  updates: updates,
+                  username: username,
+                  collectionName: collectionName
+                })
+              });
+              
+              const result = await response.json();
+              
+              if (response.ok && result.success) {
+                alert(`✅ Successfully updated ${result.modifiedCount} record(s)!`);
+                
+                // Close modal
+                closeMasterBatchEditModal();
+                
+                // Reload data
+                applyMasterAdvancedFilters();
+              } else {
+                throw new Error(result.error || 'Update failed');
+              }
+              
+            } catch (error) {
+              console.error('❌ Batch update error:', error);
+              alert(`Failed to update records: ${error.message}`);
+            }
+          };
+
+          // ==================== END BATCH EDIT SYSTEM ====================
 
           // ==================== END ADVANCED FILTER SYSTEM ====================
 
