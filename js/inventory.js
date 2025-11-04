@@ -172,6 +172,9 @@ function renderInventoryTable() {
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('背番号')">
                         ${t('serialNumber')} ${getInventorySortArrow('背番号')}
                     </th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('工場')">
+                        ${t('factory')} ${getInventorySortArrow('工場')}
+                    </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('physicalQuantity')">
                         ${t('physicalStock')} ${getInventorySortArrow('physicalQuantity')}
                     </th>
@@ -201,6 +204,12 @@ function renderInventoryTable() {
                             </td>
                             <td class="px-4 py-3 font-medium">
                                 ${item.背番号}
+                            </td>
+                            <td class="px-4 py-3 text-gray-700">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    <i class="ri-building-line mr-1"></i>
+                                    ${item.工場 || '-'}
+                                </span>
                             </td>
                             <td class="px-4 py-3">
                                 <span class="text-green-600 font-medium">${item.physicalQuantity}</span>
@@ -483,7 +492,15 @@ function renderInventoryTransactions(transactions, backNumber) {
         <div class="space-y-6">
             <!-- Current State Summary -->
             <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                <h4 class="text-lg font-semibold text-blue-900 mb-3">${t('currentState')} - ${backNumber}</h4>
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-lg font-semibold text-blue-900">${t('serialNumber')}: ${backNumber}</h4>
+                    ${currentItem.工場 ? `
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-600 text-white">
+                            <i class="ri-building-line mr-1.5"></i>
+                            ${currentItem.工場}
+                        </span>
+                    ` : ''}
+                </div>
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div class="text-center">
                         <p class="text-sm text-blue-600">${t('partNumber')}</p>

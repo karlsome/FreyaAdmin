@@ -573,6 +573,7 @@ const translations = {
 
       // Inventory Management
       noInventoryItemsFound: "No inventory items found matching your criteria.",
+      factory: "Factory",
       physicalStock: "Physical Stock",
       reservedStock: "Reserved Stock",
       availableStock: "Available Stock",
@@ -1583,6 +1584,7 @@ const translations = {
 
       // Inventory Management
       noInventoryItemsFound: "条件に一致する在庫アイテムが見つかりません。",
+      factory: "工場",
       physicalStock: "物理在庫",
       reservedStock: "予約済み在庫",
       availableStock: "利用可能在庫",
