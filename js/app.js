@@ -1275,7 +1275,12 @@ function loadPage(page) {
                 <table class="w-full text-sm border">
                   <thead class="bg-gray-100">
                     <tr>
-                      ${headers.map(h => `<th class="px-4 py-2">${h.charAt(0).toUpperCase() + h.slice(1)}</th>`).join("")}
+                      ${headers.map(h => {
+                        const sortIcon = userSortState.column === h 
+                          ? (userSortState.direction === 1 ? ' ▲' : ' ▼') 
+                          : '';
+                        return `<th class="px-4 py-2 cursor-pointer hover:bg-gray-200" onclick="sortUsers('${h}')">${h.charAt(0).toUpperCase() + h.slice(1)}${sortIcon}</th>`;
+                      }).join("")}
                       <th class='px-4 py-2'>Actions</th>
                     </tr>
                   </thead>

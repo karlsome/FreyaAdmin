@@ -1,5 +1,9 @@
 // allUsers is defined in app.js as a global variable
 
+// Sorting state for both tables
+let userSortState = { column: null, direction: 1 }; // 1 for ascending, -1 for descending
+let workerSortState = { column: null, direction: 1 };
+
 async function loadUserTable() {
     try {
     const res = await fetch(BASE_URL + "queries", {
@@ -31,7 +35,12 @@ async function loadUserTable() {
     <table class="w-full text-sm border">
         <thead class="bg-gray-100">
         <tr>
-            ${headers.map(h => `<th class="px-4 py-2">${t(h)}</th>`).join("")}
+            ${headers.map(h => {
+                const sortIcon = userSortState.column === h 
+                    ? (userSortState.direction === 1 ? ' ▲' : ' ▼') 
+                    : '';
+                return `<th class="px-4 py-2 cursor-pointer hover:bg-gray-200" onclick="sortUsers('${h}')">${t(h)}${sortIcon}</th>`;
+            }).join("")}
             <th class='px-4 py-2'>${t('actions')}</th>
         </tr>
         </thead>
@@ -95,6 +104,41 @@ async function loadUserTable() {
 
     document.getElementById("userTableContainer").innerHTML = tableHTML;
 }
+
+// ==================== USER SORTING ====================
+
+window.sortUsers = function(column) {
+    // Toggle direction if same column, otherwise reset to ascending
+    if (userSortState.column === column) {
+        userSortState.direction *= -1;
+    } else {
+        userSortState.column = column;
+        userSortState.direction = 1;
+    }
+    
+    const sorted = [...window.allUsers].sort((a, b) => {
+        let valA, valB;
+        
+        if (column === 'factory') {
+            // Handle factory array sorting
+            const factoryA = a.工場 || a.factory || [];
+            const factoryB = b.工場 || b.factory || [];
+            const arrA = Array.isArray(factoryA) ? factoryA : (factoryA ? [factoryA] : []);
+            const arrB = Array.isArray(factoryB) ? factoryB : (factoryB ? [factoryB] : []);
+            valA = arrA.join(',').toLowerCase();
+            valB = arrB.join(',').toLowerCase();
+        } else {
+            valA = (a[column] || '').toString().toLowerCase();
+            valB = (b[column] || '').toString().toLowerCase();
+        }
+        
+        if (valA < valB) return -1 * userSortState.direction;
+        if (valA > valB) return 1 * userSortState.direction;
+        return 0;
+    });
+    
+    renderUserTable(sorted);
+};
 
 // ==================== USER SEARCH ====================
 
@@ -262,14 +306,23 @@ function renderWorkerTable(workers) {
         return;
     }
 
+    const columns = [
+        { field: 'Name', label: 'Name' },
+        { field: 'ID number', label: 'ID Number' },
+        { field: '部署', label: '部署' },
+        { field: 'Picture', label: 'Picture' }
+    ];
+
     const tableHTML = `
     <table class="w-full text-sm border">
         <thead class="bg-gray-100">
         <tr>
-            <th class="px-4 py-2">Name</th>
-            <th class="px-4 py-2">ID Number</th>
-            <th class="px-4 py-2">部署</th>
-            <th class="px-4 py-2">Picture</th>
+            ${columns.map(col => {
+                const sortIcon = workerSortState.column === col.field
+                    ? (workerSortState.direction === 1 ? ' ▲' : ' ▼')
+                    : '';
+                return `<th class="px-4 py-2 cursor-pointer hover:bg-gray-200" onclick="sortWorkers('${col.field}')">${col.label}${sortIcon}</th>`;
+            }).join("")}
             <th class="px-4 py-2">Actions</th>
         </tr>
         </thead>
@@ -329,6 +382,29 @@ function renderWorkerTable(workers) {
 
     document.getElementById("workerTableContainer").innerHTML = tableHTML;
 }
+
+// ==================== WORKER SORTING ====================
+
+window.sortWorkers = function(column) {
+    // Toggle direction if same column, otherwise reset to ascending
+    if (workerSortState.column === column) {
+        workerSortState.direction *= -1;
+    } else {
+        workerSortState.column = column;
+        workerSortState.direction = 1;
+    }
+    
+    const sorted = [...allWorkers].sort((a, b) => {
+        let valA = (a[column] || '').toString().toLowerCase();
+        let valB = (b[column] || '').toString().toLowerCase();
+        
+        if (valA < valB) return -1 * workerSortState.direction;
+        if (valA > valB) return 1 * workerSortState.direction;
+        return 0;
+    });
+    
+    renderWorkerTable(sorted);
+};
 
 // ==================== DEPARTMENT TAG MANAGEMENT ====================
 
