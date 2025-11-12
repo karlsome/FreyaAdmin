@@ -805,8 +805,69 @@ function loadPage(page) {
                 </div>
               </div>
 
-              <!-- User Table -->
-              <div id="userTableContainer" data-i18n="loadingUsers">Loading users...</div>
+              <!-- Tab Navigation -->
+              <div class="border-b border-gray-200 mb-4">
+                <nav class="flex -mb-px">
+                  <button id="adminMemberTab" class="px-6 py-3 text-sm font-medium border-b-2 border-blue-600 text-blue-600" onclick="switchTab('admin')">
+                    <span data-i18n="adminMember">Admin Member</span>
+                  </button>
+                  <button id="factoryMemberTab" class="px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" onclick="switchTab('factory')">
+                    <span data-i18n="factoryMember">Factory Member</span>
+                  </button>
+                </nav>
+              </div>
+
+              <!-- Admin Member Tab Content -->
+              <div id="adminMemberContent">
+                <div id="userTableContainer" data-i18n="loadingUsers">Loading users...</div>
+              </div>
+
+              <!-- Factory Member Tab Content -->
+              <div id="factoryMemberContent" class="hidden">
+                <div class="mb-4 flex gap-4">
+                  <input type="text" id="workerSearchInput" placeholder="Search workers..." class="flex-1 border rounded px-4 py-2" />
+                  <button id="toggleCreateWorkerForm" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                    <span data-i18n="createNewWorker">Create New Worker</span>
+                  </button>
+                </div>
+
+                <!-- Create Worker Form (Initially Hidden) -->
+                <div id="createWorkerFormWrapper" class="mb-4 hidden">
+                  <div class="bg-white p-6 rounded-lg border">
+                    <h3 class="text-lg font-semibold mb-4" data-i18n="createNewWorker">Create New Worker</h3>
+                    <form id="createWorkerForm" class="grid grid-cols-2 gap-4">
+                      <input type="text" name="Name" placeholder="Name" required class="border rounded px-3 py-2" />
+                      <input type="text" name="ID number" placeholder="ID Number" class="border rounded px-3 py-2" />
+                      
+                      <!-- Department Selection -->
+                      <div class="col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="departmentSelection">Department Selection</label>
+                        <div class="selected-departments flex flex-wrap gap-1 mb-2" id="createWorkerDepartments"></div>
+                        <select class="border p-2 rounded text-sm w-full" onchange="addDepartmentToNewWorker(this.value); this.value='';">
+                          <option value="">Add Department</option>
+                          <option value="第一工場">第一工場</option>
+                          <option value="第二工場">第二工場</option>
+                          <option value="肥田瀬">肥田瀬</option>
+                          <option value="天徳">天徳</option>
+                          <option value="倉知">倉知</option>
+                          <option value="小瀬">小瀬</option>
+                          <option value="SCNA">SCNA</option>
+                          <option value="NFH">NFH</option>
+                        </select>
+                        <input type="hidden" id="newWorkerDepartments" name="部署" />
+                      </div>
+
+                      <input type="text" name="Picture" placeholder="Picture URL" class="col-span-2 border rounded px-3 py-2" />
+                      
+                      <button type="submit" class="col-span-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" data-i18n="submit">
+                        Submit
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
+                <div id="workerTableContainer" data-i18n="loadingWorkers">Loading workers...</div>
+              </div>
             </div>
             `;
           
@@ -932,6 +993,60 @@ function loadPage(page) {
               }
             });
             
+            // Toggle create worker form
+            const toggleWorkerBtn = document.getElementById("toggleCreateWorkerForm");
+            if (toggleWorkerBtn) {
+              toggleWorkerBtn.onclick = () => {
+                document.getElementById("createWorkerFormWrapper").classList.toggle("hidden");
+                // Reset form when opening
+                if (!document.getElementById("createWorkerFormWrapper").classList.contains("hidden")) {
+                  newWorkerDepartments = [];
+                  document.getElementById('createWorkerDepartments').innerHTML = '';
+                  document.getElementById('newWorkerDepartments').value = '';
+                }
+              };
+            }
+            
+            // Create worker form submission
+            const createWorkerForm = document.getElementById("createWorkerForm");
+            if (createWorkerForm) {
+              createWorkerForm.addEventListener("submit", async (e) => {
+                e.preventDefault();
+                
+                const formData = new FormData(e.target);
+                const workerData = {
+                  Name: formData.get('Name').trim(),
+                  "ID number": formData.get('ID number').trim(),
+                  部署: formData.get('部署') || '',
+                  Picture: formData.get('Picture').trim()
+                };
+                
+                try {
+                  const res = await fetch(BASE_URL + "createWorker", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(workerData)
+                  });
+                  
+                  const result = await res.json();
+                  
+                  if (res.ok) {
+                    alert("Worker created successfully!");
+                    e.target.reset();
+                    newWorkerDepartments = [];
+                    document.getElementById('createWorkerDepartments').innerHTML = '';
+                    document.getElementById("createWorkerFormWrapper").classList.add("hidden");
+                    loadWorkerTable();
+                  } else {
+                    alert(result.error || "Failed to create worker");
+                  }
+                } catch (err) {
+                  console.error("Error creating worker:", err);
+                  alert("Error creating worker");
+                }
+              });
+            }
+
             let allUsers = [];
             let sortState = { column: null, direction: 1 };
             
@@ -1324,6 +1439,7 @@ function loadPage(page) {
             };
             
             loadUserTable();
+            updateTabVisibility();
           
           if (typeof applyLanguageEnhanced === 'function') {
             applyLanguageEnhanced();

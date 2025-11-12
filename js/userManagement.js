@@ -166,3 +166,355 @@ window.toggleEditFactoryField = function(userId, role) {
         if (factoryReadonly) factoryReadonly.style.display = "inline";
     }
 };
+
+// ==================== TAB MANAGEMENT ====================
+let currentTab = 'admin';
+let allWorkers = [];
+
+window.switchTab = function(tab) {
+    currentTab = tab;
+    
+    // Update tab styling
+    const adminTab = document.getElementById('adminMemberTab');
+    const factoryTab = document.getElementById('factoryMemberTab');
+    const adminContent = document.getElementById('adminMemberContent');
+    const factoryContent = document.getElementById('factoryMemberContent');
+    
+    if (tab === 'admin') {
+        adminTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-blue-600 text-blue-600';
+        factoryTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300';
+        adminContent.classList.remove('hidden');
+        factoryContent.classList.add('hidden');
+    } else {
+        adminTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300';
+        factoryTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-blue-600 text-blue-600';
+        adminContent.classList.add('hidden');
+        factoryContent.classList.remove('hidden');
+        
+        // Load workers when switching to factory tab
+        if (allWorkers.length === 0) {
+            loadWorkerTable();
+        }
+    }
+};
+
+// Check if user can view factory member tab
+function canViewFactoryTab() {
+    const allowedRoles = ['admin', '課長', '部長', '係長'];
+    return allowedRoles.includes(currentUser.role);
+}
+
+// Hide factory tab if user doesn't have permission
+function updateTabVisibility() {
+    const factoryTab = document.getElementById('factoryMemberTab');
+    if (factoryTab && !canViewFactoryTab()) {
+        factoryTab.style.display = 'none';
+    }
+}
+
+// ==================== WORKER TABLE MANAGEMENT ====================
+
+async function loadWorkerTable() {
+    try {
+        const res = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "workerDB",
+                query: {},
+                projection: {}
+            })
+        });
+
+        allWorkers = await res.json();
+        renderWorkerTable(allWorkers);
+    } catch (err) {
+        console.error("Failed to load workers:", err);
+        document.getElementById("workerTableContainer").innerHTML = `<p class="text-red-600">Failed to load workers</p>`;
+    }
+}
+
+function renderWorkerTable(workers) {
+    if (!canViewFactoryTab()) {
+        document.getElementById("workerTableContainer").innerHTML = "";
+        return;
+    }
+
+    const tableHTML = `
+    <table class="w-full text-sm border">
+        <thead class="bg-gray-100">
+        <tr>
+            <th class="px-4 py-2">Name</th>
+            <th class="px-4 py-2">ID Number</th>
+            <th class="px-4 py-2">部署</th>
+            <th class="px-4 py-2">Picture</th>
+            <th class="px-4 py-2">Actions</th>
+        </tr>
+        </thead>
+        <tbody>
+        ${workers.map(w => {
+            // Handle department data - convert comma-separated string to array
+            const deptString = w.部署 || '';
+            const deptArray = deptString ? deptString.split(',').map(d => d.trim()) : [];
+            
+            return `
+            <tr class="border-t" id="workerRow-${w._id}">
+                <td class="px-4 py-2">
+                    <input class="border p-1 rounded w-full" value="${w.Name || ""}" disabled data-field="Name" worker-id="${w._id}" />
+                </td>
+                <td class="px-4 py-2">
+                    <input class="border p-1 rounded w-full" value="${w['ID number'] || ""}" disabled data-field="ID number" worker-id="${w._id}" />
+                </td>
+                <td class="px-4 py-2">
+                    <div class="dept-container" worker-id="${w._id}">
+                        <div class="dept-tags-display" id="deptDisplay-${w._id}">
+                            ${deptArray.map(d => `<span class="inline-block bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full mr-1 mb-1">${d}</span>`).join('')}
+                            ${deptArray.length === 0 ? '<span class="text-gray-500 text-xs">部署未設定</span>' : ''}
+                        </div>
+                        <div class="dept-tags-edit hidden" id="deptEdit-${w._id}">
+                            <div class="dept-tag-input-container">
+                                <div class="selected-departments flex flex-wrap gap-1 mb-2" id="selectedDepartments-${w._id}">
+                                    ${deptArray.map(d => `
+                                        <span class="dept-tag bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center">
+                                            ${d}
+                                            <button type="button" class="ml-1 text-green-600 hover:text-green-800" onclick="removeDepartmentTag('${w._id}', '${d}')">×</button>
+                                        </span>
+                                    `).join('')}
+                                </div>
+                                <select class="border p-1 rounded text-xs" onchange="addDepartmentTag('${w._id}', this.value); this.value='';">
+                                    <option value="">Add Department</option>
+                                    ${["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"].map(d => 
+                                        `<option value="${d}">${d}</option>`
+                                    ).join("")}
+                                </select>
+                            </div>
+                        </div>
+                        <input type="hidden" class="dept-data" data-field="部署" worker-id="${w._id}" value='${JSON.stringify(deptArray)}' />
+                    </div>
+                </td>
+                <td class="px-4 py-2">
+                    <input class="border p-1 rounded w-full" value="${w.Picture || ""}" disabled data-field="Picture" worker-id="${w._id}" />
+                </td>
+                <td class="px-4 py-2" id="workerActions-${w._id}">
+                    <button class="text-blue-600 hover:underline" onclick="startEditingWorker('${w._id}')">Edit</button>
+                    <button class="ml-2 text-red-600 hover:underline" onclick="deleteWorker('${w._id}')">Delete</button>
+                </td>
+            </tr>`;
+        }).join("")}
+        </tbody>
+    </table>
+    `;
+
+    document.getElementById("workerTableContainer").innerHTML = tableHTML;
+}
+
+// ==================== DEPARTMENT TAG MANAGEMENT ====================
+
+window.addDepartmentTag = function(workerId, department) {
+    if (!department) return;
+    
+    const hiddenInput = document.querySelector(`input.dept-data[worker-id="${workerId}"]`);
+    const selectedContainer = document.getElementById(`selectedDepartments-${workerId}`);
+    
+    if (!hiddenInput || !selectedContainer) return;
+    
+    let currentDepartments = [];
+    try {
+        currentDepartments = JSON.parse(hiddenInput.value || '[]');
+    } catch (e) {
+        currentDepartments = [];
+    }
+    
+    if (currentDepartments.includes(department)) return;
+    
+    currentDepartments.push(department);
+    hiddenInput.value = JSON.stringify(currentDepartments);
+    
+    const tagHTML = `
+        <span class="dept-tag bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center">
+            ${department}
+            <button type="button" class="ml-1 text-green-600 hover:text-green-800" onclick="removeDepartmentTag('${workerId}', '${department}')">×</button>
+        </span>
+    `;
+    selectedContainer.insertAdjacentHTML('beforeend', tagHTML);
+};
+
+window.removeDepartmentTag = function(workerId, department) {
+    const hiddenInput = document.querySelector(`input.dept-data[worker-id="${workerId}"]`);
+    
+    if (!hiddenInput) return;
+    
+    let currentDepartments = [];
+    try {
+        currentDepartments = JSON.parse(hiddenInput.value || '[]');
+    } catch (e) {
+        currentDepartments = [];
+    }
+    
+    currentDepartments = currentDepartments.filter(d => d !== department);
+    hiddenInput.value = JSON.stringify(currentDepartments);
+    
+    const tagElements = document.querySelectorAll(`#selectedDepartments-${workerId} .dept-tag`);
+    tagElements.forEach(tag => {
+        if (tag.textContent.trim().startsWith(department)) {
+            tag.remove();
+        }
+    });
+};
+
+// Department tag management for create worker form
+let newWorkerDepartments = [];
+
+window.addDepartmentToNewWorker = function(department) {
+    if (!department || newWorkerDepartments.includes(department)) return;
+    
+    newWorkerDepartments.push(department);
+    document.getElementById('newWorkerDepartments').value = newWorkerDepartments.join(',');
+    
+    const container = document.getElementById('createWorkerDepartments');
+    const tagHTML = `
+        <span class="dept-tag bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center">
+            ${department}
+            <button type="button" class="ml-1 text-green-600 hover:text-green-800" onclick="removeDepartmentFromNewWorker('${department}')">×</button>
+        </span>
+    `;
+    container.insertAdjacentHTML('beforeend', tagHTML);
+};
+
+window.removeDepartmentFromNewWorker = function(department) {
+    newWorkerDepartments = newWorkerDepartments.filter(d => d !== department);
+    document.getElementById('newWorkerDepartments').value = newWorkerDepartments.join(',');
+    
+    const tagElements = document.querySelectorAll('#createWorkerDepartments .dept-tag');
+    tagElements.forEach(tag => {
+        if (tag.textContent.trim().startsWith(department)) {
+            tag.remove();
+        }
+    });
+};
+
+// ==================== WORKER CRUD OPERATIONS ====================
+
+window.startEditingWorker = function(workerId) {
+    const row = document.getElementById(`workerRow-${workerId}`);
+    const inputs = row.querySelectorAll('input[data-field]');
+    const deptDisplay = document.getElementById(`deptDisplay-${workerId}`);
+    const deptEdit = document.getElementById(`deptEdit-${workerId}`);
+    const actionsCell = document.getElementById(`workerActions-${workerId}`);
+    
+    inputs.forEach(input => input.disabled = false);
+    if (deptDisplay) deptDisplay.classList.add('hidden');
+    if (deptEdit) deptEdit.classList.remove('hidden');
+    
+    actionsCell.innerHTML = `
+        <button class="text-green-600 hover:underline" onclick="saveWorker('${workerId}')">Save</button>
+        <button class="ml-2 text-gray-600 hover:underline" onclick="cancelEditWorker('${workerId}')">Cancel</button>
+    `;
+};
+
+window.cancelEditWorker = function(workerId) {
+    loadWorkerTable();
+};
+
+window.saveWorker = async function(workerId) {
+    const row = document.getElementById(`workerRow-${workerId}`);
+    const inputs = row.querySelectorAll('input[data-field]:not([type="hidden"])');
+    const deptInput = row.querySelector('input.dept-data');
+    
+    const updatedData = {
+        workerId: workerId
+    };
+    
+    inputs.forEach(input => {
+        const field = input.getAttribute('data-field');
+        updatedData[field] = input.value;
+    });
+    
+    // Handle departments - convert array back to comma-separated string
+    if (deptInput) {
+        try {
+            const deptArray = JSON.parse(deptInput.value || '[]');
+            updatedData['部署'] = deptArray.join(',');
+        } catch (e) {
+            updatedData['部署'] = '';
+        }
+    }
+    
+    try {
+        const res = await fetch(BASE_URL + "updateWorker", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updatedData)
+        });
+        
+        const result = await res.json();
+        
+        if (res.ok) {
+            alert("Worker updated successfully!");
+            loadWorkerTable();
+        } else {
+            alert(result.error || "Failed to update worker");
+        }
+    } catch (err) {
+        console.error("Error updating worker:", err);
+        alert("Error updating worker");
+    }
+};
+
+window.deleteWorker = async function(workerId) {
+    if (!confirm("Are you sure you want to delete this worker?")) return;
+    
+    try {
+        const res = await fetch(BASE_URL + "deleteWorker", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                workerId: workerId
+            })
+        });
+        
+        const result = await res.json();
+        
+        if (res.ok) {
+            alert("Worker deleted successfully!");
+            loadWorkerTable();
+        } else {
+            alert(result.error || "Failed to delete worker");
+        }
+    } catch (err) {
+        console.error("Error deleting worker:", err);
+        alert("Error deleting worker");
+    }
+};
+
+// ==================== WORKER SEARCH ====================
+
+window.searchWorkers = function() {
+    const searchTerm = document.getElementById('workerSearchInput').value.toLowerCase();
+    
+    if (!searchTerm) {
+        renderWorkerTable(allWorkers);
+        return;
+    }
+    
+    const filtered = allWorkers.filter(w => {
+        const name = (w.Name || '').toLowerCase();
+        const idNumber = (w['ID number'] || '').toLowerCase();
+        const dept = (w.部署 || '').toLowerCase();
+        
+        return name.includes(searchTerm) || 
+               idNumber.includes(searchTerm) || 
+               dept.includes(searchTerm);
+    });
+    
+    renderWorkerTable(filtered);
+};
+
+// Initialize worker search
+document.addEventListener('DOMContentLoaded', function() {
+    const workerSearchInput = document.getElementById('workerSearchInput');
+    if (workerSearchInput) {
+        workerSearchInput.addEventListener('input', searchWorkers);
+    }
+});

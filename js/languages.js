@@ -69,6 +69,12 @@ const translations = {
       factorySelection: "Factory Selection",
       loadingUsers: "Loading users...",
       accessDenied: "Access Denied",
+      adminMember: "Admin Member",
+      factoryMember: "Factory Member",
+      createNewWorker: "Create New Worker",
+      loadingWorkers: "Loading workers...",
+      departmentSelection: "Department Selection",
+      addFactory: "Add Factory",
       
       // Approvals
       approvalsTitle: "Data Approval System",
@@ -1080,6 +1086,12 @@ const translations = {
       factorySelection: "工場選択",
       loadingUsers: "ユーザーを読み込み中...",
       accessDenied: "アクセス拒否",
+      adminMember: "管理メンバー",
+      factoryMember: "工場メンバー",
+      createNewWorker: "新しい作業者を作成",
+      loadingWorkers: "作業者を読み込み中...",
+      departmentSelection: "部署選択",
+      addFactory: "工場を追加",
       
       // Approvals
       approvalsTitle: "データ承認システム",
