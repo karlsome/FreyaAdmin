@@ -61,6 +61,7 @@ const translations = {
       // User Management
       userManagementTitle: "User Management",
       searchUsers: "Search users...",
+      searchWorkers: "Search workers...",
       createNewUser: "Create New User",
       firstName: "First Name",
       lastName: "Last Name",
@@ -1078,6 +1079,7 @@ const translations = {
       // User Management
       userManagementTitle: "ユーザー管理",
       searchUsers: "ユーザーを検索...",
+      searchWorkers: "作業者を検索...",
       createNewUser: "新しいユーザーを作成",
       firstName: "名",
       lastName: "姓",

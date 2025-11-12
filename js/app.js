@@ -825,7 +825,7 @@ function loadPage(page) {
               <!-- Factory Member Tab Content -->
               <div id="factoryMemberContent" class="hidden">
                 <div class="mb-4 flex gap-4">
-                  <input type="text" id="workerSearchInput" placeholder="Search workers..." class="flex-1 border rounded px-4 py-2" />
+                  <input type="text" id="workerSearchInput" data-i18n-placeholder="searchWorkers" placeholder="Search workers..." class="flex-1 border rounded px-4 py-2" />
                   <button id="toggleCreateWorkerForm" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
                     <span data-i18n="createNewWorker">Create New Worker</span>
                   </button>
@@ -1440,6 +1440,14 @@ function loadPage(page) {
             
             loadUserTable();
             updateTabVisibility();
+            
+            // Initialize worker search
+            setTimeout(() => {
+              const workerSearchInput = document.getElementById('workerSearchInput');
+              if (workerSearchInput) {
+                workerSearchInput.addEventListener('input', searchWorkers);
+              }
+            }, 100);
           
           if (typeof applyLanguageEnhanced === 'function') {
             applyLanguageEnhanced();

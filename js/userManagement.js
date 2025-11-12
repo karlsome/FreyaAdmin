@@ -510,11 +510,3 @@ window.searchWorkers = function() {
     
     renderWorkerTable(filtered);
 };
-
-// Initialize worker search
-document.addEventListener('DOMContentLoaded', function() {
-    const workerSearchInput = document.getElementById('workerSearchInput');
-    if (workerSearchInput) {
-        workerSearchInput.addEventListener('input', searchWorkers);
-    }
-});
