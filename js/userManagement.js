@@ -1,3 +1,5 @@
+// allUsers is defined in app.js as a global variable
+
 async function loadUserTable() {
     try {
     const res = await fetch(BASE_URL + "queries", {
@@ -93,6 +95,25 @@ async function loadUserTable() {
 
     document.getElementById("userTableContainer").innerHTML = tableHTML;
 }
+
+// ==================== USER SEARCH ====================
+
+window.searchUsers = function() {
+    const searchTerm = document.getElementById('userSearchInput').value.toLowerCase();
+    
+    if (!searchTerm) {
+        renderUserTable(window.allUsers);
+        return;
+    }
+    
+    const filtered = window.allUsers.filter(u => {
+        const firstName = (u.firstName || '').toLowerCase();
+        const lastName = (u.lastName || '').toLowerCase();
+        return firstName.includes(searchTerm) || lastName.includes(searchTerm);
+    });
+    
+    renderUserTable(filtered);
+};
 
 // Factory tag management functions
 window.addFactoryTag = function(userId, factory) {

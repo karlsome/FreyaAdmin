@@ -764,9 +764,8 @@ function loadPage(page) {
           
               mainContent.innerHTML = `
              <div class="max-w-6xl mx-auto bg-white p-6 rounded shadow space-y-6">
-              <!-- Search and Button -->
-              <div class="flex justify-between items-center">
-                <input type="text" id="userSearchInput" data-i18n-placeholder="searchUsers" placeholder="Search users..." class="w-1/2 p-2 border rounded" />
+              <!-- Create User Button -->
+              <div class="flex justify-end items-center">
                 <button id="toggleCreateUserForm" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" data-i18n="createNewUser">Create New User</button>
               </div>
 
@@ -819,6 +818,9 @@ function loadPage(page) {
 
               <!-- Admin Member Tab Content -->
               <div id="adminMemberContent">
+                <div class="mb-4">
+                  <input type="text" id="userSearchInput" data-i18n-placeholder="searchUsers" placeholder="Search users..." class="w-full border rounded px-4 py-2" />
+                </div>
                 <div id="userTableContainer" data-i18n="loadingUsers">Loading users...</div>
               </div>
 
@@ -1047,7 +1049,8 @@ function loadPage(page) {
               });
             }
 
-            let allUsers = [];
+            // Make allUsers global so userManagement.js can access it
+            window.allUsers = [];
             let sortState = { column: null, direction: 1 };
             
             
@@ -1239,17 +1242,6 @@ function loadPage(page) {
               }
             };
             
-            document.getElementById("userSearchInput").addEventListener("input", (e) => {
-              const keyword = e.target.value.toLowerCase();
-              const filtered = allUsers.filter(u =>
-                u.firstName.toLowerCase().includes(keyword) ||
-                u.lastName.toLowerCase().includes(keyword) ||
-                u.email.toLowerCase().includes(keyword) ||
-                u.username.toLowerCase().includes(keyword)
-              );
-              renderUserTable(filtered);
-            });
-            
             // User table management functions with factory support
             async function loadUserTable() {
               try {
@@ -1264,8 +1256,8 @@ function loadPage(page) {
                   })
                 });
 
-                allUsers = await res.json();
-                renderUserTable(allUsers);
+                window.allUsers = await res.json();
+                renderUserTable(window.allUsers);
               } catch (err) {
                 console.error("Failed to load users:", err);
                 document.getElementById("userTableContainer").innerHTML = `<p class="text-red-600">Failed to load users</p>`;
@@ -1441,8 +1433,13 @@ function loadPage(page) {
             loadUserTable();
             updateTabVisibility();
             
-            // Initialize worker search
+            // Initialize search inputs
             setTimeout(() => {
+              const userSearchInput = document.getElementById('userSearchInput');
+              if (userSearchInput) {
+                userSearchInput.addEventListener('input', searchUsers);
+              }
+              
               const workerSearchInput = document.getElementById('workerSearchInput');
               if (workerSearchInput) {
                 workerSearchInput.addEventListener('input', searchWorkers);
