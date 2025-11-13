@@ -233,11 +233,13 @@ window.toggleEditFactoryField = function(userId, role) {
 };
 
 // ==================== TAB MANAGEMENT ====================
-let currentTab = 'admin';
-let allWorkers = [];
+let currentTab = localStorage.getItem('userManagementTab') || 'admin';
+window.allWorkers = []; // Make allWorkers global
 
 window.switchTab = function(tab) {
+    console.log('🔄 switchTab called with:', tab);
     currentTab = tab;
+    localStorage.setItem('userManagementTab', tab);
     
     // Update tab styling
     const adminTab = document.getElementById('adminMemberTab');
@@ -245,20 +247,35 @@ window.switchTab = function(tab) {
     const adminContent = document.getElementById('adminMemberContent');
     const factoryContent = document.getElementById('factoryMemberContent');
     
+    console.log('📊 Elements found:', {
+        adminTab: !!adminTab,
+        factoryTab: !!factoryTab,
+        adminContent: !!adminContent,
+        factoryContent: !!factoryContent
+    });
+    
     if (tab === 'admin') {
+        console.log('👤 Switching to Admin tab');
         adminTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-blue-600 text-blue-600';
         factoryTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300';
         adminContent.classList.remove('hidden');
         factoryContent.classList.add('hidden');
     } else {
+        console.log('🏭 Switching to Factory tab');
         adminTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300';
         factoryTab.className = 'px-6 py-3 text-sm font-medium border-b-2 border-blue-600 text-blue-600';
         adminContent.classList.add('hidden');
         factoryContent.classList.remove('hidden');
         
         // Load workers when switching to factory tab
-        if (allWorkers.length === 0) {
+        console.log('📦 Current allWorkers length:', window.allWorkers.length);
+        if (window.allWorkers.length === 0) {
+            console.log('⏳ Loading workers...');
             loadWorkerTable();
+        } else {
+            console.log('✅ Workers already loaded, count:', window.allWorkers.length);
+            console.log('🎨 Re-rendering existing workers...');
+            renderWorkerTable(window.allWorkers);
         }
     }
 };
@@ -280,7 +297,10 @@ function updateTabVisibility() {
 // ==================== WORKER TABLE MANAGEMENT ====================
 
 async function loadWorkerTable() {
+    console.log('🔧 loadWorkerTable() called');
+    console.log('🌐 BASE_URL:', BASE_URL);
     try {
+        console.log('📡 Fetching workers from workerDB...');
         const res = await fetch(BASE_URL + "queries", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -292,16 +312,23 @@ async function loadWorkerTable() {
             })
         });
 
-        allWorkers = await res.json();
-        renderWorkerTable(allWorkers);
+        console.log('📥 Response status:', res.status, res.ok);
+        window.allWorkers = await res.json();
+        console.log('✅ Workers loaded, count:', window.allWorkers.length);
+        renderWorkerTable(window.allWorkers);
     } catch (err) {
-        console.error("Failed to load workers:", err);
+        console.error("❌ Failed to load workers:", err);
         document.getElementById("workerTableContainer").innerHTML = `<p class="text-red-600">Failed to load workers</p>`;
     }
 }
 
 function renderWorkerTable(workers) {
+    console.log('🎨 renderWorkerTable() called with', workers.length, 'workers');
+    console.log('🔐 canViewFactoryTab():', canViewFactoryTab());
+    console.log('👤 currentUser.role:', currentUser?.role);
+    
     if (!canViewFactoryTab()) {
+        console.log('⛔ User cannot view factory tab');
         document.getElementById("workerTableContainer").innerHTML = "";
         return;
     }
@@ -394,7 +421,7 @@ window.sortWorkers = function(column) {
         workerSortState.direction = 1;
     }
     
-    const sorted = [...allWorkers].sort((a, b) => {
+    const sorted = [...window.allWorkers].sort((a, b) => {
         let valA = (a[column] || '').toString().toLowerCase();
         let valB = (b[column] || '').toString().toLowerCase();
         
@@ -591,11 +618,11 @@ window.searchWorkers = function() {
     const searchTerm = document.getElementById('workerSearchInput').value.toLowerCase();
     
     if (!searchTerm) {
-        renderWorkerTable(allWorkers);
+        renderWorkerTable(window.allWorkers);
         return;
     }
     
-    const filtered = allWorkers.filter(w => {
+    const filtered = window.allWorkers.filter(w => {
         const name = (w.Name || '').toLowerCase();
         const idNumber = (w['ID number'] || '').toLowerCase();
         const dept = (w.部署 || '').toLowerCase();

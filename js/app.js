@@ -1438,6 +1438,18 @@ function loadPage(page) {
             loadUserTable();
             updateTabVisibility();
             
+            // Restore last active tab and load data accordingly
+            setTimeout(() => {
+              const savedTab = localStorage.getItem('userManagementTab') || 'admin';
+              console.log('💾 Saved tab from localStorage:', savedTab);
+              if (savedTab === 'factory') {
+                console.log('🔄 Restoring factory tab...');
+                switchTab('factory');
+              } else {
+                console.log('📍 Staying on admin tab');
+              }
+            }, 200);
+            
             // Initialize search inputs
             setTimeout(() => {
               const userSearchInput = document.getElementById('userSearchInput');
