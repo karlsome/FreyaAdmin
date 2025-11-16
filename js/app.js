@@ -51,8 +51,8 @@ function setupNavigation() {
         
         button.addEventListener("click", function (e) {
           // Handle page navigation
-          document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active", "bg-gray-100", "text-gray-900"));
-          this.classList.add("active", "bg-gray-100", "text-gray-900");
+          document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active", "bg-gray-100", "dark:bg-gray-700", "text-gray-900", "dark:text-white"));
+          this.classList.add("active", "bg-gray-100", "dark:bg-gray-700", "text-gray-900", "dark:text-white");
           loadPage(page);
         });
       }
@@ -65,16 +65,16 @@ function createNavItem(page) {
   if (!icon || !label) return null;
 
   const li = document.createElement("li");
-  
+
   // Regular nav item
   const button = document.createElement("button");
-  button.className = "nav-btn flex items-center w-full p-2 text-gray-600 rounded-lg hover:bg-gray-100";
+  button.className = "nav-btn flex items-center w-full p-2 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200";
   button.setAttribute("data-page", page);
 
   button.innerHTML = `
     <i class="${icon} text-lg"></i>
     <span class="ml-3" data-i18n="${page}">${label}</span>
-    ${badge ? `<span class="ml-auto bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">${badge}</span>` : ""}
+    ${badge ? `<span class="ml-auto bg-red-500 dark:bg-red-600 text-white text-xs px-2 py-0.5 rounded-full">${badge}</span>` : ""}
   `;
 
   li.appendChild(button);

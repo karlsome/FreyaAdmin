@@ -4,8 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Login - Freya Admin v2.0</title>
-  <link href="https://cdn.tailwindcss.com" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+  </script>
 
   <!-- Remix Icons -->
   <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet" />
@@ -24,16 +28,22 @@
   
 
 </head>
-<body class="bg-gray-100 flex flex-col items-center justify-center h-screen">
+<body class="bg-gray-100 dark:bg-gray-900 flex flex-col items-center justify-center h-screen transition-colors duration-200">
 
   <!-- Logo and App Title -->
   <div class="text-center mb-6">
     <img src="src/logo.png" alt="Freya Logo" class="mx-auto mb-2" style="width: 560px;" />
-    <h1 class="text-xl font-bold text-gray-800">Freya Admin v2.0</h1>
-    
-    <!-- Language Selector -->
-    <div class="mt-4">
-      <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
+    <h1 class="text-xl font-bold text-gray-800 dark:text-white">Freya Admin v2.0</h1>
+
+    <!-- Theme and Language Controls -->
+    <div class="mt-4 flex items-center justify-center gap-3">
+      <!-- Theme Toggle Button -->
+      <button id="themeToggle" onclick="toggleTheme()" class="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors duration-200" aria-label="Toggle theme">
+        <i class="ri-moon-line text-xl"></i>
+      </button>
+
+      <!-- Language Selector -->
+      <select id="languageSelector" class="p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white text-sm transition-colors duration-200">
         <option value="en">English</option>
         <option value="ja">日本語</option>
       </select>
@@ -41,20 +51,20 @@
   </div>
 
   <!-- Login Form -->
-  <div class="bg-white p-8 rounded shadow-md w-full max-w-sm">
-    <h2 class="text-2xl font-bold mb-6 text-center" data-i18n="loginTitle">Login</h2>
+  <div class="bg-white dark:bg-gray-800 p-8 rounded shadow-md w-full max-w-sm transition-colors duration-200">
+    <h2 class="text-2xl font-bold mb-6 text-center text-gray-900 dark:text-white" data-i18n="loginTitle">Login</h2>
     <div class="mb-4">
-      <label class="block text-sm font-medium mb-1" data-i18n="username">Username</label>
-      <input type="text" id="username" class="w-full border p-2 rounded" data-i18n-placeholder="enterUsername" placeholder="Enter username" />
+      <label class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300" data-i18n="username">Username</label>
+      <input type="text" id="username" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white transition-colors duration-200" data-i18n-placeholder="enterUsername" placeholder="Enter username" />
     </div>
     <div class="mb-6">
-      <label class="block text-sm font-medium mb-1" data-i18n="password">Password</label>
-      <input type="password" id="password" class="w-full border p-2 rounded" data-i18n-placeholder="enterPassword" placeholder="Enter password" />
+      <label class="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300" data-i18n="password">Password</label>
+      <input type="password" id="password" class="w-full border dark:border-gray-600 p-2 rounded bg-white dark:bg-gray-700 dark:text-white transition-colors duration-200" data-i18n-placeholder="enterPassword" placeholder="Enter password" />
     </div>
-    <button onclick="login()" class="w-full bg-blue-600 text-white p-2 rounded hover:bg-blue-700" data-i18n="loginTitle">
+    <button onclick="login()" class="w-full bg-blue-600 dark:bg-blue-500 text-white p-2 rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200" data-i18n="loginTitle">
       Login
     </button>
-    <p id="loginError" class="text-red-500 text-sm mt-4 hidden" data-i18n="invalidCredentials">Invalid credentials</p>
+    <p id="loginError" class="text-red-500 dark:text-red-400 text-sm mt-4 hidden" data-i18n="invalidCredentials">Invalid credentials</p>
   </div>
 
   <script>
@@ -86,6 +96,7 @@
     }
   </script>
 
+<script src="js/theme.js"></script>
 <script src="js/languages.js"></script>
 <script src="js/charts.js"></script>
 

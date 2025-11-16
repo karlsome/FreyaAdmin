@@ -8,6 +8,11 @@
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+  </script>
 
   <!-- Remix Icons -->
   <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet" />
@@ -33,15 +38,15 @@
 
 </head>
 
-<body class="bg-gray-50">
+<body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
   <!-- Mobile Sidebar Overlay -->
-  <div id="sidebarOverlay" class="fixed inset-0 bg-black bg-opacity-30 hidden z-40 md:hidden" onclick="toggleSidebar()"></div>
+  <div id="sidebarOverlay" class="fixed inset-0 bg-black bg-opacity-30 dark:bg-opacity-60 hidden z-40 md:hidden" onclick="toggleSidebar()"></div>
 
   <div class="relative flex flex-col md:flex-row min-h-screen">
     <!-- Sidebar -->
     <aside id="sidebar"
-  class="fixed md:fixed md:top-0 md:left-0 md:h-screen w-64 bg-white border-r border-gray-200 flex flex-col transition-transform transform -translate-x-full md:translate-x-0 z-50">
-      <div class="p-4 border-b border-gray-200 flex justify-center items-center">
+  class="fixed md:fixed md:top-0 md:left-0 md:h-screen w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all transform -translate-x-full md:translate-x-0 z-50">
+      <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-center items-center">
         <a href="index.html">
           <img src="src/logo.png" alt="Sasaki Coating Logo" class="h-16" />
         </a>
@@ -53,17 +58,22 @@
 
     <!-- Main Content -->
     <main class="flex-1 flex flex-col overflow-y-auto md:ml-64 min-h-screen">
-      <header class="bg-white border-b border-gray-200 p-4">
+      <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 transition-colors duration-200">
         <div class="flex items-center justify-between">
           <div class="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
             <!-- Hamburger button for mobile -->
-            <button id="mobileMenuButton" class="md:hidden text-gray-600 focus:outline-none text-2xl">
+            <button id="mobileMenuButton" class="md:hidden text-gray-600 dark:text-gray-300 focus:outline-none text-2xl">
               <i class="ri-menu-line"></i>
             </button>
-            <input type="text" id="searchInput" class="w-full md:w-64 p-2 bg-gray-100 rounded-md" placeholder="Search..." />
-            
+            <input type="text" id="searchInput" class="w-full md:w-64 p-2 bg-gray-100 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-md transition-colors duration-200" placeholder="Search..." />
+
+            <!-- Theme Toggle Button -->
+            <button id="themeToggle" onclick="toggleTheme()" class="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors duration-200" aria-label="Toggle theme">
+              <i class="ri-moon-line text-xl"></i>
+            </button>
+
             <!-- Temporarily hided the language selector -->
-            <select id="languageSelector" class="p-2 border rounded bg-white text-sm">
+            <select id="languageSelector" class="p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white text-sm transition-colors duration-200">
               <option value="en">English</option>
               <option value="ja">日本語</option>
             </select>
@@ -79,12 +89,12 @@
               <img src="https://i.pravatar.cc/40" class="w-10 h-10 rounded-full border" alt="Profile" />
             </button>
 
-            <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-white border rounded shadow-lg z-50">
-              <div class="px-4 py-2 text-sm text-gray-700">
+            <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded shadow-lg z-50">
+              <div class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
                 <span data-i18n="role">Role</span>: <span id="userRole">admin</span>
               </div>
-              <div class="border-t"></div>
-              <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100" data-i18n="logout">
+              <div class="border-t dark:border-gray-700"></div>
+              <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-i18n="logout">
                 Logout
               </button>
             </div>
@@ -94,12 +104,16 @@
 
       <!-- Main Page Content -->
       <div id="mainContent" class="p-4 md:p-6 space-y-4">
-        <h2 class="text-2xl font-semibold">Loading...</h2>
+        <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">Loading...</h2>
       </div>
     </main>
   </div>
 
   <!-- JS Scripts -->
+  <!-- Theme Manager (must load early) -->
+  <script src="js/theme.js"></script>
+  <!-- Dark Mode Helper (must load after theme) -->
+  <script src="js/dark-mode-helper.js"></script>
   <!-- Enhanced Modal Stack Manager (must load first) -->
   <script src="js/enhanced-modal-stack.js"></script>
   <script src="js/languages.js"></script>
