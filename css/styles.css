@@ -13,8 +13,8 @@
 }
 
 .dark .tag-container {
-    border-color: #4b5563;
-    background-color: #374151;
+    border-color: #374151;
+    background-color: #1f2937;
 }
 
 .tag-container:focus-within {
@@ -23,8 +23,8 @@
 }
 
 .dark .tag-container:focus-within {
-    border-color: #60a5fa;
-    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+    border-color: #4b6bae;
+    box-shadow: 0 0 0 3px rgba(75, 107, 174, 0.15);
 }
 
 .tag {
@@ -57,11 +57,11 @@
 }
 
 .dark .tag-input {
-    color: white;
+    color: #e5e7eb;
 }
 
 .dark .tag-input::placeholder {
-    color: #9ca3af;
+    color: #6b7280;
 }
 
 /* Environmental data animations */
@@ -80,7 +80,7 @@
 }
 
 .dark .edit-tab-button:hover {
-    color: #d1d5db;
+    color: #9ca3af;
 }
 
 .edit-tab-button.active {
@@ -120,8 +120,8 @@
 }
 
 .dark .env-status-normal {
-    background-color: #14532d;
-    color: #86efac;
+    background-color: #1e3a2b;
+    color: #6fb893;
 }
 
 .env-status-warning {
@@ -130,8 +130,8 @@
 }
 
 .dark .env-status-warning {
-    background-color: #78350f;
-    color: #fcd34d;
+    background-color: #3d3020;
+    color: #d4a942;
 }
 
 .env-status-danger {
@@ -140,8 +140,8 @@
 }
 
 .dark .env-status-danger {
-    background-color: #7f1d1d;
-    color: #fca5a5;
+    background-color: #3d2020;
+    color: #d77676;
 }
 
 /* Responsive table improvements */
@@ -174,7 +174,7 @@
 }
 
 .dark .loading-state {
-    color: #9ca3af;
+    color: #7a8189;
 }
 
 .empty-state {
@@ -184,7 +184,7 @@
 }
 
 .dark .empty-state {
-    color: #9ca3af;
+    color: #7a8189;
 }
 
 /* Working hours column styling */
@@ -208,8 +208,8 @@
 }
 
 .dark .defect-rate-low {
-    background-color: #14532d;
-    color: #86efac;
+    background-color: #1e3a2b;
+    color: #6fb893;
 }
 
 .defect-rate-medium {
@@ -218,8 +218,8 @@
 }
 
 .dark .defect-rate-medium {
-    background-color: #78350f;
-    color: #fcd34d;
+    background-color: #3d3020;
+    color: #d4a942;
 }
 
 .defect-rate-high {
@@ -228,8 +228,8 @@
 }
 
 .dark .defect-rate-high {
-    background-color: #7f1d1d;
-    color: #fca5a5;
+    background-color: #3d2020;
+    color: #d77676;
 }
 
 /* Sensor display styling */
@@ -251,8 +251,8 @@
 }
 
 .dark .sensor-card:hover {
-    border-color: #60a5fa;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+    border-color: #4b6bae;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
 }
 
 /* Modal improvements */
@@ -267,8 +267,8 @@
 }
 
 .dark .sensor-status-ok {
-    background-color: #14532d;
-    color: #86efac;
+    background-color: #1e3a2b;
+    color: #6fb893;
 }
 
 .sensor-status-warning {
@@ -277,8 +277,8 @@
 }
 
 .dark .sensor-status-warning {
-    background-color: #78350f;
-    color: #fcd34d;
+    background-color: #3d3020;
+    color: #d4a942;
 }
 
 .sensor-status-error {
@@ -287,8 +287,8 @@
 }
 
 .dark .sensor-status-error {
-    background-color: #7f1d1d;
-    color: #fca5a5;
+    background-color: #3d2020;
+    color: #d77676;
 }
 
 /* Loading animation for sensor history */
@@ -326,6 +326,674 @@
 }
 
 .dark .sensor-history-card:hover {
-    background-color: #1f2937;
-    border-color: #60a5fa;
+    background-color: #252d3a;
+    border-color: #4b6bae;
+}
+
+/* ===== COMPREHENSIVE NIGHT MODE IMPROVEMENTS ===== */
+
+/* Card and container backgrounds */
+.dark .bg-white {
+    background-color: #1f2937 !important;
+}
+
+.dark .bg-gray-50 {
+    background-color: #111827 !important;
+}
+
+.dark .bg-gray-100 {
+    background-color: #1f2937 !important;
+}
+
+.dark .bg-gray-200 {
+    background-color: #374151 !important;
+}
+
+/* Muted status badge colors - Green */
+.dark .bg-green-50 {
+    background-color: #1e3a2b !important;
+}
+
+.dark .bg-green-100 {
+    background-color: #1e3a2b !important;
+}
+
+.dark .text-green-600,
+.dark .text-green-700,
+.dark .text-green-800,
+.dark .text-green-900 {
+    color: #6fb893 !important;
+}
+
+/* Muted status badge colors - Blue */
+.dark .bg-blue-50 {
+    background-color: #1e2d3d !important;
+}
+
+.dark .bg-blue-100 {
+    background-color: #1e2d3d !important;
+}
+
+.dark .text-blue-600,
+.dark .text-blue-700,
+.dark .text-blue-800,
+.dark .text-blue-900 {
+    color: #6b9fcf !important;
+}
+
+/* Muted status badge colors - Yellow */
+.dark .bg-yellow-50 {
+    background-color: #3d3020 !important;
+}
+
+.dark .bg-yellow-100 {
+    background-color: #3d3020 !important;
+}
+
+.dark .text-yellow-600,
+.dark .text-yellow-700,
+.dark .text-yellow-800,
+.dark .text-yellow-900 {
+    color: #d4a942 !important;
+}
+
+/* Muted status badge colors - Red */
+.dark .bg-red-50 {
+    background-color: #3d2020 !important;
+}
+
+.dark .bg-red-100 {
+    background-color: #3d2020 !important;
+}
+
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-800,
+.dark .text-red-900 {
+    color: #d77676 !important;
+}
+
+/* Muted status badge colors - Orange */
+.dark .bg-orange-100 {
+    background-color: #3d2820 !important;
+}
+
+.dark .text-orange-600,
+.dark .text-orange-700,
+.dark .text-orange-800 {
+    color: #d78f5d !important;
+}
+
+/* Muted status badge colors - Purple */
+.dark .bg-purple-100 {
+    background-color: #2d2040 !important;
+}
+
+.dark .text-purple-600,
+.dark .text-purple-700,
+.dark .text-purple-800 {
+    color: #a78fd7 !important;
+}
+
+/* Text colors for readability */
+.dark .text-gray-900 {
+    color: #e5e7eb !important;
+}
+
+.dark .text-gray-800 {
+    color: #d1d5db !important;
+}
+
+.dark .text-gray-700 {
+    color: #9ca3af !important;
+}
+
+.dark .text-gray-600 {
+    color: #7a8189 !important;
+}
+
+.dark .text-gray-500 {
+    color: #6b7280 !important;
+}
+
+/* Border colors */
+.dark .border-gray-100,
+.dark .border-gray-200 {
+    border-color: #374151 !important;
+}
+
+.dark .border-gray-300 {
+    border-color: #4b5563 !important;
+}
+
+.dark .border-gray-400 {
+    border-color: #6b7280 !important;
+}
+
+/* Hover effects - more subtle in night mode */
+.dark .hover\:bg-gray-50:hover {
+    background-color: #252d3a !important;
+}
+
+.dark .hover\:bg-gray-100:hover {
+    background-color: #2d3748 !important;
+}
+
+.dark .hover\:bg-blue-50:hover {
+    background-color: #263545 !important;
+}
+
+.dark .hover\:bg-blue-100:hover {
+    background-color: #263545 !important;
+}
+
+.dark .hover\:bg-green-100:hover {
+    background-color: #254232 !important;
+}
+
+.dark .hover\:bg-yellow-100:hover {
+    background-color: #453828 !important;
+}
+
+.dark .hover\:bg-red-100:hover {
+    background-color: #452828 !important;
+}
+
+/* Table specific night mode fixes */
+.dark table {
+    background-color: #1f2937 !important;
+}
+
+.dark thead {
+    background-color: #374151 !important;
+}
+
+.dark th {
+    color: #d1d5db !important;
+    border-color: #4b5563 !important;
+}
+
+.dark td {
+    color: #9ca3af !important;
+    border-color: #374151 !important;
+}
+
+.dark tr:hover {
+    background-color: #252d3a !important;
+}
+
+.dark tbody tr {
+    background-color: #1f2937 !important;
+}
+
+.dark tbody tr:nth-child(even) {
+    background-color: #1a2332 !important;
+}
+
+/* Input fields - better visibility at night */
+.dark input,
+.dark textarea,
+.dark select {
+    background-color: #1f2937 !important;
+    color: #e5e7eb !important;
+    border-color: #374151 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+    color: #6b7280 !important;
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+    border-color: #4b6bae !important;
+    outline-color: #4b6bae !important;
+}
+
+/* Button styles */
+.dark button {
+    border-color: #374151 !important;
+}
+
+.dark button:hover {
+    background-color: #2d3748 !important;
+}
+
+/* Specific button color overrides for primary actions */
+.dark .bg-blue-500,
+.dark .bg-blue-600 {
+    background-color: #4b6bae !important;
+}
+
+.dark .bg-blue-500:hover,
+.dark .bg-blue-600:hover {
+    background-color: #5a7abc !important;
+}
+
+.dark .bg-green-500,
+.dark .bg-green-600 {
+    background-color: #5a9677 !important;
+}
+
+.dark .bg-green-500:hover,
+.dark .bg-green-600:hover {
+    background-color: #6ba585 !important;
+}
+
+.dark .bg-red-500,
+.dark .bg-red-600 {
+    background-color: #b86060 !important;
+}
+
+.dark .bg-red-500:hover,
+.dark .bg-red-600:hover {
+    background-color: #c77070 !important;
+}
+
+/* Modal and overlay improvements */
+.dark .modal,
+.dark [class*="modal"] {
+    background-color: #1f2937 !important;
+}
+
+.dark .backdrop-blur {
+    backdrop-filter: blur(8px);
+}
+
+/* Dropdown and select menus */
+.dark .dropdown,
+.dark [class*="dropdown"] {
+    background-color: #1f2937 !important;
+    border-color: #374151 !important;
+}
+
+/* Shadow adjustments for night mode */
+.dark .shadow {
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 1px 2px 0 rgba(0, 0, 0, 0.4) !important;
+}
+
+.dark .shadow-md {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.4) !important;
+}
+
+.dark .shadow-lg {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4) !important;
+}
+
+.dark .shadow-xl {
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Badge and tag improvements */
+.dark .badge,
+.dark [class*="badge"] {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Chart and data visualization containers */
+.dark [id*="chart"],
+.dark [class*="chart"] {
+    background-color: #1f2937 !important;
+}
+
+/* Pagination controls */
+.dark .pagination button {
+    background-color: #1f2937 !important;
+    color: #9ca3af !important;
+}
+
+.dark .pagination button:hover:not(:disabled) {
+    background-color: #374151 !important;
+}
+
+.dark .pagination button.active,
+.dark .pagination button[aria-current="page"] {
+    background-color: #4b6bae !important;
+    color: #e5e7eb !important;
+}
+
+.dark .pagination button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Divider lines */
+.dark hr,
+.dark .divider {
+    border-color: #374151 !important;
+}
+
+/* Code and monospace text */
+.dark code,
+.dark pre {
+    background-color: #1a2332 !important;
+    color: #9ca3af !important;
+}
+
+/* Loading spinners and animations */
+.dark .spinner,
+.dark .loading {
+    border-color: #374151 !important;
+    border-top-color: #6b9fcf !important;
+}
+
+/* Toast/notification backgrounds */
+.dark .toast,
+.dark .notification {
+    background-color: #374151 !important;
+    color: #e5e7eb !important;
+    border: 1px solid #4b5563;
+}
+
+/* Scrollbar styling for dark mode */
+.dark ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.dark ::-webkit-scrollbar-track {
+    background: #1f2937;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 5px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* Factory overview cards specific styling */
+.dark .factory-card {
+    background-color: #1f2937 !important;
+    border-color: #374151 !important;
+}
+
+.dark .factory-card:hover {
+    background-color: #252d3a !important;
+    border-color: #4b5563 !important;
+}
+
+/* Stats and metrics cards */
+.dark .stat-card,
+.dark .metric-card {
+    background-color: #1f2937 !important;
+    border-color: #374151 !important;
+}
+
+/* Brown/tan temperature indicators - muted for night */
+.dark [style*="background: brown"],
+.dark [style*="background-color: brown"],
+.dark [class*="bg-brown"] {
+    background-color: #4a3f35 !important;
+}
+
+.dark [style*="color: brown"] {
+    color: #b89968 !important;
+}
+
+/* Ensure all white text on colored backgrounds has good contrast */
+.dark .text-white {
+    color: #f3f4f6 !important;
+}
+
+/* Link colors */
+.dark a {
+    color: #7fa8d6 !important;
+}
+
+.dark a:hover {
+    color: #8fb5dc !important;
+}
+
+/* ===== SPECIFIC COMPONENT FIXES ===== */
+
+/* Factory overview cards in dashboard */
+.dark .factory-overview-card,
+.dark [class*="factory"] {
+    background-color: #1f2937 !important;
+}
+
+/* User management table fixes */
+.dark .user-table,
+.dark [id*="userTable"],
+.dark [class*="userTable"] {
+    background-color: #1f2937 !important;
+}
+
+.dark .user-table th,
+.dark [id*="userTable"] th {
+    background-color: #374151 !important;
+    color: #d1d5db !important;
+}
+
+.dark .user-table td,
+.dark [id*="userTable"] td {
+    color: #9ca3af !important;
+}
+
+/* Inventory page specific fixes */
+.dark [id*="inventoryTable"],
+.dark [class*="inventory"] {
+    background-color: #1f2937 !important;
+    color: #9ca3af !important;
+}
+
+/* Approval cards and buttons */
+.dark .approval-card {
+    background-color: #1f2937 !important;
+    border-color: #374151 !important;
+}
+
+/* Analytics and chart containers */
+.dark .analytics-container,
+.dark [id*="analytics"],
+.dark [class*="chart-container"] {
+    background-color: #1f2937 !important;
+}
+
+/* Dropdown menus */
+.dark .dropdown-menu,
+.dark select option {
+    background-color: #1f2937 !important;
+    color: #e5e7eb !important;
+}
+
+/* Sidebar navigation */
+.dark aside,
+.dark .sidebar {
+    background-color: #1a2332 !important;
+}
+
+.dark .nav-btn,
+.dark .sidebar button {
+    color: #9ca3af !important;
+}
+
+.dark .nav-btn:hover,
+.dark .sidebar button:hover {
+    background-color: #2d3748 !important;
+    color: #e5e7eb !important;
+}
+
+.dark .nav-btn.active {
+    background-color: #374151 !important;
+    color: #e5e7eb !important;
+}
+
+/* Header bar */
+.dark header {
+    background-color: #1a2332 !important;
+    border-color: #374151 !important;
+}
+
+/* Search input in header */
+.dark #searchInput {
+    background-color: #374151 !important;
+    color: #e5e7eb !important;
+    border-color: #4b5563 !important;
+}
+
+.dark #searchInput::placeholder {
+    color: #6b7280 !important;
+}
+
+/* Language selector */
+.dark #languageSelector {
+    background-color: #374151 !important;
+    color: #e5e7eb !important;
+    border-color: #4b5563 !important;
+}
+
+/* Summary cards at top of pages */
+.dark [class*="summary-card"],
+.dark [class*="kpi-card"],
+.dark [class*="stat-card"] {
+    background-color: #1f2937 !important;
+    border-color: #374151 !important;
+}
+
+/* Form labels */
+.dark label {
+    color: #d1d5db !important;
+}
+
+/* Disabled elements */
+.dark button:disabled,
+.dark input:disabled,
+.dark select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    color: #6b7280 !important;
+}
+
+/* Alert and notification boxes */
+.dark .alert,
+.dark [class*="alert"] {
+    border-color: #374151 !important;
+}
+
+.dark .alert-success,
+.dark [class*="alert-success"] {
+    background-color: #1e3a2b !important;
+    color: #6fb893 !important;
+}
+
+.dark .alert-warning,
+.dark [class*="alert-warning"] {
+    background-color: #3d3020 !important;
+    color: #d4a942 !important;
+}
+
+.dark .alert-error,
+.dark [class*="alert-error"] {
+    background-color: #3d2020 !important;
+    color: #d77676 !important;
+}
+
+.dark .alert-info,
+.dark [class*="alert-info"] {
+    background-color: #1e2d3d !important;
+    color: #6b9fcf !important;
+}
+
+/* Data table alternating rows */
+.dark table tbody tr:nth-child(odd) {
+    background-color: #1a2332 !important;
+}
+
+.dark table tbody tr:nth-child(even) {
+    background-color: #1f2937 !important;
+}
+
+/* Focus rings - softer in dark mode */
+.dark *:focus {
+    outline-color: #4b6bae !important;
+}
+
+.dark *:focus-visible {
+    outline-color: #4b6bae !important;
+    outline-width: 2px;
+    outline-style: solid;
+}
+
+/* Remove any forced white backgrounds */
+.dark [style*="background-color: white"],
+.dark [style*="background-color:#fff"],
+.dark [style*="background-color: #fff"],
+.dark [style*="background-color: #ffffff"],
+.dark [style*="background: white"],
+.dark [style*="background:#fff"],
+.dark [style*="background: #fff"] {
+    background-color: #1f2937 !important;
+}
+
+/* Remove any forced black text on white */
+.dark [style*="color: black"],
+.dark [style*="color:#000"],
+.dark [style*="color: #000"],
+.dark [style*="color: #000000"] {
+    color: #e5e7eb !important;
+}
+
+/* Placeholder improvements for all inputs */
+.dark input::placeholder,
+.dark textarea::placeholder {
+    color: #6b7280 !important;
+    opacity: 1;
+}
+
+/* Select dropdowns - arrow visibility */
+.dark select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+}
+
+/* Improve checkbox and radio visibility */
+.dark input[type="checkbox"],
+.dark input[type="radio"] {
+    border-color: #6b7280 !important;
+    background-color: #374151 !important;
+}
+
+.dark input[type="checkbox"]:checked,
+.dark input[type="radio"]:checked {
+    background-color: #4b6bae !important;
+    border-color: #4b6bae !important;
+}
+
+/* Loading skeletons */
+.dark .skeleton,
+.dark [class*="skeleton"],
+.dark .animate-pulse {
+    background-color: #374151 !important;
+}
+
+/* Better visibility for icons */
+.dark i,
+.dark [class*="ri-"] {
+    color: inherit !important;
+}
+
+/* Improve contrast for small text */
+.dark .text-xs,
+.dark .text-sm {
+    color: #9ca3af !important;
+}
+
+/* Make sure primary buttons are visible */
+.dark button[type="submit"],
+.dark .btn-primary {
+    background-color: #4b6bae !important;
+    color: #f3f4f6 !important;
+}
+
+.dark button[type="submit"]:hover,
+.dark .btn-primary:hover {
+    background-color: #5a7abc !important;
 }

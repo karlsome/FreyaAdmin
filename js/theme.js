@@ -41,6 +41,13 @@ class ThemeManager {
 
     localStorage.setItem(this.storageKey, theme);
     this.updateToggleButton();
+    
+    // Trigger dark mode helper to re-enhance content if available
+    if (typeof darkModeHelper !== 'undefined' && darkModeHelper) {
+      setTimeout(() => {
+        darkModeHelper.enhanceExistingContent();
+      }, 50);
+    }
   }
 
   toggle() {
