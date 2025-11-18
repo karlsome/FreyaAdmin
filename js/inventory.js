@@ -163,31 +163,32 @@ function renderInventoryTable() {
     }
     
     const tableHTML = `
-        <table class="w-full text-sm">
+        <div class="overflow-x-auto -mx-4 sm:mx-0">
+        <table class="w-full text-xs sm:text-sm">
             <thead class="bg-gray-50 border-b">
                 <tr>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('品番')">
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('品番')">
                         ${t('partNumber')} ${getInventorySortArrow('品番')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('背番号')">
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('背番号')">
                         ${t('serialNumber')} ${getInventorySortArrow('背番号')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('工場')">
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('工場')">
                         ${t('factory')} ${getInventorySortArrow('工場')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('physicalQuantity')">
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('physicalQuantity')">
                         ${t('physicalStock')} ${getInventorySortArrow('physicalQuantity')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('reservedQuantity')">
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('reservedQuantity')">
                         ${t('reservedStock')} ${getInventorySortArrow('reservedQuantity')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('availableQuantity')">
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('availableQuantity')">
                         ${t('availableStock')} ${getInventorySortArrow('availableQuantity')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('lastUpdated')">
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('lastUpdated')">
                         ${t('lastUpdated')} ${getInventorySortArrow('lastUpdated')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('actions')}</th>
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700">${t('actions')}</th>
                 </tr>
             </thead>
             <tbody>
@@ -197,38 +198,38 @@ function renderInventoryTable() {
                     
                     return `
                         <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openInventoryTransactions('${item.背番号}')">
-                            <td class="px-4 py-3 font-medium text-blue-600">
+                            <td class="px-2 sm:px-4 py-2 sm:py-3 font-medium text-blue-600">
                                 <span class="hover:underline">
                                     ${item.品番}
                                 </span>
                             </td>
-                            <td class="px-4 py-3 font-medium">
+                            <td class="px-2 sm:px-4 py-2 sm:py-3 font-medium">
                                 ${item.背番号}
                             </td>
-                            <td class="px-4 py-3 text-gray-700">
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                    <i class="ri-building-line mr-1"></i>
+                            <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-700">
+                                <span class="inline-flex items-center px-1.5 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium bg-blue-100 text-blue-800">
+                                    <i class="ri-building-line mr-1 text-xs"></i>
                                     ${item.工場 || '-'}
                                 </span>
                             </td>
-                            <td class="px-4 py-3">
+                            <td class="px-2 sm:px-4 py-2 sm:py-3">
                                 <span class="text-green-600 font-medium">${item.physicalQuantity}</span>
                             </td>
-                            <td class="px-4 py-3">
+                            <td class="px-2 sm:px-4 py-2 sm:py-3">
                                 <span class="text-yellow-600 font-medium">${item.reservedQuantity}</span>
                             </td>
-                            <td class="px-4 py-3">
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${availabilityStatus.badgeClass}">
-                                    <i class="${availabilityStatus.icon} mr-1"></i>
+                            <td class="px-2 sm:px-4 py-2 sm:py-3">
+                                <span class="inline-flex items-center px-1.5 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${availabilityStatus.badgeClass}">
+                                    <i class="${availabilityStatus.icon} mr-1 text-xs"></i>
                                     ${item.availableQuantity}
                                 </span>
                             </td>
-                            <td class="px-4 py-3 text-gray-600">
+                            <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-600 whitespace-nowrap">
                                 ${lastUpdated}
                             </td>
-                            <td class="px-4 py-3" onclick="event.stopPropagation()">
+                            <td class="px-2 sm:px-4 py-2 sm:py-3" onclick="event.stopPropagation()">
                                 <button onclick="openInventoryTransactions('${item.背番号}')" class="text-blue-600 hover:text-blue-800" title="${t('viewTransactions')}">
-                                    <i class="ri-history-line"></i>
+                                    <i class="ri-history-line text-base sm:text-lg"></i>
                                 </button>
                             </td>
                         </tr>
@@ -236,6 +237,7 @@ function renderInventoryTable() {
                 }).join('')}
             </tbody>
         </table>
+        </div>
     `;
     
     container.innerHTML = tableHTML;

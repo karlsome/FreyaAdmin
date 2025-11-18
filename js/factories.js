@@ -1282,23 +1282,23 @@ async function showFactorySensorHistoryModal(factoryName) {
     modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
     
     modal.innerHTML = `
-        <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
-            <div class="px-6 py-4 border-b border-gray-200">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <h3 class="text-lg font-semibold" data-i18n="temperatureHistory">温度履歴</h3>
-                        <p class="text-sm text-gray-600">${factoryName} - <span data-i18n="allSensors">全センサー</span></p>
+        <div class="bg-white rounded-lg shadow-lg w-full h-full sm:max-w-4xl sm:h-auto sm:mx-4 sm:max-h-[90vh] sm:rounded-lg overflow-hidden">
+            <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+                <div class="flex justify-between items-center gap-2">
+                    <div class="min-w-0">
+                        <h3 class="text-base sm:text-lg font-semibold truncate" data-i18n="temperatureHistory">温度履歴</h3>
+                        <p class="text-xs sm:text-sm text-gray-600 truncate">${factoryName} - <span data-i18n="allSensors">全センサー</span></p>
                     </div>
-                    <button onclick="closeFactorySensorHistoryModal()" class="text-gray-400 hover:text-gray-600">
-                        <i class="ri-close-line text-xl"></i>
+                    <button onclick="closeFactorySensorHistoryModal()" class="text-gray-400 hover:text-gray-600 flex-shrink-0">
+                        <i class="ri-close-line text-xl sm:text-2xl"></i>
                     </button>
                 </div>
             </div>
-            
-            <div class="p-6">
+
+            <div class="p-4 sm:p-6 overflow-y-auto" style="max-height: calc(100vh - 80px); sm:max-height: calc(90vh - 100px);">
                 <div class="text-center py-4">
                     <i class="ri-loader-4-line animate-spin text-xl"></i>
-                    <p class="text-gray-500 mt-2" data-i18n="loadingSensorData">センサーデータを読み込み中...</p>
+                    <p class="text-gray-500 mt-2 text-sm" data-i18n="loadingSensorData">センサーデータを読み込み中...</p>
                 </div>
             </div>
         </div>
@@ -1347,42 +1347,42 @@ async function showFactorySensorHistoryModal(factoryName) {
         const sensors = await res.json();
         
         if (!sensors || sensors.length === 0) {
-            modal.querySelector('.p-6').innerHTML = `
+            modal.querySelector('.p-4, .p-6, .sm\\:p-6').innerHTML = `
                 <div class="text-center py-8">
                     <i class="ri-sensor-line text-4xl text-gray-300 mb-4"></i>
-                    <p class="text-gray-500" data-i18n="noDataLast30Days">過去30日間にセンサーデータがありません</p>
+                    <p class="text-gray-500 text-sm" data-i18n="noDataLast30Days">過去30日間にセンサーデータがありません</p>
                 </div>
             `;
-            
+
             // Apply translations to the new content
             if (window.translateDynamicContent) {
-                window.translateDynamicContent(modal.querySelector('.p-6'));
+                window.translateDynamicContent(modal.querySelector('.p-4, .p-6, .sm\\:p-6'));
             }
             return;
         }
-        
-        modal.querySelector('.p-6').innerHTML = `
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+        modal.querySelector('.p-4, .p-6, .sm\\:p-6').innerHTML = `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 ${sensors.map(sensor => `
-                    <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
+                    <div class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
                          onclick="event.stopPropagation(); closeFactorySensorHistoryModal(); showSensorHistoryModal('${sensor._id}', '${factoryName}')">
-                        <div class="flex justify-between items-start mb-3">
-                            <div>
-                                <h4 class="font-semibold text-gray-900" data-i18n="sensor">センサー</h4>
-                                <p class="text-xs text-gray-500 font-mono">${sensor._id}</p>
+                        <div class="flex justify-between items-start mb-3 gap-2">
+                            <div class="min-w-0">
+                                <h4 class="font-semibold text-gray-900 text-sm sm:text-base" data-i18n="sensor">センサー</h4>
+                                <p class="text-xs text-gray-500 font-mono truncate">${sensor._id}</p>
                             </div>
-                            <span class="px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-medium">
+                            <span class="px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-medium flex-shrink-0">
                                 ${sensor.count}<span data-i18n="records">件</span>
                             </span>
                         </div>
-                        
+
                         <div class="text-center p-3 bg-gray-50 rounded">
-                            <div class="text-sm font-bold text-gray-700">
+                            <div class="text-sm sm:text-base font-bold text-gray-700">
                                 ${parseFloat(sensor.latestReading.Temperature.replace('°C', '').trim())}°C
                             </div>
                             <div class="text-xs text-gray-500 mt-1" data-i18n="latestTemperature">最新温度</div>
                         </div>
-                        
+
                         <div class="text-xs text-blue-600 text-center mt-3">
                             <i class="ri-history-line mr-1"></i>
                             <span data-i18n="clickForHistory">クリックして詳細履歴表示</span>
@@ -1390,8 +1390,8 @@ async function showFactorySensorHistoryModal(factoryName) {
                     </div>
                 `).join('')}
             </div>
-            
-            <div class="mt-6 text-xs text-gray-500 text-center" data-i18n="last30Days">
+
+            <div class="mt-4 sm:mt-6 text-xs text-gray-500 text-center" data-i18n="last30Days">
                 過去30日間のセンサーデータ
             </div>
         `;
@@ -1471,17 +1471,17 @@ function showSensorModal(factoryName, sensorData) {
     };
     
     modal.innerHTML = `
-        <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
-            <div class="px-6 py-4 border-b border-gray-200">
+        <div class="bg-white rounded-lg shadow-lg w-full h-full sm:max-w-4xl sm:h-auto sm:mx-4 sm:max-h-[90vh] sm:rounded-lg overflow-hidden">
+            <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
                 <div class="flex justify-between items-center">
-                    <h3 class="text-lg font-semibold">${factoryName} - <span data-i18n="sensorDetails">物理センサー詳細</span></h3>
-                    <button onclick="closeSensorModal()" class="text-gray-400 hover:text-gray-600">
-                        <i class="ri-close-line text-xl"></i>
+                    <h3 class="text-base sm:text-lg font-semibold truncate pr-2">${factoryName} - <span data-i18n="sensorDetails">物理センサー詳細</span></h3>
+                    <button onclick="closeSensorModal()" class="text-gray-400 hover:text-gray-600 flex-shrink-0">
+                        <i class="ri-close-line text-xl sm:text-2xl"></i>
                     </button>
                 </div>
             </div>
-            
-            <div class="p-6 overflow-y-auto" style="max-height: calc(90vh - 120px);">
+
+            <div class="p-4 sm:p-6 overflow-y-auto" style="max-height: calc(100vh - 60px); sm:max-height: calc(90vh - 120px);">
                 ${sensorData.sensors.length === 0 ? `
                     <div class="text-center py-8">
                         <i class="ri-sensor-line text-4xl text-gray-300 mb-4"></i>
@@ -1489,63 +1489,63 @@ function showSensorModal(factoryName, sensorData) {
                     </div>
                 ` : `
                     <!-- Summary Stats -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <div class="bg-blue-50 p-4 rounded-lg text-center">
-                            <div class="text-2xl font-bold text-blue-600">${sensorData.sensorCount}</div>
-                            <div class="text-sm text-blue-600" data-i18n="activeSensors">アクティブセンサー</div>
+                    <div class="grid grid-cols-3 gap-2 sm:gap-4 mb-4 sm:mb-6">
+                        <div class="bg-blue-50 p-3 sm:p-4 rounded-lg text-center">
+                            <div class="text-xl sm:text-2xl font-bold text-blue-600">${sensorData.sensorCount}</div>
+                            <div class="text-xs sm:text-sm text-blue-600" data-i18n="activeSensors">アクティブセンサー</div>
                         </div>
-                        <div class="bg-red-50 p-4 rounded-lg text-center">
-                            <div class="text-2xl font-bold text-red-600">
+                        <div class="bg-red-50 p-3 sm:p-4 rounded-lg text-center">
+                            <div class="text-xl sm:text-2xl font-bold text-red-600">
                                 ${sensorData.highestTemp ? sensorData.highestTemp + '°C' : 'N/A'}
                             </div>
-                            <div class="text-sm text-red-600" data-i18n="highestTemp">最高温度</div>
+                            <div class="text-xs sm:text-sm text-red-600" data-i18n="highestTemp">最高温度</div>
                         </div>
-                        <div class="bg-green-50 p-4 rounded-lg text-center">
-                            <div class="text-2xl font-bold text-green-600">
+                        <div class="bg-green-50 p-3 sm:p-4 rounded-lg text-center">
+                            <div class="text-xl sm:text-2xl font-bold text-green-600">
                                 ${sensorData.averageHumidity ? sensorData.averageHumidity + '%' : 'N/A'}
                             </div>
-                            <div class="text-sm text-green-600" data-i18n="averageHumidity">平均湿度</div>
+                            <div class="text-xs sm:text-sm text-green-600" data-i18n="averageHumidity">平均湿度</div>
                         </div>
                     </div>
-                    
+
                     <!-- Sensor List -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 gap-3 sm:gap-4">
                         ${sensorData.sensors.map(sensor => `
-                            <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
+                            <div class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
                                  onclick="showSensorHistoryModal('${sensor.deviceId}', '${factoryName}')">
-                                <div class="flex justify-between items-start mb-3">
-                                    <div>
-                                        <h4 class="font-semibold text-gray-900" data-i18n="sensor">センサー</h4>
-                                        <p class="text-xs text-gray-500 font-mono">${sensor.deviceId}</p>
+                                <div class="flex justify-between items-start mb-3 gap-2">
+                                    <div class="min-w-0">
+                                        <h4 class="font-semibold text-gray-900 text-sm sm:text-base" data-i18n="sensor">センサー</h4>
+                                        <p class="text-xs text-gray-500 font-mono truncate">${sensor.deviceId}</p>
                                     </div>
-                                    <span class="px-2 py-1 rounded-full text-xs font-medium ${getSensorStatusColor(sensor.status)}">
+                                    <span class="px-2 py-1 rounded-full text-xs font-medium ${getSensorStatusColor(sensor.status)} flex-shrink-0">
                                         ${sensor.status}
                                     </span>
                                 </div>
-                                
-                                <div class="grid grid-cols-2 gap-4 mb-3">
-                                    <div class="text-center p-3 bg-orange-50 rounded">
+
+                                <div class="grid grid-cols-2 gap-2 sm:gap-4 mb-3">
+                                    <div class="text-center p-2 sm:p-3 bg-orange-50 rounded">
                                         <div class="flex items-center justify-center mb-1">
                                             <i class="ri-temp-hot-line text-orange-600 mr-1"></i>
                                         </div>
-                                        <div class="text-lg font-bold text-orange-600">${sensor.temperature}°C</div>
-                                        <div class="text-xs text-gray-600" data-i18n="temperature">温度</div>
+                                        <div class="text-base sm:text-lg font-bold text-orange-600">${sensor.temperature}°C</div>
+                                        <div class="text-[10px] sm:text-xs text-gray-600" data-i18n="temperature">温度</div>
                                     </div>
-                                    
-                                    <div class="text-center p-3 bg-blue-50 rounded">
+
+                                    <div class="text-center p-2 sm:p-3 bg-blue-50 rounded">
                                         <div class="flex items-center justify-center mb-1">
                                             <i class="ri-drop-line text-blue-600 mr-1"></i>
                                         </div>
-                                        <div class="text-lg font-bold text-blue-600">${sensor.humidity}%</div>
-                                        <div class="text-xs text-gray-600" data-i18n="humidity">湿度</div>
+                                        <div class="text-base sm:text-lg font-bold text-blue-600">${sensor.humidity}%</div>
+                                        <div class="text-[10px] sm:text-xs text-gray-600" data-i18n="humidity">湿度</div>
                                     </div>
                                 </div>
-                                
+
                                 <div class="text-xs text-gray-500 text-center">
                                     <i class="ri-time-line mr-1"></i>
                                     <span data-i18n="lastUpdate">最終更新</span>: ${formatTime(sensor.lastUpdate)}
                                 </div>
-                                
+
                                 <div class="text-xs text-blue-600 text-center mt-2">
                                     <i class="ri-history-line mr-1"></i>
                                     <span data-i18n="clickForHistory">クリックして詳細履歴表示</span>
@@ -2856,11 +2856,11 @@ async function renderFactoryCards() {
   
         const isClickable = role !== "member"; // All roles except member can click
         return `
-          <div 
-            class="${isClickable ? "cursor-pointer hover:shadow-md" : "opacity-100 cursor-not-allowed"} bg-white p-6 rounded-lg shadow border transition"
+          <div
+            class="${isClickable ? "cursor-pointer hover:shadow-md" : "opacity-100 cursor-not-allowed"} bg-white p-4 sm:p-6 rounded-lg shadow border transition"
             ${isClickable ? `onclick="loadFactoryPage('${factory}')"` : ""}
           >
-            <h4 class="text-lg font-bold mb-3">${factory}</h4>
+            <h4 class="text-base sm:text-lg font-bold mb-3">${factory}</h4>
             
             <!-- Production Data -->
             <div class="mb-4 pb-3 border-b border-gray-200">
@@ -2890,32 +2890,32 @@ async function renderFactoryCards() {
               </div>
               
               <!-- Weather-based Environmental Data -->
-              <div class="grid grid-cols-3 gap-2 text-xs">
-                <div class="text-center p-2 rounded ${tempStatus.bgColor}" title="${tempStatus.message} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('temperatureRange') : '18-26°C'})">
+              <div class="grid grid-cols-3 gap-1 sm:gap-2 text-xs">
+                <div class="text-center p-1.5 sm:p-2 rounded ${tempStatus.bgColor}" title="${tempStatus.message} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('temperatureRange') : '18-26°C'})">
                   <div class="flex items-center justify-center mb-1">
-                    <i class="ri-temp-hot-line mr-1"></i>
+                    <i class="ri-temp-hot-line mr-1 text-sm sm:text-base"></i>
                     ${tempStatus.status !== 'normal' ? `<i class="${tempStatus.icon} text-xs ml-1"></i>` : ''}
                   </div>
-                  <div class="font-semibold ${tempStatus.color}">${envData.temperature}°C</div>
-                  <div class="text-gray-600" data-i18n="temperature">気温</div>
+                  <div class="font-semibold ${tempStatus.color} text-xs sm:text-sm">${envData.temperature}°C</div>
+                  <div class="text-gray-600 text-[10px] sm:text-xs" data-i18n="temperature">気温</div>
                 </div>
-                
-                <div class="text-center p-2 rounded ${humidityStatus.bgColor}" title="${humidityStatus.message} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('humidityRange') : '40-60%'})">
+
+                <div class="text-center p-1.5 sm:p-2 rounded ${humidityStatus.bgColor}" title="${humidityStatus.message} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('humidityRange') : '40-60%'})">
                   <div class="flex items-center justify-center mb-1">
-                    <i class="ri-drop-line mr-1"></i>
+                    <i class="ri-drop-line mr-1 text-sm sm:text-base"></i>
                     ${humidityStatus.status !== 'normal' ? `<i class="${humidityStatus.icon} text-xs ml-1"></i>` : ''}
                   </div>
-                  <div class="font-semibold ${humidityStatus.color}">${envData.humidity}%</div>
-                  <div class="text-gray-600" data-i18n="humidity">外気湿度</div>
+                  <div class="font-semibold ${humidityStatus.color} text-xs sm:text-sm">${envData.humidity}%</div>
+                  <div class="text-gray-600 text-[10px] sm:text-xs" data-i18n="humidity">外気湿度</div>
                 </div>
-                
-                <div class="text-center p-2 rounded ${co2Status.bgColor}" title="${co2Status.message} (${window.t ? window.t('co2Standard') : '<1000ppm'})">
+
+                <div class="text-center p-1.5 sm:p-2 rounded ${co2Status.bgColor}" title="${co2Status.message} (${window.t ? window.t('co2Standard') : '<1000ppm'})">
                   <div class="flex items-center justify-center mb-1">
-                    <i class="ri-leaf-line mr-1"></i>
+                    <i class="ri-leaf-line mr-1 text-sm sm:text-base"></i>
                     ${co2Status.status !== 'normal' ? `<i class="${co2Status.icon} text-xs ml-1"></i>` : ''}
                   </div>
-                  <div class="font-semibold ${co2Status.color}">${envData.co2}</div>
-                  <div class="text-gray-600" data-i18n="co2">CO2</div>
+                  <div class="font-semibold ${co2Status.color} text-xs sm:text-sm">${envData.co2}</div>
+                  <div class="text-gray-600 text-[10px] sm:text-xs" data-i18n="co2">CO2</div>
                 </div>
               </div>
               
@@ -2935,43 +2935,43 @@ async function renderFactoryCards() {
                     <span class="text-xs text-gray-500">${sensorData.sensorCount}<span data-i18n="sensorCount">台</span></span>
                   </div>
                   
-                  <div 
+                  <div
                     class="cursor-pointer p-2 rounded border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all"
                     onclick="event.stopPropagation(); showSensorModalForFactory('${factory}')"
                   >
-                    <div class="grid grid-cols-3 gap-2 text-xs">
-                      <div class="text-center p-2 rounded ${sensorTempStatus ? sensorTempStatus.bgColor : 'bg-gray-100'}" 
+                    <div class="grid grid-cols-3 gap-1 sm:gap-2 text-xs">
+                      <div class="text-center p-1.5 sm:p-2 rounded ${sensorTempStatus ? sensorTempStatus.bgColor : 'bg-gray-100'}"
                            title="${sensorTempStatus ? sensorTempStatus.message : ''} (${window.t ? window.t('normalRange') : '適正範囲'}: ${window.t ? window.t('temperatureRange') : '18-26°C'})">
                         <div class="flex items-center justify-center mb-1">
-                          <i class="ri-temp-hot-line mr-1"></i>
+                          <i class="ri-temp-hot-line mr-1 text-sm sm:text-base"></i>
                           ${sensorTempStatus && sensorTempStatus.status !== 'normal' ? `<i class="${sensorTempStatus.icon} text-xs ml-1"></i>` : ''}
                         </div>
-                        <div class="font-semibold ${sensorTempStatus ? sensorTempStatus.color : 'text-gray-600'}">
+                        <div class="font-semibold ${sensorTempStatus ? sensorTempStatus.color : 'text-gray-600'} text-xs sm:text-sm">
                           ${sensorData.highestTemp !== null ? sensorData.highestTemp + '°C' : 'N/A'}
                         </div>
-                        <div class="text-gray-500" data-i18n="highestTemp">最高温度</div>
+                        <div class="text-gray-500 text-[10px] sm:text-xs" data-i18n="highestTemp">最高温度</div>
                       </div>
-                      
-                      <div class="text-center p-2 rounded bg-blue-50">
+
+                      <div class="text-center p-1.5 sm:p-2 rounded bg-blue-50">
                         <div class="flex items-center justify-center mb-1">
-                          <i class="ri-drop-line mr-1"></i>
+                          <i class="ri-drop-line mr-1 text-sm sm:text-base"></i>
                         </div>
-                        <div class="font-semibold text-blue-600">
+                        <div class="font-semibold text-blue-600 text-xs sm:text-sm">
                           ${sensorData.averageHumidity !== null ? sensorData.averageHumidity + '%' : 'N/A'}
                         </div>
-                        <div class="text-gray-500" data-i18n="averageHumidity">平均湿度</div>
+                        <div class="text-gray-500 text-[10px] sm:text-xs" data-i18n="averageHumidity">平均湿度</div>
                       </div>
-                      
-                      <div class="text-center p-2 rounded ${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).bgColor : 'bg-gray-100'}"
+
+                      <div class="text-center p-1.5 sm:p-2 rounded ${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).bgColor : 'bg-gray-100'}"
                            title="${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).message : 'N/A'} (WBGT: Wet Bulb Globe Temperature)">
                         <div class="flex items-center justify-center mb-1">
-                          <i class="ri-temp-cold-line mr-1"></i>
+                          <i class="ri-temp-cold-line mr-1 text-sm sm:text-base"></i>
                           ${sensorData.wbgt !== null && getWBGTStatus(sensorData.wbgt).status !== 'safe' ? `<i class="${getWBGTStatus(sensorData.wbgt).icon} text-xs ml-1"></i>` : ''}
                         </div>
-                        <div class="font-semibold ${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).color : 'text-gray-600'}">
+                        <div class="font-semibold ${sensorData.wbgt !== null ? getWBGTStatus(sensorData.wbgt).color : 'text-gray-600'} text-xs sm:text-sm">
                           ${sensorData.wbgt !== null ? sensorData.wbgt + '°C' : 'N/A'}
                         </div>
-                        <div class="text-gray-500" data-i18n="wbgt">WBGT</div>
+                        <div class="text-gray-500 text-[10px] sm:text-xs" data-i18n="wbgt">WBGT</div>
                       </div>
                     </div>
                     
@@ -3137,8 +3137,8 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
 
     mainContent.innerHTML = `
         <!-- Page Header -->
-        <div class="flex items-center justify-between mb-6">
-        <h2 class="text-2xl font-semibold" data-factory-name="${factoryName}">${factoryName} - ${translations[currentLang].factoryOverview}</h2>
+        <div class="flex items-center justify-between mb-4 sm:mb-6">
+        <h2 class="text-lg sm:text-xl md:text-2xl font-semibold truncate" data-factory-name="${factoryName}">${factoryName} - ${translations[currentLang].factoryOverview}</h2>
         </div>
 
         <!-- Dynamic Filter System -->
@@ -3233,39 +3233,39 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
 
         <!-- Summary Cards -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-4 sm:mb-6">
         ${[["Press", pressData], ["SRS", srsData], ["Slit", slitData], ["Kensa", kensaData]].map(([label, data]) => {
             const totalProc = data.reduce((sum, d) => sum + (d.totalProcess ?? 0), 0);
             const totalNG = data.reduce((sum, d) => sum + (d.totalNG ?? 0), 0);
             const defectRate = totalProc ? ((totalNG / totalProc) * 100).toFixed(2) : 0;
             return `
-            <div class="bg-white p-4 rounded shadow">
-                <h3 class="font-semibold">${label} Process</h3>
-                <p>${translations[currentLang].total}: ${totalProc}</p>
-                <p>${translations[currentLang].totalNG}: ${totalNG}</p>
-                <p>${translations[currentLang].defectRate}: ${defectRate}%</p>
+            <div class="bg-white p-3 sm:p-4 rounded shadow">
+                <h3 class="font-semibold text-sm sm:text-base mb-2">${label} Process</h3>
+                <p class="text-xs sm:text-sm mb-1">${translations[currentLang].total}: ${totalProc}</p>
+                <p class="text-xs sm:text-sm mb-1">${translations[currentLang].totalNG}: ${totalNG}</p>
+                <p class="text-xs sm:text-sm">${translations[currentLang].defectRate}: ${defectRate}%</p>
             </div>
             `;
         }).join("")}
         </div>
 
         <!-- Top Defects -->
-        <div class="bg-white p-4 rounded shadow mb-6">
-        <h3 class="font-semibold mb-2">${translations[currentLang].topDefectiveProducts || "Top 15 Defective Products"}</h3>
-        <ul class="list-disc list-inside">
-            ${topDefects.map(p => `<li>${p.product} – ${p.totalNG} ${translations[currentLang].totalNG}</li>`).join("") || "<li>No data</li>"}
+        <div class="bg-white p-3 sm:p-4 rounded shadow mb-4 sm:mb-6">
+        <h3 class="font-semibold text-sm sm:text-base mb-2">${translations[currentLang].topDefectiveProducts || "Top 15 Defective Products"}</h3>
+        <ul class="list-disc list-inside text-xs sm:text-sm space-y-1">
+            ${topDefects.map(p => `<li class="break-words">${p.product} – ${p.totalNG} ${translations[currentLang].totalNG}</li>`).join("") || "<li>No data</li>"}
         </ul>
         </div>
 
         <!-- Charts -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-white p-4 rounded shadow">
-            <h3 class="font-semibold mb-2">${translations[currentLang].defectRate} per Process</h3>
-            <div id="defectRateChart" style="height: 300px;"></div>
+        <div class="grid grid-cols-1 gap-4">
+        <div class="bg-white p-3 sm:p-4 rounded shadow">
+            <h3 class="font-semibold text-sm sm:text-base mb-2">${translations[currentLang].defectRate} per Process</h3>
+            <div id="defectRateChart" style="height: 250px; sm:height: 300px;"></div>
         </div>
-        <div class="bg-white p-4 rounded shadow">
-            <h3 class="font-semibold mb-2">Cycle Time per Process</h3>
-            <div id="cycleTimeChart" style="height: 300px;"></div>
+        <div class="bg-white p-3 sm:p-4 rounded shadow">
+            <h3 class="font-semibold text-sm sm:text-base mb-2">Cycle Time per Process</h3>
+            <div id="cycleTimeChart" style="height: 250px; sm:height: 300px;"></div>
         </div>
         </div>
     `;
@@ -4310,38 +4310,38 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                       </div>
                       
                       <!-- Table -->
-                      <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
+                      <div class="overflow-x-auto -mx-4 sm:mx-0">
+                        <table class="w-full text-xs sm:text-sm">
                           <thead class="bg-gray-50 border-b">
                             <tr>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                                   onclick="handleSectionSort('${label}', '${proc.name}', '品番')">
                                 品番${arrow("品番")}
                               </th>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                                   onclick="handleSectionSort('${label}', '${proc.name}', '背番号')">
                                 背番号${arrow("背番号")}
                               </th>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                                   onclick="handleSectionSort('${label}', '${proc.name}', 'Worker_Name')">
                                 作業者${arrow("Worker_Name")}
                               </th>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                                   onclick="handleSectionSort('${label}', '${proc.name}', 'Date')">
                                 日付${arrow("Date")}
                               </th>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                                   onclick="handleSectionSort('${label}', '${proc.name}', 'Total')">
                                 Total${arrow("Total")}
                               </th>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" 
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                                   onclick="handleSectionSort('${label}', '${proc.name}', 'Total_NG')">
                                 Total NG${arrow("Total_NG")}
                               </th>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700">
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700">
                                 稼働時間
                               </th>
-                              <th class="px-4 py-3 text-left font-medium text-gray-700">
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700">
                                 不良率
                               </th>
                             </tr>
@@ -4349,7 +4349,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                           <tbody class="divide-y divide-gray-200">
                             ${pageData.length === 0 ? `
                               <tr>
-                                <td colspan="8" class="px-4 py-8 text-center text-gray-500">
+                                <td colspan="8" class="px-2 sm:px-4 py-6 sm:py-8 text-center text-gray-500 text-xs sm:text-sm">
                                   ${searchTerm ? 'No results found for your search' : 'No data available'}
                                 </td>
                               </tr>
@@ -4358,7 +4358,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                               const processQuantity = item.Process_Quantity ?? 0;
                               const totalNG = item.Total_NG ?? 0;
                               const defectRate = processQuantity > 0 ? ((totalNG / processQuantity) * 100).toFixed(2) : '0.00';
-                              
+
                               // Calculate working hours
                               let workingHours = 'N/A';
                               if (item.Time_start && item.Time_end) {
@@ -4369,23 +4369,23 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                                   workingHours = hours.toFixed(2);
                                 }
                               }
-                              
+
                               const isEvenRow = index % 2 === 0;
-                              
+
                               return `
                                 <tr class="cursor-pointer hover:bg-blue-50 transition-colors ${isEvenRow ? 'bg-gray-50/50' : 'bg-white'}"
                                     onclick='showSidebarFromElement(this)'
                                     data-item='${encodedData.encodedItem}'
                                     data-comment='${encodedData.comment.replace(/'/g, '&#39;').replace(/"/g, '&quot;')}'>
-                                  <td class="px-4 py-3 font-medium text-gray-900">${item.品番 ?? "-"}</td>
-                                  <td class="px-4 py-3 text-gray-700">${item.背番号 ?? "-"}</td>
-                                  <td class="px-4 py-3 text-gray-700">${item.Worker_Name ?? "-"}</td>
-                                  <td class="px-4 py-3 text-gray-700">${item.Date ?? "-"}</td>
-                                  <td class="px-4 py-3 font-medium text-gray-900">${processQuantity.toLocaleString()}</td>
-                                  <td class="px-4 py-3 ${totalNG > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}">${totalNG}</td>
-                                  <td class="px-4 py-3 text-gray-700">${workingHours === 'N/A' ? workingHours : workingHours + ' hrs'}</td>
-                                  <td class="px-4 py-3">
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-900">${item.品番 ?? "-"}</td>
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-700">${item.背番号 ?? "-"}</td>
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-700">${item.Worker_Name ?? "-"}</td>
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-700 whitespace-nowrap">${item.Date ?? "-"}</td>
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-900">${processQuantity.toLocaleString()}</td>
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3 ${totalNG > 0 ? 'text-red-600 font-medium' : 'text-gray-700'}">${totalNG}</td>
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-700 whitespace-nowrap">${workingHours === 'N/A' ? workingHours : workingHours + ' hrs'}</td>
+                                  <td class="px-2 sm:px-4 py-2 sm:py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${
                                       parseFloat(defectRate) > 2 ? 'bg-red-100 text-red-800' :
                                       parseFloat(defectRate) > 1 ? 'bg-yellow-100 text-yellow-800' :
                                       'bg-green-100 text-green-800'
@@ -4402,15 +4402,15 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
 
                       <!-- Pagination -->
                       ${totalPages > 1 ? `
-                        <div class="px-6 py-4 bg-gray-50 border-t flex items-center justify-between">
-                          <div class="text-sm text-gray-700">
-                            ${totalItems === 0 ? '0件中 0-0件を表示' : 
+                        <div class="px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 border-t flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0">
+                          <div class="text-xs sm:text-sm text-gray-700">
+                            ${totalItems === 0 ? '0件中 0-0件を表示' :
                               `${totalItems}件中 ${startIndex + 1}-${Math.min(endIndex, totalItems)}件を表示`}
                           </div>
-                          <div class="flex items-center space-x-2">
-                            <button onclick="changeFactoryPage('${label}', '${proc.name}', -1)" 
-                                    ${currentPage === 1 ? 'disabled' : ''} 
-                                    class="px-3 py-1 border rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                          <div class="flex items-center space-x-1 sm:space-x-2">
+                            <button onclick="changeFactoryPage('${label}', '${proc.name}', -1)"
+                                    ${currentPage === 1 ? 'disabled' : ''}
+                                    class="px-2 sm:px-3 py-1 border rounded text-xs sm:text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
                               前へ
                             </button>
                             <div class="flex space-x-1" id="pageNumbers${label}${proc.name}">
@@ -4419,16 +4419,16 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                                 const pageNum = startPage + i;
                                 if (pageNum > totalPages) return '';
                                 return `
-                                  <button onclick="goToFactoryPage('${label}', '${proc.name}', ${pageNum})" 
-                                          class="px-3 py-1 border rounded text-sm ${pageNum === currentPage ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}">
+                                  <button onclick="goToFactoryPage('${label}', '${proc.name}', ${pageNum})"
+                                          class="px-2 sm:px-3 py-1 border rounded text-xs sm:text-sm ${pageNum === currentPage ? 'bg-blue-500 text-white' : 'hover:bg-gray-50'}">
                                     ${pageNum}
                                   </button>
                                 `;
                               }).join('')}
                             </div>
-                            <button onclick="changeFactoryPage('${label}', '${proc.name}', 1)" 
-                                    ${currentPage === totalPages ? 'disabled' : ''} 
-                                    class="px-3 py-1 border rounded text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <button onclick="changeFactoryPage('${label}', '${proc.name}', 1)"
+                                    ${currentPage === totalPages ? 'disabled' : ''}
+                                    class="px-2 sm:px-3 py-1 border rounded text-xs sm:text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
                               次へ
                             </button>
                           </div>

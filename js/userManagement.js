@@ -32,16 +32,17 @@ async function loadUserTable() {
 
     const headers = ["firstName", "lastName", "email", "username", "role", "factory"];
     const tableHTML = `
-    <table class="w-full text-sm border">
+    <div class="overflow-x-auto -mx-4 sm:mx-0">
+    <table class="w-full text-xs sm:text-sm border">
         <thead class="bg-gray-100">
         <tr>
             ${headers.map(h => {
-                const sortIcon = userSortState.column === h 
-                    ? (userSortState.direction === 1 ? ' ▲' : ' ▼') 
+                const sortIcon = userSortState.column === h
+                    ? (userSortState.direction === 1 ? ' ▲' : ' ▼')
                     : '';
-                return `<th class="px-4 py-2 cursor-pointer hover:bg-gray-200" onclick="sortUsers('${h}')">${t(h)}${sortIcon}</th>`;
+                return `<th class="px-2 sm:px-4 py-2 cursor-pointer hover:bg-gray-200" onclick="sortUsers('${h}')">${t(h)}${sortIcon}</th>`;
             }).join("")}
-            <th class='px-4 py-2'>${t('actions')}</th>
+            <th class='px-2 sm:px-4 py-2'>${t('actions')}</th>
         </tr>
         </thead>
         <tbody>
@@ -54,9 +55,9 @@ async function loadUserTable() {
             return `
             <tr class="border-t" id="userRow-${u._id}">
             ${headers.map(h => `
-                <td class="px-4 py-2">
+                <td class="px-2 sm:px-4 py-2">
                 ${h === "role"
-                    ? `<select class="border p-1 rounded" disabled data-role user-id="${u._id}" onchange="toggleEditFactoryField('${u._id}', this.value)">
+                    ? `<select class="border p-1 rounded text-xs sm:text-sm" disabled data-role user-id="${u._id}" onchange="toggleEditFactoryField('${u._id}', this.value)">
                         ${["admin", "班長", "係長", "課長", "member"].map(r => `
                         <option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>
                         `).join("")}
@@ -64,14 +65,14 @@ async function loadUserTable() {
                     : h === "factory"
                     ? `<div class="factory-container" user-id="${u._id}">
                         <div class="factory-tags-display" id="factoryDisplay-${u._id}" ${u.role !== "班長" ? "style='display:none'" : ""}>
-                            ${factoryArray.map(f => `<span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full mr-1 mb-1">${f}</span>`).join('')}
+                            ${factoryArray.map(f => `<span class="inline-block bg-blue-100 text-blue-800 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full mr-1 mb-1">${f}</span>`).join('')}
                             ${factoryArray.length === 0 ? '<span class="text-gray-500 text-xs">工場未設定</span>' : ''}
                         </div>
                         <div class="factory-tags-edit hidden" id="factoryEdit-${u._id}">
                             <div class="factory-tag-input-container">
                                 <div class="selected-factories flex flex-wrap gap-1 mb-2" id="selectedFactories-${u._id}">
                                     ${factoryArray.map(f => `
-                                        <span class="factory-tag bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center">
+                                        <span class="factory-tag bg-blue-100 text-blue-800 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full flex items-center">
                                             ${f}
                                             <button type="button" class="ml-1 text-blue-600 hover:text-blue-800" onclick="removeFactoryTag('${u._id}', '${f}')">×</button>
                                         </span>
@@ -79,7 +80,7 @@ async function loadUserTable() {
                                 </div>
                                 <select class="border p-1 rounded text-xs" onchange="addFactoryTag('${u._id}', this.value); this.value='';">
                                     <option value="">${t('addFactory')}</option>
-                                    ${["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"].map(f => 
+                                    ${["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"].map(f =>
                                         `<option value="${f}">${f}</option>`
                                     ).join("")}
                                 </select>
@@ -88,18 +89,19 @@ async function loadUserTable() {
                         <input type="hidden" class="factory-data" data-field="factory" user-id="${u._id}" value='${JSON.stringify(factoryArray)}' />
                         ${u.role !== "班長" ? `<span class="text-gray-500 factory-readonly">${factoryDisplayText}</span>` : ""}
                     </div>`
-                    : `<input class="border p-1 rounded w-full" value="${u[h] || ""}" disabled data-field="${h}" user-id="${u._id}" />`}
+                    : `<input class="border p-1 rounded w-full text-xs sm:text-sm" value="${u[h] || ""}" disabled data-field="${h}" user-id="${u._id}" />`}
                 </td>
             `).join("")}
-            <td class="px-4 py-2" id="actions-${u._id}">
-                <button class="text-blue-600 hover:underline" onclick="startEditingUser('${u._id}')">${t('edit')}</button>
-                <button class="ml-2 text-yellow-600 hover:underline" onclick="resetPassword('${u._id}')">${t('resetPassword')}</button>
-                <button class="ml-2 text-red-600 hover:underline" onclick="deleteUser('${u._id}')">${t('delete')}</button>
+            <td class="px-2 sm:px-4 py-2 whitespace-nowrap" id="actions-${u._id}">
+                <button class="text-blue-600 hover:underline text-xs sm:text-sm" onclick="startEditingUser('${u._id}')">${t('edit')}</button>
+                <button class="ml-1 sm:ml-2 text-yellow-600 hover:underline text-xs sm:text-sm" onclick="resetPassword('${u._id}')">${t('resetPassword')}</button>
+                <button class="ml-1 sm:ml-2 text-red-600 hover:underline text-xs sm:text-sm" onclick="deleteUser('${u._id}')">${t('delete')}</button>
             </td>
             </tr>`;
         }).join("")}
         </tbody>
     </table>
+    </div>
     `;
 
     document.getElementById("userTableContainer").innerHTML = tableHTML;
@@ -341,16 +343,17 @@ function renderWorkerTable(workers) {
     ];
 
     const tableHTML = `
-    <table class="w-full text-sm border">
+    <div class="overflow-x-auto -mx-4 sm:mx-0">
+    <table class="w-full text-xs sm:text-sm border">
         <thead class="bg-gray-100">
         <tr>
             ${columns.map(col => {
                 const sortIcon = workerSortState.column === col.field
                     ? (workerSortState.direction === 1 ? ' ▲' : ' ▼')
                     : '';
-                return `<th class="px-4 py-2 cursor-pointer hover:bg-gray-200" onclick="sortWorkers('${col.field}')">${col.label}${sortIcon}</th>`;
+                return `<th class="px-2 sm:px-4 py-2 cursor-pointer hover:bg-gray-200" onclick="sortWorkers('${col.field}')">${col.label}${sortIcon}</th>`;
             }).join("")}
-            <th class="px-4 py-2">Actions</th>
+            <th class="px-2 sm:px-4 py-2">Actions</th>
         </tr>
         </thead>
         <tbody>
@@ -358,26 +361,26 @@ function renderWorkerTable(workers) {
             // Handle department data - convert comma-separated string to array
             const deptString = w.部署 || '';
             const deptArray = deptString ? deptString.split(',').map(d => d.trim()) : [];
-            
+
             return `
             <tr class="border-t" id="workerRow-${w._id}">
-                <td class="px-4 py-2">
-                    <input class="border p-1 rounded w-full" value="${w.Name || ""}" disabled data-field="Name" worker-id="${w._id}" />
+                <td class="px-2 sm:px-4 py-2">
+                    <input class="border p-1 rounded w-full text-xs sm:text-sm" value="${w.Name || ""}" disabled data-field="Name" worker-id="${w._id}" />
                 </td>
-                <td class="px-4 py-2">
-                    <input class="border p-1 rounded w-full" value="${w['ID number'] || ""}" disabled data-field="ID number" worker-id="${w._id}" />
+                <td class="px-2 sm:px-4 py-2">
+                    <input class="border p-1 rounded w-full text-xs sm:text-sm" value="${w['ID number'] || ""}" disabled data-field="ID number" worker-id="${w._id}" />
                 </td>
-                <td class="px-4 py-2">
+                <td class="px-2 sm:px-4 py-2">
                     <div class="dept-container" worker-id="${w._id}">
                         <div class="dept-tags-display" id="deptDisplay-${w._id}">
-                            ${deptArray.map(d => `<span class="inline-block bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full mr-1 mb-1">${d}</span>`).join('')}
+                            ${deptArray.map(d => `<span class="inline-block bg-green-100 text-green-800 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full mr-1 mb-1">${d}</span>`).join('')}
                             ${deptArray.length === 0 ? '<span class="text-gray-500 text-xs">部署未設定</span>' : ''}
                         </div>
                         <div class="dept-tags-edit hidden" id="deptEdit-${w._id}">
                             <div class="dept-tag-input-container">
                                 <div class="selected-departments flex flex-wrap gap-1 mb-2" id="selectedDepartments-${w._id}">
                                     ${deptArray.map(d => `
-                                        <span class="dept-tag bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center">
+                                        <span class="dept-tag bg-green-100 text-green-800 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full flex items-center">
                                             ${d}
                                             <button type="button" class="ml-1 text-green-600 hover:text-green-800" onclick="removeDepartmentTag('${w._id}', '${d}')">×</button>
                                         </span>
@@ -385,7 +388,7 @@ function renderWorkerTable(workers) {
                                 </div>
                                 <select class="border p-1 rounded text-xs" onchange="addDepartmentTag('${w._id}', this.value); this.value='';">
                                     <option value="">Add Department</option>
-                                    ${["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"].map(d => 
+                                    ${["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"].map(d =>
                                         `<option value="${d}">${d}</option>`
                                     ).join("")}
                                 </select>
@@ -394,17 +397,18 @@ function renderWorkerTable(workers) {
                         <input type="hidden" class="dept-data" data-field="部署" worker-id="${w._id}" value='${JSON.stringify(deptArray)}' />
                     </div>
                 </td>
-                <td class="px-4 py-2">
-                    <input class="border p-1 rounded w-full" value="${w.Picture || ""}" disabled data-field="Picture" worker-id="${w._id}" />
+                <td class="px-2 sm:px-4 py-2">
+                    <input class="border p-1 rounded w-full text-xs sm:text-sm" value="${w.Picture || ""}" disabled data-field="Picture" worker-id="${w._id}" />
                 </td>
-                <td class="px-4 py-2" id="workerActions-${w._id}">
-                    <button class="text-blue-600 hover:underline" onclick="startEditingWorker('${w._id}')">Edit</button>
-                    <button class="ml-2 text-red-600 hover:underline" onclick="deleteWorker('${w._id}')">Delete</button>
+                <td class="px-2 sm:px-4 py-2 whitespace-nowrap" id="workerActions-${w._id}">
+                    <button class="text-blue-600 hover:underline text-xs sm:text-sm" onclick="startEditingWorker('${w._id}')">Edit</button>
+                    <button class="ml-1 sm:ml-2 text-red-600 hover:underline text-xs sm:text-sm" onclick="deleteWorker('${w._id}')">Delete</button>
                 </td>
             </tr>`;
         }).join("")}
         </tbody>
     </table>
+    </div>
     `;
 
     document.getElementById("workerTableContainer").innerHTML = tableHTML;
