@@ -179,39 +179,39 @@ function renderApprovalData(data, pagination) {
     const columns = getTableColumns(currentApprovalTab);
     
     const tableHTML = `
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
+        <div class="overflow-x-auto -mx-4 sm:mx-0">
+            <table class="w-full text-xs sm:text-sm">
                 <thead class="bg-gray-50 border-b">
                     <tr>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('approvalStatus')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('approvalStatus')">
                             状態
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('Date')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('Date')">
                             日付・時間
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('工場')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('工場')">
                             工場
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('品番')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('品番')">
                             品番
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('背番号')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('背番号')">
                             背番号
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('Worker_Name')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('Worker_Name')">
                             作業者
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('${getQuantityField(currentApprovalTab)}')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('${getQuantityField(currentApprovalTab)}')">
                             数量
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('${getNGField(currentApprovalTab)}')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('${getNGField(currentApprovalTab)}')">
                             NG
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700">不良率</th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('approvedBy')">
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700">不良率</th>
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortApprovalTable('approvedBy')">
                             承認者
                         </th>
-                        <th class="px-4 py-3 text-left font-medium text-gray-700">操作</th>
+                        <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700">操作</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
@@ -225,32 +225,32 @@ function renderApprovalData(data, pagination) {
                         
                         return `
                             <tr class="hover:bg-gray-50 ${statusInfo.rowClass}">
-                                <td class="px-4 py-3">
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.badgeClass}">
+                                <td class="px-2 sm:px-4 py-2 sm:py-3">
+                                    <span class="inline-flex items-center px-1.5 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${statusInfo.badgeClass}">
                                         <i class="${statusInfo.icon} mr-1"></i>
                                         ${statusInfo.text}
                                     </span>
                                 </td>
-                                <td class="px-4 py-3 text-gray-900">
-                                    <div class="font-medium">${item.Date || '-'}</div>
-                                    <div class="text-xs text-gray-500">${item.Time_start || '-'} - ${item.Time_end || '-'}</div>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-900 whitespace-nowrap">
+                                    <div class="font-medium text-xs sm:text-sm">${item.Date || '-'}</div>
+                                    <div class="text-[10px] sm:text-xs text-gray-500">${item.Time_start || '-'} - ${item.Time_end || '-'}</div>
                                 </td>
-                                <td class="px-4 py-3 text-gray-900">${item.工場 || '-'}</td>
-                                <td class="px-4 py-3 font-medium text-gray-900">${item.品番 || '-'}</td>
-                                <td class="px-4 py-3 text-gray-900">${item.背番号 || '-'}</td>
-                                <td class="px-4 py-3 text-gray-900">${item.Worker_Name || '-'}</td>
-                                <td class="px-4 py-3 text-gray-900 font-medium">${quantity.toLocaleString()}</td>
-                                <td class="px-4 py-3 text-red-600 font-medium">${ngCount}</td>
-                                <td class="px-4 py-3">
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-900">${item.工場 || '-'}</td>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 font-medium text-gray-900">${item.品番 || '-'}</td>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-900">${item.背番号 || '-'}</td>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-900">${item.Worker_Name || '-'}</td>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-900 font-medium">${quantity.toLocaleString()}</td>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 text-red-600 font-medium">${ngCount}</td>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3">
                                     <span class="font-medium ${parseFloat(defectRate) > 0 ? 'text-red-600' : 'text-green-600'}">
                                         ${defectRate}%
                                     </span>
                                 </td>
-                                <td class="px-4 py-3 text-gray-900">${item.approvedBy || '-'}</td>
-                                <td class="px-4 py-3">
-                                    <button 
+                                <td class="px-2 sm:px-4 py-2 sm:py-3 text-gray-900">${item.approvedBy || '-'}</td>
+                                <td class="px-2 sm:px-4 py-2 sm:py-3">
+                                    <button
                                         onclick="openApprovalDetail('${item._id}')"
-                                        class="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                        class="text-blue-600 hover:text-blue-800 text-xs sm:text-sm font-medium"
                                     >
                                         詳細
                                     </button>

@@ -554,35 +554,35 @@ function loadPage(page) {
             }
             break;        case "approvals":
             mainContent.innerHTML = `
-                <h2 class="text-2xl font-semibold mb-6" data-i18n="approvalsTitle">Data Approval System</h2>
-                
+                <h2 class="text-xl sm:text-2xl font-semibold mb-4 sm:mb-6" data-i18n="approvalsTitle">Data Approval System</h2>
+
                 <!-- View Options Dropdown -->
-                <div class="mb-6 flex justify-between items-center">
-                    <div class="flex items-center space-x-4">
-                        <label for="viewModeSelect" class="text-sm font-medium text-gray-700" data-i18n="viewMode">View Mode:</label>
-                        <select id="viewModeSelect" class="p-2 border rounded bg-white">
+                <div class="mb-4 sm:mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div class="flex items-center space-x-2 sm:space-x-4">
+                        <label for="viewModeSelect" class="text-xs sm:text-sm font-medium text-gray-700" data-i18n="viewMode">View Mode:</label>
+                        <select id="viewModeSelect" class="p-1.5 sm:p-2 border rounded bg-white text-xs sm:text-sm">
                             <option value="table" data-i18n="tableView">Table View (Individual Approval)</option>
                             <option value="list" data-i18n="listView">List View (Batch Approval)</option>
                         </select>
                     </div>
                 </div>
-                
+
                 <!-- Process Tabs -->
-                <div class="border-b border-gray-200 mb-6">
-                    <nav class="-mb-px flex space-x-8">
-                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap active" 
+                <div class="border-b border-gray-200 mb-4 sm:mb-6 overflow-x-auto">
+                    <nav class="-mb-px flex space-x-4 sm:space-x-8 min-w-max">
+                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap active"
                                 data-tab="kensaDB" onclick="switchApprovalTab('kensaDB')" data-i18n="kensa">
                             Inspection (Kensa)
                         </button>
-                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap" 
+                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap"
                                 data-tab="pressDB" onclick="switchApprovalTab('pressDB')" data-i18n="press">
                             Press
                         </button>
-                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap" 
+                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap"
                                 data-tab="SRSDB" onclick="switchApprovalTab('SRSDB')">
                             SRS
                         </button>
-                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap" 
+                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-xs sm:text-sm whitespace-nowrap"
                                 data-tab="slitDB" onclick="switchApprovalTab('slitDB')" data-i18n="slit">
                             Slit
                         </button>
@@ -593,77 +593,77 @@ function loadPage(page) {
                 <div id="approvalTabContent">
                     <!-- Stats Cards -->
                     <!-- Data Range Toggle -->
-                    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
-                        <div class="flex items-center space-x-4">
-                            <div class="bg-white rounded-lg border border-gray-200 p-1 flex items-center">
-                                <button 
-                                    id="currentDateModeBtn" 
-                                    class="px-3 py-2 text-sm font-medium rounded-md transition-colors bg-blue-500 text-white"
+                    <div class="mb-4 flex flex-col sm:flex-row flex-wrap items-start sm:items-center justify-between gap-3 sm:gap-4">
+                        <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:space-x-4 w-full sm:w-auto">
+                            <div class="bg-white rounded-lg border border-gray-200 p-1 flex items-center w-full sm:w-auto">
+                                <button
+                                    id="currentDateModeBtn"
+                                    class="px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md transition-colors bg-blue-500 text-white flex-1 sm:flex-none"
                                     onclick="toggleDataRange('current')"
                                 >
                                     <i class="ri-calendar-line mr-1"></i>
                                     <span data-i18n="currentDateOnly">Current Date Only</span>
                                 </button>
-                                <button 
-                                    id="allDataModeBtn" 
-                                    class="px-3 py-2 text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100"
+                                <button
+                                    id="allDataModeBtn"
+                                    class="px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md transition-colors text-gray-600 hover:bg-gray-100 flex-1 sm:flex-none"
                                     onclick="toggleDataRange('all')"
                                 >
                                     <i class="ri-database-2-line mr-1"></i>
                                     <span data-i18n="allHistoricalData">All Historical Data</span>
                                 </button>
                             </div>
-                            <div id="dataRangeIndicator" class="text-sm text-gray-600">
+                            <div id="dataRangeIndicator" class="text-xs sm:text-sm text-gray-600">
                                 <i class="ri-calendar-check-line mr-1 text-blue-500"></i>
                                 <span data-i18n="showingCurrentDate">Showing current date data</span>
                             </div>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-${role === '班長' ? '6' : '5'} gap-4 mb-6">
-                        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
-                            <h3 class="text-sm font-medium text-yellow-800" data-i18n="pending">Pending</h3>
-                            <p class="text-2xl font-bold text-yellow-900" id="pendingCount">0</p>
-                            <p class="text-xs text-yellow-600" data-i18n="pendingApproval">Pending Hancho Approval</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-${role === '班長' ? '6' : '5'} gap-2 sm:gap-4 mb-4 sm:mb-6">
+                        <div class="bg-yellow-50 p-3 sm:p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
+                            <h3 class="text-xs sm:text-sm font-medium text-yellow-800" data-i18n="pending">Pending</h3>
+                            <p class="text-xl sm:text-2xl font-bold text-yellow-900" id="pendingCount">0</p>
+                            <p class="text-[10px] sm:text-xs text-yellow-600 hidden sm:block" data-i18n="pendingApproval">Pending Hancho Approval</p>
                         </div>
-                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors" onclick="filterByStatus('hancho_approved')">
-                            <h3 class="text-sm font-medium text-blue-800" data-i18n="hanchoApproved">Hancho Approved</h3>
-                            <p class="text-2xl font-bold text-blue-900" id="hanchoApprovedCount">0</p>
-                            <p class="text-xs text-blue-600" data-i18n="waitingKacho">Waiting for Kacho Approval</p>
+                        <div class="bg-blue-50 p-3 sm:p-4 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors" onclick="filterByStatus('hancho_approved')">
+                            <h3 class="text-xs sm:text-sm font-medium text-blue-800" data-i18n="hanchoApproved">Hancho Approved</h3>
+                            <p class="text-xl sm:text-2xl font-bold text-blue-900" id="hanchoApprovedCount">0</p>
+                            <p class="text-[10px] sm:text-xs text-blue-600 hidden sm:block" data-i18n="waitingKacho">Waiting for Kacho Approval</p>
                         </div>
-                        <div class="bg-green-50 p-4 rounded-lg border border-green-200 cursor-pointer hover:bg-green-100 transition-colors" onclick="filterByStatus('fully_approved')">
-                            <h3 class="text-sm font-medium text-green-800" data-i18n="fullyApproved">Fully Approved</h3>
-                            <p class="text-2xl font-bold text-green-900" id="fullyApprovedCount">0</p>
-                            <p class="text-xs text-green-600" data-i18n="kachoApprovalComplete">Kacho Approval Complete</p>
+                        <div class="bg-green-50 p-3 sm:p-4 rounded-lg border border-green-200 cursor-pointer hover:bg-green-100 transition-colors" onclick="filterByStatus('fully_approved')">
+                            <h3 class="text-xs sm:text-sm font-medium text-green-800" data-i18n="fullyApproved">Fully Approved</h3>
+                            <p class="text-xl sm:text-2xl font-bold text-green-900" id="fullyApprovedCount">0</p>
+                            <p class="text-[10px] sm:text-xs text-green-600 hidden sm:block" data-i18n="kachoApprovalComplete">Kacho Approval Complete</p>
                         </div>
-                        <div class="bg-red-50 p-4 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors" onclick="filterByStatus('correction_needed')">
-                            <h3 class="text-sm font-medium text-red-800" data-i18n="correctionNeeded">Correction Needed</h3>
-                            <p class="text-2xl font-bold text-red-900" id="correctionCount">0</p>
-                            <p class="text-xs text-red-600" data-i18n="needsCorrection">Needs Correction & Resubmission</p>
+                        <div class="bg-red-50 p-3 sm:p-4 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors" onclick="filterByStatus('correction_needed')">
+                            <h3 class="text-xs sm:text-sm font-medium text-red-800" data-i18n="correctionNeeded">Correction Needed</h3>
+                            <p class="text-xl sm:text-2xl font-bold text-red-900" id="correctionCount">0</p>
+                            <p class="text-[10px] sm:text-xs text-red-600 hidden sm:block" data-i18n="needsCorrection">Needs Correction & Resubmission</p>
                         </div>
                         ${role === '班長' ? `
-                        <div class="bg-orange-50 p-4 rounded-lg border border-orange-200 cursor-pointer hover:bg-orange-100 transition-colors" onclick="filterByStatus('correction_needed_from_kacho')">
-                            <h3 class="text-sm font-medium text-orange-800" data-i18n="kachoRequest">Kacho Correction Request</h3>
-                            <p class="text-2xl font-bold text-orange-900" id="kachoRequestCount">0</p>
-                            <p class="text-xs text-orange-600" data-i18n="hanchoAction">Hancho Action Required</p>
+                        <div class="bg-orange-50 p-3 sm:p-4 rounded-lg border border-orange-200 cursor-pointer hover:bg-orange-100 transition-colors" onclick="filterByStatus('correction_needed_from_kacho')">
+                            <h3 class="text-xs sm:text-sm font-medium text-orange-800" data-i18n="kachoRequest">Kacho Correction Request</h3>
+                            <p class="text-xl sm:text-2xl font-bold text-orange-900" id="kachoRequestCount">0</p>
+                            <p class="text-[10px] sm:text-xs text-orange-600 hidden sm:block" data-i18n="hanchoAction">Hancho Action Required</p>
                         </div>
                         ` : ''}
-                        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors" onclick="filterByStatus('today')">
-                            <h3 class="text-sm font-medium text-gray-800" data-i18n="todayTotal">Today's Total</h3>
-                            <p class="text-2xl font-bold text-gray-900" id="totalCount">0</p>
-                            <p class="text-xs text-gray-600" data-i18n="submittedToday">Submitted Today</p>
+                        <div class="bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors" onclick="filterByStatus('today')">
+                            <h3 class="text-xs sm:text-sm font-medium text-gray-800" data-i18n="todayTotal">Today's Total</h3>
+                            <p class="text-xl sm:text-2xl font-bold text-gray-900" id="totalCount">0</p>
+                            <p class="text-[10px] sm:text-xs text-gray-600 hidden sm:block" data-i18n="submittedToday">Submitted Today</p>
                         </div>
                     </div>
 
                     <!-- Controls -->
-                    <div class="flex flex-wrap gap-4 mb-6">
-                        <button id="refreshBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600" data-i18n="dataUpdate">
+                    <div class="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-4 mb-4 sm:mb-6">
+                        <button id="refreshBtn" class="bg-blue-500 text-white px-3 sm:px-4 py-2 rounded hover:bg-blue-600 text-xs sm:text-sm w-full sm:w-auto" data-i18n="dataUpdate">
                             🔄 データ更新
                         </button>
-                        <select id="factoryFilter" class="p-2 border rounded">
+                        <select id="factoryFilter" class="p-1.5 sm:p-2 border rounded text-xs sm:text-sm w-full sm:w-auto">
                             <option value="" data-i18n="allFactories">All Factories</option>
                         </select>
-                        <select id="statusFilter" class="p-2 border rounded">
+                        <select id="statusFilter" class="p-1.5 sm:p-2 border rounded text-xs sm:text-sm w-full sm:w-auto">
                             <option value="" data-i18n="allStatus">All Status</option>
                             <option value="pending">保留中 (班長承認待ち)</option>
                             <option value="hancho_approved">班長承認済み (課長承認待ち)</option>
@@ -671,9 +671,9 @@ function loadPage(page) {
                             <option value="correction_needed">修正要求</option>
                             <option value="correction_needed_from_kacho">課長修正要求（班長対応）</option>
                         </select>
-                        <input type="date" id="dateFilter" class="p-2 border rounded">
-                        <input type="text" id="approvalSearchInput" placeholder="品番、背番号、作業者で検索..." class="p-2 border rounded flex-1 min-w-64">
-                        <select id="itemsPerPageSelect" class="p-2 border rounded">
+                        <input type="date" id="dateFilter" class="p-1.5 sm:p-2 border rounded text-xs sm:text-sm w-full sm:w-auto">
+                        <input type="text" id="approvalSearchInput" placeholder="品番、背番号、作業者で検索..." class="p-1.5 sm:p-2 border rounded flex-1 min-w-0 sm:min-w-64 text-xs sm:text-sm w-full sm:w-auto">
+                        <select id="itemsPerPageSelect" class="p-1.5 sm:p-2 border rounded text-xs sm:text-sm w-full sm:w-auto">
                             <option value="10">10件表示</option>
                             <option value="15">15件表示</option>
                             <option value="50">50件表示</option>
@@ -682,16 +682,16 @@ function loadPage(page) {
                     </div>
 
                     <!-- List View Controls (hidden by default) -->
-                    <div id="listViewControls" class="hidden mb-6">
-                        <div class="flex flex-wrap gap-4 items-center">
-                            <button id="batchApproveBtn" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled data-i18n="batchApproveSelected">
+                    <div id="listViewControls" class="hidden mb-4 sm:mb-6">
+                        <div class="flex flex-col sm:flex-row gap-2 sm:gap-4 items-stretch sm:items-center">
+                            <button id="batchApproveBtn" class="bg-green-500 text-white px-3 sm:px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm w-full sm:w-auto" disabled data-i18n="batchApproveSelected">
                                 Batch Approve Selected
                             </button>
-                            <button id="batchRejectBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled data-i18n="batchRejectSelected">
+                            <button id="batchRejectBtn" class="bg-red-500 text-white px-3 sm:px-4 py-2 rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm w-full sm:w-auto" disabled data-i18n="batchRejectSelected">
                                 Batch Reject Selected
                             </button>
-                            <div class="ml-auto">
-                                <span id="selectedCount" class="text-sm text-gray-600">0 <span data-i18n="selected">selected</span></span>
+                            <div class="sm:ml-auto text-center sm:text-left">
+                                <span id="selectedCount" class="text-xs sm:text-sm text-gray-600">0 <span data-i18n="selected">selected</span></span>
                             </div>
                         </div>
                     </div>
@@ -707,33 +707,33 @@ function loadPage(page) {
                     </div>
 
                     <!-- Summary Report (for card view) -->
-                    <div id="summaryReport" class="hidden mt-6 bg-gray-50 p-6 rounded-lg border">
-                        <h3 class="text-lg font-semibold mb-4">Summary Report</h3>
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="summaryStats">
+                    <div id="summaryReport" class="hidden mt-4 sm:mt-6 bg-gray-50 p-4 sm:p-6 rounded-lg border">
+                        <h3 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">Summary Report</h3>
+                        <div class="grid grid-cols-2 gap-2 sm:gap-4" id="summaryStats">
                             <!-- Will be populated dynamically -->
                         </div>
                     </div>
 
                     <!-- Pagination -->
-                    <div class="flex items-center justify-between mt-6 p-4 bg-gray-50 border rounded-lg" id="paginationContainer">
-                        <div class="text-sm text-gray-700" id="pageInfo">0件中 0-0件を表示</div>
-                        <div class="flex items-center space-x-2">
-                            <button id="prevPageBtn" class="p-2 border rounded hover:bg-gray-50 bg-white shadow-sm" disabled>前へ</button>
+                    <div class="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0 mt-4 sm:mt-6 p-3 sm:p-4 bg-gray-50 border rounded-lg" id="paginationContainer">
+                        <div class="text-xs sm:text-sm text-gray-700" id="pageInfo">0件中 0-0件を表示</div>
+                        <div class="flex items-center space-x-1 sm:space-x-2">
+                            <button id="prevPageBtn" class="p-1.5 sm:p-2 border rounded hover:bg-gray-50 bg-white shadow-sm text-xs sm:text-sm" disabled>前へ</button>
                             <div id="pageNumbers" class="flex space-x-1"></div>
-                            <button id="nextPageBtn" class="p-2 border rounded hover:bg-gray-50 bg-white shadow-sm" disabled>次へ</button>
+                            <button id="nextPageBtn" class="p-1.5 sm:p-2 border rounded hover:bg-gray-50 bg-white shadow-sm text-xs sm:text-sm" disabled>次へ</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Approval Modal -->
                 <div id="approvalModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
-                    <div class="flex items-center justify-center min-h-screen p-4">
-                        <div class="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
-                            <div class="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
-                                <h3 class="text-lg font-semibold">データ承認</h3>
-                                <button onclick="closeApprovalModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+                    <div class="flex items-center justify-center min-h-screen p-0 sm:p-4">
+                        <div class="bg-white sm:rounded-lg w-full h-full sm:h-auto sm:max-w-6xl sm:max-h-[90vh] overflow-y-auto">
+                            <div class="sticky top-0 bg-white border-b px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center z-10">
+                                <h3 class="text-base sm:text-lg font-semibold">データ承認</h3>
+                                <button onclick="closeApprovalModal()" class="text-gray-400 hover:text-gray-600 text-xl sm:text-2xl p-1">✕</button>
                             </div>
-                            <div id="approvalModalContent" class="p-6"></div>
+                            <div id="approvalModalContent" class="p-4 sm:p-6"></div>
                         </div>
                     </div>
                 </div>
@@ -7508,12 +7508,12 @@ window.openApprovalDetail = async function(itemId) {
     }
     
     content.innerHTML = `
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
             <!-- Complete Information -->
-            <div class="lg:col-span-2 space-y-4">
-                <div class="bg-gray-50 p-4 rounded-lg">
-                    <h4 class="font-semibold text-gray-900 mb-3">基本情報</h4>
-                    <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="lg:col-span-2 space-y-3 sm:space-y-4">
+                <div class="bg-gray-50 p-3 sm:p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-2 sm:mb-3 text-sm sm:text-base">基本情報</h4>
+                    <div class="grid grid-cols-2 gap-1 sm:gap-2 text-xs sm:text-sm">
                         <div><span class="text-gray-600">品番:</span> <span class="font-medium">${item.品番 || '-'}</span></div>
                         <div><span class="text-gray-600">背番号:</span> <span class="font-medium">${item.背番号 || '-'}</span></div>
                         <div><span class="text-gray-600">工場:</span> <span class="font-medium">${item.工場 || '-'}</span></div>
@@ -7524,10 +7524,10 @@ window.openApprovalDetail = async function(itemId) {
                         <div><span class="text-gray-600">終了:</span> <span class="font-medium">${item.Time_end || '-'}</span></div>
                     </div>
                 </div>
-                
-                <div class="bg-gray-50 p-4 rounded-lg">
-                    <h4 class="font-semibold text-gray-900 mb-3">生産実績</h4>
-                    <div class="grid grid-cols-2 gap-2 text-sm">
+
+                <div class="bg-gray-50 p-3 sm:p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-2 sm:mb-3 text-sm sm:text-base">生産実績</h4>
+                    <div class="grid grid-cols-2 gap-1 sm:gap-2 text-xs sm:text-sm">
                         <div><span class="text-gray-600">処理数量:</span> <span class="font-medium">${quantity.toLocaleString()}</span></div>
                         <div><span class="text-gray-600">不良数:</span> <span class="font-medium text-red-600">${ngCount}</span></div>
                         <div><span class="text-gray-600">不良率:</span> <span class="font-medium ${parseFloat(defectRate) > 0 ? 'text-red-600' : 'text-green-600'}">${defectRate}%</span></div>
@@ -7859,26 +7859,28 @@ function getApprovalStatusHTML(item) {
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
     
     let statusHTML = `<div class="space-y-3">`;
-    
+
     // Current status display
-    statusHTML += `<div class="flex items-center space-x-2">`;
-    
+    statusHTML += `<div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:space-x-2">`;
+
     if (!item.approvalStatus || item.approvalStatus === 'pending') {
         statusHTML += `
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                 <i class="ri-time-line mr-1"></i>保留中（班長承認待ち）
             </span>
         `;
-        
+
         // 班長 can approve in first step
         if (currentUser.role === '班長') {
             statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    班長承認
-                </button>
-                <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                    修正要求
-                </button>
+                <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-2 sm:py-1 bg-green-500 text-white text-sm sm:text-xs rounded hover:bg-green-600 w-full sm:w-auto">
+                        班長承認
+                    </button>
+                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-2 sm:py-1 bg-red-500 text-white text-sm sm:text-xs rounded hover:bg-red-600 w-full sm:w-auto">
+                        修正要求
+                    </button>
+                </div>
             `;
         }
     } else if (item.approvalStatus === 'hancho_approved') {
@@ -7887,16 +7889,18 @@ function getApprovalStatusHTML(item) {
                 <i class="ri-user-check-line mr-1"></i>班長承認済み（課長承認待ち）
             </span>
         `;
-        
+
         // 課長, admin, 部長 can approve in second step
         if (['課長', 'admin', '部長'].includes(currentUser.role)) {
             statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    課長承認
-                </button>
-                <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                    修正要求
-                </button>
+                <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-2 sm:py-1 bg-green-500 text-white text-sm sm:text-xs rounded hover:bg-green-600 w-full sm:w-auto">
+                        課長承認
+                    </button>
+                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-2 sm:py-1 bg-red-500 text-white text-sm sm:text-xs rounded hover:bg-red-600 w-full sm:w-auto">
+                        修正要求
+                    </button>
+                </div>
             `;
         }
         
@@ -7939,13 +7943,15 @@ function getApprovalStatusHTML(item) {
                 <i class="ri-error-warning-line mr-1"></i>課長修正要求（班長対応）
             </span>
         `;
-        
+
         // 班長 can edit data and re-approve
         if (currentUser.role === '班長') {
             statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    修正完了・再承認
-                </button>
+                <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-2 sm:py-1 bg-green-500 text-white text-sm sm:text-xs rounded hover:bg-green-600 w-full sm:w-auto">
+                        修正完了・再承認
+                    </button>
+                </div>
             `;
         }
         
