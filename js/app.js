@@ -4682,6 +4682,9 @@ function loadPage(page) {
                             <p class="mt-2 text-gray-600" data-i18n="nodaSubtitle">Warehouse Picking Order Management System</p>
                         </div>
                         <div class="flex items-center space-x-4">
+                            <button onclick="openGenSyncModal()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                                <i class="ri-cloud-line mr-2"></i><span data-i18n="syncFromGen">Sync from GEN</span>
+                            </button>
                             <button onclick="triggerNodaCsvUpload()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
                                 <i class="ri-upload-line mr-2"></i><span data-i18n="csvUpload">Upload CSV</span>
                             </button>
