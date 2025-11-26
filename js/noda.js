@@ -3447,7 +3447,7 @@ window.openGenSyncModal = function() {
                         </div>
                         
                         <div class="mt-4 flex justify-end">
-                            <button onclick="proceedWithDuplicateSelection()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                            <button onclick="proceedWithDuplicateSelectionForGen()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
                                 <i class="ri-arrow-right-line mr-2"></i>Continue to Comparison
                             </button>
                         </div>
@@ -3459,17 +3459,7 @@ window.openGenSyncModal = function() {
                         <div id="genComparisonList" class="space-y-2 max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                             <!-- Comparison items will be inserted here -->
                         </div>
-                        <div class="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                            <div class="flex items-start space-x-2">
-                                <i class="ri-information-line text-blue-600 dark:text-blue-400 mt-0.5"></i>
-                                <div class="text-sm text-blue-800 dark:text-blue-300">
-                                    <p><strong>Legend:</strong></p>
-                                    <p>• White background: Existing items (quantities will be updated)</p>
-                                    <p>• Light green background: New items (will be added)</p>
-                                    <p>• Light red background: Items not in GEN (will be removed)</p>
-                                </div>
-                            </div>
-                        </div>
+
                     </div>
                     
                     <!-- Error Message (Hidden Initially) -->
@@ -3492,8 +3482,8 @@ window.openGenSyncModal = function() {
                         <button id="genSyncFetchBtn" onclick="fetchFromGen()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
                             <i class="ri-download-cloud-line mr-2"></i>Fetch from GEN
                         </button>
-                        <button id="genSyncOverwriteBtn" onclick="overwriteWithGenData()" class="hidden px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                            <i class="ri-check-line mr-2"></i>Overwrite Existing
+                        <button id="genSyncCreateBtn" onclick="createNewRequestFromGen()" class="hidden px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                            <i class="ri-add-line mr-2"></i>Create Request
                         </button>
                     </div>
                 </div>
@@ -3627,39 +3617,59 @@ window.fetchFromGen = async function() {
         
         updateGenProgress(90, 'Preparing comparison...');
         
-        // Check for existing picking request for this date
-        const existingRequest = await checkExistingPickingRequest(selectedDate);
+        // Get ALL existing picking requests for this date
+        const existingRequests = await getAllPickingRequestsForDate(selectedDate);
         
-        // Detect duplicates (same 背番号 + same date)
-        const duplicateGroups = detectDuplicates(validatedData, selectedDate);
+        // Calculate what's already been allocated
+        const allocatedQuantities = calculateAllocatedQuantities(existingRequests);
+        
+        // Detect duplicates (same 背番号)
+        const duplicateGroups = detectDuplicatesInGenData(validatedData);
+        
+        // Determine next request number
+        const nextRequestNumber = getNextRequestNumber(existingRequests, selectedDate);
         
         updateGenProgress(100, 'Complete!');
         
         // Store data for later use
         window.genComparisonData = {
-            newData: validatedData,
-            existingData: existingRequest,
+            validatedData: validatedData,
+            existingRequests: existingRequests,
+            allocatedQuantities: allocatedQuantities,
             deliveryDate: selectedDate,
+            nextRequestNumber: nextRequestNumber,
             duplicateGroups: duplicateGroups
         };
         
         // If duplicates exist, show duplicate selector first
         if (Object.keys(duplicateGroups).length > 0) {
-            displayDuplicateSelector(duplicateGroups, existingRequest, selectedDate);
+            displayDuplicateSelectorForGen(duplicateGroups, allocatedQuantities, nextRequestNumber);
             
             // Hide date selection, show duplicate selector
             document.getElementById('genDateSelection').classList.add('hidden');
             document.getElementById('genDuplicateSelector').classList.remove('hidden');
             document.getElementById('genSyncFetchBtn').classList.add('hidden');
         } else {
-            // No duplicates, proceed directly to comparison
-            displayComparisonView(validatedData, existingRequest);
+            // No duplicates - proceed directly to comparison
+            const consolidatedData = consolidateGenData(validatedData);
+            const remainingItems = calculateRemainingQuantities(consolidatedData, allocatedQuantities);
+            const availableItems = remainingItems.filter(item => item.remainingQty > 0);
+            
+            if (availableItems.length === 0) {
+                showGenError('All items from GEN have been fully allocated for this date. No remaining quantities to create a new request.');
+                fetchBtn.disabled = false;
+                fetchBtn.innerHTML = '<i class="ri-download-cloud-line mr-2"></i>Fetch from GEN';
+                return;
+            }
+            
+            window.genComparisonData.availableItems = availableItems;
+            displayEditableComparisonView(availableItems, existingRequests, nextRequestNumber);
             
             // Hide date selection, show comparison
             document.getElementById('genDateSelection').classList.add('hidden');
             document.getElementById('genComparisonView').classList.remove('hidden');
             document.getElementById('genSyncFetchBtn').classList.add('hidden');
-            document.getElementById('genSyncOverwriteBtn').classList.remove('hidden');
+            document.getElementById('genSyncCreateBtn').classList.remove('hidden');
         }
         
         setTimeout(() => updateGenProgress(0, ''), 1000);
@@ -3676,31 +3686,30 @@ window.fetchFromGen = async function() {
 };
 
 /**
- * Detect duplicates (same 背番号 + same date)
+ * Detect duplicates in GEN data (same 背番号)
  */
-function detectDuplicates(validatedData, deliveryDate) {
+function detectDuplicatesInGenData(validatedData) {
     const groups = {};
     
     validatedData.forEach(item => {
-        const key = `${item.背番号}_${deliveryDate}`;
+        const seban = item.背番号;
         
-        if (!groups[key]) {
-            groups[key] = {
+        if (!groups[seban]) {
+            groups[seban] = {
                 背番号: item.背番号,
                 品番: item.品番,
-                deliveryDate: deliveryDate,
                 entries: []
             };
         }
         
-        groups[key].entries.push(item);
+        groups[seban].entries.push(item);
     });
     
     // Filter to only groups with duplicates (more than 1 entry)
     const duplicates = {};
-    Object.keys(groups).forEach(key => {
-        if (groups[key].entries.length > 1) {
-            duplicates[key] = groups[key];
+    Object.keys(groups).forEach(seban => {
+        if (groups[seban].entries.length > 1) {
+            duplicates[seban] = groups[seban];
         }
     });
     
@@ -3709,7 +3718,345 @@ function detectDuplicates(validatedData, deliveryDate) {
 }
 
 /**
- * Display duplicate selector UI
+ * Display duplicate selector for GEN data
+ */
+function displayDuplicateSelectorForGen(duplicateGroups, allocatedQuantities, nextRequestNumber) {
+    const duplicateList = document.getElementById('genDuplicateList');
+    duplicateList.innerHTML = '';
+    
+    Object.values(duplicateGroups).forEach(group => {
+        const allocatedQty = allocatedQuantities.get(group.背番号) || 0;
+        
+        let groupHTML = `
+            <div class="border border-yellow-300 dark:border-yellow-700 rounded-lg p-4 bg-yellow-50 dark:bg-yellow-900/10">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h5 class="font-semibold text-gray-900 dark:text-white">
+                            ${group.背番号} <span class="text-gray-500 dark:text-gray-400">- ${group.品番}</span>
+                        </h5>
+                        ${allocatedQty > 0 ? `<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Already allocated: ${allocatedQty}</p>` : ''}
+                    </div>
+                    <span class="bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 text-xs px-2 py-1 rounded">
+                        ${group.entries.length} duplicates
+                    </span>
+                </div>
+                
+                <div class="space-y-2">
+        `;
+        
+        group.entries.forEach((entry, index) => {
+            const checkboxId = `dup_${group.背番号}_${index}`;
+            const isAlreadyAllocated = allocatedQty === entry.quantity;
+            
+            groupHTML += `
+                <label class="flex items-center space-x-3 p-3 ${isAlreadyAllocated ? 'bg-gray-100 dark:bg-gray-700' : 'bg-white dark:bg-gray-800'} rounded border ${isAlreadyAllocated ? 'border-gray-300 dark:border-gray-600' : 'border-gray-200 dark:border-gray-700'} hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer">
+                    <input type="checkbox" 
+                           id="${checkboxId}"
+                           data-seban="${group.背番号}"
+                           data-quantity="${entry.quantity}"
+                           data-index="${index}"
+                           class="duplicate-checkbox w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 ${isAlreadyAllocated ? 'opacity-50' : ''}"
+                           ${!isAlreadyAllocated ? 'checked' : ''}
+                           ${isAlreadyAllocated ? 'disabled' : ''}>
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium ${isAlreadyAllocated ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white'}">${entry.quantity} pieces</span>
+                            ${isAlreadyAllocated ? '<span class="text-xs px-2 py-0.5 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded">📋 Already allocated</span>' : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Available stock: ${entry.availableQuantity}
+                        </div>
+                    </div>
+                </label>
+            `;
+        });
+        
+        groupHTML += `
+                </div>
+                <div class="mt-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-xs text-blue-700 dark:text-blue-300">
+                    <span id="summary_${group.背番号}" class="font-medium"></span>
+                </div>
+            </div>
+        `;
+        
+        duplicateList.insertAdjacentHTML('beforeend', groupHTML);
+        
+        // Update summary for this group
+        updateDuplicateSummaryForGen(group.背番号);
+    });
+    
+    // Add event listeners to update summaries
+    document.querySelectorAll('.duplicate-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const seban = e.target.dataset.seban;
+            updateDuplicateSummaryForGen(seban);
+        });
+    });
+}
+
+/**
+ * Update duplicate selection summary for GEN
+ */
+function updateDuplicateSummaryForGen(seban) {
+    const checkboxes = document.querySelectorAll(`.duplicate-checkbox[data-seban="${seban}"]`);
+    const checked = Array.from(checkboxes).filter(cb => cb.checked && !cb.disabled);
+    const summaryEl = document.getElementById(`summary_${seban}`);
+    
+    if (checked.length === 0) {
+        summaryEl.innerHTML = '❌ No entries selected - this item will be <strong>excluded</strong>';
+    } else if (checked.length === 1) {
+        const qty = checked[0].dataset.quantity;
+        summaryEl.innerHTML = `✓ Selected: <strong>${qty} pieces</strong>`;
+    } else {
+        const totalQty = checked.reduce((sum, cb) => sum + parseInt(cb.dataset.quantity), 0);
+        summaryEl.innerHTML = `✓ Multiple selected - will be <strong>summed to ${totalQty} pieces</strong>`;
+    }
+}
+
+/**
+ * Proceed with duplicate selection
+ */
+window.proceedWithDuplicateSelectionForGen = function() {
+    const { validatedData, duplicateGroups, allocatedQuantities, existingRequests, nextRequestNumber, deliveryDate } = window.genComparisonData;
+    
+    // Build resolved data based on checkbox selections
+    const resolvedData = [];
+    const processedSebans = new Set();
+    
+    // Process items with duplicates
+    Object.values(duplicateGroups).forEach(group => {
+        const seban = group.背番号;
+        const checkboxes = document.querySelectorAll(`.duplicate-checkbox[data-seban="${seban}"]`);
+        const checked = Array.from(checkboxes).filter(cb => cb.checked && !cb.disabled);
+        
+        processedSebans.add(seban);
+        
+        if (checked.length === 0) {
+            // No selection - exclude this item
+            console.log(`Excluding ${seban} - no checkboxes selected`);
+        } else if (checked.length === 1) {
+            // Single selection
+            const index = parseInt(checked[0].dataset.index);
+            const selectedEntry = group.entries[index];
+            resolvedData.push(selectedEntry);
+            console.log(`Selected single entry for ${seban}: ${selectedEntry.quantity}`);
+        } else {
+            // Multiple selections - sum quantities
+            const totalQty = checked.reduce((sum, cb) => sum + parseInt(cb.dataset.quantity), 0);
+            const firstEntry = group.entries[0];
+            
+            resolvedData.push({
+                ...firstEntry,
+                quantity: totalQty
+            });
+            console.log(`Summed ${checked.length} entries for ${seban}: ${totalQty}`);
+        }
+    });
+    
+    // Add items without duplicates
+    validatedData.forEach(item => {
+        if (!processedSebans.has(item.背番号)) {
+            resolvedData.push(item);
+        }
+    });
+    
+    console.log('Resolved data after duplicate selection:', resolvedData);
+    
+    // Now consolidate and calculate remaining
+    const consolidatedData = consolidateGenData(resolvedData);
+    const remainingItems = calculateRemainingQuantities(consolidatedData, allocatedQuantities);
+    const availableItems = remainingItems.filter(item => item.remainingQty > 0);
+    
+    if (availableItems.length === 0) {
+        showGenError('All selected items have been fully allocated for this date. No remaining quantities to create a new request.');
+        return;
+    }
+    
+    // Update stored data
+    window.genComparisonData.availableItems = availableItems;
+    
+    // Show editable comparison view
+    displayEditableComparisonView(availableItems, existingRequests, nextRequestNumber);
+    
+    // Hide duplicate selector, show comparison
+    document.getElementById('genDuplicateSelector').classList.add('hidden');
+    document.getElementById('genComparisonView').classList.remove('hidden');
+    document.getElementById('genSyncCreateBtn').classList.remove('hidden');
+};
+
+/**
+ * Consolidate GEN data - sum quantities for duplicate 背番号
+ */
+function consolidateGenData(validatedData) {
+    const consolidated = new Map();
+    
+    validatedData.forEach(item => {
+        const seban = item.背番号;
+        
+        if (consolidated.has(seban)) {
+            // Sum quantities for duplicates
+            const existing = consolidated.get(seban);
+            existing.quantity += item.quantity;
+        } else {
+            // First occurrence - clone the item
+            consolidated.set(seban, {
+                背番号: item.背番号,
+                品番: item.品番,
+                quantity: item.quantity,
+                deliveryDate: item.deliveryDate,
+                masterData: item.masterData,
+                availableQuantity: item.availableQuantity
+            });
+        }
+    });
+    
+    const result = Array.from(consolidated.values());
+    console.log('Consolidated GEN data:', result);
+    return result;
+}
+
+/**
+ * Calculate remaining quantities (GEN total - already allocated)
+ */
+function calculateRemainingQuantities(consolidatedData, allocatedQuantities) {
+    return consolidatedData.map(item => {
+        const allocated = allocatedQuantities.get(item.背番号) || 0;
+        const remainingQty = item.quantity - allocated;
+        
+        return {
+            ...item,
+            genTotal: item.quantity,
+            allocatedQty: allocated,
+            remainingQty: Math.max(0, remainingQty) // Never negative
+        };
+    });
+}
+
+/**
+ * Display editable comparison view with quantity inputs
+ */
+function displayEditableComparisonView(availableItems, existingRequests, nextRequestNumber) {
+    const comparisonList = document.getElementById('genComparisonList');
+    comparisonList.innerHTML = '';
+    
+    // Add header info
+    const headerHTML = `
+        <div class="mb-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <h5 class="font-semibold text-indigo-900 dark:text-indigo-100">Creating New Request</h5>
+                    <p class="text-sm text-indigo-700 dark:text-indigo-300 mt-1">Request Number: <strong>${nextRequestNumber}</strong></p>
+                </div>
+                ${existingRequests.length > 0 ? `
+                    <span class="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs px-3 py-1 rounded-full">
+                        ${existingRequests.length} existing request${existingRequests.length > 1 ? 's' : ''} for this date
+                    </span>
+                ` : ''}
+            </div>
+            <p class="text-xs text-indigo-600 dark:text-indigo-400 mt-2">
+                💡 Edit quantities below. Enter 0 or leave empty to skip an item. Quantities cannot exceed remaining amounts.
+            </p>
+        </div>
+    `;
+    
+    comparisonList.insertAdjacentHTML('beforeend', headerHTML);
+    
+    // Add each item with editable quantity
+    availableItems.forEach((item, index) => {
+        const itemHTML = `
+            <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="font-semibold text-lg text-gray-900 dark:text-white">${item.背番号}</span>
+                            <span class="text-gray-500 dark:text-gray-400">|</span>
+                            <span class="text-sm text-gray-600 dark:text-gray-300">${item.品番}</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-400">
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-500">GEN Total:</span>
+                                <strong class="text-gray-900 dark:text-white ml-1">${item.genTotal}</strong>
+                            </div>
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-500">Already Allocated:</span>
+                                <strong class="text-orange-600 dark:text-orange-400 ml-1">${item.allocatedQty}</strong>
+                            </div>
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-500">Remaining:</span>
+                                <strong class="text-green-600 dark:text-green-400 ml-1">${item.remainingQty}</strong>
+                            </div>
+                            <div>
+                                <span class="text-gray-500 dark:text-gray-500">Stock Available:</span>
+                                <strong class="text-blue-600 dark:text-blue-400 ml-1">${item.availableQuantity}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-2">
+                        <label class="text-xs font-medium text-gray-700 dark:text-gray-300">Quantity for this request:</label>
+                        <input 
+                            type="number" 
+                            id="qty_${item.背番号}"
+                            data-seban="${item.背番号}"
+                            data-max="${item.remainingQty}"
+                            class="gen-qty-input w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-center font-semibold text-gray-900 dark:text-white bg-white dark:bg-gray-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            value="${item.remainingQty}"
+                            min="0"
+                            max="${item.remainingQty}"
+                            placeholder="0"
+                        />
+                        <span class="text-xs text-gray-500 dark:text-gray-400">Max: ${item.remainingQty}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        comparisonList.insertAdjacentHTML('beforeend', itemHTML);
+    });
+    
+    // Add event listeners for validation
+    document.querySelectorAll('.gen-qty-input').forEach(input => {
+        input.addEventListener('input', (e) => {
+            const max = parseInt(e.target.dataset.max);
+            let value = parseInt(e.target.value) || 0;
+            
+            if (value < 0) {
+                e.target.value = 0;
+            } else if (value > max) {
+                e.target.value = max;
+            }
+            
+            updateCreateButtonState();
+        });
+    });
+    
+    updateCreateButtonState();
+}
+
+/**
+ * Update create button state based on quantities
+ */
+function updateCreateButtonState() {
+    const createBtn = document.getElementById('genSyncCreateBtn');
+    const inputs = document.querySelectorAll('.gen-qty-input');
+    
+    let hasAnyQuantity = false;
+    inputs.forEach(input => {
+        if (parseInt(input.value) > 0) {
+            hasAnyQuantity = true;
+        }
+    });
+    
+    if (hasAnyQuantity) {
+        createBtn.disabled = false;
+        createBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    } else {
+        createBtn.disabled = true;
+        createBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+}
+
+/**
+ * Display duplicate selector UI (OLD - will be removed/updated)
  */
 function displayDuplicateSelector(duplicateGroups, existingData, deliveryDate) {
     const duplicateList = document.getElementById('genDuplicateList');
@@ -3747,24 +4094,33 @@ function displayDuplicateSelector(duplicateGroups, existingData, deliveryDate) {
         `;
         
         group.entries.forEach((entry, index) => {
+            // Check if this exact quantity already exists in current data
+            const alreadyAdded = existingQty === entry.quantity;
             // Auto-select entries that DON'T match existing quantity
             const shouldAutoCheck = existingQty ? entry.quantity !== existingQty : index === 0;
             const checkboxId = `dup_${group.背番号}_${index}`;
             
+            // Different styling for already-added items
+            const bgColor = alreadyAdded ? 'bg-gray-100 dark:bg-gray-700' : 'bg-white dark:bg-gray-800';
+            const borderColor = alreadyAdded ? 'border-gray-300 dark:border-gray-600' : 'border-gray-200 dark:border-gray-700';
+            const textColor = alreadyAdded ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white';
+            const checkboxClass = alreadyAdded ? 'opacity-50' : '';
+            
             groupHTML += `
-                <label class="flex items-center space-x-3 p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer">
+                <label class="flex items-center space-x-3 p-3 ${bgColor} rounded border ${borderColor} hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer">
                     <input type="checkbox" 
                            id="${checkboxId}"
                            data-seban="${group.背番号}"
                            data-quantity="${entry.quantity}"
                            data-index="${index}"
-                           class="duplicate-checkbox w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
-                           ${shouldAutoCheck ? 'checked' : ''}>
+                           class="duplicate-checkbox w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 ${checkboxClass}"
+                           ${shouldAutoCheck && !alreadyAdded ? 'checked' : ''}
+                           ${alreadyAdded ? 'disabled' : ''}>
                     <div class="flex-1">
                         <div class="flex items-center justify-between">
-                            <span class="font-medium text-gray-900 dark:text-white">${entry.quantity} pieces</span>
-                            ${existingQty === entry.quantity ? '<span class="text-xs text-blue-600 dark:text-blue-400">(Matches current)</span>' : ''}
-                            ${shouldAutoCheck && existingQty ? '<span class="text-xs text-green-600 dark:text-green-400">✓ Auto-selected</span>' : ''}
+                            <span class="font-medium ${textColor}">${entry.quantity} pieces</span>
+                            ${alreadyAdded ? '<span class="text-xs px-2 py-0.5 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded">📋 Already in list</span>' : ''}
+                            ${!alreadyAdded && shouldAutoCheck && existingQty ? '<span class="text-xs text-green-600 dark:text-green-400">✓ Auto-selected</span>' : ''}
                         </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Available stock: ${entry.availableQuantity}
@@ -4045,11 +4401,11 @@ async function validateGenData(parsedData, deliveryDate) {
 }
 
 /**
- * Check if picking request already exists for the given date
+ * Get ALL picking requests for the given date
  */
-async function checkExistingPickingRequest(deliveryDate) {
+async function getAllPickingRequestsForDate(deliveryDate) {
     try {
-        console.log(`Checking for existing request with date: ${deliveryDate}`);
+        console.log(`Fetching all requests for date: ${deliveryDate}`);
         
         const response = await fetch(`${BASE_URL}queries`, {
             method: 'POST',
@@ -4057,25 +4413,76 @@ async function checkExistingPickingRequest(deliveryDate) {
             body: JSON.stringify({
                 dbName: 'submittedDB',
                 collectionName: 'nodaRequestDB',
-                query: { pickupDate: deliveryDate }
+                query: { 
+                    pickupDate: deliveryDate,
+                    requestType: 'bulk'
+                }
             })
         });
         
         const data = await response.json();
         
-        console.log(`Query result:`, data);
+        console.log(`Found ${data?.length || 0} existing requests for ${deliveryDate}:`, data);
         
-        if (data && data.length > 0) {
-            console.log(`Found existing picking request for ${deliveryDate}:`, data[0]);
-            return data[0]; // Return first matching request
-        }
-        
-        console.log(`No existing picking request found for ${deliveryDate}`);
-        return null;
+        return data || [];
     } catch (error) {
-        console.error('Error checking existing request:', error);
-        return null;
+        console.error('Error fetching existing requests:', error);
+        return [];
     }
+}
+
+/**
+ * Calculate allocated quantities across all requests for a date
+ */
+function calculateAllocatedQuantities(existingRequests) {
+    const allocated = new Map();
+    
+    existingRequests.forEach(request => {
+        const lineItems = request.lineItems || [];
+        lineItems.forEach(item => {
+            const seban = item.背番号;
+            const qty = item.quantity || 0;
+            
+            if (allocated.has(seban)) {
+                allocated.set(seban, allocated.get(seban) + qty);
+            } else {
+                allocated.set(seban, qty);
+            }
+        });
+    });
+    
+    console.log('Allocated quantities:', Object.fromEntries(allocated));
+    return allocated;
+}
+
+/**
+ * Determine next request number for the date
+ */
+function getNextRequestNumber(existingRequests, deliveryDate) {
+    if (!existingRequests || existingRequests.length === 0) {
+        // First request
+        const dateStr = deliveryDate.replace(/-/g, '');
+        return `NODAPO-${dateStr}-001`;
+    }
+    
+    // Find highest sequence number
+    let maxSeq = 0;
+    existingRequests.forEach(request => {
+        const match = request.requestNumber.match(/-(\d{3})$/);
+        if (match) {
+            const seq = parseInt(match[1]);
+            if (seq > maxSeq) {
+                maxSeq = seq;
+            }
+        }
+    });
+    
+    const nextSeq = maxSeq + 1;
+    const dateStr = deliveryDate.replace(/-/g, '');
+    const seqStr = String(nextSeq).padStart(3, '0');
+    
+    console.log(`Next request number: NODAPO-${dateStr}-${seqStr}`);
+    return `NODAPO-${dateStr}-${seqStr}`;
 }
 
 /**
@@ -4245,91 +4652,107 @@ function displayComparisonView(newData, existingData) {
 }
 
 /**
- * Overwrite existing picking request with GEN data
+ * Create new picking request from GEN data
  */
-window.overwriteWithGenData = async function() {
+window.createNewRequestFromGen = async function() {
     if (!window.genComparisonData) {
         showGenError('No comparison data available');
         return;
     }
     
-    const { newData, existingData, deliveryDate } = window.genComparisonData;
+    const { availableItems, deliveryDate, nextRequestNumber } = window.genComparisonData;
     
-    const overwriteBtn = document.getElementById('genSyncOverwriteBtn');
-    overwriteBtn.disabled = true;
-    overwriteBtn.innerHTML = '<div class="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Creating...';
+    const createBtn = document.getElementById('genSyncCreateBtn');
+    createBtn.disabled = true;
+    createBtn.innerHTML = '<div class="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Creating...';
     
     try {
-        updateGenProgress(10, '🔄 Preparing picking request...');
+        updateGenProgress(10, '🔄 Collecting quantities...');
         
-        // Format items for nodaDB
-        const items = newData.map(item => ({
-            背番号: item.背番号,
-            品番: item.品番,
-            quantity: item.quantity,
-            status: 'pending',
-            timestamp: new Date().toISOString()
-        }));
+        // Collect quantities from inputs
+        const items = [];
+        availableItems.forEach(item => {
+            const input = document.getElementById(`qty_${item.背番号}`);
+            const quantity = parseInt(input.value) || 0;
+            
+            if (quantity > 0) {
+                items.push({
+                    背番号: item.背番号,
+                    品番: item.品番,
+                    quantity: quantity,
+                    status: 'pending',
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
         
-        updateGenProgress(50, '💾 Saving to database...');
-        
-        if (existingData) {
-            // Update existing request
-            const updateResponse = await fetch(`${BASE_URL}update`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    dbName: 'submittedDB',
-                    collectionName: 'nodaDB',
-                    query: { _id: { $oid: existingData._id.$oid } },
-                    update: {
-                        $set: {
-                            items: items,
-                            updatedAt: new Date().toISOString(),
-                            updatedBy: currentUser.username || 'system',
-                            syncedFromGEN: true
-                        }
-                    }
-                })
-            });
-            
-            if (!updateResponse.ok) {
-                throw new Error('Failed to update picking request');
-            }
-            
-            console.log('Updated existing picking request');
-        } else {
-            // Create new request using bulk request API
-            const insertResponse = await fetch(`${BASE_URL}api/noda-requests`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'bulkCreateRequests',
-                    data: {
-                        items: items,
-                        pickupDate: deliveryDate
-                    },
-                    userName: currentUser.username || 'system'
-                })
-            });
-            
-            if (!insertResponse.ok) {
-                throw new Error('Failed to create picking request');
-            }
-            
-            const result = await insertResponse.json();
-            
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to create picking request');
-            }
-            
-            console.log('Created new picking request:', result.bulkRequestNumber);
+        if (items.length === 0) {
+            throw new Error('No items with quantities > 0 to create request');
         }
+        
+        updateGenProgress(30, '✅ Validating...');
+        
+        // Validate stock availability again before creating
+        for (const item of items) {
+            const inventoryResponse = await fetch(`${BASE_URL}api/noda-requests`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'checkInventory',
+                    背番号: item.背番号
+                })
+            });
+            
+            if (!inventoryResponse.ok) {
+                throw new Error(`Inventory check failed for ${item.背番号}`);
+            }
+            
+            const inventoryResult = await inventoryResponse.json();
+            
+            if (!inventoryResult.success || !inventoryResult.inventory) {
+                throw new Error(`${item.背番号} not found in inventory`);
+            }
+            
+            const availableQuantity = inventoryResult.inventory.availableQuantity || 0;
+            
+            if (availableQuantity < item.quantity) {
+                throw new Error(`${item.背番号}: Insufficient stock (need ${item.quantity}, have ${availableQuantity})`);
+            }
+        }
+        
+        updateGenProgress(60, '💾 Creating request...');
+        
+        // Create new request using bulk request API
+        const insertResponse = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'bulkCreateRequests',
+                data: {
+                    items: items,
+                    pickupDate: deliveryDate
+                },
+                userName: currentUser.username || 'system'
+            })
+        });
+        
+        if (!insertResponse.ok) {
+            const errorText = await insertResponse.text();
+            throw new Error(`Failed to create picking request: ${errorText}`);
+        }
+        
+        const result = await insertResponse.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to create picking request');
+        }
+        
+        console.log('Created new picking request:', result.bulkRequestNumber);
         
         updateGenProgress(100, '✅ Complete!');
         
         // Show success message
-        showToast(existingData ? 'Picking request updated successfully!' : 'Picking request created successfully!', 'success');
+        showToast(`Picking request ${nextRequestNumber} created successfully!`, 'success');
         
         // Close modal and refresh data
         setTimeout(() => {
@@ -4338,11 +4761,11 @@ window.overwriteWithGenData = async function() {
         }, 1000);
         
     } catch (error) {
-        console.error('Error overwriting with GEN data:', error);
+        console.error('Error creating request from GEN:', error);
         showGenError(error.message);
         updateGenProgress(0, '');
         
-        overwriteBtn.disabled = false;
-        overwriteBtn.innerHTML = '<i class="ri-check-line mr-2"></i>Overwrite Existing';
+        createBtn.disabled = false;
+        createBtn.innerHTML = '<i class="ri-add-line mr-2"></i>Create Request';
     }
 };
