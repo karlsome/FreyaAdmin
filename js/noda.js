@@ -3801,23 +3801,28 @@ async function validateGenData(parsedData, deliveryDate) {
  */
 async function checkExistingPickingRequest(deliveryDate) {
     try {
+        console.log(`Checking for existing request with date: ${deliveryDate}`);
+        
         const response = await fetch(`${BASE_URL}queries`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 dbName: 'submittedDB',
-                collectionName: 'nodaDB',
-                query: { deliveryDate: deliveryDate }
+                collectionName: 'nodaRequestDB',
+                query: { pickupDate: deliveryDate }
             })
         });
         
         const data = await response.json();
         
+        console.log(`Query result:`, data);
+        
         if (data && data.length > 0) {
-            console.log(`📦 Found existing picking request for ${deliveryDate}`);
+            console.log(`Found existing picking request for ${deliveryDate}:`, data[0]);
             return data[0]; // Return first matching request
         }
         
+        console.log(`No existing picking request found for ${deliveryDate}`);
         return null;
     } catch (error) {
         console.error('Error checking existing request:', error);
@@ -3832,42 +3837,104 @@ function displayComparisonView(newData, existingData) {
     const comparisonList = document.getElementById('genComparisonList');
     comparisonList.innerHTML = '';
     
+    console.log('=== Comparison Debug ===');
+    console.log('New data:', newData);
+    console.log('Existing data:', existingData);
+    console.log('Existing data structure:', existingData ? {
+        hasItems: !!existingData.items,
+        hasLineItems: !!existingData.lineItems,
+        keys: Object.keys(existingData)
+    } : 'No existing data');
+    
     // Create maps for easy lookup
     const newDataMap = new Map(newData.map(item => [item.背番号, item]));
-    const existingDataMap = existingData ? new Map(existingData.items.map(item => [item.背番号, item])) : new Map();
+    
+    // Check if existing data uses 'items' or 'lineItems' property
+    let existingItems = [];
+    if (existingData) {
+        if (existingData.lineItems && Array.isArray(existingData.lineItems)) {
+            existingItems = existingData.lineItems;
+            console.log('Using lineItems from existing data');
+        } else if (existingData.items && Array.isArray(existingData.items)) {
+            existingItems = existingData.items;
+            console.log('Using items from existing data');
+        } else {
+            console.warn('Existing data has unexpected structure');
+        }
+    }
+    
+    const existingDataMap = new Map(existingItems.map(item => [item.背番号, item]));
+    
+    console.log('New data map size:', newDataMap.size);
+    console.log('Existing data map size:', existingDataMap.size);
+    console.log('New data keys:', Array.from(newDataMap.keys()));
+    console.log('Existing data keys:', Array.from(existingDataMap.keys()));
     
     // Get all unique 背番号
     const all背番号 = new Set([...newDataMap.keys(), ...existingDataMap.keys()]);
+    
+    let hasAnyChanges = false;
     
     all背番号.forEach(背番号 => {
         const newItem = newDataMap.get(背番号);
         const existingItem = existingDataMap.get(背番号);
         
+        console.log(`\nComparing ${背番号}:`, {
+            hasNew: !!newItem,
+            hasExisting: !!existingItem,
+            newQty: newItem?.quantity,
+            existingQty: existingItem?.quantity,
+            qtyMatch: newItem?.quantity === existingItem?.quantity
+        });
+        
         let bgColor, content, icon;
         
         if (newItem && existingItem) {
-            // Item exists in both - will be updated
-            bgColor = 'bg-white dark:bg-gray-800';
-            icon = '🔄';
+            // Item exists in both - check if quantity changed
             const qtyChanged = newItem.quantity !== existingItem.quantity;
-            content = `
-                <div class="flex items-center justify-between">
-                    <div class="flex-1">
-                        <span class="font-semibold">${背番号}</span>
-                        <span class="text-gray-600 dark:text-gray-400 mx-2">|</span>
-                        <span class="text-sm text-gray-700 dark:text-gray-300">${newItem.品番}</span>
+            
+            console.log(`  Both exist. Qty changed: ${qtyChanged} (${existingItem.quantity} → ${newItem.quantity})`);
+            
+            if (qtyChanged) {
+                // Quantity changed - will be updated (GREEN)
+                bgColor = 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
+                icon = '🔄';
+                hasAnyChanges = true;
+                content = `
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <span class="font-semibold">${背番号}</span>
+                            <span class="text-gray-600 dark:text-gray-400 mx-2">|</span>
+                            <span class="text-sm text-gray-700 dark:text-gray-300">${newItem.品番}</span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-red-600 dark:text-red-400 line-through">${existingItem.quantity}</span>
+                            <i class="ri-arrow-right-line text-gray-400"></i>
+                            <span class="text-green-600 dark:text-green-400 font-semibold">${newItem.quantity}</span>
+                        </div>
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <span class="text-red-600 dark:text-red-400 line-through">${existingItem.quantity}</span>
-                        <i class="ri-arrow-right-line text-gray-400"></i>
-                        <span class="text-green-600 dark:text-green-400 font-semibold">${newItem.quantity}</span>
+                `;
+            } else {
+                // Same quantity - no change (WHITE)
+                bgColor = 'bg-white dark:bg-gray-800';
+                icon = '✓';
+                content = `
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <span class="font-semibold">${背番号}</span>
+                            <span class="text-gray-600 dark:text-gray-400 mx-2">|</span>
+                            <span class="text-sm text-gray-700 dark:text-gray-300">${newItem.品番}</span>
+                            <span class="ml-2 text-xs text-gray-500 dark:text-gray-400">(No changes)</span>
+                        </div>
+                        <div class="text-gray-600 dark:text-gray-400">${newItem.quantity}</div>
                     </div>
-                </div>
-            `;
+                `;
+            }
         } else if (newItem && !existingItem) {
             // New item - will be added
             bgColor = 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
             icon = '✨';
+            hasAnyChanges = true;
             content = `
                 <div class="flex items-center justify-between">
                     <div class="flex-1">
@@ -3883,6 +3950,7 @@ function displayComparisonView(newData, existingData) {
             // Item not in GEN - will be removed
             bgColor = 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
             icon = '🗑️';
+            hasAnyChanges = true;
             content = `
                 <div class="flex items-center justify-between">
                     <div class="flex-1">
@@ -3909,6 +3977,23 @@ function displayComparisonView(newData, existingData) {
         
         comparisonList.insertAdjacentHTML('beforeend', itemHTML);
     });
+    
+    // If no changes detected, show a message
+    if (!hasAnyChanges) {
+        comparisonList.innerHTML = `
+            <div class="text-center py-12">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full mb-4">
+                    <i class="ri-check-line text-3xl text-green-600 dark:text-green-400"></i>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Changes Detected</h3>
+                <p class="text-gray-600 dark:text-gray-400">The GEN data matches the existing picking request. All items have the same quantities.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-500 mt-2">No update is needed.</p>
+            </div>
+        `;
+        
+        // Hide the overwrite button since there's nothing to update
+        document.getElementById('genSyncOverwriteBtn').classList.add('hidden');
+    }
 }
 
 /**
