@@ -3423,6 +3423,36 @@ window.openGenSyncModal = function() {
                         <p id="genSyncProgressText" class="mt-2 text-sm text-center text-gray-600 dark:text-gray-400"></p>
                     </div>
                     
+                    <!-- Duplicate Selector (Hidden Initially) -->
+                    <div id="genDuplicateSelector" class="hidden mb-6">
+                        <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-4">
+                            <div class="flex items-start space-x-2">
+                                <i class="ri-alert-line text-yellow-600 dark:text-yellow-400 text-xl mt-0.5"></i>
+                                <div>
+                                    <h4 class="font-semibold text-yellow-800 dark:text-yellow-300">⚠️ Duplicate Entries Detected</h4>
+                                    <p class="text-sm text-yellow-700 dark:text-yellow-400 mt-1">
+                                        Multiple entries with the same 背番号 were found. Please select which to include:
+                                    </p>
+                                    <ul class="text-xs text-yellow-600 dark:text-yellow-500 mt-2 space-y-1">
+                                        <li>✓ Check one or more entries to include them</li>
+                                        <li>✓ If multiple are checked, quantities will be summed</li>
+                                        <li>✓ If none are checked, the item will be excluded</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="genDuplicateList" class="space-y-4 max-h-96 overflow-y-auto">
+                            <!-- Duplicate groups will be inserted here -->
+                        </div>
+                        
+                        <div class="mt-4 flex justify-end">
+                            <button onclick="proceedWithDuplicateSelection()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                                <i class="ri-arrow-right-line mr-2"></i>Continue to Comparison
+                            </button>
+                        </div>
+                    </div>
+                    
                     <!-- Comparison View (Hidden Initially) -->
                     <div id="genComparisonView" class="hidden">
                         <h4 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">📋 Data Comparison</h4>
@@ -3600,23 +3630,37 @@ window.fetchFromGen = async function() {
         // Check for existing picking request for this date
         const existingRequest = await checkExistingPickingRequest(selectedDate);
         
+        // Detect duplicates (same 背番号 + same date)
+        const duplicateGroups = detectDuplicates(validatedData, selectedDate);
+        
         updateGenProgress(100, 'Complete!');
         
         // Store data for later use
         window.genComparisonData = {
             newData: validatedData,
             existingData: existingRequest,
-            deliveryDate: selectedDate
+            deliveryDate: selectedDate,
+            duplicateGroups: duplicateGroups
         };
         
-        // Show comparison view
-        displayComparisonView(validatedData, existingRequest);
-        
-        // Hide date selection, show comparison
-        document.getElementById('genDateSelection').classList.add('hidden');
-        document.getElementById('genComparisonView').classList.remove('hidden');
-        document.getElementById('genSyncFetchBtn').classList.add('hidden');
-        document.getElementById('genSyncOverwriteBtn').classList.remove('hidden');
+        // If duplicates exist, show duplicate selector first
+        if (Object.keys(duplicateGroups).length > 0) {
+            displayDuplicateSelector(duplicateGroups, existingRequest, selectedDate);
+            
+            // Hide date selection, show duplicate selector
+            document.getElementById('genDateSelection').classList.add('hidden');
+            document.getElementById('genDuplicateSelector').classList.remove('hidden');
+            document.getElementById('genSyncFetchBtn').classList.add('hidden');
+        } else {
+            // No duplicates, proceed directly to comparison
+            displayComparisonView(validatedData, existingRequest);
+            
+            // Hide date selection, show comparison
+            document.getElementById('genDateSelection').classList.add('hidden');
+            document.getElementById('genComparisonView').classList.remove('hidden');
+            document.getElementById('genSyncFetchBtn').classList.add('hidden');
+            document.getElementById('genSyncOverwriteBtn').classList.remove('hidden');
+        }
         
         setTimeout(() => updateGenProgress(0, ''), 1000);
         
@@ -3629,6 +3673,210 @@ window.fetchFromGen = async function() {
         fetchBtn.disabled = false;
         fetchBtn.innerHTML = '<i class="ri-download-cloud-line mr-2"></i>Fetch from GEN';
     }
+};
+
+/**
+ * Detect duplicates (same 背番号 + same date)
+ */
+function detectDuplicates(validatedData, deliveryDate) {
+    const groups = {};
+    
+    validatedData.forEach(item => {
+        const key = `${item.背番号}_${deliveryDate}`;
+        
+        if (!groups[key]) {
+            groups[key] = {
+                背番号: item.背番号,
+                品番: item.品番,
+                deliveryDate: deliveryDate,
+                entries: []
+            };
+        }
+        
+        groups[key].entries.push(item);
+    });
+    
+    // Filter to only groups with duplicates (more than 1 entry)
+    const duplicates = {};
+    Object.keys(groups).forEach(key => {
+        if (groups[key].entries.length > 1) {
+            duplicates[key] = groups[key];
+        }
+    });
+    
+    console.log('Detected duplicate groups:', duplicates);
+    return duplicates;
+}
+
+/**
+ * Display duplicate selector UI
+ */
+function displayDuplicateSelector(duplicateGroups, existingData, deliveryDate) {
+    const duplicateList = document.getElementById('genDuplicateList');
+    duplicateList.innerHTML = '';
+    
+    // Get existing quantities for auto-selection
+    let existingItems = [];
+    if (existingData) {
+        if (existingData.lineItems && Array.isArray(existingData.lineItems)) {
+            existingItems = existingData.lineItems;
+        } else if (existingData.items && Array.isArray(existingData.items)) {
+            existingItems = existingData.items;
+        }
+    }
+    const existingMap = new Map(existingItems.map(item => [item.背番号, item.quantity]));
+    
+    Object.values(duplicateGroups).forEach(group => {
+        const existingQty = existingMap.get(group.背番号);
+        
+        let groupHTML = `
+            <div class="border border-yellow-300 dark:border-yellow-700 rounded-lg p-4 bg-yellow-50 dark:bg-yellow-900/10">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h5 class="font-semibold text-gray-900 dark:text-white">
+                            ${group.背番号} <span class="text-gray-500 dark:text-gray-400">- ${group.品番}</span>
+                        </h5>
+                        ${existingQty ? `<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Current quantity: ${existingQty}</p>` : ''}
+                    </div>
+                    <span class="bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 text-xs px-2 py-1 rounded">
+                        ${group.entries.length} duplicates
+                    </span>
+                </div>
+                
+                <div class="space-y-2">
+        `;
+        
+        group.entries.forEach((entry, index) => {
+            // Auto-select entries that DON'T match existing quantity
+            const shouldAutoCheck = existingQty ? entry.quantity !== existingQty : index === 0;
+            const checkboxId = `dup_${group.背番号}_${index}`;
+            
+            groupHTML += `
+                <label class="flex items-center space-x-3 p-3 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer">
+                    <input type="checkbox" 
+                           id="${checkboxId}"
+                           data-seban="${group.背番号}"
+                           data-quantity="${entry.quantity}"
+                           data-index="${index}"
+                           class="duplicate-checkbox w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                           ${shouldAutoCheck ? 'checked' : ''}>
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium text-gray-900 dark:text-white">${entry.quantity} pieces</span>
+                            ${existingQty === entry.quantity ? '<span class="text-xs text-blue-600 dark:text-blue-400">(Matches current)</span>' : ''}
+                            ${shouldAutoCheck && existingQty ? '<span class="text-xs text-green-600 dark:text-green-400">✓ Auto-selected</span>' : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Available stock: ${entry.availableQuantity}
+                        </div>
+                    </div>
+                </label>
+            `;
+        });
+        
+        groupHTML += `
+                </div>
+                <div class="mt-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-xs text-blue-700 dark:text-blue-300">
+                    <span id="summary_${group.背番号}" class="font-medium"></span>
+                </div>
+            </div>
+        `;
+        
+        duplicateList.insertAdjacentHTML('beforeend', groupHTML);
+        
+        // Update summary for this group
+        updateDuplicateSummary(group.背番号);
+    });
+    
+    // Add event listeners to update summaries
+    document.querySelectorAll('.duplicate-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const seban = e.target.dataset.seban;
+            updateDuplicateSummary(seban);
+        });
+    });
+}
+
+/**
+ * Update duplicate selection summary
+ */
+function updateDuplicateSummary(seban) {
+    const checkboxes = document.querySelectorAll(`.duplicate-checkbox[data-seban="${seban}"]`);
+    const checked = Array.from(checkboxes).filter(cb => cb.checked);
+    const summaryEl = document.getElementById(`summary_${seban}`);
+    
+    if (checked.length === 0) {
+        summaryEl.innerHTML = '❌ No entries selected - this item will be <strong>excluded</strong>';
+    } else if (checked.length === 1) {
+        const qty = checked[0].dataset.quantity;
+        summaryEl.innerHTML = `✓ Selected: <strong>${qty} pieces</strong>`;
+    } else {
+        const totalQty = checked.reduce((sum, cb) => sum + parseInt(cb.dataset.quantity), 0);
+        summaryEl.innerHTML = `✓ Multiple selected - will be <strong>summed to ${totalQty} pieces</strong>`;
+    }
+}
+
+/**
+ * Proceed with duplicate selection
+ */
+window.proceedWithDuplicateSelection = function() {
+    const duplicateGroups = window.genComparisonData.duplicateGroups;
+    const originalData = window.genComparisonData.newData;
+    const existingData = window.genComparisonData.existingData;
+    
+    // Build resolved data based on checkbox selections
+    const resolvedData = [];
+    const processedSebans = new Set();
+    
+    // Process items with duplicates
+    Object.values(duplicateGroups).forEach(group => {
+        const seban = group.背番号;
+        const checkboxes = document.querySelectorAll(`.duplicate-checkbox[data-seban="${seban}"]`);
+        const checked = Array.from(checkboxes).filter(cb => cb.checked);
+        
+        processedSebans.add(seban);
+        
+        if (checked.length === 0) {
+            // No selection - exclude this item
+            console.log(`Excluding ${seban} - no checkboxes selected`);
+        } else if (checked.length === 1) {
+            // Single selection
+            const index = parseInt(checked[0].dataset.index);
+            const selectedEntry = group.entries[index];
+            resolvedData.push(selectedEntry);
+            console.log(`Selected single entry for ${seban}: ${selectedEntry.quantity}`);
+        } else {
+            // Multiple selections - sum quantities
+            const totalQty = checked.reduce((sum, cb) => sum + parseInt(cb.dataset.quantity), 0);
+            const firstEntry = group.entries[0];
+            
+            resolvedData.push({
+                ...firstEntry,
+                quantity: totalQty
+            });
+            console.log(`Summed ${checked.length} entries for ${seban}: ${totalQty}`);
+        }
+    });
+    
+    // Add items without duplicates
+    originalData.forEach(item => {
+        if (!processedSebans.has(item.背番号)) {
+            resolvedData.push(item);
+        }
+    });
+    
+    console.log('Resolved data after duplicate selection:', resolvedData);
+    
+    // Update stored data
+    window.genComparisonData.newData = resolvedData;
+    
+    // Show comparison view
+    displayComparisonView(resolvedData, existingData);
+    
+    // Hide duplicate selector, show comparison
+    document.getElementById('genDuplicateSelector').classList.add('hidden');
+    document.getElementById('genComparisonView').classList.remove('hidden');
+    document.getElementById('genSyncOverwriteBtn').classList.remove('hidden');
 };
 
 /**
