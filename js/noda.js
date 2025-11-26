@@ -3380,3 +3380,636 @@ async function parseEditCsvAndAddToCart(csvData) {
         alert(t('alertErrorParsingCsv') + error.message);
     }
 }
+
+// ==================== GEN SYNC FUNCTIONALITY ====================
+
+/**
+ * Open GEN Sync Modal
+ */
+window.openGenSyncModal = function() {
+    const modalHTML = `
+        <div id="genSyncModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3">
+                            <i class="ri-cloud-line text-3xl text-indigo-600"></i>
+                            <div>
+                                <h3 class="text-xl font-bold text-gray-900 dark:text-white">Sync from GEN</h3>
+                                <p class="text-sm text-gray-600 dark:text-gray-400">Automatically retrieve and create picking request from GEN data</p>
+                            </div>
+                        </div>
+                        <button onclick="closeGenSyncModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-6">
+                    <!-- Date Selection -->
+                    <div id="genDateSelection" class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            📅 Select Delivery Date
+                        </label>
+                        <input type="date" id="genSyncDate" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white" />
+                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">This will be the delivery date for the picking request</p>
+                    </div>
+                    
+                    <!-- Progress Bar (Hidden Initially) -->
+                    <div id="genSyncProgress" class="hidden mb-6">
+                        <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                            <div id="genSyncProgressBar" class="bg-indigo-600 h-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p id="genSyncProgressText" class="mt-2 text-sm text-center text-gray-600 dark:text-gray-400"></p>
+                    </div>
+                    
+                    <!-- Comparison View (Hidden Initially) -->
+                    <div id="genComparisonView" class="hidden">
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">📋 Data Comparison</h4>
+                        <div id="genComparisonList" class="space-y-2 max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                            <!-- Comparison items will be inserted here -->
+                        </div>
+                        <div class="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                            <div class="flex items-start space-x-2">
+                                <i class="ri-information-line text-blue-600 dark:text-blue-400 mt-0.5"></i>
+                                <div class="text-sm text-blue-800 dark:text-blue-300">
+                                    <p><strong>Legend:</strong></p>
+                                    <p>• White background: Existing items (quantities will be updated)</p>
+                                    <p>• Light green background: New items (will be added)</p>
+                                    <p>• Light red background: Items not in GEN (will be removed)</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Error Message (Hidden Initially) -->
+                    <div id="genSyncError" class="hidden mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                        <div class="flex items-start space-x-2">
+                            <i class="ri-error-warning-line text-red-600 dark:text-red-400 text-xl mt-0.5"></i>
+                            <div>
+                                <h5 class="font-semibold text-red-800 dark:text-red-300">Error</h5>
+                                <p id="genSyncErrorText" class="text-sm text-red-700 dark:text-red-400 mt-1"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                    <div class="flex justify-end space-x-3">
+                        <button onclick="closeGenSyncModal()" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
+                            Cancel
+                        </button>
+                        <button id="genSyncFetchBtn" onclick="fetchFromGen()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                            <i class="ri-download-cloud-line mr-2"></i>Fetch from GEN
+                        </button>
+                        <button id="genSyncOverwriteBtn" onclick="overwriteWithGenData()" class="hidden px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                            <i class="ri-check-line mr-2"></i>Overwrite Existing
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Set default date to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('genSyncDate').value = today;
+};
+
+/**
+ * Close GEN Sync Modal
+ */
+window.closeGenSyncModal = function() {
+    const modal = document.getElementById('genSyncModal');
+    if (modal) {
+        modal.remove();
+    }
+    // Clear any stored comparison data
+    window.genComparisonData = null;
+};
+
+/**
+ * Update progress bar
+ */
+function updateGenProgress(percent, message) {
+    const progressBar = document.getElementById('genSyncProgressBar');
+    const progressText = document.getElementById('genSyncProgressText');
+    const progressContainer = document.getElementById('genSyncProgress');
+    
+    if (percent > 0) {
+        progressContainer.classList.remove('hidden');
+        progressBar.style.width = `${percent}%`;
+        progressText.textContent = message;
+    } else {
+        progressContainer.classList.add('hidden');
+    }
+}
+
+/**
+ * Show error message
+ */
+function showGenError(message) {
+    const errorContainer = document.getElementById('genSyncError');
+    const errorText = document.getElementById('genSyncErrorText');
+    
+    errorText.textContent = message;
+    errorContainer.classList.remove('hidden');
+}
+
+/**
+ * Hide error message
+ */
+function hideGenError() {
+    const errorContainer = document.getElementById('genSyncError');
+    errorContainer.classList.add('hidden');
+}
+
+/**
+ * Fetch data from GEN
+ */
+window.fetchFromGen = async function() {
+    const dateInput = document.getElementById('genSyncDate');
+    const selectedDate = dateInput.value;
+    
+    if (!selectedDate) {
+        showGenError('Please select a delivery date');
+        return;
+    }
+    
+    hideGenError();
+    updateGenProgress(10, '🔌 Connecting to GEN...');
+    
+    // Disable fetch button
+    const fetchBtn = document.getElementById('genSyncFetchBtn');
+    fetchBtn.disabled = true;
+    fetchBtn.innerHTML = '<div class="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Processing...';
+    
+    try {
+        // Use BASE_URL from charts.js
+        const API_BASE_URL = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000';
+        
+        updateGenProgress(30, '📥 Fetching data from GEN...');
+        
+        const response = await fetch(`${API_BASE_URL}extract-tokens`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fromDate: selectedDate,
+                toDate: selectedDate,
+                workerFilter: 'gen_all'
+            })
+        });
+        
+        updateGenProgress(60, '📄 Parsing CSV data...');
+        
+        if (!response.ok) {
+            const errorData = await response.text();
+            let errorMessage = 'Failed to fetch data from GEN';
+            try {
+                const parsed = JSON.parse(errorData);
+                errorMessage = parsed.error || errorMessage;
+            } catch (e) {
+                errorMessage = errorData || errorMessage;
+            }
+            throw new Error(errorMessage);
+        }
+        
+        const csvBlob = await response.blob();
+        
+        // Decode Shift-JIS properly
+        const arrayBuffer = await csvBlob.arrayBuffer();
+        const decoder = new TextDecoder('shift-jis');
+        const csvText = decoder.decode(arrayBuffer);
+        
+        updateGenProgress(70, 'Validating items...');
+        
+        // Parse CSV (Shift-JIS encoded, comma-delimited)
+        const parsedData = await parseGenCSV(csvText);
+        
+        updateGenProgress(80, 'Checking inventory...');
+        
+        // Validate and enrich data
+        const validatedData = await validateGenData(parsedData, selectedDate);
+        
+        updateGenProgress(90, 'Preparing comparison...');
+        
+        // Check for existing picking request for this date
+        const existingRequest = await checkExistingPickingRequest(selectedDate);
+        
+        updateGenProgress(100, 'Complete!');
+        
+        // Store data for later use
+        window.genComparisonData = {
+            newData: validatedData,
+            existingData: existingRequest,
+            deliveryDate: selectedDate
+        };
+        
+        // Show comparison view
+        displayComparisonView(validatedData, existingRequest);
+        
+        // Hide date selection, show comparison
+        document.getElementById('genDateSelection').classList.add('hidden');
+        document.getElementById('genComparisonView').classList.remove('hidden');
+        document.getElementById('genSyncFetchBtn').classList.add('hidden');
+        document.getElementById('genSyncOverwriteBtn').classList.remove('hidden');
+        
+        setTimeout(() => updateGenProgress(0, ''), 1000);
+        
+    } catch (error) {
+        console.error('Error fetching from GEN:', error);
+        showGenError(error.message);
+        updateGenProgress(0, '');
+        
+        // Re-enable fetch button
+        fetchBtn.disabled = false;
+        fetchBtn.innerHTML = '<i class="ri-download-cloud-line mr-2"></i>Fetch from GEN';
+    }
+};
+
+/**
+ * Parse GEN CSV data
+ */
+async function parseGenCSV(csvText) {
+    const lines = csvText.split('\n').filter(line => line.trim());
+    
+    if (lines.length < 2) {
+        throw new Error('CSV file is empty or invalid');
+    }
+    
+    const headers = lines[0].split(',').map(h => h.trim());
+    
+    console.log('CSV Headers detected:', headers);
+    
+    // Expected headers: 収容数,日付,背番号
+    const 収容数Index = headers.findIndex(h => h.includes('収容数'));
+    const 日付Index = headers.findIndex(h => h.includes('日付'));
+    const 背番号Index = headers.findIndex(h => h.includes('背番号'));
+    
+    if (収容数Index === -1 || 日付Index === -1 || 背番号Index === -1) {
+        console.error('Header detection failed:', { 収容数Index, 日付Index, 背番号Index });
+        throw new Error('CSV headers invalid. Expected: 収容数, 日付, 背番号');
+    }
+    
+    const items = [];
+    
+    for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',');
+        
+        if (values.length < 3) continue;
+        
+        const 背番号 = values[背番号Index]?.trim();
+        const 収容数 = parseInt(values[収容数Index]?.trim()) || 0;
+        const 日付 = values[日付Index]?.trim();
+        
+        if (背番号 && 収容数 > 0) {
+            items.push({ 背番号, 収容数, 日付 });
+        }
+    }
+    
+    console.log(`Parsed ${items.length} items from GEN CSV`);
+    return items;
+}
+
+/**
+ * Validate GEN data against masterDB and inventory
+ */
+async function validateGenData(parsedData, deliveryDate) {
+    const validatedItems = [];
+    const errors = [];
+    
+    console.log('Starting validation for', parsedData.length, 'items');
+    
+    for (const item of parsedData) {
+        try {
+            console.log(`\nValidating ${item.背番号}...`);
+            
+            // 1. Query masterDB for this 背番号 with pickingIOT="yes"
+            const queryPayload = {
+                dbName: 'Sasaki_Coating_MasterDB',
+                collectionName: 'masterDB',
+                query: { 
+                    背番号: item.背番号,
+                    pickingIOT: 'yes'
+                }
+            };
+            
+            console.log('Querying masterDB:', JSON.stringify(queryPayload, null, 2));
+            
+            const masterResponse = await fetch(`${BASE_URL}queries`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(queryPayload)
+            });
+            
+            if (!masterResponse.ok) {
+                console.error(`masterDB fetch failed for ${item.背番号}:`, masterResponse.status, masterResponse.statusText);
+                errors.push(`${item.背番号}: Database query failed`);
+                continue;
+            }
+            
+            const masterData = await masterResponse.json();
+            console.log(`masterDB response for ${item.背番号}:`, masterData);
+            
+            if (!masterData || masterData.length === 0) {
+                console.warn(`${item.背番号} not found in masterDB or pickingIOT != 'yes'`);
+                errors.push(`${item.背番号}: Not configured for picking (pickingIOT must be 'yes')`);
+                continue;
+            }
+            
+            console.log(`Found in masterDB:`, masterData[0].品番, 'pickingIOT:', masterData[0].pickingIOT);
+            
+            const masterItem = masterData[0];
+            const 品番 = masterItem.品番;
+            
+            // 2. Check inventory using the same API as CSV upload
+            console.log(`Checking inventory for 背番号: ${item.背番号}`);
+            
+            const inventoryResponse = await fetch(`${BASE_URL}api/noda-requests`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'checkInventory',
+                    背番号: item.背番号
+                })
+            });
+            
+            if (!inventoryResponse.ok) {
+                console.error(`Inventory check failed for ${item.背番号}:`, inventoryResponse.status);
+                errors.push(`${item.背番号} (${品番}): Inventory query failed`);
+                continue;
+            }
+            
+            const inventoryResult = await inventoryResponse.json();
+            console.log(`Inventory response for ${item.背番号}:`, inventoryResult);
+            
+            if (!inventoryResult.success || !inventoryResult.inventory) {
+                console.warn(`${item.背番号} (${品番}) not found in inventory`);
+                errors.push(`${item.背番号} (${品番}): Not found in inventory`);
+                continue;
+            }
+            
+            const availableQuantity = inventoryResult.inventory.availableQuantity || 0;
+            
+            console.log(`Stock check: need ${item.収容数}, available ${availableQuantity}`);
+            
+            if (availableQuantity < item.収容数) {
+                console.warn(`${item.背番号} (${品番}) insufficient stock`);
+                errors.push(`${item.背番号} (${品番}): Insufficient stock (need ${item.収容数}, have ${availableQuantity})`);
+                continue;
+            }
+            
+            // 3. Item is valid, add to list
+            console.log(`${item.背番号} validated successfully`);
+            validatedItems.push({
+                背番号: item.背番号,
+                品番: 品番,
+                quantity: item.収容数,
+                deliveryDate: deliveryDate,
+                masterData: masterItem,
+                availableQuantity: availableQuantity
+            });
+            
+        } catch (error) {
+            console.error(`Error validating ${item.背番号}:`, error);
+            errors.push(`${item.背番号}: ${error.message}`);
+        }
+    }
+    
+    console.log(`\nValidation Summary:`);
+    console.log(`   Valid items: ${validatedItems.length}`);
+    console.log(`   Failed items: ${errors.length}`);
+    
+    if (errors.length > 0) {
+        console.warn(`\nValidation errors:`, errors);
+    }
+    
+    if (validatedItems.length === 0) {
+        throw new Error(`No valid items found. Errors:\n${errors.join('\n')}`);
+    }
+    
+    console.log(`✅ Validated ${validatedItems.length} items`);
+    return validatedItems;
+}
+
+/**
+ * Check if picking request already exists for the given date
+ */
+async function checkExistingPickingRequest(deliveryDate) {
+    try {
+        const response = await fetch(`${BASE_URL}queries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'nodaDB',
+                query: { deliveryDate: deliveryDate }
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data && data.length > 0) {
+            console.log(`📦 Found existing picking request for ${deliveryDate}`);
+            return data[0]; // Return first matching request
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('Error checking existing request:', error);
+        return null;
+    }
+}
+
+/**
+ * Display comparison view
+ */
+function displayComparisonView(newData, existingData) {
+    const comparisonList = document.getElementById('genComparisonList');
+    comparisonList.innerHTML = '';
+    
+    // Create maps for easy lookup
+    const newDataMap = new Map(newData.map(item => [item.背番号, item]));
+    const existingDataMap = existingData ? new Map(existingData.items.map(item => [item.背番号, item])) : new Map();
+    
+    // Get all unique 背番号
+    const all背番号 = new Set([...newDataMap.keys(), ...existingDataMap.keys()]);
+    
+    all背番号.forEach(背番号 => {
+        const newItem = newDataMap.get(背番号);
+        const existingItem = existingDataMap.get(背番号);
+        
+        let bgColor, content, icon;
+        
+        if (newItem && existingItem) {
+            // Item exists in both - will be updated
+            bgColor = 'bg-white dark:bg-gray-800';
+            icon = '🔄';
+            const qtyChanged = newItem.quantity !== existingItem.quantity;
+            content = `
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <span class="font-semibold">${背番号}</span>
+                        <span class="text-gray-600 dark:text-gray-400 mx-2">|</span>
+                        <span class="text-sm text-gray-700 dark:text-gray-300">${newItem.品番}</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-red-600 dark:text-red-400 line-through">${existingItem.quantity}</span>
+                        <i class="ri-arrow-right-line text-gray-400"></i>
+                        <span class="text-green-600 dark:text-green-400 font-semibold">${newItem.quantity}</span>
+                    </div>
+                </div>
+            `;
+        } else if (newItem && !existingItem) {
+            // New item - will be added
+            bgColor = 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
+            icon = '✨';
+            content = `
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <span class="font-semibold">${背番号}</span>
+                        <span class="text-gray-600 dark:text-gray-400 mx-2">|</span>
+                        <span class="text-sm text-gray-700 dark:text-gray-300">${newItem.品番}</span>
+                        <span class="ml-2 text-xs text-green-600 dark:text-green-400 font-medium">(NEW)</span>
+                    </div>
+                    <div class="text-green-600 dark:text-green-400 font-semibold">${newItem.quantity}</div>
+                </div>
+            `;
+        } else if (!newItem && existingItem) {
+            // Item not in GEN - will be removed
+            bgColor = 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+            icon = '🗑️';
+            content = `
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <span class="font-semibold text-red-600 dark:text-red-400">${背番号}</span>
+                        <span class="text-gray-600 dark:text-gray-400 mx-2">|</span>
+                        <span class="text-sm text-gray-500 dark:text-gray-400">${existingItem.品番 || 'Unknown'}</span>
+                        <span class="ml-2 text-xs text-red-600 dark:text-red-400 font-medium">(WILL BE DELETED)</span>
+                    </div>
+                    <div class="text-red-600 dark:text-red-400">${existingItem.quantity}</div>
+                </div>
+            `;
+        }
+        
+        const itemHTML = `
+            <div class="${bgColor} border border-gray-200 dark:border-gray-700 rounded-lg p-3 transition-all hover:shadow-md">
+                <div class="flex items-center space-x-3">
+                    <span class="text-xl">${icon}</span>
+                    <div class="flex-1">
+                        ${content}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        comparisonList.insertAdjacentHTML('beforeend', itemHTML);
+    });
+}
+
+/**
+ * Overwrite existing picking request with GEN data
+ */
+window.overwriteWithGenData = async function() {
+    if (!window.genComparisonData) {
+        showGenError('No comparison data available');
+        return;
+    }
+    
+    const { newData, existingData, deliveryDate } = window.genComparisonData;
+    
+    const overwriteBtn = document.getElementById('genSyncOverwriteBtn');
+    overwriteBtn.disabled = true;
+    overwriteBtn.innerHTML = '<div class="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>Creating...';
+    
+    try {
+        updateGenProgress(10, '🔄 Preparing picking request...');
+        
+        // Format items for nodaDB
+        const items = newData.map(item => ({
+            背番号: item.背番号,
+            品番: item.品番,
+            quantity: item.quantity,
+            status: 'pending',
+            timestamp: new Date().toISOString()
+        }));
+        
+        updateGenProgress(50, '💾 Saving to database...');
+        
+        if (existingData) {
+            // Update existing request
+            const updateResponse = await fetch(`${BASE_URL}update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dbName: 'submittedDB',
+                    collectionName: 'nodaDB',
+                    query: { _id: { $oid: existingData._id.$oid } },
+                    update: {
+                        $set: {
+                            items: items,
+                            updatedAt: new Date().toISOString(),
+                            updatedBy: currentUser.username || 'system',
+                            syncedFromGEN: true
+                        }
+                    }
+                })
+            });
+            
+            if (!updateResponse.ok) {
+                throw new Error('Failed to update picking request');
+            }
+            
+            console.log('Updated existing picking request');
+        } else {
+            // Create new request using bulk request API
+            const insertResponse = await fetch(`${BASE_URL}api/noda-requests`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'bulkCreateRequests',
+                    data: {
+                        items: items,
+                        pickupDate: deliveryDate
+                    },
+                    userName: currentUser.username || 'system'
+                })
+            });
+            
+            if (!insertResponse.ok) {
+                throw new Error('Failed to create picking request');
+            }
+            
+            const result = await insertResponse.json();
+            
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to create picking request');
+            }
+            
+            console.log('Created new picking request:', result.bulkRequestNumber);
+        }
+        
+        updateGenProgress(100, '✅ Complete!');
+        
+        // Show success message
+        showToast(existingData ? 'Picking request updated successfully!' : 'Picking request created successfully!', 'success');
+        
+        // Close modal and refresh data
+        setTimeout(() => {
+            closeGenSyncModal();
+            loadNodaData();
+        }, 1000);
+        
+    } catch (error) {
+        console.error('Error overwriting with GEN data:', error);
+        showGenError(error.message);
+        updateGenProgress(0, '');
+        
+        overwriteBtn.disabled = false;
+        overwriteBtn.innerHTML = '<i class="ri-check-line mr-2"></i>Overwrite Existing';
+    }
+};

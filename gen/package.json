@@ -1,0 +1,24 @@
+{
+  "name": "gen-token-extractor",
+  "version": "1.0.0",
+  "description": "Automated GEN token extraction using Puppeteer",
+  "main": "gen-token-extractor.js",
+  "scripts": {
+    "start": "node server.js",
+    "extract": "node gen-token-extractor.js",
+    "install-deps": "npm install puppeteer node-fetch express"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "iconv-lite": "^0.6.3",
+    "node-fetch": "^2.7.0",
+    "puppeteer": "^21.11.0"
+  },
+  "keywords": [
+    "puppeteer",
+    "automation",
+    "token-extraction"
+  ],
+  "author": "GEN CSV Tool",
+  "license": "MIT"
+}
