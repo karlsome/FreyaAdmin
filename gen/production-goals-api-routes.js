@@ -314,9 +314,8 @@ app.post('/api/production-goals/lookup', async (req, res) => {
             });
         }
         
-        // Lookup from masterDB (adjust collection name based on factory)
-        const dbName = factory === 'SASAKI_COATING' ? 'Sasaki_Coating_MasterDB' : 'masterDB';
-        const db = client.db(dbName);
+        // Lookup from masterDB - always use Sasaki_Coating_MasterDB for all factories
+        const db = client.db('Sasaki_Coating_MasterDB');
         const collection = db.collection('masterDB');
         
         const query = { [searchType]: searchValue };
@@ -337,7 +336,7 @@ app.post('/api/production-goals/lookup', async (req, res) => {
                 品名: product.品名,
                 収容数: product.収容数,
                 pcPerCycle: product.pcPerCycle || 1,
-                '秒数(1pcs何秒)': product['秒数(1pcs何秒)'] || 120
+                '秒数(1pcs何秒)': product['秒数(1pcs何秒)'] || 22.5
             }
         });
     } catch (error) {

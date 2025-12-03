@@ -8,7 +8,7 @@ const PLANNER_CONFIG = {
     workStartTime: '08:45',
     workEndTime: '20:00',
     intervalMinutes: 15,
-    defaultCycleTime: 120, // 2 minutes in seconds (default if 秒数 is empty)
+    defaultCycleTime: 22.5, // 22.5 seconds per piece (default if 秒数 is empty)
     defaultPcPerCycle: 1,
     lunchBreakDuration: 45, // minutes
     shortBreakDuration: 15, // minutes
@@ -478,7 +478,9 @@ async function parseGoalCsv(csvData) {
     try {
         console.log('📋 Parsing Goal CSV...');
         
-        const lines = csvData.split('\\n').filter(line => line.trim());
+        const lines = csvData.split(/\r?\n/).filter(line => line.trim());
+        console.log(`📋 Found ${lines.length} lines in CSV`);
+        
         if (lines.length < 2) {
             showPlannerNotification('CSV must contain header and at least one data row', 'error');
             return;
@@ -1127,12 +1129,10 @@ function renderGoalCard(goal) {
     if (isCompleted) {
         statusBgClass = 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700';
         statusTextClass = 'text-green-700 dark:text-green-400';
-    } else if (isInProgress) {
-        statusBgClass = 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700';
-        statusTextClass = 'text-blue-700 dark:text-blue-400';
     } else {
-        statusBgClass = 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700';
-        statusTextClass = 'text-gray-700 dark:text-gray-400';
+        // Both in-progress and pending show as red (incomplete)
+        statusBgClass = 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700';
+        statusTextClass = 'text-red-700 dark:text-red-400';
     }
     
     return `
@@ -1345,21 +1345,62 @@ function updateSelectedProductsSummary() {
                     </span>
                 </div>
                 <div class="space-y-2">
-                    ${data.items.map(item => `
-                        <div class="flex items-center justify-between text-sm">
-                            <div class="flex items-center gap-2">
-                                <div class="w-2 h-2 rounded-full" style="background-color: ${item.color}"></div>
-                                <span class="text-gray-700 dark:text-gray-300">${item.背番号}</span>
+                    ${data.items.map(item => {
+                        const startTime = item.startTime;
+                        const startMinutes = timeToMinutes(startTime);
+                        const durationMinutes = item.estimatedTime.totalSeconds / 60;
+                        const endMinutes = startMinutes + durationMinutes;
+                        
+                        // Find breaks during this product's time
+                        const affectingBreaks = plannerState.breaks.filter(brk => {
+                            const breakStart = timeToMinutes(brk.start);
+                            const breakEnd = timeToMinutes(brk.end);
+                            const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+                            return breakStart >= startMinutes && breakStart < endMinutes && isForThisEquipment;
+                        }).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+                        
+                        // Build time ranges string
+                        let timeRanges = '';
+                        if (affectingBreaks.length === 0) {
+                            timeRanges = `${startTime} - ${minutesToTime(endMinutes)}`;
+                        } else {
+                            let currentTime = startMinutes;
+                            const ranges = [];
+                            
+                            affectingBreaks.forEach(brk => {
+                                const breakStart = timeToMinutes(brk.start);
+                                if (currentTime < breakStart) {
+                                    ranges.push(`${minutesToTime(currentTime)} - ${minutesToTime(breakStart)}`);
+                                }
+                                currentTime = timeToMinutes(brk.end);
+                            });
+                            
+                            // Add final range after last break
+                            if (currentTime < endMinutes) {
+                                ranges.push(`${minutesToTime(currentTime)} - ${minutesToTime(endMinutes)}`);
+                            }
+                            
+                            timeRanges = ranges.join(', ');
+                        }
+                        
+                        return `
+                        <div class="flex items-center justify-between text-sm py-2 border-b border-gray-200 dark:border-gray-600 last:border-0">
+                            <div class="flex items-center gap-2 flex-1">
+                                <div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ${item.color}"></div>
+                                <div class="flex flex-col">
+                                    <span class="text-gray-700 dark:text-gray-300 font-medium">${item.背番号}</span>
+                                    <span class="text-xs text-gray-500 dark:text-gray-400">${timeRanges}</span>
+                                </div>
                             </div>
                             <div class="flex items-center gap-4">
                                 <span class="text-gray-500 dark:text-gray-400">${item.quantity}pcs</span>
                                 <span class="text-gray-500 dark:text-gray-400">${item.estimatedTime.formattedTime}</span>
-                                <button onclick="removeSelectedProduct('${item._id}')" class="text-red-500 hover:text-red-700">
+                                <button onclick="removeSelectedProduct('${item._id}')" class="text-red-500 hover:text-red-700 flex-shrink-0">
                                     <i class="ri-close-line"></i>
                                 </button>
                             </div>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                 </div>
                 ${isOverCapacity ? `
                     <div class="mt-2 text-xs text-red-600 dark:text-red-400">
@@ -1602,18 +1643,19 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
             }
             
             if (productForSlot) {
-                const isFirstSlotForProduct = index === 0 || !assignedProducts.some(p => {
-                    if (p._id !== productForSlot._id) return false;
-                    const prevSlotMinutes = timeToMinutes(timeSlots[index - 1]);
-                    return prevSlotMinutes >= currentMinutes;
-                });
+                // Check if this is the first slot for this specific product
+                const productStartMinutes = productForSlot.startTime ? timeToMinutes(productForSlot.startTime) : 0;
+                const isFirstSlotForProduct = slotMinutes === productStartMinutes;
                 
                 html += `
-                    <div class="flex-shrink-0 border-r dark:border-gray-500 relative group" 
-                         style="width: ${slotWidth}px; background-color: ${productForSlot.color}20">
+                    <div class="flex-shrink-0 border-r dark:border-gray-500 relative group ${isFirstSlotForProduct ? 'cursor-move' : ''}" 
+                         style="width: ${slotWidth}px; background-color: ${productForSlot.color}20"
+                         ${isFirstSlotForProduct ? `draggable="true" 
+                         ondragstart="handleProductDragStart(event, '${productForSlot._id}', '${equipment}')"
+                         ondragend="handleProductDragEnd(event)"` : ''}>
                         <div class="absolute inset-0 flex items-center justify-center text-xs font-medium truncate px-1" 
                              style="color: ${productForSlot.color}" 
-                             title="${productForSlot.背番号} - ${productForSlot.quantity}pcs">
+                             title="${productForSlot.背番号} - ${productForSlot.quantity}pcs (${isFirstSlotForProduct ? 'Drag to reschedule' : ''})">
                             ${productForSlot.背番号}
                         </div>
                         ${isFirstSlotForProduct ? `
@@ -1627,10 +1669,15 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
                 `;
             } else {
                 html += `
-                    <div class="flex-shrink-0 border-r dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer group relative" 
+                    <div class="flex-shrink-0 border-r dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer group relative drop-zone" 
                          style="width: ${slotWidth}px"
+                         data-equipment="${equipment}"
+                         data-time="${slot}"
+                         ondragover="handleTimelineDragOver(event)"
+                         ondragleave="handleTimelineDragLeave(event)"
+                         ondrop="handleTimelineDrop(event, '${equipment}', '${slot}')"
                          onclick="handleTimelineSlotClick('${equipment}', '${slot}')" 
-                         title="Click to add products">
+                         title="Click to add products or drop here to reschedule">
                         <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                             <i class="ri-add-circle-line text-blue-500 text-lg"></i>
                         </div>
@@ -3329,6 +3376,78 @@ function showPlannerNotification(message, type = 'info') {
     }, 3000);
 }
 
+// ============================================
+// DRAG AND DROP FOR TIMELINE
+// ============================================
+let draggedProduct = null;
+let draggedProductEquipment = null;
+
+function handleProductDragStart(event, productId, equipment) {
+    draggedProduct = productId;
+    draggedProductEquipment = equipment;
+    event.target.style.opacity = '0.5';
+    event.dataTransfer.effectAllowed = 'move';
+    console.log(`🎯 Started dragging product ${productId} from ${equipment}`);
+}
+
+function handleProductDragEnd(event) {
+    event.target.style.opacity = '1';
+}
+
+function handleTimelineDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    event.currentTarget.classList.add('bg-green-100', 'dark:bg-green-900/30');
+}
+
+function handleTimelineDragLeave(event) {
+    event.currentTarget.classList.remove('bg-green-100', 'dark:bg-green-900/30');
+}
+
+async function handleTimelineDrop(event, targetEquipment, targetTime) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('bg-green-100', 'dark:bg-green-900/30');
+    
+    if (!draggedProduct) return;
+    
+    console.log(`📍 Dropped product ${draggedProduct} at ${targetEquipment} - ${targetTime}`);
+    
+    // Find the product
+    const productIndex = plannerState.selectedProducts.findIndex(p => p._id === draggedProduct);
+    if (productIndex === -1) {
+        console.error('Product not found');
+        draggedProduct = null;
+        return;
+    }
+    
+    const product = plannerState.selectedProducts[productIndex];
+    const oldStartTime = product.startTime;
+    const oldEquipment = product.equipment;
+    
+    // Calculate new start time accounting for breaks
+    const targetMinutes = timeToMinutes(targetTime);
+    const durationMinutes = product.estimatedTime.totalSeconds / 60;
+    const newStartTime = findNextAvailableTime(targetMinutes, durationMinutes, targetEquipment);
+    
+    // Update product
+    product.startTime = minutesToTime(newStartTime);
+    product.equipment = targetEquipment;
+    
+    console.log(`✏️ Rescheduled ${product.背番号}: ${oldEquipment} ${oldStartTime} → ${targetEquipment} ${product.startTime}`);
+    
+    // Update views
+    updateSelectedProductsSummary();
+    renderAllViews();
+    
+    // Auto-save
+    await savePlanToDatabase();
+    
+    showPlannerNotification(`${product.背番号} rescheduled to ${product.startTime}`, 'success');
+    
+    draggedProduct = null;
+    draggedProductEquipment = null;
+}
+
 // Make functions globally available
 window.initializePlanner = initializePlanner;
 window.handleFactoryChange = handleFactoryChange;
@@ -3343,6 +3462,11 @@ window.handleKanbanDragStart = handleKanbanDragStart;
 window.handleKanbanDragOver = handleKanbanDragOver;
 window.handleKanbanDrop = handleKanbanDrop;
 window.handleTimelineSlotClick = handleTimelineSlotClick;
+window.handleProductDragStart = handleProductDragStart;
+window.handleProductDragEnd = handleProductDragEnd;
+window.handleTimelineDragOver = handleTimelineDragOver;
+window.handleTimelineDragLeave = handleTimelineDragLeave;
+window.handleTimelineDrop = handleTimelineDrop;
 window.closeTimelineClickModal = closeTimelineClickModal;
 window.showAddBreakModal = showAddBreakModal;
 window.closeAddBreakModal = closeAddBreakModal;
