@@ -289,6 +289,7 @@ async function handleFactoryChange(e) {
         
         // Render views
         renderGoalList();
+        updateSelectedProductsSummary();
         renderAllViews();
         
     } catch (error) {
@@ -308,6 +309,7 @@ function handleDateChange(e) {
             loadExistingPlans(plannerState.currentFactory, plannerState.currentDate)
         ]).then(() => {
             renderGoalList();
+            updateSelectedProductsSummary();
             renderAllViews();
         });
     }
