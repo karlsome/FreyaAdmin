@@ -82,6 +82,14 @@ const translations = {
       calendarComingSoon: "Calendar view coming soon...",
       workHours: "Work Hours",
       defaultCycleTimeInfo: "Default cycle time: 2 minutes (if not specified in masterDB)",
+      addProductsToTimeline: "Add Products to Timeline",
+      startTime: "Start Time",
+      availableProducts: "Available Products",
+      selectedWithQuantities: "Selected & Quantities",
+      productionOrder: "Production Order",
+      clickProductsToAdd: "Click products to add",
+      addQuantitiesFirst: "Add quantities first",
+      addToTimeline: "Add to Timeline",
       
       // Export Options
       exportOptions: "Export Options",
@@ -1179,6 +1187,14 @@ const translations = {
       calendarComingSoon: "カレンダー表示は近日公開予定...",
       workHours: "勤務時間",
       defaultCycleTimeInfo: "デフォルトサイクルタイム: 2分（masterDBに未指定の場合）",
+      addProductsToTimeline: "タイムラインに製品を追加",
+      startTime: "開始時間",
+      availableProducts: "利用可能な製品",
+      selectedWithQuantities: "選択と数量",
+      productionOrder: "生産順序",
+      clickProductsToAdd: "製品をクリックして追加",
+      addQuantitiesFirst: "最初に数量を追加",
+      addToTimeline: "タイムラインに追加",
       
       // Export Options
       exportOptions: "エクスポートオプション",

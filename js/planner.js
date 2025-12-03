@@ -385,6 +385,11 @@ function renderProductList() {
             (product.品名 || '').toLowerCase().includes(searchTerm) ||
             (product.モデル || '').toLowerCase().includes(searchTerm)
         );
+    }).sort((a, b) => {
+        // Sort alphabetically by 背番号
+        const aSerial = (a.背番号 || '').toLowerCase();
+        const bSerial = (b.背番号 || '').toLowerCase();
+        return aSerial.localeCompare(bSerial);
     });
     
     if (filteredProducts.length === 0) {
@@ -803,9 +808,14 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
                 `;
             } else {
                 html += `
-                    <div class="flex-shrink-0 border-r dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer" 
+                    <div class="flex-shrink-0 border-r dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer group relative" 
                          style="width: ${slotWidth}px"
-                         onclick="handleTimelineSlotClick('${equipment}', '${slot}')"></div>
+                         onclick="handleTimelineSlotClick('${equipment}', '${slot}')" 
+                         title="Click to add products">
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <i class="ri-add-circle-line text-blue-500 text-lg"></i>
+                        </div>
+                    </div>
                 `;
             }
         }
@@ -815,8 +825,8 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
 }
 
 function handleTimelineSlotClick(equipment, timeSlot) {
-    // Could open a modal to add a product at this specific time
-    console.log(`Clicked slot: ${equipment} at ${timeSlot}`);
+    // Open multi-column product picker modal
+    showMultiColumnProductPicker(equipment, timeSlot);
 }
 
 // ============================================
@@ -1031,6 +1041,365 @@ function editSelectedProduct(productId) {
         // Re-add with modal
         showAddProductModal(originalProduct);
     }
+}
+
+// ============================================
+// MULTI-COLUMN PRODUCT PICKER
+// ============================================
+let multiPickerState = {
+    equipment: null,
+    startTime: null,
+    availableProducts: [],
+    selectedProducts: [],
+    orderedProducts: []
+};
+
+function showMultiColumnProductPicker(equipment, startTime) {
+    multiPickerState = {
+        equipment: equipment,
+        startTime: startTime,
+        availableProducts: [...plannerState.products].sort((a, b) => {
+            const aSerial = (a.背番号 || '').toLowerCase();
+            const bSerial = (b.背番号 || '').toLowerCase();
+            return aSerial.localeCompare(bSerial);
+        }),
+        selectedProducts: [],
+        orderedProducts: []
+    };
+    
+    const modalHTML = `
+        <div id="multiPickerModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-6xl h-[80vh] flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="addProductsToTimeline">Add Products to Timeline</h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                <span data-i18n="equipment">Equipment</span>: <strong>${equipment}</strong> | 
+                                <span data-i18n="startTime">Start Time</span>: <strong>${startTime}</strong>
+                            </p>
+                        </div>
+                        <button onclick="closeMultiColumnPicker()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="flex-1 flex overflow-hidden">
+                    <!-- Column 1: Available Products -->
+                    <div class="w-1/3 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+                        <div class="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
+                            <h4 class="font-semibold text-gray-900 dark:text-white mb-2" data-i18n="availableProducts">Available Products</h4>
+                            <input type="text" id="multiPickerSearch" 
+                                   class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white" 
+                                   placeholder="Search..." 
+                                   oninput="filterMultiPickerProducts()">
+                        </div>
+                        <div id="multiPickerAvailable" class="flex-1 overflow-y-auto p-3 space-y-2">
+                            <!-- Will be populated -->
+                        </div>
+                    </div>
+                    
+                    <!-- Column 2: Selected Products with Quantities -->
+                    <div class="w-1/3 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+                        <div class="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
+                            <h4 class="font-semibold text-gray-900 dark:text-white" data-i18n="selectedWithQuantities">Selected & Quantities</h4>
+                        </div>
+                        <div id="multiPickerSelected" class="flex-1 overflow-y-auto p-3 space-y-2">
+                            <div class="text-center py-8 text-gray-400">
+                                <i class="ri-arrow-left-line text-3xl mb-2"></i>
+                                <p class="text-sm" data-i18n="clickProductsToAdd">Click products to add</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Column 3: Order Arrangement -->
+                    <div class="w-1/3 flex flex-col">
+                        <div class="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
+                            <h4 class="font-semibold text-gray-900 dark:text-white" data-i18n="productionOrder">Production Order</h4>
+                        </div>
+                        <div id="multiPickerOrdered" class="flex-1 overflow-y-auto p-3 space-y-2">
+                            <div class="text-center py-8 text-gray-400">
+                                <i class="ri-arrow-left-line text-3xl mb-2"></i>
+                                <p class="text-sm" data-i18n="addQuantitiesFirst">Add quantities first</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">
+                            <span id="multiPickerStats">0 products selected</span>
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="closeMultiColumnPicker()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
+                            <button onclick="confirmMultiPickerSelection()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors" data-i18n="addToTimeline">Add to Timeline</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    renderMultiPickerAvailable();
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+function closeMultiColumnPicker() {
+    const modal = document.getElementById('multiPickerModal');
+    if (modal) modal.remove();
+    multiPickerState = { equipment: null, startTime: null, availableProducts: [], selectedProducts: [], orderedProducts: [] };
+}
+
+function filterMultiPickerProducts() {
+    renderMultiPickerAvailable();
+}
+
+function renderMultiPickerAvailable() {
+    const container = document.getElementById('multiPickerAvailable');
+    if (!container) return;
+    
+    const searchTerm = document.getElementById('multiPickerSearch')?.value?.toLowerCase() || '';
+    
+    const filtered = multiPickerState.availableProducts.filter(product => {
+        // Don't show already selected products
+        if (multiPickerState.selectedProducts.some(p => p._id === product._id)) return false;
+        
+        if (!searchTerm) return true;
+        return (
+            (product.品番 || '').toLowerCase().includes(searchTerm) ||
+            (product.背番号 || '').toLowerCase().includes(searchTerm) ||
+            (product.品名 || '').toLowerCase().includes(searchTerm)
+        );
+    });
+    
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="text-center py-4 text-gray-400 text-sm">No products found</div>';
+        return;
+    }
+    
+    container.innerHTML = filtered.map(product => {
+        const color = plannerState.productColors[product.背番号] || '#6B7280';
+        return `
+            <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 transition-colors"
+                 onclick="addToMultiPickerSelected('${product._id}')">
+                <div class="flex items-center gap-2">
+                    <div class="w-3 h-3 rounded-full" style="background-color: ${color}"></div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-sm text-gray-900 dark:text-white truncate">${product.背番号 || '-'}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${product.品番 || '-'}</p>
+                    </div>
+                    <i class="ri-add-circle-line text-blue-500"></i>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function addToMultiPickerSelected(productId) {
+    const product = multiPickerState.availableProducts.find(p => p._id === productId);
+    if (!product) return;
+    
+    const capacity = parseInt(product['収容数']) || 1;
+    
+    multiPickerState.selectedProducts.push({
+        ...product,
+        quantity: capacity,
+        quantityInputId: `qty-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    });
+    
+    renderMultiPickerAvailable();
+    renderMultiPickerSelected();
+    updateMultiPickerStats();
+}
+
+function renderMultiPickerSelected() {
+    const container = document.getElementById('multiPickerSelected');
+    if (!container) return;
+    
+    if (multiPickerState.selectedProducts.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8 text-gray-400">
+                <i class="ri-arrow-left-line text-3xl mb-2"></i>
+                <p class="text-sm" data-i18n="clickProductsToAdd">Click products to add</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = multiPickerState.selectedProducts.map((product, index) => {
+        const color = plannerState.productColors[product.背番号] || '#6B7280';
+        const timeInfo = calculateProductionTime(product, product.quantity);
+        const boxes = calculateBoxesNeeded(product, product.quantity);
+        
+        return `
+            <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
+                <div class="flex items-start gap-2 mb-2">
+                    <div class="w-3 h-3 rounded-full mt-1" style="background-color: ${color}"></div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-sm text-gray-900 dark:text-white truncate">${product.背番号 || '-'}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${product.品名 || '-'}</p>
+                    </div>
+                    <button onclick="removeFromMultiPickerSelected(${index})" class="text-red-500 hover:text-red-700">
+                        <i class="ri-close-line"></i>
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    <div>
+                        <label class="text-xs text-gray-600 dark:text-gray-400">Quantity</label>
+                        <input type="number" id="${product.quantityInputId}" min="1" value="${product.quantity}" 
+                               class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded text-sm dark:bg-gray-700 dark:text-white"
+                               onchange="updateMultiPickerQuantity(${index}, this.value)">
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 grid grid-cols-2 gap-2">
+                        <div>Boxes: <strong>${boxes}</strong></div>
+                        <div>Time: <strong>${timeInfo.formattedTime}</strong></div>
+                    </div>
+                    <button onclick="moveToOrderColumn(${index})" 
+                            class="w-full p-2 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded text-xs hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors">
+                        <i class="ri-arrow-right-line mr-1"></i>Move to Order
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function removeFromMultiPickerSelected(index) {
+    multiPickerState.selectedProducts.splice(index, 1);
+    renderMultiPickerAvailable();
+    renderMultiPickerSelected();
+    updateMultiPickerStats();
+}
+
+function updateMultiPickerQuantity(index, value) {
+    const qty = parseInt(value) || 1;
+    multiPickerState.selectedProducts[index].quantity = qty;
+    renderMultiPickerSelected();
+}
+
+function moveToOrderColumn(index) {
+    const product = multiPickerState.selectedProducts.splice(index, 1)[0];
+    multiPickerState.orderedProducts.push(product);
+    renderMultiPickerSelected();
+    renderMultiPickerOrdered();
+    updateMultiPickerStats();
+}
+
+function renderMultiPickerOrdered() {
+    const container = document.getElementById('multiPickerOrdered');
+    if (!container) return;
+    
+    if (multiPickerState.orderedProducts.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8 text-gray-400">
+                <i class="ri-arrow-left-line text-3xl mb-2"></i>
+                <p class="text-sm" data-i18n="addQuantitiesFirst">Add quantities first</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = multiPickerState.orderedProducts.map((product, index) => {
+        const color = plannerState.productColors[product.背番号] || '#6B7280';
+        const timeInfo = calculateProductionTime(product, product.quantity);
+        const boxes = calculateBoxesNeeded(product, product.quantity);
+        
+        return `
+            <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 relative">
+                <div class="absolute -left-3 -top-3 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                    ${index + 1}
+                </div>
+                <div class="flex items-start gap-2 mb-2">
+                    <div class="w-3 h-3 rounded-full mt-1" style="background-color: ${color}"></div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-sm text-gray-900 dark:text-white truncate">${product.背番号 || '-'}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${product.品名 || '-'}</p>
+                    </div>
+                    <button onclick="removeFromOrderColumn(${index})" class="text-red-500 hover:text-red-700">
+                        <i class="ri-close-line"></i>
+                    </button>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 grid grid-cols-3 gap-1">
+                    <div>Qty: <strong>${product.quantity}</strong></div>
+                    <div>Box: <strong>${boxes}</strong></div>
+                    <div>Time: <strong>${timeInfo.formattedTime}</strong></div>
+                </div>
+                <div class="mt-2 flex gap-1">
+                    ${index > 0 ? `<button onclick="moveOrderUp(${index})" class="flex-1 p-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600"><i class="ri-arrow-up-line"></i></button>` : ''}
+                    ${index < multiPickerState.orderedProducts.length - 1 ? `<button onclick="moveOrderDown(${index})" class="flex-1 p-1 bg-gray-100 dark:bg-gray-700 rounded text-xs hover:bg-gray-200 dark:hover:bg-gray-600"><i class="ri-arrow-down-line"></i></button>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function removeFromOrderColumn(index) {
+    const product = multiPickerState.orderedProducts.splice(index, 1)[0];
+    multiPickerState.selectedProducts.push(product);
+    renderMultiPickerSelected();
+    renderMultiPickerOrdered();
+    updateMultiPickerStats();
+}
+
+function moveOrderUp(index) {
+    if (index === 0) return;
+    const temp = multiPickerState.orderedProducts[index];
+    multiPickerState.orderedProducts[index] = multiPickerState.orderedProducts[index - 1];
+    multiPickerState.orderedProducts[index - 1] = temp;
+    renderMultiPickerOrdered();
+}
+
+function moveOrderDown(index) {
+    if (index === multiPickerState.orderedProducts.length - 1) return;
+    const temp = multiPickerState.orderedProducts[index];
+    multiPickerState.orderedProducts[index] = multiPickerState.orderedProducts[index + 1];
+    multiPickerState.orderedProducts[index + 1] = temp;
+    renderMultiPickerOrdered();
+}
+
+function updateMultiPickerStats() {
+    const statsEl = document.getElementById('multiPickerStats');
+    if (!statsEl) return;
+    
+    const total = multiPickerState.selectedProducts.length + multiPickerState.orderedProducts.length;
+    const ordered = multiPickerState.orderedProducts.length;
+    
+    statsEl.textContent = `${total} products selected | ${ordered} ready for timeline`;
+}
+
+function confirmMultiPickerSelection() {
+    if (multiPickerState.orderedProducts.length === 0) {
+        showPlannerNotification('Please move products to the order column', 'warning');
+        return;
+    }
+    
+    // Add all ordered products to the selected products state
+    multiPickerState.orderedProducts.forEach(product => {
+        const timeInfo = calculateProductionTime(product, product.quantity);
+        const boxes = calculateBoxesNeeded(product, product.quantity);
+        
+        plannerState.selectedProducts.push({
+            ...product,
+            equipment: multiPickerState.equipment,
+            boxes: boxes,
+            estimatedTime: timeInfo,
+            color: plannerState.productColors[product.背番号],
+            startTime: multiPickerState.startTime
+        });
+    });
+    
+    closeMultiColumnPicker();
+    renderProductList();
+    updateSelectedProductsSummary();
+    renderAllViews();
+    
+    showPlannerNotification(`Added ${multiPickerState.orderedProducts.length} products to timeline`, 'success');
 }
 
 // ============================================
@@ -1307,3 +1676,14 @@ window.loadPlan = loadPlan;
 window.showPlannerCalendar = showPlannerCalendar;
 window.closePlannerCalendar = closePlannerCalendar;
 window.filterProducts = filterProducts;
+window.showMultiColumnProductPicker = showMultiColumnProductPicker;
+window.closeMultiColumnPicker = closeMultiColumnPicker;
+window.filterMultiPickerProducts = filterMultiPickerProducts;
+window.addToMultiPickerSelected = addToMultiPickerSelected;
+window.removeFromMultiPickerSelected = removeFromMultiPickerSelected;
+window.updateMultiPickerQuantity = updateMultiPickerQuantity;
+window.moveToOrderColumn = moveToOrderColumn;
+window.removeFromOrderColumn = removeFromOrderColumn;
+window.moveOrderUp = moveOrderUp;
+window.moveOrderDown = moveOrderDown;
+window.confirmMultiPickerSelection = confirmMultiPickerSelection;
