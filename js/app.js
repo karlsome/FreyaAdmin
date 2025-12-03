@@ -1825,9 +1825,16 @@ function loadPage(page) {
                         <i class="ri-magic-line mr-2"></i><span data-i18n="smartScheduling">Smart Scheduling</span>
                       </button>
                     </div>
-                    <input type="text" id="goalSearch" 
-                           class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm" 
-                           data-i18n-placeholder="searchGoals" placeholder="Search goals...">
+                    <div class="flex items-center gap-2 mb-2">
+                      <input type="text" id="goalSearch" 
+                             class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm" 
+                             data-i18n-placeholder="searchGoals" placeholder="Search goals...">
+                      <button onclick="openBulkEditGoalsModal()" 
+                              class="px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center"
+                              title="Edit Goals">
+                        <i class="ri-edit-line"></i>
+                      </button>
+                    </div>
                     <input type="file" id="goalCsvFileInput" accept=".csv" style="display: none;" onchange="handleGoalCsvUpload(this)">
                   </div>
                   <div id="goalListContainer" class="flex-1 overflow-y-auto p-3 space-y-2">

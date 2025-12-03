@@ -1071,8 +1071,15 @@ function renderGoalList() {
             (goal.品名 || '').toLowerCase().includes(searchTerm)
         );
     }).sort((a, b) => {
-        // Sort by date, then by 背番号
+        // Sort by date first
         if (a.date !== b.date) return a.date.localeCompare(b.date);
+        
+        // Then by completion status (incomplete/red first, completed/green second)
+        const aComplete = a.status === 'completed';
+        const bComplete = b.status === 'completed';
+        if (aComplete !== bComplete) return aComplete ? 1 : -1;
+        
+        // Finally by 背番号 alphabetically
         const aSerial = (a.背番号 || '').toLowerCase();
         const bSerial = (b.背番号 || '').toLowerCase();
         return aSerial.localeCompare(bSerial);
@@ -1328,6 +1335,18 @@ function updateSelectedProductsSummary() {
     });
     
     container.innerHTML = Object.entries(byEquipment).map(([equipment, data]) => {
+        // Calculate time range
+        const startTimes = data.items.map(item => timeToMinutes(item.startTime));
+        const earliestStart = Math.min(...startTimes);
+        const latestEnd = Math.max(...data.items.map((item, idx) => {
+            const start = startTimes[idx];
+            const duration = item.estimatedTime.totalSeconds / 60;
+            return start + duration;
+        }));
+        
+        const timeRange = `${minutesToTime(earliestStart)} - ${minutesToTime(latestEnd)}`;
+        const totalQuantity = data.items.reduce((sum, item) => sum + item.quantity, 0);
+        const itemCount = data.items.length;
         const hours = Math.floor(data.totalMinutes / 60);
         const mins = Math.round(data.totalMinutes % 60);
         const timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
@@ -1336,15 +1355,34 @@ function updateSelectedProductsSummary() {
         const isOverCapacity = utilization > 100;
         
         return `
-            <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg mb-3">
-                <div class="flex items-center justify-between mb-2">
-                    <h4 class="font-semibold text-gray-900 dark:text-white">${equipment}</h4>
-                    <span class="text-sm ${isOverCapacity ? 'text-red-600 font-bold' : 'text-gray-500 dark:text-gray-400'}">
-                        ${timeStr} (${utilization}%)
-                        ${isOverCapacity ? '<i class="ri-alert-fill ml-1"></i>' : ''}
-                    </span>
+            <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg mb-3 overflow-hidden">
+                <!-- Collapsed Summary Card -->
+                <div class="p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors" 
+                     onclick="toggleEquipmentCard('${equipment}')">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <h4 class="font-semibold text-gray-900 dark:text-white mb-1">${equipment}</h4>
+                            <div class="text-sm text-gray-600 dark:text-gray-300">
+                                <span>${itemCount} items</span>
+                                <span class="mx-2">•</span>
+                                <span>${totalQuantity}pcs</span>
+                                <span class="mx-2">•</span>
+                                <span>${timeRange}</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-sm ${isOverCapacity ? 'text-red-600 font-bold' : 'text-gray-500 dark:text-gray-400'}">
+                                ${timeStr} (${utilization}%)
+                                ${isOverCapacity ? '<i class="ri-alert-fill ml-1"></i>' : ''}
+                            </span>
+                            <i class="ri-arrow-down-s-line text-xl text-gray-500 dark:text-gray-400 transition-transform equipment-card-arrow" 
+                               id="arrow-${equipment}"></i>
+                        </div>
+                    </div>
                 </div>
-                <div class="space-y-2">
+                
+                <!-- Expandable Details -->
+                <div class="hidden border-t border-gray-200 dark:border-gray-600 p-4 space-y-2" id="details-${equipment}">
                     ${data.items.map(item => {
                         const startTime = item.startTime;
                         const startMinutes = timeToMinutes(startTime);
@@ -3430,6 +3468,19 @@ function showPlannerNotification(message, type = 'info') {
 }
 
 // ============================================
+// SELECTED PRODUCTS CARD TOGGLE
+// ============================================
+function toggleEquipmentCard(equipment) {
+    const details = document.getElementById(`details-${equipment}`);
+    const arrow = document.getElementById(`arrow-${equipment}`);
+    
+    if (details && arrow) {
+        details.classList.toggle('hidden');
+        arrow.classList.toggle('rotate-180');
+    }
+}
+
+// ============================================
 // DRAG AND DROP FOR TIMELINE
 // ============================================
 let draggedProduct = null;
@@ -3501,6 +3552,269 @@ async function handleTimelineDrop(event, targetEquipment, targetTime) {
     draggedProductEquipment = null;
 }
 
+// ============================================
+// BULK EDIT GOALS MODAL
+// ============================================
+function openBulkEditGoalsModal() {
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        showPlannerNotification('Please select factory and date first', 'warning');
+        return;
+    }
+    
+    // Filter goals for current date and factory
+    const currentGoals = plannerState.goals.filter(g => 
+        g.date === plannerState.currentDate && g.factory === plannerState.currentFactory
+    );
+    
+    const modalHtml = `
+        <div id="bulkEditGoalsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
+                        Edit Production Goals - ${plannerState.currentFactory} - ${plannerState.currentDate}
+                    </h3>
+                    <button onclick="closeBulkEditGoalsModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                        <i class="ri-close-line text-2xl"></i>
+                    </button>
+                </div>
+                
+                <div class="flex-1 overflow-auto p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-gray-700 dark:text-gray-300 font-semibold">背番号</th>
+                                    <th class="px-4 py-3 text-left text-gray-700 dark:text-gray-300 font-semibold">品番</th>
+                                    <th class="px-4 py-3 text-left text-gray-700 dark:text-gray-300 font-semibold">品名</th>
+                                    <th class="px-4 py-3 text-left text-gray-700 dark:text-gray-300 font-semibold w-32">Target Qty</th>
+                                    <th class="px-4 py-3 text-center text-gray-700 dark:text-gray-300 font-semibold w-24">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bulkEditGoalsTableBody" class="divide-y divide-gray-200 dark:divide-gray-700">
+                                ${currentGoals.map(goal => `
+                                    <tr data-goal-id="${goal._id}" class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                                        <td class="px-4 py-3 text-gray-900 dark:text-white">${goal.背番号 || '-'}</td>
+                                        <td class="px-4 py-3 text-gray-900 dark:text-white">${goal.品番 || '-'}</td>
+                                        <td class="px-4 py-3 text-gray-600 dark:text-gray-400">${goal.品名 || '-'}</td>
+                                        <td class="px-4 py-3">
+                                            <input type="number" 
+                                                   value="${goal.targetQuantity}" 
+                                                   min="1"
+                                                   class="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"
+                                                   onchange="updateGoalQuantityInTable('${goal._id}', this.value)">
+                                        </td>
+                                        <td class="px-4 py-3 text-center">
+                                            <button onclick="deleteGoalFromTable('${goal._id}')" 
+                                                    class="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                                                <i class="ri-delete-bin-line"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Add New Goal Section -->
+                    <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+                        <h4 class="font-semibold text-gray-900 dark:text-white mb-3">Add New Goal</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+                            <div>
+                                <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">背番号</label>
+                                <input type="text" id="newGoal背番号" 
+                                       class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
+                                       placeholder="背番号">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">品番</label>
+                                <input type="text" id="newGoal品番" 
+                                       class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
+                                       placeholder="品番">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">品名</label>
+                                <input type="text" id="newGoal品名" 
+                                       class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
+                                       placeholder="品名">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">Target Qty</label>
+                                <input type="number" id="newGoalQuantity" min="1" value="100"
+                                       class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm">
+                            </div>
+                            <div class="flex items-end">
+                                <button onclick="addNewGoalFromTable()" 
+                                        class="w-full px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium">
+                                    <i class="ri-add-line mr-1"></i>Add
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                    <button onclick="closeBulkEditGoalsModal()" 
+                            class="px-6 py-2 bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-white rounded-lg hover:bg-gray-400 dark:hover:bg-gray-500">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function closeBulkEditGoalsModal() {
+    const modal = document.getElementById('bulkEditGoalsModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+async function updateGoalQuantityInTable(goalId, newQuantity) {
+    try {
+        const quantity = parseInt(newQuantity);
+        if (isNaN(quantity) || quantity < 1) {
+            showPlannerNotification('Invalid quantity', 'error');
+            return;
+        }
+        
+        const response = await fetch(BASE_URL + 'api/production-goals', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                goalId: goalId,
+                updates: { targetQuantity: quantity }
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Update local state
+            const goal = plannerState.goals.find(g => g._id === goalId);
+            if (goal) {
+                goal.targetQuantity = quantity;
+            }
+            
+            showPlannerNotification('Goal quantity updated', 'success');
+            renderGoalList();
+        } else {
+            showPlannerNotification('Failed to update goal', 'error');
+        }
+    } catch (error) {
+        console.error('Error updating goal:', error);
+        showPlannerNotification('Error updating goal', 'error');
+    }
+}
+
+async function deleteGoalFromTable(goalId) {
+    if (!confirm('Delete this goal? This cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(BASE_URL + 'api/production-goals', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goalId: goalId })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Remove from local state
+            plannerState.goals = plannerState.goals.filter(g => g._id !== goalId);
+            
+            // Remove from table
+            const row = document.querySelector(`tr[data-goal-id="${goalId}"]`);
+            if (row) {
+                row.remove();
+            }
+            
+            showPlannerNotification('Goal deleted', 'success');
+            renderGoalList();
+        } else {
+            showPlannerNotification('Failed to delete goal', 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting goal:', error);
+        showPlannerNotification('Error deleting goal', 'error');
+    }
+}
+
+async function addNewGoalFromTable() {
+    const 背番号 = document.getElementById('newGoal背番号')?.value?.trim();
+    const 品番 = document.getElementById('newGoal品番')?.value?.trim();
+    const 品名 = document.getElementById('newGoal品名')?.value?.trim();
+    const quantity = parseInt(document.getElementById('newGoalQuantity')?.value);
+    
+    if (!背番号 || !品番) {
+        showPlannerNotification('背番号 and 品番 are required', 'error');
+        return;
+    }
+    
+    if (isNaN(quantity) || quantity < 1) {
+        showPlannerNotification('Invalid quantity', 'error');
+        return;
+    }
+    
+    try {
+        // Look up product details from masterDB if needed
+        let productData = { 背番号, 品番, 品名 };
+        
+        // Try to find additional details from masterDB
+        const lookupResponse = await fetch(BASE_URL + 'api/production-goals/lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 背番号, 品番 })
+        });
+        
+        const lookupResult = await lookupResponse.json();
+        if (lookupResult.success && lookupResult.data) {
+            productData = { ...productData, ...lookupResult.data };
+        }
+        
+        // Create the goal
+        const response = await fetch(BASE_URL + 'api/production-goals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: plannerState.currentDate,
+                targetQuantity: quantity,
+                ...productData
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Add to local state
+            plannerState.goals.push(result.data);
+            
+            // Clear inputs
+            document.getElementById('newGoal背番号').value = '';
+            document.getElementById('newGoal品番').value = '';
+            document.getElementById('newGoal品名').value = '';
+            document.getElementById('newGoalQuantity').value = '100';
+            
+            // Refresh modal content
+            closeBulkEditGoalsModal();
+            openBulkEditGoalsModal();
+            
+            showPlannerNotification('Goal added successfully', 'success');
+            renderGoalList();
+        } else {
+            showPlannerNotification(result.message || 'Failed to add goal', 'error');
+        }
+    } catch (error) {
+        console.error('Error adding goal:', error);
+        showPlannerNotification('Error adding goal', 'error');
+    }
+}
+
 // Make functions globally available
 window.initializePlanner = initializePlanner;
 window.handleFactoryChange = handleFactoryChange;
@@ -3545,3 +3859,10 @@ window.removeFromOrderColumn = removeFromOrderColumn;
 window.moveOrderUp = moveOrderUp;
 window.moveOrderDown = moveOrderDown;
 window.confirmMultiPickerSelection = confirmMultiPickerSelection;
+window.openBulkEditGoalsModal = openBulkEditGoalsModal;
+window.closeBulkEditGoalsModal = closeBulkEditGoalsModal;
+window.updateGoalQuantityInTable = updateGoalQuantityInTable;
+window.deleteGoalFromTable = deleteGoalFromTable;
+window.addNewGoalFromTable = addNewGoalFromTable;
+window.toggleEquipmentCard = toggleEquipmentCard;
+
