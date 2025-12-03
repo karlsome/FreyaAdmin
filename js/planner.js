@@ -2957,20 +2957,35 @@ window.confirmSmartScheduling = async function() {
     const assignments = window._smartSchedulingAssignments;
     if (!assignments) return;
     
+    const MAX_END_TIME = timeToMinutes('19:00'); // 7 PM limit
+    
     try {
-        // For each equipment, schedule products sequentially
+        // Sort equipment by confidence level and prepare scheduling queue
+        const equipmentQueue = [];
+        
         for (const [equipment, products] of Object.entries(assignments)) {
+            for (const product of products) {
+                equipmentQueue.push({
+                    equipment,
+                    product,
+                    confidence: product.confidence || 0
+                });
+            }
+        }
+        
+        // Sort by confidence (highest first)
+        equipmentQueue.sort((a, b) => b.confidence - a.confidence);
+        
+        // Try to schedule each product
+        for (const item of equipmentQueue) {
+            const { equipment, product } = item;
+            
             // Find the last scheduled time for this equipment
             const existingProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
             let currentTime = timeToMinutes(PLANNER_CONFIG.workStartTime);
             
-            console.log(`\n🔧 Equipment: ${equipment}`);
-            console.log(`   Existing products: ${existingProducts.length}`);
-            console.log(`   Initial currentTime: ${currentTime}min (${minutesToTime(currentTime)})`);
-            
             // If there are existing products, start after the last one
             if (existingProducts.length > 0) {
-                // Sort by start time to find the actual last product
                 existingProducts.sort((a, b) => {
                     const timeA = a.startTime ? timeToMinutes(a.startTime) : 0;
                     const timeB = b.startTime ? timeToMinutes(b.startTime) : 0;
@@ -2978,53 +2993,91 @@ window.confirmSmartScheduling = async function() {
                 });
                 
                 const lastProduct = existingProducts[existingProducts.length - 1];
-                console.log(`   Last product: ${lastProduct.背番号} @ ${lastProduct.startTime}`);
                 if (lastProduct.startTime) {
                     currentTime = timeToMinutes(lastProduct.startTime) + (lastProduct.estimatedTime.totalSeconds / 60);
-                    console.log(`   Updated currentTime: ${currentTime}min (${minutesToTime(currentTime)})`);
                 }
             }
             
-            for (const product of products) {
-                console.log(`🤖 Smart Scheduling: ${product.背番号} - ${product.quantity} pcs (remaining from goal: ${product.remainingQuantity})`);
+            const timeInfo = calculateProductionTime(product, product.quantity);
+            const productDurationMinutes = timeInfo.totalSeconds / 60;
+            const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
+            const actualEndTime = actualStartTime + productDurationMinutes;
+            
+            console.log(`\n🤖 Smart Scheduling: ${product.背番号} on ${equipment}`);
+            console.log(`   Start: ${minutesToTime(actualStartTime)}, End: ${minutesToTime(actualEndTime)}, Limit: 19:00`);
+            
+            // Check if product would end after 7 PM
+            if (actualEndTime > MAX_END_TIME) {
+                console.log(`   ⚠️ Would exceed 7 PM limit - trying alternative equipment`);
                 
-                const timeInfo = calculateProductionTime(product, product.quantity);
-                const boxes = calculateBoxesNeeded(product, product.quantity);
-                const productDurationMinutes = timeInfo.totalSeconds / 60;
+                // Try to find alternative equipment with available capacity
+                let scheduled = false;
+                const alternativeEquipment = Object.keys(assignments).filter(eq => eq !== equipment);
                 
-                console.log(`   Before findNextAvailableTime: currentTime=${currentTime}min (${minutesToTime(currentTime)}), duration=${productDurationMinutes}min`);
-                
-                // Find actual start time, skipping breaks
-                const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
-                
-                console.log(`   After findNextAvailableTime: actualStartTime=${actualStartTime}min (${minutesToTime(actualStartTime)})`);
-
-                
-                plannerState.selectedProducts.push({
-                    ...product,
-                    equipment: equipment,
-                    boxes: boxes,
-                    estimatedTime: timeInfo,
-                    color: plannerState.productColors[product.背番号],
-                    startTime: minutesToTime(actualStartTime),
-                    goalId: product._id
-                });
-                
-                // Update goal quantity
-                console.log(`📦 Updating goal ${product._id}: scheduling ${product.quantity} pcs`);
-                const response = await fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ quantityToSchedule: product.quantity })
-                });
-                
-                if (response.ok) {
-                    console.log(`✅ Goal ${product._id} updated successfully`);
-                } else {
-                    console.error(`❌ Failed to update goal ${product._id}`);
+                for (const altEq of alternativeEquipment) {
+                    const altExisting = plannerState.selectedProducts.filter(p => p.equipment === altEq);
+                    let altCurrentTime = timeToMinutes(PLANNER_CONFIG.workStartTime);
+                    
+                    if (altExisting.length > 0) {
+                        altExisting.sort((a, b) => {
+                            const timeA = a.startTime ? timeToMinutes(a.startTime) : 0;
+                            const timeB = b.startTime ? timeToMinutes(b.startTime) : 0;
+                            return timeA - timeB;
+                        });
+                        const lastProd = altExisting[altExisting.length - 1];
+                        if (lastProd.startTime) {
+                            altCurrentTime = timeToMinutes(lastProd.startTime) + (lastProd.estimatedTime.totalSeconds / 60);
+                        }
+                    }
+                    
+                    const altStart = findNextAvailableTime(altCurrentTime, productDurationMinutes, altEq);
+                    const altEnd = altStart + productDurationMinutes;
+                    
+                    if (altEnd <= MAX_END_TIME) {
+                        console.log(`   ✅ Reassigning to ${altEq} (ends at ${minutesToTime(altEnd)})`);
+                        await scheduleProduct(product, altEq, altStart, timeInfo);
+                        scheduled = true;
+                        break;
+                    }
                 }
                 
-                currentTime = actualStartTime + productDurationMinutes;
+                if (!scheduled) {
+                    console.log(`   ❌ Could not fit before 7 PM on any equipment - skipping`);
+                    showPlannerNotification(`${product.背番号} could not fit before 7 PM`, 'warning');
+                }
+                continue;
+            }
+            
+            // Schedule on primary equipment
+            await scheduleProduct(product, equipment, actualStartTime, timeInfo);
+        }
+        
+        // Helper function to schedule a product
+        async function scheduleProduct(product, equipment, startTime, timeInfo) {
+            const boxes = calculateBoxesNeeded(product, product.quantity);
+            
+            plannerState.selectedProducts.push({
+                ...product,
+                equipment: equipment,
+                boxes: boxes,
+                estimatedTime: timeInfo,
+                color: plannerState.productColors[product.背番号],
+                startTime: minutesToTime(startTime),
+                goalId: product._id
+            });
+            
+            // Update goal quantity
+            console.log(`📦 Updating goal ${product._id}: scheduling ${product.quantity} pcs on ${equipment}`);
+            const response = await fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ quantityToSchedule: product.quantity })
+            });
+            
+            if (response.ok) {
+                console.log(`✅ Goal ${product._id} updated successfully`);
+            } else {
+                console.error(`❌ Failed to update goal ${product._id}`);
             }
         }
         
