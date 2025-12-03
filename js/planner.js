@@ -514,6 +514,7 @@ async function parseGoalCsv(csvData) {
                         背番号: result.data.背番号,
                         品番: result.data.品番,
                         品名: result.data.品名,
+                        収容数: result.data.収容数,
                         targetQuantity: goal.targetQuantity,
                         status: 'valid'
                     });
@@ -821,6 +822,7 @@ window.confirmManualGoal = async function() {
                     背番号: product.背番号,
                     品番: product.品番,
                     品名: product.品名,
+                    収容数: product.収容数,
                     targetQuantity: quantity,
                     createdBy: window.currentUser?.username || 'system'
                 })
@@ -1994,16 +1996,35 @@ function renderMultiPickerAvailable() {
     
     container.innerHTML = filtered.map(product => {
         const color = plannerState.productColors[product.背番号] || '#6B7280';
+        const remainingQty = product.remainingQuantity || 0;
+        
+        // Get 収容数 from product (it comes from masterDB in the goal)
+        // First check if it's in the goal object, otherwise try to find it in products list
+        let capacity = parseInt(product['収容数']) || 1;
+        
+        // If not in goal, look it up from the full product in plannerState
+        if (!product['収容数'] && product.品番) {
+            const fullProduct = plannerState.products.find(p => p.品番 === product.品番 || p.背番号 === product.背番号);
+            if (fullProduct && fullProduct['収容数']) {
+                capacity = parseInt(fullProduct['収容数']);
+            }
+        }
+        
+        const boxes = Math.ceil(remainingQty / capacity);
+        
         return `
             <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 transition-colors"
                  onclick="addToMultiPickerSelected('${product._id}')">
-                <div class="flex items-center gap-2">
-                    <div class="w-3 h-3 rounded-full" style="background-color: ${color}"></div>
+                <div class="flex items-start gap-2">
+                    <div class="w-3 h-3 rounded-full mt-0.5" style="background-color: ${color}"></div>
                     <div class="flex-1 min-w-0">
                         <p class="font-medium text-sm text-gray-900 dark:text-white truncate">${product.背番号 || '-'}</p>
                         <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${product.品番 || '-'}</p>
+                        <p class="text-xs font-semibold text-blue-600 dark:text-blue-400 mt-1">
+                            ${remainingQty} pcs / ${boxes} ${boxes === 1 ? 'box' : 'boxes'}
+                        </p>
                     </div>
-                    <i class="ri-add-circle-line text-blue-500"></i>
+                    <i class="ri-add-circle-line text-blue-500 text-lg"></i>
                 </div>
             </div>
         `;
