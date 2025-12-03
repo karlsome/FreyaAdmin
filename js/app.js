@@ -13,17 +13,18 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
-  部長: ["dashboard", "factories", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
-  係長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "approvals", "masterDB", "equipment", "scna", "noda"],
+  admin: ["dashboard", "factories", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
+  部長: ["dashboard", "factories", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
+  係長: ["dashboard", "factories", "planner", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
+  班長: ["dashboard", "factories", "planner", "approvals", "masterDB", "equipment", "scna", "noda"],
   member: ["dashboard", "noda"]
 };
 
 const navItemsConfig = {
   dashboard: { icon: "ri-dashboard-line", label: "dashboard" },
   factories: { icon: "ri-building-line", label: "factories" },
+  planner: { icon: "ri-calendar-schedule-line", label: "planner" },
   masterDB: { icon: "ri-settings-line", label: "masterDB" },
   inventory: { icon: "ri-archive-line", label: "inventory" },
   notifications: { icon: "ri-notification-line", label: "notifications" },
@@ -1754,6 +1755,159 @@ function loadPage(page) {
               </div>
           `;
           renderFactoryList();
+          if (typeof applyLanguageEnhanced === 'function') {
+            applyLanguageEnhanced();
+          } else if (typeof applyLanguage === 'function') {
+            applyLanguage();
+          }
+          break;
+
+        case "planner":
+          mainContent.innerHTML = `
+            <div class="space-y-6">
+              <!-- Header Section -->
+              <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                  <h2 class="text-3xl font-bold text-gray-900 dark:text-white" data-i18n="productionPlanning">Production Planning</h2>
+                  <p class="mt-2 text-gray-600 dark:text-gray-400" data-i18n="productionPlanningSubtitle">Plan and schedule production for equipment</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                  <button onclick="showBreakTimeModal()" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+                    <i class="ri-time-line mr-2"></i><span data-i18n="breakTimes">Break Times</span>
+                  </button>
+                  <button onclick="showPlannerCalendar()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                    <i class="ri-calendar-line mr-2"></i><span data-i18n="viewCalendar">View Calendar</span>
+                  </button>
+                  <button onclick="savePlan()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                    <i class="ri-save-line mr-2"></i><span data-i18n="savePlan">Save Plan</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Factory & Date Selection -->
+              <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="factory">Factory</label>
+                    <select id="plannerFactory" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white">
+                      <option value="" data-i18n="selectFactory">-- Select Factory --</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="planDate">Plan Date</label>
+                    <input type="date" id="plannerDate" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white">
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="endDateOptional">End Date (Optional)</label>
+                    <input type="date" id="plannerEndDate" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white">
+                  </div>
+                  <div>
+                    <div id="plannerLoader" class="hidden">
+                      <div class="flex items-center justify-center">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Main Content Grid -->
+              <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <!-- Product List Panel (Left) -->
+                <div class="lg:col-span-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col" style="max-height: 70vh;">
+                  <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="font-semibold text-gray-900 dark:text-white mb-3" data-i18n="products">Products</h3>
+                    <input type="text" id="productSearch" 
+                           class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm" 
+                           data-i18n-placeholder="searchProducts" placeholder="Search products...">
+                  </div>
+                  <div id="productListContainer" class="flex-1 overflow-y-auto p-3 space-y-2">
+                    <div class="text-center py-8 text-gray-500">
+                      <i class="ri-inbox-line text-4xl mb-2"></i>
+                      <p data-i18n="selectFactoryFirst">Please select a factory first</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Planning Panel (Right) -->
+                <div class="lg:col-span-3 space-y-4">
+                  <!-- Selected Products Summary -->
+                  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <h3 class="font-semibold text-gray-900 dark:text-white mb-3" data-i18n="selectedProducts">Selected Products</h3>
+                    <div id="selectedProductsSummary">
+                      <div class="text-center py-4 text-gray-500">
+                        <p data-i18n="noProductsSelected">No products selected</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- View Tabs -->
+                  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div class="border-b border-gray-200 dark:border-gray-700">
+                      <nav class="flex -mb-px">
+                        <button class="planner-tab-btn px-6 py-3 text-sm font-medium border-b-2 border-blue-500 text-blue-600" data-tab="timeline">
+                          <i class="ri-time-line mr-2"></i><span data-i18n="timelineView">Timeline</span>
+                        </button>
+                        <button class="planner-tab-btn px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-tab="kanban">
+                          <i class="ri-layout-column-line mr-2"></i><span data-i18n="kanbanView">Kanban</span>
+                        </button>
+                        <button class="planner-tab-btn px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-tab="table">
+                          <i class="ri-table-line mr-2"></i><span data-i18n="tableView">Table</span>
+                        </button>
+                      </nav>
+                    </div>
+
+                    <!-- Timeline View -->
+                    <div id="planner-timeline-view" class="planner-view p-4" style="min-height: 400px;">
+                      <div id="timelineContainer">
+                        <div class="text-center py-8 text-gray-500">
+                          <i class="ri-calendar-line text-4xl mb-2"></i>
+                          <p data-i18n="selectFactoryFirst">Please select a factory first</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Kanban View -->
+                    <div id="planner-kanban-view" class="planner-view p-4 hidden" style="min-height: 400px;">
+                      <div id="kanbanContainer">
+                        <div class="text-center py-8 text-gray-500">
+                          <i class="ri-layout-column-line text-4xl mb-2"></i>
+                          <p data-i18n="selectFactoryFirst">Please select a factory first</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Table View -->
+                    <div id="planner-table-view" class="planner-view p-4 hidden" style="min-height: 400px;">
+                      <div id="tableContainer">
+                        <div class="text-center py-8 text-gray-500">
+                          <i class="ri-table-line text-4xl mb-2"></i>
+                          <p data-i18n="noProductsInPlan">No products in the plan</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Work Hours Info -->
+              <div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div class="flex items-center text-blue-800 dark:text-blue-300">
+                  <i class="ri-information-line text-xl mr-3"></i>
+                  <div class="text-sm">
+                    <p><strong data-i18n="workHours">Work Hours:</strong> 8:45 AM - 8:00 PM</p>
+                    <p class="mt-1"><span data-i18n="defaultCycleTimeInfo">Default cycle time: 2 minutes (if not specified in masterDB)</span></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+          
+          // Initialize the planner
+          if (typeof initializePlanner === 'function') {
+            initializePlanner();
+          }
+          
           if (typeof applyLanguageEnhanced === 'function') {
             applyLanguageEnhanced();
           } else if (typeof applyLanguage === 'function') {
