@@ -47,6 +47,13 @@ const PRODUCT_COLORS = [
     '#E879F9', '#2DD4BF', '#FB7185', '#A3E635', '#818CF8'
 ];
 
+// Get random color from palette or assign next color
+function getRandomColor() {
+    const color = PRODUCT_COLORS[plannerState.colorIndex % PRODUCT_COLORS.length];
+    plannerState.colorIndex++;
+    return color;
+}
+
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -232,11 +239,17 @@ async function loadExistingPlans(factory, date) {
             plannerState.breaks = plan.breaks || [];
             
             // Restore selected products from plan
-            plannerState.selectedProducts = plan.products.map(item => ({
-                ...item,
-                _id: item.goalId || item._id,
-                color: plannerState.productColors[item.背番号] || getRandomColor()
-            }));
+            plannerState.selectedProducts = plan.products.map(item => {
+                // Ensure color is assigned
+                if (!plannerState.productColors[item.背番号]) {
+                    plannerState.productColors[item.背番号] = getRandomColor();
+                }
+                return {
+                    ...item,
+                    _id: item.goalId || item._id,
+                    color: plannerState.productColors[item.背番号]
+                };
+            });
             
             console.log(`✅ Restored ${plannerState.selectedProducts.length} products from plan`);
         } else {
@@ -395,7 +408,19 @@ function minutesToTime(minutes) {
 function getTimeSlots() {
     const slots = [];
     const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
-    const endMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
+    let endMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
+    
+    // Extend timeline if any product goes beyond workEndTime
+    plannerState.selectedProducts.forEach(product => {
+        if (product.startTime && product.estimatedTime) {
+            const productStart = timeToMinutes(product.startTime);
+            const productDuration = product.estimatedTime.totalSeconds / 60;
+            const productEnd = productStart + productDuration;
+            if (productEnd > endMinutes) {
+                endMinutes = productEnd;
+            }
+        }
+    });
     
     for (let m = startMinutes; m <= endMinutes; m += PLANNER_CONFIG.intervalMinutes) {
         slots.push(minutesToTime(m));
@@ -1448,7 +1473,7 @@ function renderTimelineView() {
     const slotWidth = 60; // pixels per 15-minute slot
     
     // Build timeline header
-    let headerHTML = '<div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300" data-i18n="equipment">Equipment</div>';
+    let headerHTML = '<div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" data-i18n="equipment">Equipment</div>';
     
     timeSlots.forEach((slot, index) => {
         // Only show hour labels
@@ -1464,10 +1489,11 @@ function renderTimelineView() {
     let rowsHTML = '';
     plannerState.equipment.forEach(equipment => {
         const assignedProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
+        console.log(`🔧 ${equipment}: ${assignedProducts.length} products`, assignedProducts.map(p => `${p.背番号} @ ${p.startTime}`));
         
         rowsHTML += `
             <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-equipment="${equipment}">
-                <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/50 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/50 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">
                     ${equipment}
                 </div>
                 <div class="flex-1 flex relative">
@@ -1554,18 +1580,23 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
         } else {
             // Check if any product is scheduled for this slot
             let productForSlot = null;
-            let accumulatedMinutes = 0;
             
             for (let i = 0; i < assignedProducts.length; i++) {
                 const product = assignedProducts[i];
-                const productMinutes = product.estimatedTime.totalSeconds / 60;
+                const productStartMinutes = product.startTime ? timeToMinutes(product.startTime) : 0;
+                const productDurationMinutes = product.estimatedTime.totalSeconds / 60;
+                const productEndMinutes = productStartMinutes + productDurationMinutes;
                 
-                if (slotMinutes >= currentMinutes + accumulatedMinutes && 
-                    slotMinutes < currentMinutes + accumulatedMinutes + productMinutes) {
+                // Debug first iteration
+                if (i === 0 && index === 0) {
+                    console.log(`🔍 Checking ${product.背番号}: start=${productStartMinutes}min (${product.startTime}), duration=${productDurationMinutes}min, end=${productEndMinutes}min`);
+                }
+                
+                // Check if current slot falls within this product's time range
+                if (slotMinutes >= productStartMinutes && slotMinutes < productEndMinutes) {
                     productForSlot = product;
                     break;
                 }
-                accumulatedMinutes += productMinutes;
             }
             
             if (productForSlot) {
@@ -1581,7 +1612,7 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
                         <div class="absolute inset-0 flex items-center justify-center text-xs font-medium truncate px-1" 
                              style="color: ${productForSlot.color}" 
                              title="${productForSlot.背番号} - ${productForSlot.quantity}pcs">
-                            ${isFirstSlotForProduct ? productForSlot.背番号 : ''}
+                            ${productForSlot.背番号}
                         </div>
                         ${isFirstSlotForProduct ? `
                             <button onclick="event.stopPropagation(); removeSelectedProduct('${productForSlot._id}')" 
@@ -1611,8 +1642,131 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
 }
 
 function handleTimelineSlotClick(equipment, timeSlot) {
-    // Open multi-column product picker modal
-    showMultiColumnProductPicker(equipment, timeSlot);
+    // Show context menu to choose: Add Products or Add Break
+    const modalHTML = `
+        <div id="timelineClickModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                <div class="p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                        ${equipment} - ${timeSlot}
+                    </h3>
+                    
+                    <div class="space-y-3">
+                        <button onclick="closeTimelineClickModal(); showMultiColumnProductPicker('${equipment}', '${timeSlot}')" 
+                                class="w-full p-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                            <i class="ri-add-circle-line text-xl"></i>
+                            <span data-i18n="addProducts">Add Products</span>
+                        </button>
+                        
+                        <button onclick="closeTimelineClickModal(); showAddBreakModal('${equipment}', '${timeSlot}')" 
+                                class="w-full p-4 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2">
+                            <i class="ri-time-line text-xl"></i>
+                            <span data-i18n="addBreak">Add Break Time</span>
+                        </button>
+                        
+                        <button onclick="closeTimelineClickModal()" 
+                                class="w-full p-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                            <span data-i18n="cancel">Cancel</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+function closeTimelineClickModal() {
+    const modal = document.getElementById('timelineClickModal');
+    if (modal) modal.remove();
+}
+
+function showAddBreakModal(equipment, timeSlot) {
+    const modalHTML = `
+        <div id="addBreakModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                <div class="p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4" data-i18n="addBreakTime">Add Break Time</h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="equipment">Equipment</label>
+                            <select id="breakEquipmentSelect" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                                <option value="">All Equipment</option>
+                                ${plannerState.equipment.map(eq => `<option value="${eq}" ${eq === equipment ? 'selected' : ''}>${eq}</option>`).join('')}
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="breakName">Break Name</label>
+                            <input type="text" id="breakNameInput" value="Break" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="startTime">Start Time</label>
+                            <input type="time" id="breakStartTime" value="${timeSlot}" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="endTime">End Time</label>
+                            <input type="time" id="breakEndTime" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-end gap-3 mt-6">
+                        <button onclick="closeAddBreakModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
+                        <button onclick="confirmAddBreak()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors" data-i18n="add">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+function closeAddBreakModal() {
+    const modal = document.getElementById('addBreakModal');
+    if (modal) modal.remove();
+}
+
+async function confirmAddBreak() {
+    const equipment = document.getElementById('breakEquipmentSelect').value;
+    const name = document.getElementById('breakNameInput').value;
+    const startTime = document.getElementById('breakStartTime').value;
+    const endTime = document.getElementById('breakEndTime').value;
+    
+    if (!startTime || !endTime) {
+        showPlannerNotification('Please enter start and end time', 'warning');
+        return;
+    }
+    
+    const newBreak = {
+        id: `break-${Date.now()}`,
+        name: name || 'Break',
+        start: startTime,
+        end: endTime,
+        equipment: equipment || null,
+        isDefault: false
+    };
+    
+    plannerState.breaks.push(newBreak);
+    closeAddBreakModal();
+    renderAllViews();
+    
+    // Auto-save after adding break
+    await savePlanToDatabase();
+    
+    showPlannerNotification('Break time added', 'success');
 }
 
 function addBreakToTimeline(durationMinutes) {
@@ -2212,8 +2366,17 @@ function removeFromMultiPickerSelected(index) {
 }
 
 function updateMultiPickerQuantity(index, value) {
-    const qty = parseInt(value) || 1;
-    multiPickerState.selectedProducts[index].quantity = qty;
+    const product = multiPickerState.selectedProducts[index];
+    let qty = parseInt(value) || 1;
+    
+    // Validate against remaining quantity
+    if (product.remainingQuantity && qty > product.remainingQuantity) {
+        console.warn(`⚠️ Quantity ${qty} exceeds remaining ${product.remainingQuantity} for ${product.背番号}`);
+        showPlannerNotification(`Cannot exceed remaining quantity (${product.remainingQuantity} pcs)`, 'warning');
+        qty = product.remainingQuantity;
+    }
+    
+    product.quantity = qty;
     renderMultiPickerSelected();
 }
 
@@ -2314,8 +2477,11 @@ async function confirmMultiPickerSelection() {
     }
     
     // Calculate actual start times, skipping breaks
+    // Use the clicked time slot, not the work start time
     let currentTime = timeToMinutes(multiPickerState.startTime);
     const equipment = multiPickerState.equipment;
+    
+    console.log(`🕒 Starting products at clicked time: ${multiPickerState.startTime} (${currentTime} minutes)`);
     
     // Add all ordered products to the selected products state and update goal quantities
     const updatePromises = [];
@@ -2340,11 +2506,33 @@ async function confirmMultiPickerSelection() {
         
         // Update goal quantity in database
         if (product._id) {
+            console.log(`📦 Scheduling ${product.quantity} pcs for goal ${product._id} (${product.背番号})`);
+            
+            // Find the current goal to check remaining quantity
+            const currentGoal = plannerState.goals.find(g => g._id === product._id);
+            console.log(`   Current goal state: remaining=${currentGoal?.remainingQuantity}, scheduled=${currentGoal?.scheduledQuantity}, target=${currentGoal?.targetQuantity}`);
+            
+            if (currentGoal && product.quantity > currentGoal.remainingQuantity) {
+                console.error(`⚠️ Cannot schedule ${product.quantity} pcs - only ${currentGoal.remainingQuantity} pcs remaining!`);
+                showPlannerNotification(`Cannot schedule ${product.quantity} pcs for ${product.背番号} - only ${currentGoal.remainingQuantity} pcs remaining`, 'error');
+                continue; // Skip this product
+            }
+            
             updatePromises.push(
                 fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ quantityToSchedule: product.quantity })
+                }).then(async response => {
+                    if (!response.ok) {
+                        const error = await response.json();
+                        console.error(`❌ Failed to update goal ${product._id}: ${error.error || 'Unknown error'}`);
+                        showPlannerNotification(`Error: ${error.error || 'Failed to update goal'}`, 'error');
+                    } else {
+                        const result = await response.json();
+                        console.log(`✅ Goal ${product._id} updated successfully - remaining: ${result.remainingQuantity}`);
+                    }
+                    return response;
                 })
             );
         }
@@ -2432,19 +2620,22 @@ async function savePlanToDatabase() {
             const planId = existingPlans[0]._id;
             console.log('Updating existing plan:', planId);
             
-            const updateResponse = await fetch(BASE_URL + 'update', {
+            const updateResponse = await fetch('http://localhost:3000/api/production-plans/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    dbName: 'submittedDB',
-                    collectionName: 'productionPlansDB',
-                    query: { _id: { $oid: planId } },
-                    update: { $set: { ...planData, updatedAt: new Date() } }
+                    planId: planId,
+                    factory: planData.factory,
+                    date: planData.date,
+                    products: planData.products,
+                    breaks: planData.breaks,
+                    updatedBy: planData.createdBy
                 })
             });
             
             if (!updateResponse.ok) {
-                throw new Error('Failed to update plan');
+                const error = await updateResponse.json();
+                throw new Error(error.error || 'Failed to update plan');
             }
             
             console.log('✅ Plan updated successfully');
@@ -2452,18 +2643,15 @@ async function savePlanToDatabase() {
             // Create new plan
             console.log('Creating new plan');
             
-            const insertResponse = await fetch(BASE_URL + 'queries', {
+            const insertResponse = await fetch('http://localhost:3000/api/production-plans', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    dbName: 'submittedDB',
-                    collectionName: 'productionPlansDB',
-                    insertData: planData
-                })
+                body: JSON.stringify(planData)
             });
             
             if (!insertResponse.ok) {
-                throw new Error('Failed to create plan');
+                const error = await insertResponse.json();
+                throw new Error(error.error || 'Failed to create plan');
             }
             
             console.log('✅ Plan created successfully');
@@ -2477,43 +2665,37 @@ async function savePlanToDatabase() {
 
 function findNextAvailableTime(startMinutes, durationMinutes, equipment) {
     let currentMinutes = startMinutes;
-    let remainingDuration = durationMinutes;
     
-    while (remainingDuration > 0) {
-        // Check if current time falls within a break
-        const breakAtTime = plannerState.breaks.find(brk => {
-            const breakStart = timeToMinutes(brk.start);
-            const breakEnd = timeToMinutes(brk.end);
-            const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
-            return currentMinutes >= breakStart && currentMinutes < breakEnd && isForThisEquipment;
-        });
-        
-        if (breakAtTime) {
-            // Skip to end of break
-            const breakEnd = timeToMinutes(breakAtTime.end);
-            currentMinutes = breakEnd;
-        } else {
-            // Check if we'll hit a break during this product's duration
-            const productEnd = currentMinutes + remainingDuration;
-            const breakDuring = plannerState.breaks.find(brk => {
-                const breakStart = timeToMinutes(brk.start);
-                const breakEnd = timeToMinutes(brk.end);
-                const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
-                return breakStart > currentMinutes && breakStart < productEnd && isForThisEquipment;
-            });
-            
-            if (breakDuring) {
-                // Calculate time until break
-                const breakStart = timeToMinutes(breakDuring.start);
-                const timeUntilBreak = breakStart - currentMinutes;
-                remainingDuration -= timeUntilBreak;
-                currentMinutes = timeToMinutes(breakDuring.end);
-            } else {
-                // No break, we're done
-                break;
-            }
-        }
+    // First, check if start time is within a break and skip to break end
+    const startInBreak = plannerState.breaks.find(brk => {
+        const breakStart = timeToMinutes(brk.start);
+        const breakEnd = timeToMinutes(brk.end);
+        const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+        return currentMinutes >= breakStart && currentMinutes < breakEnd && isForThisEquipment;
+    });
+    
+    if (startInBreak) {
+        currentMinutes = timeToMinutes(startInBreak.end);
     }
+    
+    // Now check if the product duration will overlap with any breaks
+    // If so, we need to account for the break time
+    let adjustedEndTime = currentMinutes + durationMinutes;
+    
+    // Find all breaks that fall within the product's time range
+    const overlappingBreaks = plannerState.breaks.filter(brk => {
+        const breakStart = timeToMinutes(brk.start);
+        const breakEnd = timeToMinutes(brk.end);
+        const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+        // Break overlaps if it starts during product time
+        return breakStart >= currentMinutes && breakStart < adjustedEndTime && isForThisEquipment;
+    }).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+    
+    // Add break durations to the end time
+    overlappingBreaks.forEach(brk => {
+        const breakDuration = timeToMinutes(brk.end) - timeToMinutes(brk.start);
+        adjustedEndTime += breakDuration;
+    });
     
     return currentMinutes;
 }
@@ -2729,15 +2911,45 @@ window.confirmSmartScheduling = async function() {
     try {
         // For each equipment, schedule products sequentially
         for (const [equipment, products] of Object.entries(assignments)) {
+            // Find the last scheduled time for this equipment
+            const existingProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
             let currentTime = timeToMinutes(PLANNER_CONFIG.workStartTime);
             
+            console.log(`\n🔧 Equipment: ${equipment}`);
+            console.log(`   Existing products: ${existingProducts.length}`);
+            console.log(`   Initial currentTime: ${currentTime}min (${minutesToTime(currentTime)})`);
+            
+            // If there are existing products, start after the last one
+            if (existingProducts.length > 0) {
+                // Sort by start time to find the actual last product
+                existingProducts.sort((a, b) => {
+                    const timeA = a.startTime ? timeToMinutes(a.startTime) : 0;
+                    const timeB = b.startTime ? timeToMinutes(b.startTime) : 0;
+                    return timeA - timeB;
+                });
+                
+                const lastProduct = existingProducts[existingProducts.length - 1];
+                console.log(`   Last product: ${lastProduct.背番号} @ ${lastProduct.startTime}`);
+                if (lastProduct.startTime) {
+                    currentTime = timeToMinutes(lastProduct.startTime) + (lastProduct.estimatedTime.totalSeconds / 60);
+                    console.log(`   Updated currentTime: ${currentTime}min (${minutesToTime(currentTime)})`);
+                }
+            }
+            
             for (const product of products) {
+                console.log(`🤖 Smart Scheduling: ${product.背番号} - ${product.quantity} pcs (remaining from goal: ${product.remainingQuantity})`);
+                
                 const timeInfo = calculateProductionTime(product, product.quantity);
                 const boxes = calculateBoxesNeeded(product, product.quantity);
                 const productDurationMinutes = timeInfo.totalSeconds / 60;
                 
+                console.log(`   Before findNextAvailableTime: currentTime=${currentTime}min (${minutesToTime(currentTime)}), duration=${productDurationMinutes}min`);
+                
                 // Find actual start time, skipping breaks
                 const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
+                
+                console.log(`   After findNextAvailableTime: actualStartTime=${actualStartTime}min (${minutesToTime(actualStartTime)})`);
+
                 
                 plannerState.selectedProducts.push({
                     ...product,
@@ -2750,11 +2962,18 @@ window.confirmSmartScheduling = async function() {
                 });
                 
                 // Update goal quantity
-                await fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
+                console.log(`📦 Updating goal ${product._id}: scheduling ${product.quantity} pcs`);
+                const response = await fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ quantityToSchedule: product.quantity })
                 });
+                
+                if (response.ok) {
+                    console.log(`✅ Goal ${product._id} updated successfully`);
+                } else {
+                    console.error(`❌ Failed to update goal ${product._id}`);
+                }
                 
                 currentTime = actualStartTime + productDurationMinutes;
             }
@@ -2767,6 +2986,10 @@ window.confirmSmartScheduling = async function() {
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        
+        // Auto-save plan after smart scheduling
+        console.log('💾 Auto-saving plan after Smart Scheduling...');
+        await savePlanToDatabase();
         
         showPlannerNotification('Smart scheduling applied successfully!', 'success');
         
@@ -3118,6 +3341,10 @@ window.handleKanbanDragStart = handleKanbanDragStart;
 window.handleKanbanDragOver = handleKanbanDragOver;
 window.handleKanbanDrop = handleKanbanDrop;
 window.handleTimelineSlotClick = handleTimelineSlotClick;
+window.closeTimelineClickModal = closeTimelineClickModal;
+window.showAddBreakModal = showAddBreakModal;
+window.closeAddBreakModal = closeAddBreakModal;
+window.confirmAddBreak = confirmAddBreak;
 window.showBreakTimeModal = showBreakTimeModal;
 window.closeBreakTimeModal = closeBreakTimeModal;
 window.addBreak = addBreak;

@@ -346,6 +346,145 @@ app.post('/api/production-goals/lookup', async (req, res) => {
     }
 });
 
+// ==================== UPDATE PRODUCTION PLAN ====================
+app.post('/api/production-plans/update', async (req, res) => {
+    try {
+        const { planId, factory, date, products, breaks, updatedBy } = req.body;
+        
+        if (!planId) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Plan ID is required' 
+            });
+        }
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('productionPlansDB');
+        
+        const updateData = {
+            updatedAt: new Date()
+        };
+        
+        if (factory) updateData.factory = factory;
+        if (date) updateData.date = date;
+        if (products) updateData.products = products;
+        if (breaks) updateData.breaks = breaks;
+        if (updatedBy) updateData.updatedBy = updatedBy;
+        
+        const result = await collection.updateOne(
+            { _id: new ObjectId(planId) },
+            { $set: updateData }
+        );
+        
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Plan not found' 
+            });
+        }
+        
+        res.json({ 
+            success: true, 
+            modifiedCount: result.modifiedCount,
+            matchedCount: result.matchedCount
+        });
+    } catch (error) {
+        console.error('Error updating production plan:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==================== GET PRODUCTION PLANS ====================
+app.get('/api/production-plans', async (req, res) => {
+    try {
+        const { factory, date, startDate, endDate } = req.query;
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('productionPlansDB');
+        
+        const query = {};
+        if (factory) query.factory = factory;
+        
+        if (date) {
+            query.date = date;
+        } else if (startDate && endDate) {
+            query.date = { $gte: startDate, $lte: endDate };
+        } else if (startDate) {
+            query.date = { $gte: startDate };
+        } else if (endDate) {
+            query.date = { $lte: endDate };
+        }
+        
+        const plans = await collection.find(query).sort({ date: 1 }).toArray();
+        
+        res.json({ success: true, data: plans });
+    } catch (error) {
+        console.error('Error fetching production plans:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==================== CREATE PRODUCTION PLAN ====================
+app.post('/api/production-plans', async (req, res) => {
+    try {
+        const { factory, date, products, breaks, createdBy } = req.body;
+        
+        if (!factory || !date) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Factory and date are required' 
+            });
+        }
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('productionPlansDB');
+        
+        const plan = {
+            factory,
+            date,
+            products: products || [],
+            breaks: breaks || [],
+            createdBy: createdBy || 'system',
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+        
+        const result = await collection.insertOne(plan);
+        
+        res.json({ 
+            success: true, 
+            data: { ...plan, _id: result.insertedId } 
+        });
+    } catch (error) {
+        console.error('Error creating production plan:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==================== DELETE PRODUCTION PLAN ====================
+app.delete('/api/production-plans/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const db = client.db('submittedDB');
+        const collection = db.collection('productionPlansDB');
+        
+        const result = await collection.deleteOne({ _id: new ObjectId(id) });
+        
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Plan not found' 
+            });
+        }
+        
+        res.json({ success: true, deletedCount: result.deletedCount });
+    } catch (error) {
+        console.error('Error deleting production plan:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ==================== GET PRESS HISTORY (for smart scheduling) ====================
 app.post('/api/production-goals/press-history', async (req, res) => {
     try {
