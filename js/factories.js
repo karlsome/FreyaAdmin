@@ -5859,7 +5859,7 @@ async function saveExportTemplate(templateData) {
 async function deleteExportTemplate(templateId) {
     try {
         // Get current user for the delete (archive) operation
-        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
         const username = currentUser.username || currentUser.firstName || 'admin';
         
         const response = await fetch(BASE_URL + "queries", {
@@ -6255,7 +6255,7 @@ function setupExportModalEventListeners(data, filename, exportType, processType,
         }
         
         // Get current user info
-        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
         
         const templateData = {
             templateName: templateName.trim(),
@@ -6344,8 +6344,13 @@ function setupExportModalEventListeners(data, filename, exportType, processType,
  */
 function showTemplateManagementModal(processType, templates, onClose) {
     // Check if user is admin
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-    const isAdmin = currentUser.role === 'admin' || currentUser.role === 'super_admin';
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    // Check multiple possible role formats
+    const userRole = (currentUser.role || currentUser.Role || '').toLowerCase();
+    const isAdmin = userRole === 'admin' || userRole === 'super_admin' || userRole === 'superadmin' || userRole === 'administrator';
+    
+    console.log('Template Management - User:', currentUser);
+    console.log('Template Management - Role:', userRole, 'isAdmin:', isAdmin);
 
     const managementModalHTML = `
         <div id="templateManagementModal" class="fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
