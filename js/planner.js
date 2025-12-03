@@ -208,25 +208,43 @@ async function loadProductsForFactory(factory) {
 
 async function loadExistingPlans(factory, date) {
     try {
+        console.log(`📋 Loading plans for factory: ${factory}, date: ${date}`);
+        
         const response = await fetch(BASE_URL + 'queries', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                dbName: PLANNER_CONFIG.dbName,
-                collectionName: PLANNER_CONFIG.plansCollection,
+                dbName: 'submittedDB',
+                collectionName: 'productionPlansDB',
                 query: { 
-                    '工場': factory,
-                    'planDate': date
+                    factory: factory,
+                    date: date
                 }
             })
         });
         
-        const data = await response.json();
-        plannerState.plans = data;
+        const plans = await response.json();
+        console.log(`📋 Found ${plans.length} plans`, plans);
         
-        console.log(`📋 Loaded ${plannerState.plans.length} existing plans`);
+        if (plans.length > 0) {
+            const plan = plans[0];
+            plannerState.currentPlan = plan;
+            plannerState.breaks = plan.breaks || [];
+            
+            // Restore selected products from plan
+            plannerState.selectedProducts = plan.products.map(item => ({
+                ...item,
+                _id: item.goalId || item._id,
+                color: plannerState.productColors[item.背番号] || getRandomColor()
+            }));
+            
+            console.log(`✅ Restored ${plannerState.selectedProducts.length} products from plan`);
+        } else {
+            plannerState.selectedProducts = [];
+            console.log('ℹ️ No existing plan found for this date');
+        }
         
-        return plannerState.plans;
+        return plans;
     } catch (error) {
         console.error('❌ Failed to load existing plans:', error);
         return [];
@@ -879,7 +897,9 @@ async function saveGoalsBatch(goals) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 goals: goals,
-                createdBy: window.currentUser?.username || 'system'
+                createdBy: (window.currentUser?.firstName && window.currentUser?.lastName) 
+                    ? `${window.currentUser.firstName} ${window.currentUser.lastName}`
+                    : (window.currentUser?.username || 'Unknown')
             })
         });
         
@@ -1325,13 +1345,50 @@ function updateSelectedProductsSummary() {
     }).join('');
 }
 
-function removeSelectedProduct(productId) {
+async function removeSelectedProduct(productId) {
     const index = plannerState.selectedProducts.findIndex(p => p._id === productId);
     if (index !== -1) {
+        const product = plannerState.selectedProducts[index];
+        
+        // Restore goal quantity if this product was from a goal
+        if (product.goalId || product._id) {
+            const goalId = product.goalId || product._id;
+            console.log(`Restoring ${product.quantity} pcs to goal ${goalId}`);
+            
+            try {
+                // Update goal to restore the quantity
+                const goal = plannerState.goals.find(g => g._id === goalId);
+                if (goal) {
+                    const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            remainingQuantity: goal.remainingQuantity + product.quantity,
+                            scheduledQuantity: goal.scheduledQuantity - product.quantity,
+                            status: 'pending' // Reset to pending if removing scheduled quantity
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        console.log('✅ Goal quantity restored');
+                        // Reload goals to reflect changes
+                        await loadGoals();
+                        renderGoalList();
+                    }
+                }
+            } catch (error) {
+                console.error('Error restoring goal quantity:', error);
+            }
+        }
+        
+        // Remove from selected products
         plannerState.selectedProducts.splice(index, 1);
         renderProductList();
         updateSelectedProductsSummary();
         renderAllViews();
+        
+        // Auto-save the plan after deletion
+        await savePlanToDatabase();
     }
 }
 
@@ -1512,14 +1569,27 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
             }
             
             if (productForSlot) {
+                const isFirstSlotForProduct = index === 0 || !assignedProducts.some(p => {
+                    if (p._id !== productForSlot._id) return false;
+                    const prevSlotMinutes = timeToMinutes(timeSlots[index - 1]);
+                    return prevSlotMinutes >= currentMinutes;
+                });
+                
                 html += `
                     <div class="flex-shrink-0 border-r dark:border-gray-500 relative group" 
                          style="width: ${slotWidth}px; background-color: ${productForSlot.color}20">
                         <div class="absolute inset-0 flex items-center justify-center text-xs font-medium truncate px-1" 
                              style="color: ${productForSlot.color}" 
                              title="${productForSlot.背番号} - ${productForSlot.quantity}pcs">
-                            ${index === 0 || timeSlots[index - 1] !== slot ? productForSlot.背番号 : ''}
+                            ${isFirstSlotForProduct ? productForSlot.背番号 : ''}
                         </div>
+                        ${isFirstSlotForProduct ? `
+                            <button onclick="event.stopPropagation(); removeSelectedProduct('${productForSlot._id}')" 
+                                    class="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs hover:bg-red-600 z-10"
+                                    title="Delete">
+                                <i class="ri-close-line"></i>
+                            </button>
+                        ` : ''}
                     </div>
                 `;
             } else {
@@ -1694,9 +1764,16 @@ function renderKanbanView() {
                                      draggable="true"
                                      ondragstart="handleKanbanDragStart(event, '${item._id}')"
                                      data-product-id="${item._id}">
-                                    <div class="flex items-center gap-2 mb-2">
-                                        <div class="w-3 h-3 rounded-full" style="background-color: ${item.color}"></div>
-                                        <span class="font-medium text-gray-900 dark:text-white">${item.背番号}</span>
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-3 h-3 rounded-full" style="background-color: ${item.color}"></div>
+                                            <span class="font-medium text-gray-900 dark:text-white">${item.背番号}</span>
+                                        </div>
+                                        <button onclick="event.stopPropagation(); removeSelectedProduct('${item._id}')" 
+                                                class="text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                                title="Delete">
+                                            <i class="ri-close-line text-lg"></i>
+                                        </button>
                                     </div>
                                     <div class="text-xs text-gray-500 dark:text-gray-400 space-y-1">
                                         <div class="flex justify-between">
@@ -1731,7 +1808,7 @@ function handleKanbanDragOver(event) {
     event.preventDefault();
 }
 
-function handleKanbanDrop(event, newEquipment) {
+async function handleKanbanDrop(event, newEquipment) {
     event.preventDefault();
     const productId = event.dataTransfer.getData('productId');
     
@@ -1740,6 +1817,9 @@ function handleKanbanDrop(event, newEquipment) {
         product.equipment = newEquipment;
         renderAllViews();
         updateSelectedProductsSummary();
+        
+        // Auto-save after equipment change
+        await savePlanToDatabase();
     }
 }
 
@@ -2280,6 +2360,8 @@ async function confirmMultiPickerSelection() {
         // Reload goals to reflect new quantities
         await loadGoals();
         
+        console.log('✅ Goal quantities updated successfully');
+        
     } catch (error) {
         console.error('Error updating goal quantities:', error);
         showPlannerNotification('Warning: Some goal quantities may not have been updated', 'warning');
@@ -2290,7 +2372,107 @@ async function confirmMultiPickerSelection() {
     updateSelectedProductsSummary();
     renderAllViews();
     
+    // Auto-save the plan after adding products
+    console.log('💾 Auto-saving plan to database...');
+    await savePlanToDatabase();
+    
     showPlannerNotification(`Added ${multiPickerState.orderedProducts.length} products to timeline`, 'success');
+}
+
+// Save current plan to database
+async function savePlanToDatabase() {
+    if (!plannerState.currentFactory || plannerState.selectedProducts.length === 0) {
+        return;
+    }
+    
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    const fullName = currentUser.firstName && currentUser.lastName 
+        ? `${currentUser.firstName} ${currentUser.lastName}`
+        : (currentUser.username || 'Unknown');
+    
+    const planData = {
+        factory: plannerState.currentFactory,
+        date: plannerState.currentDate,
+        createdBy: fullName,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        breaks: plannerState.breaks,
+        products: plannerState.selectedProducts.map(item => ({
+            goalId: item.goalId || item._id,
+            背番号: item.背番号,
+            品番: item.品番,
+            品名: item.品名,
+            equipment: item.equipment,
+            quantity: item.quantity,
+            boxes: item.boxes,
+            startTime: item.startTime,
+            estimatedTime: item.estimatedTime
+        }))
+    };
+    
+    try {
+        // Check if plan exists for this factory/date
+        const existingResponse = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'productionPlansDB',
+                query: { 
+                    factory: plannerState.currentFactory,
+                    date: plannerState.currentDate
+                }
+            })
+        });
+        
+        const existingPlans = await existingResponse.json();
+        
+        if (existingPlans.length > 0) {
+            // Update existing plan
+            const planId = existingPlans[0]._id;
+            console.log('Updating existing plan:', planId);
+            
+            const updateResponse = await fetch(BASE_URL + 'update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dbName: 'submittedDB',
+                    collectionName: 'productionPlansDB',
+                    query: { _id: { $oid: planId } },
+                    update: { $set: { ...planData, updatedAt: new Date() } }
+                })
+            });
+            
+            if (!updateResponse.ok) {
+                throw new Error('Failed to update plan');
+            }
+            
+            console.log('✅ Plan updated successfully');
+        } else {
+            // Create new plan
+            console.log('Creating new plan');
+            
+            const insertResponse = await fetch(BASE_URL + 'queries', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dbName: 'submittedDB',
+                    collectionName: 'productionPlansDB',
+                    insertData: planData
+                })
+            });
+            
+            if (!insertResponse.ok) {
+                throw new Error('Failed to create plan');
+            }
+            
+            console.log('✅ Plan created successfully');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error saving plan:', error);
+        showPlannerNotification('Warning: Plan may not have been saved', 'warning');
+    }
 }
 
 function findNextAvailableTime(startMinutes, durationMinutes, equipment) {
@@ -2762,12 +2944,15 @@ async function savePlan() {
     }
     
     const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    const fullName = currentUser.firstName && currentUser.lastName 
+        ? `${currentUser.firstName} ${currentUser.lastName}`
+        : (currentUser.username || 'Unknown');
     
     const planData = {
         '工場': plannerState.currentFactory,
         'planDate': plannerState.currentDate,
         'endDate': plannerState.endDate,
-        'createdBy': currentUser.username || 'unknown',
+        'createdBy': fullName,
         'createdAt': new Date().toISOString(),
         'breaks': plannerState.breaks,
         'items': plannerState.selectedProducts.map(item => ({

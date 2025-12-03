@@ -1778,9 +1778,6 @@ function loadPage(page) {
                   <button onclick="showPlannerCalendar()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
                     <i class="ri-calendar-line mr-2"></i><span data-i18n="viewCalendar">View Calendar</span>
                   </button>
-                  <button onclick="savePlan()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                    <i class="ri-save-line mr-2"></i><span data-i18n="savePlan">Save Plan</span>
-                  </button>
                 </div>
               </div>
 
