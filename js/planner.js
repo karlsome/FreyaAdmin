@@ -3769,12 +3769,11 @@ async function updateGoalQuantityInTable(goalId, newQuantity) {
             return;
         }
         
-        const response = await fetch(BASE_URL + 'api/production-goals', {
+        const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                goalId: goalId,
-                updates: { targetQuantity: quantity }
+                targetQuantity: quantity
             })
         });
         
@@ -3804,10 +3803,8 @@ async function deleteGoalFromTable(goalId) {
     }
     
     try {
-        const response = await fetch(BASE_URL + 'api/production-goals', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ goalId: goalId })
+        const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+            method: 'DELETE'
         });
         
         const result = await response.json();
