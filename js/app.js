@@ -1816,15 +1816,27 @@ function loadPage(page) {
                 <!-- Product List Panel (Left) -->
                 <div class="lg:col-span-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col" style="max-height: 70vh;">
                   <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h3 class="font-semibold text-gray-900 dark:text-white mb-3" data-i18n="products">Products</h3>
-                    <input type="text" id="productSearch" 
+                    <h3 class="font-semibold text-gray-900 dark:text-white mb-3" data-i18n="productionGoals">Production Goals</h3>
+                    <div class="space-y-2 mb-3">
+                      <button onclick="triggerGoalCsvUpload()" class="w-full px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center">
+                        <i class="ri-upload-2-line mr-2"></i><span data-i18n="uploadCSV">Upload CSV</span>
+                      </button>
+                      <button onclick="showManualGoalInput()" class="w-full px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center">
+                        <i class="ri-add-line mr-2"></i><span data-i18n="manualInput">Manual Input</span>
+                      </button>
+                      <button onclick="showSmartSchedulingModal()" class="w-full px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center">
+                        <i class="ri-magic-line mr-2"></i><span data-i18n="smartScheduling">Smart Scheduling</span>
+                      </button>
+                    </div>
+                    <input type="text" id="goalSearch" 
                            class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm" 
-                           data-i18n-placeholder="searchProducts" placeholder="Search products...">
+                           data-i18n-placeholder="searchGoals" placeholder="Search goals...">
+                    <input type="file" id="goalCsvFileInput" accept=".csv" style="display: none;" onchange="handleGoalCsvUpload(this)">
                   </div>
-                  <div id="productListContainer" class="flex-1 overflow-y-auto p-3 space-y-2">
+                  <div id="goalListContainer" class="flex-1 overflow-y-auto p-3 space-y-2">
                     <div class="text-center py-8 text-gray-500">
-                      <i class="ri-inbox-line text-4xl mb-2"></i>
-                      <p data-i18n="selectFactoryFirst">Please select a factory first</p>
+                      <i class="ri-target-line text-4xl mb-2"></i>
+                      <p data-i18n="setGoalsFirst">Please set production goals first</p>
                     </div>
                   </div>
                 </div>

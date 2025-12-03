@@ -25,11 +25,15 @@ let plannerState = {
     currentDate: new Date().toISOString().split('T')[0],
     endDate: null, // For date range plans
     equipment: [],
-    products: [],
+    products: [], // All available products from masterDB
+    goals: [], // Production quantity goals
     plans: [],
     currentPlan: null,
     selectedProducts: [],
-    breaks: [],
+    breaks: [
+        { name: 'Lunch Break', start: '12:00', end: '12:45', isDefault: true, id: 'default-lunch' },
+        { name: 'Break', start: '15:00', end: '15:15', isDefault: true, id: 'default-break' }
+    ],
     activeTab: 'timeline',
     productColors: {},
     colorIndex: 0
@@ -90,13 +94,23 @@ function setupPlannerEventListeners() {
     
     // Tab switching
     document.querySelectorAll('.planner-tab-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => switchPlannerTab(e.target.dataset.tab));
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const tab = e.currentTarget.dataset.tab || e.currentTarget.getAttribute('data-tab');
+            if (tab) switchPlannerTab(tab);
+        });
     });
     
     // Product search
     const productSearch = document.getElementById('productSearch');
     if (productSearch) {
         productSearch.addEventListener('input', filterProducts);
+    }
+    
+    // Goal search
+    const goalSearch = document.getElementById('goalSearch');
+    if (goalSearch) {
+        goalSearch.addEventListener('input', filterGoals);
     }
 }
 
@@ -234,15 +248,16 @@ async function handleFactoryChange(e) {
     showPlannerLoading(true);
     
     try {
-        // Load equipment and products in parallel
+        // Load equipment, products (for lookups), goals, and plans in parallel
         await Promise.all([
             loadEquipmentForFactory(factory),
             loadProductsForFactory(factory),
+            loadGoals(),
             loadExistingPlans(factory, plannerState.currentDate)
         ]);
         
         // Render views
-        renderProductList();
+        renderGoalList();
         renderAllViews();
         
     } catch (error) {
@@ -257,8 +272,13 @@ function handleDateChange(e) {
     plannerState.currentDate = e.target.value;
     
     if (plannerState.currentFactory) {
-        loadExistingPlans(plannerState.currentFactory, plannerState.currentDate)
-            .then(() => renderAllViews());
+        Promise.all([
+            loadGoals(),
+            loadExistingPlans(plannerState.currentFactory, plannerState.currentDate)
+        ]).then(() => {
+            renderGoalList();
+            renderAllViews();
+        });
     }
 }
 
@@ -267,6 +287,20 @@ function handleEndDateChange(e) {
 }
 
 function switchPlannerTab(tab) {
+    // If tab is an event object, extract the tab name from the button
+    if (typeof tab === 'object' && tab.currentTarget) {
+        const button = tab.currentTarget;
+        tab = button.dataset.tab || button.getAttribute('data-tab');
+    } else if (typeof tab === 'object' && tab.target) {
+        // Handle clicks on child elements (icon, text)
+        const button = tab.target.closest('.planner-tab-btn');
+        if (button) {
+            tab = button.dataset.tab || button.getAttribute('data-tab');
+        }
+    }
+    
+    if (!tab) return;
+    
     plannerState.activeTab = tab;
     
     // Update tab buttons
@@ -368,6 +402,522 @@ function getEffectiveWorkMinutes() {
 }
 
 // ============================================
+// GOAL MANAGEMENT
+// ============================================
+
+// Trigger CSV upload for goals
+window.triggerGoalCsvUpload = function() {
+    document.getElementById('goalCsvFileInput').click();
+};
+
+// Handle CSV file upload for goals
+window.handleGoalCsvUpload = function(input) {
+    const file = input.files[0];
+    if (!file) return;
+    
+    if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+        showPlannerNotification('Please select a valid CSV file', 'error');
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const csv = e.target.result;
+        parseGoalCsv(csv);
+    };
+    reader.readAsText(file, 'Shift_JIS'); // JIS encoding like NODA
+};
+
+// Parse goal CSV
+async function parseGoalCsv(csvData) {
+    try {
+        console.log('📋 Parsing Goal CSV...');
+        
+        const lines = csvData.split('\\n').filter(line => line.trim());
+        if (lines.length < 2) {
+            showPlannerNotification('CSV must contain header and at least one data row', 'error');
+            return;
+        }
+        
+        const headers = lines[0].split(',').map(h => h.trim());
+        console.log('📋 CSV Headers:', headers);
+        
+        // Detect format: 背番号,収容数,日付 or 品番,収容数,日付
+        let formatType = null;
+        let itemColumn = null;
+        
+        if (headers.includes('背番号') && headers.includes('収容数') && headers.includes('日付')) {
+            formatType = '背番号';
+            itemColumn = '背番号';
+        } else if (headers.includes('品番') && headers.includes('収容数') && headers.includes('日付')) {
+            formatType = '品番';
+            itemColumn = '品番';
+        } else {
+            showPlannerNotification('Invalid CSV format. Expected: 背番号,収容数,日付 or 品番,収容数,日付', 'error');
+            return;
+        }
+        
+        console.log(`📋 Detected format: ${formatType}`);
+        
+        // Parse data rows
+        const rawGoals = [];
+        for (let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(',').map(v => v.trim());
+            if (values.length < headers.length) continue;
+            
+            const rowData = {};
+            headers.forEach((header, index) => {
+                rowData[header] = values[index];
+            });
+            
+            const item = rowData[itemColumn];
+            const quantity = parseInt(rowData['収容数']);
+            const date = rowData['日付'];
+            
+            if (item && quantity > 0 && date) {
+                rawGoals.push({
+                    [formatType]: item,
+                    targetQuantity: quantity,
+                    date: date,
+                    rowIndex: i
+                });
+            }
+        }
+        
+        if (rawGoals.length === 0) {
+            showPlannerNotification('No valid goals found in CSV', 'error');
+            return;
+        }
+        
+        console.log(`📋 Found ${rawGoals.length} valid goals`);
+        
+        // Auto-fill missing data from masterDB
+        const processedGoals = [];
+        for (const goal of rawGoals) {
+            try {
+                const response = await fetch(BASE_URL + 'api/production-goals/lookup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        searchType: formatType,
+                        searchValue: goal[formatType],
+                        factory: plannerState.currentFactory
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    processedGoals.push({
+                        factory: plannerState.currentFactory,
+                        date: goal.date,
+                        背番号: result.data.背番号,
+                        品番: result.data.品番,
+                        品名: result.data.品名,
+                        targetQuantity: goal.targetQuantity,
+                        status: 'valid'
+                    });
+                } else {
+                    processedGoals.push({
+                        ...goal,
+                        factory: plannerState.currentFactory,
+                        status: 'error',
+                        error: 'Product not found in masterDB'
+                    });
+                }
+            } catch (error) {
+                console.error(`Error processing goal:`, error);
+                processedGoals.push({
+                    ...goal,
+                    factory: plannerState.currentFactory,
+                    status: 'error',
+                    error: error.message
+                });
+            }
+        }
+        
+        // Show review modal
+        showGoalCsvReviewModal(processedGoals);
+        
+    } catch (error) {
+        console.error('❌ Error parsing CSV:', error);
+        showPlannerNotification('Error parsing CSV: ' + error.message, 'error');
+    }
+}
+
+// Show CSV review modal
+function showGoalCsvReviewModal(goals) {
+    const validGoals = goals.filter(g => g.status === 'valid');
+    const errorGoals = goals.filter(g => g.status === 'error');
+    
+    const modalHTML = `
+        <div id="goalCsvReviewModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="reviewGoals">Review Goals</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        ${validGoals.length} valid, ${errorGoals.length} errors
+                    </p>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    <th class="px-4 py-2 text-left">日付</th>
+                                    <th class="px-4 py-2 text-left">背番号</th>
+                                    <th class="px-4 py-2 text-left">品番</th>
+                                    <th class="px-4 py-2 text-left">品名</th>
+                                    <th class="px-4 py-2 text-right">数量</th>
+                                    <th class="px-4 py-2 text-center">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${goals.map(goal => `
+                                    <tr class="${goal.status === 'error' ? 'bg-red-50 dark:bg-red-900/20' : ''}">
+                                        <td class="px-4 py-2">${goal.date}</td>
+                                        <td class="px-4 py-2">${goal.背番号 || '-'}</td>
+                                        <td class="px-4 py-2">${goal.品番 || '-'}</td>
+                                        <td class="px-4 py-2">${goal.品名 || '-'}</td>
+                                        <td class="px-4 py-2 text-right">${goal.targetQuantity}</td>
+                                        <td class="px-4 py-2 text-center">
+                                            ${goal.status === 'valid' ? '<span class="text-green-600">✓</span>' : '<span class="text-red-600" title="' + (goal.error || '') + '">✗</span>'}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                    <button onclick="closeGoalCsvReviewModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
+                    ${validGoals.length > 0 ? `<button onclick="confirmGoalCsvUpload()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Import ${validGoals.length} Goals</button>` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+    
+    // Store for confirmation
+    window._pendingGoals = validGoals;
+}
+
+window.closeGoalCsvReviewModal = function() {
+    const modal = document.getElementById('goalCsvReviewModal');
+    if (modal) modal.remove();
+    window._pendingGoals = null;
+};
+
+window.confirmGoalCsvUpload = async function() {
+    if (!window._pendingGoals || window._pendingGoals.length === 0) return;
+    
+    try {
+        // Check for duplicates
+        const response = await fetch(BASE_URL + 'api/production-goals/check-duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: plannerState.currentDate,
+                items: window._pendingGoals.map(g => ({ 背番号: g.背番号, 品番: g.品番 }))
+            })
+        });
+        
+        const dupResult = await response.json();
+        
+        if (dupResult.success && dupResult.hasDuplicates) {
+            // Show duplicate confirmation modal
+            showDuplicateConfirmationModal(window._pendingGoals, dupResult.duplicates);
+        } else {
+            // No duplicates, proceed to save
+            await saveGoalsBatch(window._pendingGoals);
+        }
+    } catch (error) {
+        console.error('Error checking duplicates:', error);
+        showPlannerNotification('Error: ' + error.message, 'error');
+    }
+};
+
+// Show manual goal input modal
+window.showManualGoalInput = function() {
+    if (!plannerState.currentFactory) {
+        showPlannerNotification('Please select a factory first', 'warning');
+        return;
+    }
+    
+    const modalHTML = `
+        <div id="manualGoalModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="addProductionGoals">Add Production Goals</h3>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-6">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="date">Date</label>
+                            <input type="date" id="manualGoalDate" value="${plannerState.currentDate}" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="searchProducts">Search Product</label>
+                            <input type="text" id="manualGoalProductSearch" placeholder="Search by 背番号, 品番, or 品名..." class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                        </div>
+                        
+                        <div id="manualGoalProductList" class="border border-gray-300 dark:border-gray-600 rounded-lg max-h-60 overflow-y-auto">
+                            <!-- Products will be loaded here -->
+                        </div>
+                        
+                        <div id="manualGoalSelectedProduct" class="hidden">
+                            <div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                                <p class="text-sm font-medium text-gray-900 dark:text-white mb-2" data-i18n="selectedProduct">Selected Product:</p>
+                                <div id="selectedProductInfo"></div>
+                                <div class="mt-3">
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="targetQuantity">Target Quantity</label>
+                                    <input type="number" id="manualGoalQuantity" min="1" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                    <button onclick="closeManualGoalModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
+                    <button onclick="confirmManualGoal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors" data-i18n="addGoal">Add Goal</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Load products
+    renderManualGoalProductList();
+    
+    // Setup search
+    document.getElementById('manualGoalProductSearch').addEventListener('input', renderManualGoalProductList);
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+};
+
+function renderManualGoalProductList() {
+    const searchTerm = document.getElementById('manualGoalProductSearch')?.value?.toLowerCase() || '';
+    const container = document.getElementById('manualGoalProductList');
+    
+    if (!container) return;
+    
+    const filteredProducts = plannerState.products.filter(p => {
+        if (!searchTerm) return true;
+        return (
+            (p.背番号 || '').toLowerCase().includes(searchTerm) ||
+            (p.品番 || '').toLowerCase().includes(searchTerm) ||
+            (p.品名 || '').toLowerCase().includes(searchTerm)
+        );
+    }).slice(0, 50); // Limit to 50 for performance
+    
+    container.innerHTML = filteredProducts.map(product => `
+        <div class="p-3 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-200 dark:border-gray-700 last:border-b-0"
+             onclick="selectManualGoalProduct('${product.背番号}')">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="font-medium text-gray-900 dark:text-white">${product.背番号}</p>
+                    <p class="text-sm text-gray-600 dark:text-gray-400">${product.品番} - ${product.品名 || ''}</p>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+window.selectManualGoalProduct = function(seiban) {
+    const product = plannerState.products.find(p => p.背番号 === seiban);
+    if (!product) return;
+    
+    window._selectedGoalProduct = product;
+    
+    document.getElementById('manualGoalSelectedProduct').classList.remove('hidden');
+    document.getElementById('selectedProductInfo').innerHTML = `
+        <p class="text-sm"><strong>${product.背番号}</strong> - ${product.品番}</p>
+        <p class="text-sm text-gray-600 dark:text-gray-400">${product.品名 || ''}</p>
+    `;
+    
+    document.getElementById('manualGoalQuantity').focus();
+};
+
+window.closeManualGoalModal = function() {
+    const modal = document.getElementById('manualGoalModal');
+    if (modal) modal.remove();
+    window._selectedGoalProduct = null;
+};
+
+window.confirmManualGoal = async function() {
+    const product = window._selectedGoalProduct;
+    const quantity = parseInt(document.getElementById('manualGoalQuantity')?.value);
+    const date = document.getElementById('manualGoalDate')?.value;
+    
+    if (!product) {
+        showPlannerNotification('Please select a product', 'warning');
+        return;
+    }
+    
+    if (!quantity || quantity <= 0) {
+        showPlannerNotification('Please enter a valid quantity', 'warning');
+        return;
+    }
+    
+    if (!date) {
+        showPlannerNotification('Please select a date', 'warning');
+        return;
+    }
+    
+    try {
+        // Check for duplicates
+        const dupResponse = await fetch(BASE_URL + 'api/production-goals/check-duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: date,
+                items: [{ 背番号: product.背番号 }]
+            })
+        });
+        
+        const dupResult = await dupResponse.json();
+        
+        if (dupResult.success && dupResult.hasDuplicates) {
+            // Ask user: overwrite or add?
+            const existing = dupResult.duplicates[0].existing;
+            const choice = await showDuplicateChoiceModal(product, existing, quantity);
+            
+            if (choice === 'cancel') return;
+            
+            if (choice === 'overwrite') {
+                // Update existing goal
+                await updateGoal(existing._id, { targetQuantity: quantity, remainingQuantity: quantity });
+            } else if (choice === 'add') {
+                // Add to existing quantity
+                const newTotal = existing.targetQuantity + quantity;
+                await updateGoal(existing._id, { 
+                    targetQuantity: newTotal, 
+                    remainingQuantity: existing.remainingQuantity + quantity 
+                });
+            }
+        } else {
+            // Create new goal
+            await fetch(BASE_URL + 'api/production-goals', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    factory: plannerState.currentFactory,
+                    date: date,
+                    背番号: product.背番号,
+                    品番: product.品番,
+                    品名: product.品名,
+                    targetQuantity: quantity,
+                    createdBy: window.currentUser?.username || 'system'
+                })
+            });
+        }
+        
+        await loadGoals();
+        renderGoalList();
+        closeManualGoalModal();
+        showPlannerNotification('Goal added successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error adding goal:', error);
+        showPlannerNotification('Error adding goal: ' + error.message, 'error');
+    }
+};
+
+// Load goals from database
+async function loadGoals() {
+    try {
+        const params = new URLSearchParams({
+            factory: plannerState.currentFactory,
+            date: plannerState.currentDate
+        });
+        
+        const response = await fetch(BASE_URL + 'api/production-goals?' + params);
+        const result = await response.json();
+        
+        if (result.success) {
+            plannerState.goals = result.data;
+            console.log(`📋 Loaded ${plannerState.goals.length} goals`);
+            
+            // Assign colors to goals
+            plannerState.goals.forEach(goal => {
+                if (!plannerState.productColors[goal.背番号]) {
+                    plannerState.productColors[goal.背番号] = PRODUCT_COLORS[plannerState.colorIndex % PRODUCT_COLORS.length];
+                    plannerState.colorIndex++;
+                }
+            });
+        }
+        
+        return plannerState.goals;
+    } catch (error) {
+        console.error('❌ Error loading goals:', error);
+        return [];
+    }
+}
+
+// Save goals batch
+async function saveGoalsBatch(goals) {
+    try {
+        const response = await fetch(BASE_URL + 'api/production-goals/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                goals: goals,
+                createdBy: window.currentUser?.username || 'system'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            closeGoalCsvReviewModal();
+            await loadGoals();
+            renderGoalList();
+            showPlannerNotification(`${result.insertedCount} goals imported successfully`, 'success');
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('Error saving goals:', error);
+        showPlannerNotification('Error saving goals: ' + error.message, 'error');
+    }
+}
+
+// Update goal
+async function updateGoal(goalId, updates) {
+    try {
+        const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('Error updating goal:', error);
+        throw error;
+    }
+}
+
+// ============================================
 // PRODUCT LIST & SELECTION
 // ============================================
 function renderProductList() {
@@ -392,8 +942,35 @@ function renderProductList() {
         return aSerial.localeCompare(bSerial);
     });
     
+    // Break time blocks at the top
+    const breakTimeBlocks = `
+        <div class="mb-4 space-y-2">
+            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase" data-i18n="breakTimeBlocks">Break Time Blocks</p>
+            <div class="break-block p-3 border-2 border-dashed border-orange-300 dark:border-orange-600 rounded-lg cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors"
+                 onclick="addBreakToTimeline(45)">
+                <div class="flex items-center gap-2">
+                    <i class="ri-restaurant-line text-orange-500 text-lg"></i>
+                    <div class="flex-1">
+                        <p class="font-medium text-sm text-gray-900 dark:text-white" data-i18n="lunchBreak">Lunch Break</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">45 minutes</p>
+                    </div>
+                </div>
+            </div>
+            <div class="break-block p-3 border-2 border-dashed border-blue-300 dark:border-blue-600 rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                 onclick="addBreakToTimeline(15)">
+                <div class="flex items-center gap-2">
+                    <i class="ri-cup-line text-blue-500 text-lg"></i>
+                    <div class="flex-1">
+                        <p class="font-medium text-sm text-gray-900 dark:text-white" data-i18n="shortBreak">Short Break</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">15 minutes</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
     if (filteredProducts.length === 0) {
-        container.innerHTML = `
+        container.innerHTML = breakTimeBlocks + `
             <div class="text-center py-8 text-gray-500">
                 <i class="ri-inbox-line text-4xl mb-2"></i>
                 <p data-i18n="noProductsFound">No products found</p>
@@ -402,7 +979,7 @@ function renderProductList() {
         return;
     }
     
-    container.innerHTML = filteredProducts.map(product => {
+    container.innerHTML = breakTimeBlocks + filteredProducts.map(product => {
         const color = plannerState.productColors[product.背番号] || '#6B7280';
         const isSelected = plannerState.selectedProducts.some(p => p._id === product._id);
         
@@ -427,8 +1004,120 @@ function renderProductList() {
     }).join('');
 }
 
+// Render goal list (replaces product list)
+function renderGoalList() {
+    const container = document.getElementById('goalListContainer');
+    if (!container) return;
+    
+    const searchTerm = document.getElementById('goalSearch')?.value?.toLowerCase() || '';
+    
+    const filteredGoals = plannerState.goals.filter(goal => {
+        if (!searchTerm) return true;
+        
+        return (
+            (goal.品番 || '').toLowerCase().includes(searchTerm) ||
+            (goal.背番号 || '').toLowerCase().includes(searchTerm) ||
+            (goal.品名 || '').toLowerCase().includes(searchTerm)
+        );
+    }).sort((a, b) => {
+        // Sort by date, then by 背番号
+        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        const aSerial = (a.背番号 || '').toLowerCase();
+        const bSerial = (b.背番号 || '').toLowerCase();
+        return aSerial.localeCompare(bSerial);
+    });
+    
+    if (filteredGoals.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8 text-gray-500">
+                <i class="ri-target-line text-4xl mb-2"></i>
+                <p data-i18n="noGoalsSet">No goals set</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Group by date
+    const goalsByDate = {};
+    filteredGoals.forEach(goal => {
+        if (!goalsByDate[goal.date]) {
+            goalsByDate[goal.date] = [];
+        }
+        goalsByDate[goal.date].push(goal);
+    });
+    
+    let html = '';
+    
+    Object.keys(goalsByDate).sort().forEach(date => {
+        const goalsForDate = goalsByDate[date];
+        const isToday = date === plannerState.currentDate;
+        
+        html += `
+            <div class="mb-4">
+                <div class="sticky top-0 bg-gray-100 dark:bg-gray-700 px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300 flex items-center justify-between">
+                    <span>${date}</span>
+                    ${isToday ? '<span class="bg-blue-500 text-white px-2 py-0.5 rounded text-xs">Today</span>' : ''}
+                </div>
+                ${goalsForDate.map(goal => renderGoalCard(goal)).join('')}
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function renderGoalCard(goal) {
+    const color = plannerState.productColors[goal.背番号] || '#6B7280';
+    const percentage = goal.targetQuantity > 0 ? Math.round((goal.scheduledQuantity / goal.targetQuantity) * 100) : 0;
+    const isCompleted = goal.remainingQuantity === 0;
+    const isInProgress = goal.scheduledQuantity > 0 && goal.remainingQuantity > 0;
+    
+    let statusBgClass = '';
+    let statusTextClass = '';
+    
+    if (isCompleted) {
+        statusBgClass = 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700';
+        statusTextClass = 'text-green-700 dark:text-green-400';
+    } else if (isInProgress) {
+        statusBgClass = 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700';
+        statusTextClass = 'text-blue-700 dark:text-blue-400';
+    } else {
+        statusBgClass = 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700';
+        statusTextClass = 'text-gray-700 dark:text-gray-400';
+    }
+    
+    return `
+        <div class="goal-card p-3 border rounded-lg ${statusBgClass} mb-2">
+            <div class="flex items-center gap-3 mb-2">
+                <div class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${color}"></div>
+                <div class="flex-1 min-w-0">
+                    <p class="font-medium text-sm ${statusTextClass} truncate">${goal.背番号 || '-'}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${goal.品番 || '-'}</p>
+                </div>
+                <button onclick="deleteGoal('${goal._id}')" class="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <i class="ri-delete-bin-line"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs ${statusTextClass}">
+                    <span><strong>${goal.remainingQuantity}</strong> / ${goal.targetQuantity} pcs</span>
+                    <span>${percentage}%</span>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-1.5">
+                    <div class="h-1.5 rounded-full transition-all ${isCompleted ? 'bg-green-500' : 'bg-blue-500'}" style="width: ${percentage}%"></div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function filterProducts() {
     renderProductList();
+}
+
+function filterGoals() {
+    renderGoalList();
 }
 
 function toggleProductSelection(productId) {
@@ -767,16 +1456,41 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
     timeSlots.forEach((slot, index) => {
         const slotMinutes = timeToMinutes(slot);
         
-        // Check if this slot is a break
-        const isBreak = plannerState.breaks.some(brk => {
+        // Check if this slot is a break for this equipment or global break
+        const breakAtSlot = plannerState.breaks.find(brk => {
             const breakStart = timeToMinutes(brk.start);
             const breakEnd = timeToMinutes(brk.end);
-            return slotMinutes >= breakStart && slotMinutes < breakEnd;
+            const isInBreakTime = slotMinutes >= breakStart && slotMinutes < breakEnd;
+            const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+            return isInBreakTime && isForThisEquipment;
         });
         
+        const isBreak = breakAtSlot !== undefined;
+        
         if (isBreak) {
+            const isFirstSlot = index === 0 || !plannerState.breaks.some(brk => {
+                const breakStart = timeToMinutes(brk.start);
+                const breakEnd = timeToMinutes(brk.end);
+                const prevSlotMinutes = timeToMinutes(timeSlots[index - 1]);
+                const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+                return prevSlotMinutes >= breakStart && prevSlotMinutes < breakEnd && isForThisEquipment;
+            });
+            
             html += `
-                <div class="flex-shrink-0 bg-gray-300 dark:bg-gray-600 border-r dark:border-gray-500" style="width: ${slotWidth}px" title="Break Time"></div>
+                <div class="flex-shrink-0 bg-gray-300 dark:bg-gray-600 border-r dark:border-gray-500 relative group" 
+                     style="width: ${slotWidth}px" 
+                     title="${breakAtSlot.name || 'Break Time'}">
+                    ${isFirstSlot ? `
+                        <div class="absolute inset-0 flex items-center justify-center text-xs font-medium text-gray-700 dark:text-gray-300">
+                            ${breakAtSlot.name || 'Break'}
+                        </div>
+                        <button onclick="removeBreakTime('${breakAtSlot.id}', '${equipment}')" 
+                                class="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs hover:bg-red-600"
+                                title="Remove break">
+                            ×
+                        </button>
+                    ` : ''}
+                </div>
             `;
         } else {
             // Check if any product is scheduled for this slot
@@ -827,6 +1541,96 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
 function handleTimelineSlotClick(equipment, timeSlot) {
     // Open multi-column product picker modal
     showMultiColumnProductPicker(equipment, timeSlot);
+}
+
+function addBreakToTimeline(durationMinutes) {
+    // Show modal to select equipment and time
+    const modalHTML = `
+        <div id="addBreakModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                <div class="p-6">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                        <span data-i18n="addBreakTime">Add Break Time</span> (${durationMinutes} min)
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="equipment">Equipment</label>
+                            <select id="breakEquipment" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                                <option value="" data-i18n="selectEquipment">-- Select Equipment --</option>
+                                ${plannerState.equipment.map(eq => `<option value="${eq}">${eq}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="startTime">Start Time</label>
+                            <input type="time" id="breakStartTime" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="breakName">Break Name (Optional)</label>
+                            <input type="text" id="breakName" placeholder="e.g., Lunch, Coffee Break" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-end gap-3 mt-6">
+                        <button onclick="closeAddBreakModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
+                        <button onclick="confirmAddBreak(${durationMinutes})" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors" data-i18n="add">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+function closeAddBreakModal() {
+    const modal = document.getElementById('addBreakModal');
+    if (modal) modal.remove();
+}
+
+function confirmAddBreak(durationMinutes) {
+    const equipment = document.getElementById('breakEquipment')?.value;
+    const startTime = document.getElementById('breakStartTime')?.value;
+    const name = document.getElementById('breakName')?.value || (durationMinutes === 45 ? 'Lunch Break' : 'Break');
+    
+    if (!equipment || !startTime) {
+        showPlannerNotification('Please select equipment and start time', 'warning');
+        return;
+    }
+    
+    // Calculate end time
+    const startMinutes = timeToMinutes(startTime);
+    const endMinutes = startMinutes + durationMinutes;
+    const endTime = minutesToTime(endMinutes);
+    
+    // Check if break already exists at this time for this equipment
+    const existingBreak = plannerState.breaks.find(b => 
+        b.equipment === equipment &&
+        b.start === startTime
+    );
+    
+    if (existingBreak) {
+        showPlannerNotification('A break already exists at this time for this equipment', 'warning');
+        return;
+    }
+    
+    // Add break
+    plannerState.breaks.push({
+        name: name,
+        start: startTime,
+        end: endTime,
+        equipment: equipment,
+        isDefault: false,
+        id: `break-${Date.now()}`
+    });
+    
+    closeAddBreakModal();
+    renderAllViews();
+    showPlannerNotification('Break time added', 'success');
 }
 
 // ============================================
@@ -1055,14 +1859,19 @@ let multiPickerState = {
 };
 
 function showMultiColumnProductPicker(equipment, startTime) {
+    // Filter goals that have remaining quantity > 0 for the current date
+    const availableGoals = plannerState.goals.filter(g => 
+        g.remainingQuantity > 0 && g.date === plannerState.currentDate
+    ).sort((a, b) => {
+        const aSerial = (a.背番号 || '').toLowerCase();
+        const bSerial = (b.背番号 || '').toLowerCase();
+        return aSerial.localeCompare(bSerial);
+    });
+    
     multiPickerState = {
         equipment: equipment,
         startTime: startTime,
-        availableProducts: [...plannerState.products].sort((a, b) => {
-            const aSerial = (a.背番号 || '').toLowerCase();
-            const bSerial = (b.背番号 || '').toLowerCase();
-            return aSerial.localeCompare(bSerial);
-        }),
+        availableProducts: availableGoals,
         selectedProducts: [],
         orderedProducts: []
     };
@@ -1373,34 +2182,416 @@ function updateMultiPickerStats() {
     statsEl.textContent = `${total} products selected | ${ordered} ready for timeline`;
 }
 
-function confirmMultiPickerSelection() {
+async function confirmMultiPickerSelection() {
     if (multiPickerState.orderedProducts.length === 0) {
         showPlannerNotification('Please move products to the order column', 'warning');
         return;
     }
     
-    // Add all ordered products to the selected products state
-    multiPickerState.orderedProducts.forEach(product => {
+    // Calculate actual start times, skipping breaks
+    let currentTime = timeToMinutes(multiPickerState.startTime);
+    const equipment = multiPickerState.equipment;
+    
+    // Add all ordered products to the selected products state and update goal quantities
+    const updatePromises = [];
+    
+    for (const product of multiPickerState.orderedProducts) {
         const timeInfo = calculateProductionTime(product, product.quantity);
         const boxes = calculateBoxesNeeded(product, product.quantity);
+        const productDurationMinutes = timeInfo.totalSeconds / 60;
+        
+        // Find actual start time, skipping any breaks
+        const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
         
         plannerState.selectedProducts.push({
             ...product,
-            equipment: multiPickerState.equipment,
+            equipment: equipment,
             boxes: boxes,
             estimatedTime: timeInfo,
             color: plannerState.productColors[product.背番号],
-            startTime: multiPickerState.startTime
+            startTime: minutesToTime(actualStartTime),
+            goalId: product._id // Store goal ID for tracking
         });
-    });
+        
+        // Update goal quantity in database
+        if (product._id) {
+            updatePromises.push(
+                fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quantityToSchedule: product.quantity })
+                })
+            );
+        }
+        
+        // Update current time for next product
+        currentTime = actualStartTime + productDurationMinutes;
+    }
+    
+    // Wait for all goal updates to complete
+    try {
+        await Promise.all(updatePromises);
+        
+        // Reload goals to reflect new quantities
+        await loadGoals();
+        
+    } catch (error) {
+        console.error('Error updating goal quantities:', error);
+        showPlannerNotification('Warning: Some goal quantities may not have been updated', 'warning');
+    }
     
     closeMultiColumnPicker();
-    renderProductList();
+    renderGoalList();
     updateSelectedProductsSummary();
     renderAllViews();
     
     showPlannerNotification(`Added ${multiPickerState.orderedProducts.length} products to timeline`, 'success');
 }
+
+function findNextAvailableTime(startMinutes, durationMinutes, equipment) {
+    let currentMinutes = startMinutes;
+    let remainingDuration = durationMinutes;
+    
+    while (remainingDuration > 0) {
+        // Check if current time falls within a break
+        const breakAtTime = plannerState.breaks.find(brk => {
+            const breakStart = timeToMinutes(brk.start);
+            const breakEnd = timeToMinutes(brk.end);
+            const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+            return currentMinutes >= breakStart && currentMinutes < breakEnd && isForThisEquipment;
+        });
+        
+        if (breakAtTime) {
+            // Skip to end of break
+            const breakEnd = timeToMinutes(breakAtTime.end);
+            currentMinutes = breakEnd;
+        } else {
+            // Check if we'll hit a break during this product's duration
+            const productEnd = currentMinutes + remainingDuration;
+            const breakDuring = plannerState.breaks.find(brk => {
+                const breakStart = timeToMinutes(brk.start);
+                const breakEnd = timeToMinutes(brk.end);
+                const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+                return breakStart > currentMinutes && breakStart < productEnd && isForThisEquipment;
+            });
+            
+            if (breakDuring) {
+                // Calculate time until break
+                const breakStart = timeToMinutes(breakDuring.start);
+                const timeUntilBreak = breakStart - currentMinutes;
+                remainingDuration -= timeUntilBreak;
+                currentMinutes = timeToMinutes(breakDuring.end);
+            } else {
+                // No break, we're done
+                break;
+            }
+        }
+    }
+    
+    return currentMinutes;
+}
+
+function removeBreakTime(breakId, equipment) {
+    const breakIndex = plannerState.breaks.findIndex(b => b.id === breakId);
+    if (breakIndex === -1) return;
+    
+    const breakToRemove = plannerState.breaks[breakIndex];
+    
+    // Check if it's a default break and for all equipment
+    if (breakToRemove.isDefault && !breakToRemove.equipment) {
+        // Remove default break for all equipment
+        plannerState.breaks.splice(breakIndex, 1);
+    } else if (breakToRemove.equipment === equipment) {
+        // Remove equipment-specific break
+        plannerState.breaks.splice(breakIndex, 1);
+    } else {
+        // If it's a global break but we're removing from specific equipment,
+        // we need to convert it to equipment-specific breaks for other equipment
+        const otherEquipment = plannerState.equipment.filter(eq => eq !== equipment);
+        plannerState.breaks.splice(breakIndex, 1);
+        
+        // Add break for other equipment
+        otherEquipment.forEach(eq => {
+            plannerState.breaks.push({
+                ...breakToRemove,
+                equipment: eq,
+                isDefault: false,
+                id: `break-${eq}-${Date.now()}`
+            });
+        });
+    }
+    
+    renderAllViews();
+    showPlannerNotification('Break time removed', 'success');
+}
+
+// ============================================
+// SMART SCHEDULING
+// ============================================
+window.showSmartSchedulingModal = async function() {
+    if (!plannerState.currentFactory) {
+        showPlannerNotification('Please select a factory first', 'warning');
+        return;
+    }
+    
+    if (plannerState.goals.length === 0) {
+        showPlannerNotification('Please set production goals first', 'warning');
+        return;
+    }
+    
+    showPlannerNotification('Analyzing production trends...', 'info');
+    
+    try {
+        // Get goals for current date with remaining quantity
+        const goalsToSchedule = plannerState.goals.filter(g => 
+            g.date === plannerState.currentDate && g.remainingQuantity > 0
+        );
+        
+        if (goalsToSchedule.length === 0) {
+            showPlannerNotification('No goals with remaining quantity for today', 'warning');
+            return;
+        }
+        
+        // Fetch press history trends
+        const response = await fetch(BASE_URL + 'api/production-goals/press-history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                items: goalsToSchedule.map(g => ({ 背番号: g.背番号, 品番: g.品番 }))
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to fetch trends');
+        }
+        
+        const trends = result.trends;
+        
+        // Auto-assign products to equipment based on trends
+        const assignments = {};
+        let totalAssigned = 0;
+        let totalUnassigned = 0;
+        
+        goalsToSchedule.forEach(goal => {
+            const identifier = goal.背番号 || goal.品番;
+            const trend = trends[identifier];
+            
+            if (trend && trend.mostFrequentEquipment) {
+                const equipment = trend.mostFrequentEquipment;
+                if (!assignments[equipment]) {
+                    assignments[equipment] = [];
+                }
+                assignments[equipment].push({
+                    ...goal,
+                    quantity: goal.remainingQuantity,
+                    confidence: trend.frequency / trend.totalRecords
+                });
+                totalAssigned++;
+            } else {
+                totalUnassigned++;
+            }
+        });
+        
+        // Show confirmation modal
+        showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassigned);
+        
+    } catch (error) {
+        console.error('Error in smart scheduling:', error);
+        showPlannerNotification('Error: ' + error.message, 'error');
+    }
+};
+
+function showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassigned) {
+    const modalHTML = `
+        <div id="smartSchedulingModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="smartScheduling">Smart Scheduling</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        ${totalAssigned} products assigned, ${totalUnassigned} without history
+                    </p>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-6">
+                    ${Object.entries(assignments).map(([equipment, products]) => `
+                        <div class="mb-6">
+                            <h4 class="font-semibold text-gray-900 dark:text-white mb-3">
+                                <i class="ri-tools-line mr-2"></i>${equipment}
+                            </h4>
+                            <div class="space-y-2">
+                                ${products.map(p => `
+                                    <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                        <div>
+                                            <p class="font-medium text-gray-900 dark:text-white">${p.背番号} - ${p.品番}</p>
+                                            <p class="text-sm text-gray-600 dark:text-gray-400">${p.remainingQuantity} pcs remaining</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <p class="text-sm text-gray-600 dark:text-gray-400">
+                                                ${Math.round(p.confidence * 100)}% confidence
+                                            </p>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                    <button onclick="closeSmartSchedulingModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
+                    <button onclick="confirmSmartScheduling()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">Apply Smart Schedule</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Store assignments for confirmation
+    window._smartSchedulingAssignments = assignments;
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+window.closeSmartSchedulingModal = function() {
+    const modal = document.getElementById('smartSchedulingModal');
+    if (modal) modal.remove();
+    window._smartSchedulingAssignments = null;
+};
+
+window.confirmSmartScheduling = async function() {
+    const assignments = window._smartSchedulingAssignments;
+    if (!assignments) return;
+    
+    try {
+        // For each equipment, schedule products sequentially
+        for (const [equipment, products] of Object.entries(assignments)) {
+            let currentTime = timeToMinutes(PLANNER_CONFIG.workStartTime);
+            
+            for (const product of products) {
+                const timeInfo = calculateProductionTime(product, product.quantity);
+                const boxes = calculateBoxesNeeded(product, product.quantity);
+                const productDurationMinutes = timeInfo.totalSeconds / 60;
+                
+                // Find actual start time, skipping breaks
+                const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
+                
+                plannerState.selectedProducts.push({
+                    ...product,
+                    equipment: equipment,
+                    boxes: boxes,
+                    estimatedTime: timeInfo,
+                    color: plannerState.productColors[product.背番号],
+                    startTime: minutesToTime(actualStartTime),
+                    goalId: product._id
+                });
+                
+                // Update goal quantity
+                await fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quantityToSchedule: product.quantity })
+                });
+                
+                currentTime = actualStartTime + productDurationMinutes;
+            }
+        }
+        
+        // Reload goals
+        await loadGoals();
+        
+        closeSmartSchedulingModal();
+        renderGoalList();
+        updateSelectedProductsSummary();
+        renderAllViews();
+        
+        showPlannerNotification('Smart scheduling applied successfully!', 'success');
+        
+    } catch (error) {
+        console.error('Error applying smart scheduling:', error);
+        showPlannerNotification('Error: ' + error.message, 'error');
+    }
+};
+
+// ============================================
+// DUPLICATE HANDLING
+// ============================================
+function showDuplicateChoiceModal(product, existing, newQuantity) {
+    return new Promise((resolve) => {
+        const modalHTML = `
+            <div id="duplicateChoiceModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                    <div class="p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                            <i class="ri-alert-line text-yellow-500 mr-2"></i>Duplicate Goal Found
+                        </h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                            A goal for <strong>${product.背番号}</strong> on <strong>${existing.date}</strong> already exists with ${existing.targetQuantity} pcs.
+                        </p>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                            What would you like to do?
+                        </p>
+                        
+                        <div class="space-y-3">
+                            <button onclick="resolveDuplicateChoice('overwrite')" 
+                                    class="w-full px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-left">
+                                <div class="font-medium">Overwrite</div>
+                                <div class="text-sm opacity-90">Replace with ${newQuantity} pcs</div>
+                            </button>
+                            
+                            <button onclick="resolveDuplicateChoice('add')" 
+                                    class="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-left">
+                                <div class="font-medium">Add</div>
+                                <div class="text-sm opacity-90">Total will be ${existing.targetQuantity + newQuantity} pcs</div>
+                            </button>
+                            
+                            <button onclick="resolveDuplicateChoice('cancel')" 
+                                    class="w-full px-4 py-3 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+        window.resolveDuplicateChoice = function(choice) {
+            const modal = document.getElementById('duplicateChoiceModal');
+            if (modal) modal.remove();
+            resolve(choice);
+        };
+    });
+}
+
+window.deleteGoal = async function(goalId) {
+    if (!confirm('Are you sure you want to delete this goal?')) return;
+    
+    try {
+        const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            await loadGoals();
+            renderGoalList();
+            showPlannerNotification('Goal deleted', 'success');
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('Error deleting goal:', error);
+        showPlannerNotification('Error deleting goal: ' + error.message, 'error');
+    }
+};
 
 // ============================================
 // BREAK TIME MANAGEMENT
