@@ -392,7 +392,19 @@ function calculateProductionTime(product, quantity) {
 }
 
 function calculateBoxesNeeded(product, quantity) {
-    const capacity = parseInt(product['収容数']) || 1;
+    let capacity = parseInt(product['収容数']) || 1;
+    
+    // If capacity not in product, look it up from plannerState.products
+    if (!product['収容数'] && (product.品番 || product.背番号)) {
+        const fullProduct = plannerState.products.find(p => 
+            (product.品番 && p.品番 === product.品番) || 
+            (product.背番号 && p.背番号 === product.背番号)
+        );
+        if (fullProduct && fullProduct['収容数']) {
+            capacity = parseInt(fullProduct['収容数']);
+        }
+    }
+    
     return Math.ceil(quantity / capacity);
 }
 
@@ -1130,6 +1142,23 @@ function renderGoalCard(goal) {
     const isCompleted = goal.remainingQuantity === 0;
     const isInProgress = goal.scheduledQuantity > 0 && goal.remainingQuantity > 0;
     
+    // Calculate box quantities with proper capacity lookup
+    let capacity = parseInt(goal['收容数']) || 1;
+    
+    // If capacity not in goal, look it up from plannerState.products
+    if (!goal['収容数'] && (goal.品番 || goal.背番号)) {
+        const fullProduct = plannerState.products.find(p => 
+            (goal.品番 && p.品番 === goal.品番) || 
+            (goal.背番号 && p.背番号 === goal.背番号)
+        );
+        if (fullProduct && fullProduct['収容数']) {
+            capacity = parseInt(fullProduct['収容数']);
+        }
+    }
+    
+    const remainingBoxes = Math.ceil(goal.remainingQuantity / capacity);
+    const targetBoxes = Math.ceil(goal.targetQuantity / capacity);
+    
     let statusBgClass = '';
     let statusTextClass = '';
     
@@ -1157,7 +1186,7 @@ function renderGoalCard(goal) {
             
             <div class="space-y-1">
                 <div class="flex justify-between text-xs ${statusTextClass}">
-                    <span><strong>${goal.remainingQuantity}</strong> / ${goal.targetQuantity} pcs</span>
+                    <span><strong>${goal.remainingQuantity}</strong> / ${goal.targetQuantity} pcs - ${targetBoxes} boxes</span>
                     <span>${percentage}%</span>
                 </div>
                 <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-1.5">
