@@ -2067,12 +2067,33 @@ function renderMultiPickerSelected() {
         const timeInfo = calculateProductionTime(product, product.quantity);
         const boxes = calculateBoxesNeeded(product, product.quantity);
         
+        // Get goal info
+        const goalQty = product.remainingQuantity || 0;
+        const inputQty = product.quantity || 0;
+        const remaining = Math.max(0, goalQty - inputQty);
+        
+        // Get capacity for box calculation
+        let capacity = parseInt(product['収容数']) || 1;
+        if (!product['収容数'] && product.品番) {
+            const fullProduct = plannerState.products.find(p => p.品番 === product.品番 || p.背番号 === product.背番号);
+            if (fullProduct && fullProduct['収容数']) {
+                capacity = parseInt(fullProduct['収容数']);
+            }
+        }
+        const goalBoxes = Math.ceil(goalQty / capacity);
+        const remainingBoxes = Math.ceil(remaining / capacity);
+        
         return `
             <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
                 <div class="flex items-start gap-2 mb-2">
                     <div class="w-3 h-3 rounded-full mt-1" style="background-color: ${color}"></div>
                     <div class="flex-1 min-w-0">
-                        <p class="font-medium text-sm text-gray-900 dark:text-white truncate">${product.背番号 || '-'}</p>
+                        <div class="flex items-baseline gap-2">
+                            <p class="font-medium text-sm text-gray-900 dark:text-white">${product.背番号 || '-'}</p>
+                            <p class="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                                ${goalQty} pcs / ${goalBoxes} boxes
+                            </p>
+                        </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${product.品名 || '-'}</p>
                     </div>
                     <button onclick="removeFromMultiPickerSelected(${index})" class="text-red-500 hover:text-red-700">
@@ -2082,9 +2103,12 @@ function renderMultiPickerSelected() {
                 <div class="space-y-2">
                     <div>
                         <label class="text-xs text-gray-600 dark:text-gray-400">Quantity</label>
-                        <input type="number" id="${product.quantityInputId}" min="1" value="${product.quantity}" 
+                        <input type="number" id="${product.quantityInputId}" min="1" max="${goalQty}" value="${product.quantity}" 
                                class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded text-sm dark:bg-gray-700 dark:text-white"
                                onchange="updateMultiPickerQuantity(${index}, this.value)">
+                        <p class="text-xs mt-1 ${remaining > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}">
+                            ${remaining > 0 ? `Remaining: ${remaining} pcs / ${remainingBoxes} boxes` : 'Goal Complete! ✓'}
+                        </p>
                     </div>
                     <div class="text-xs text-gray-500 dark:text-gray-400 grid grid-cols-2 gap-2">
                         <div>Boxes: <strong>${boxes}</strong></div>
