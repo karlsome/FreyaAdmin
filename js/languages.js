@@ -36,6 +36,7 @@ const translations = {
       search: "Search",
       all: "All",
       total: "Total",
+      grandTotal: "Total",
       
       // Login Page
       loginTitle: "Login",
@@ -1055,6 +1056,7 @@ const translations = {
       search: "検索",
       all: "すべて",
       total: "合計",
+      grandTotal: "合計",
       
       // Login Page
       loginTitle: "ログイン",

@@ -4481,6 +4481,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                                       </tr>
                                     `;
                                   }).join("")}
+                                  ${renderSummaryTotalRow(calculateSummaryTotals(summary))}
                                 </tbody>
                               </table>
                               <div class="flex gap-3 mt-3 pt-3 border-t">
@@ -4672,6 +4673,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                           </tr>
                         `;
                       }).join("")}
+                      ${renderSummaryTotalRow(calculateSummaryTotals(summary))}
                     </tbody>
                   </table>
                   <div class="flex gap-4">
@@ -4722,6 +4724,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                               </tr>
                             `;
                           }).join("")}
+                          ${renderSummaryTotalRow(calculateSummaryTotals(proc.summary))}
                         </tbody>
                       </table>
                     </div>
@@ -5017,6 +5020,78 @@ function groupAndSummarize(records) {
             avgWorkingHours: avgWorkingHours
         };
     });
+}
+
+/**
+ * Calculates totals for a summary array (for displaying total row at bottom of summary tables)
+ * @param {Array} summary - Array of summary objects
+ * @returns {Object} - Object containing all totals
+ */
+function calculateSummaryTotals(summary) {
+    if (!summary || summary.length === 0) {
+        return null;
+    }
+    
+    const totals = {
+        grandTotal: 0,
+        grandTotalNG: 0,
+        grandTotalWorkHours: 0,
+        totalRecordsWithHours: 0
+    };
+    
+    summary.forEach(row => {
+        totals.grandTotal += row.Total || 0;
+        totals.grandTotalNG += row.Total_NG || 0;
+        if (row.totalWorkingHours && row.totalWorkingHours > 0) {
+            totals.grandTotalWorkHours += row.totalWorkingHours;
+            totals.totalRecordsWithHours++;
+        }
+    });
+    
+    // Calculate overall average work hours
+    totals.grandAvgWorkHours = totals.totalRecordsWithHours > 0 
+        ? totals.grandTotalWorkHours / totals.totalRecordsWithHours 
+        : null;
+    
+    // Calculate overall defect rate
+    totals.grandDefectRate = totals.grandTotal > 0 
+        ? ((totals.grandTotalNG / totals.grandTotal) * 100).toFixed(2) 
+        : '0.00';
+    
+    return totals;
+}
+
+/**
+ * Renders the total row HTML for summary tables
+ * @param {Object} totals - Totals object from calculateSummaryTotals
+ * @returns {string} - HTML string for the total row
+ */
+function renderSummaryTotalRow(totals) {
+    if (!totals) return '';
+    
+    const totalLabel = window.t ? window.t('grandTotal') : 'Total';
+    const totalWorkHours = totals.grandTotalWorkHours > 0 ? totals.grandTotalWorkHours.toFixed(2) + ' hrs' : 'N/A';
+    const avgWorkHours = totals.grandAvgWorkHours ? totals.grandAvgWorkHours.toFixed(2) + ' hrs' : 'N/A';
+    
+    return `
+        <tr class="bg-gray-200 font-bold border-t-2 border-gray-400">
+            <td class="px-3 py-2" data-i18n="grandTotal">${totalLabel}</td>
+            <td class="px-3 py-2"></td>
+            <td class="px-3 py-2">${totals.grandTotal.toLocaleString()}</td>
+            <td class="px-3 py-2 ${totals.grandTotalNG > 0 ? 'text-red-600' : ''}">${totals.grandTotalNG.toLocaleString()}</td>
+            <td class="px-3 py-2 working-hours">${totalWorkHours}</td>
+            <td class="px-3 py-2 working-hours">${avgWorkHours}</td>
+            <td class="px-3 py-2">
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs ${
+                    parseFloat(totals.grandDefectRate) > 2 ? 'bg-red-100 text-red-700' :
+                    parseFloat(totals.grandDefectRate) > 1 ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-green-100 text-green-700'
+                }">
+                    ${totals.grandDefectRate}%
+                </span>
+            </td>
+        </tr>
+    `;
 }
 
 /**
@@ -5376,6 +5451,21 @@ function exportToCSVGrouped(processData, filename = "export.csv") {
                   defectRate.toFixed(1) + "%"
               ];
           });
+          
+          // Calculate and add totals row
+          const totals = calculateSummaryTotals(proc.summary);
+          if (totals) {
+              const totalLabel = window.t ? window.t('grandTotal') : 'Total';
+              rows.push([
+                  totalLabel,
+                  '',
+                  totals.grandTotal.toLocaleString(),
+                  totals.grandTotalNG.toLocaleString(),
+                  totals.grandTotalWorkHours > 0 ? totals.grandTotalWorkHours.toFixed(2) : '0.00',
+                  totals.grandAvgWorkHours ? totals.grandAvgWorkHours.toFixed(2) : '0.00',
+                  totals.grandDefectRate + '%'
+              ]);
+          }
       
           doc.autoTable({
             startY: y,
@@ -5395,7 +5485,14 @@ function exportToCSVGrouped(processData, filename = "export.csv") {
                 fontSize: 10
             },
             alternateRowStyles: { fillColor: [245, 245, 245] },
-            margin: { left: 14, right: 14 }
+            margin: { left: 14, right: 14 },
+            // Style the last row (totals row) differently
+            didParseCell: function(data) {
+                if (totals && data.row.index === rows.length - 1 && data.section === 'body') {
+                    data.cell.styles.fillColor = [209, 213, 219]; // bg-gray-300
+                    data.cell.styles.fontStyle = 'bold';
+                }
+            }
           });
       
           y = doc.lastAutoTable.finalY + 15;
