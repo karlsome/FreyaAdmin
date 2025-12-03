@@ -3623,19 +3623,22 @@ function openBulkEditGoalsModal() {
                                 <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">背番号</label>
                                 <input type="text" id="newGoal背番号" 
                                        class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
-                                       placeholder="背番号">
+                                       placeholder="背番号"
+                                       onblur="handleGoalBackNumberBlur()">
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">品番</label>
                                 <input type="text" id="newGoal品番" 
                                        class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
-                                       placeholder="品番">
+                                       placeholder="品番"
+                                       onblur="handleGoalPartNumberBlur()">
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">品名</label>
                                 <input type="text" id="newGoal品名" 
                                        class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
-                                       placeholder="品名">
+                                       placeholder="品名"
+                                       readonly>
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">Target Qty</label>
@@ -3744,6 +3747,89 @@ async function deleteGoalFromTable(goalId) {
     }
 }
 
+// Auto-generation handlers for Add New Goal
+async function handleGoalBackNumberBlur() {
+    const backNumber = document.getElementById('newGoal背番号')?.value?.trim();
+    const partNumberField = document.getElementById('newGoal品番');
+    const productNameField = document.getElementById('newGoal品名');
+    
+    // Only auto-fill if backNumber has value and other fields are empty
+    if (!backNumber || partNumberField.value.trim()) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(BASE_URL + 'api/production-goals/lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                searchType: '背番号', 
+                searchValue: backNumber 
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            partNumberField.value = result.data.品番 || '';
+            productNameField.value = result.data.品名 || '';
+            
+            // Show brief notification
+            showGoalAutoFillNotification('品番 and 品名 auto-filled from masterDB');
+        }
+    } catch (error) {
+        console.error('Error looking up by 背番号:', error);
+    }
+}
+
+async function handleGoalPartNumberBlur() {
+    const partNumber = document.getElementById('newGoal品番')?.value?.trim();
+    const backNumberField = document.getElementById('newGoal背番号');
+    const productNameField = document.getElementById('newGoal品名');
+    
+    // Only auto-fill if partNumber has value and other fields are empty
+    if (!partNumber || backNumberField.value.trim()) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(BASE_URL + 'api/production-goals/lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                searchType: '品番', 
+                searchValue: partNumber 
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            backNumberField.value = result.data.背番号 || '';
+            productNameField.value = result.data.品名 || '';
+            
+            // Show brief notification
+            showGoalAutoFillNotification('背番号 and 品名 auto-filled from masterDB');
+        }
+    } catch (error) {
+        console.error('Error looking up by 品番:', error);
+    }
+}
+
+function showGoalAutoFillNotification(message) {
+    const notification = document.createElement('div');
+    notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity duration-300';
+    notification.innerHTML = `<i class="ri-magic-line mr-2"></i>${message}`;
+    
+    document.body.appendChild(notification);
+    
+    // Fade out and remove after 2 seconds
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 300);
+    }, 2000);
+}
+
 async function addNewGoalFromTable() {
     const 背番号 = document.getElementById('newGoal背番号')?.value?.trim();
     const 品番 = document.getElementById('newGoal品番')?.value?.trim();
@@ -3768,7 +3854,10 @@ async function addNewGoalFromTable() {
         const lookupResponse = await fetch(BASE_URL + 'api/production-goals/lookup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 背番号, 品番 })
+            body: JSON.stringify({ 
+                searchType: '背番号', 
+                searchValue: 背番号 
+            })
         });
         
         const lookupResult = await lookupResponse.json();
@@ -3864,5 +3953,7 @@ window.closeBulkEditGoalsModal = closeBulkEditGoalsModal;
 window.updateGoalQuantityInTable = updateGoalQuantityInTable;
 window.deleteGoalFromTable = deleteGoalFromTable;
 window.addNewGoalFromTable = addNewGoalFromTable;
+window.handleGoalBackNumberBlur = handleGoalBackNumberBlur;
+window.handleGoalPartNumberBlur = handleGoalPartNumberBlur;
 window.toggleEquipmentCard = toggleEquipmentCard;
 
