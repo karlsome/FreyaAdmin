@@ -1363,7 +1363,17 @@ function updateSelectedProductsSummary() {
         byEquipment[item.equipment].totalMinutes += item.estimatedTime.totalSeconds / 60;
     });
     
-    container.innerHTML = Object.entries(byEquipment).map(([equipment, data]) => {
+    const clearAllButton = `
+        <div class="mb-2 flex justify-end">
+            <button onclick="clearAllSelectedProducts()" 
+                    class="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center gap-1">
+                <i class="ri-delete-bin-line"></i>
+                <span>Clear All</span>
+            </button>
+        </div>
+    `;
+    
+    container.innerHTML = clearAllButton + Object.entries(byEquipment).map(([equipment, data]) => {
         // Calculate time range
         const startTimes = data.items.map(item => timeToMinutes(item.startTime));
         const earliestStart = Math.min(...startTimes);
@@ -1384,34 +1394,34 @@ function updateSelectedProductsSummary() {
         const isOverCapacity = utilization > 100;
         
         return `
-            <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg mb-3 overflow-hidden">
+            <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg mb-2 overflow-hidden">
                 <!-- Collapsed Summary Card -->
-                <div class="p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors" 
+                <div class="p-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors" 
                      onclick="toggleEquipmentCard('${equipment}')">
                     <div class="flex items-center justify-between">
                         <div class="flex-1">
-                            <h4 class="font-semibold text-gray-900 dark:text-white mb-1">${equipment}</h4>
-                            <div class="text-sm text-gray-600 dark:text-gray-300">
+                            <h4 class="font-medium text-sm text-gray-900 dark:text-white mb-0.5">${equipment}</h4>
+                            <div class="text-xs text-gray-600 dark:text-gray-300">
                                 <span>${itemCount} items</span>
-                                <span class="mx-2">•</span>
+                                <span class="mx-1">•</span>
                                 <span>${totalQuantity}pcs</span>
-                                <span class="mx-2">•</span>
+                                <span class="mx-1">•</span>
                                 <span>${timeRange}</span>
                             </div>
                         </div>
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm ${isOverCapacity ? 'text-red-600 font-bold' : 'text-gray-500 dark:text-gray-400'}">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs ${isOverCapacity ? 'text-red-600 font-bold' : 'text-gray-500 dark:text-gray-400'}">
                                 ${timeStr} (${utilization}%)
                                 ${isOverCapacity ? '<i class="ri-alert-fill ml-1"></i>' : ''}
                             </span>
-                            <i class="ri-arrow-down-s-line text-xl text-gray-500 dark:text-gray-400 transition-transform equipment-card-arrow" 
+                            <i class="ri-arrow-down-s-line text-lg text-gray-500 dark:text-gray-400 transition-transform equipment-card-arrow" 
                                id="arrow-${equipment}"></i>
                         </div>
                     </div>
                 </div>
                 
                 <!-- Expandable Details -->
-                <div class="hidden border-t border-gray-200 dark:border-gray-600 p-4 space-y-2" id="details-${equipment}">
+                <div class="hidden border-t border-gray-200 dark:border-gray-600 p-2 space-y-1" id="details-${equipment}">
                     ${data.items.map(item => {
                         const startTime = item.startTime;
                         const startMinutes = timeToMinutes(startTime);
@@ -1451,19 +1461,19 @@ function updateSelectedProductsSummary() {
                         }
                         
                         return `
-                        <div class="flex items-center justify-between text-sm py-2 border-b border-gray-200 dark:border-gray-600 last:border-0">
-                            <div class="flex items-center gap-2 flex-1">
-                                <div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ${item.color}"></div>
+                        <div class="flex items-center justify-between text-xs py-1 border-b border-gray-200 dark:border-gray-600 last:border-0">
+                            <div class="flex items-center gap-1.5 flex-1">
+                                <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background-color: ${item.color}"></div>
                                 <div class="flex flex-col">
                                     <span class="text-gray-700 dark:text-gray-300 font-medium">${item.背番号}</span>
-                                    <span class="text-xs text-gray-500 dark:text-gray-400">${timeRanges}</span>
+                                    <span class="text-[10px] text-gray-500 dark:text-gray-400">${timeRanges}</span>
                                 </div>
                             </div>
-                            <div class="flex items-center gap-4">
+                            <div class="flex items-center gap-2">
                                 <span class="text-gray-500 dark:text-gray-400">${item.quantity}pcs</span>
                                 <span class="text-gray-500 dark:text-gray-400">${item.estimatedTime.formattedTime}</span>
                                 <button onclick="removeSelectedProduct('${item._id}')" class="text-red-500 hover:text-red-700 flex-shrink-0">
-                                    <i class="ri-close-line"></i>
+                                    <i class="ri-close-line text-sm"></i>
                                 </button>
                             </div>
                         </div>
@@ -1527,6 +1537,53 @@ async function removeSelectedProduct(productId) {
     }
 }
 
+async function clearAllSelectedProducts() {
+    if (plannerState.selectedProducts.length === 0) return;
+    
+    if (!confirm(`Clear all ${plannerState.selectedProducts.length} products from the timeline? This will restore all quantities to their goals.`)) {
+        return;
+    }
+    
+    // Restore all goal quantities
+    for (const product of plannerState.selectedProducts) {
+        if (product.goalId || product._id) {
+            const goalId = product.goalId || product._id;
+            
+            try {
+                const goal = plannerState.goals.find(g => g._id === goalId);
+                if (goal) {
+                    await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            remainingQuantity: goal.remainingQuantity + product.quantity,
+                            scheduledQuantity: goal.scheduledQuantity - product.quantity,
+                            status: 'pending'
+                        })
+                    });
+                }
+            } catch (error) {
+                console.error('Error restoring goal quantity:', error);
+            }
+        }
+    }
+    
+    // Clear all selected products
+    plannerState.selectedProducts = [];
+    
+    // Reload goals and refresh UI
+    await loadGoals();
+    renderGoalList();
+    renderProductList();
+    updateSelectedProductsSummary();
+    renderAllViews();
+    
+    // Auto-save the cleared plan
+    await savePlanToDatabase();
+    
+    showPlannerNotification('All products cleared from timeline', 'success');
+}
+
 // ============================================
 // VIEW RENDERING
 // ============================================
@@ -1586,11 +1643,11 @@ function renderTimelineView() {
     let headerHTML = '<div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" data-i18n="equipment">Equipment</div>';
     
     timeSlots.forEach((slot, index) => {
-        // Only show hour labels
-        const showLabel = slot.endsWith(':00') || slot.endsWith(':45') && index === 0;
+        // Show all time labels
+        const isHourMark = slot.endsWith(':00');
         headerHTML += `
-            <div class="flex-shrink-0 border-r dark:border-gray-600 text-center text-xs text-gray-500 dark:text-gray-400 ${showLabel ? 'font-medium' : ''}" style="width: ${slotWidth}px">
-                ${showLabel ? slot : ''}
+            <div class="flex-shrink-0 border-r dark:border-gray-600 text-center text-xs text-gray-500 dark:text-gray-400 ${isHourMark ? 'font-medium' : ''}" style="width: ${slotWidth}px">
+                ${slot}
             </div>
         `;
     });
@@ -3942,6 +3999,7 @@ window.updateQuantityPreview = updateQuantityPreview;
 window.closeAddProductModal = closeAddProductModal;
 window.confirmAddProduct = confirmAddProduct;
 window.removeSelectedProduct = removeSelectedProduct;
+window.clearAllSelectedProducts = clearAllSelectedProducts;
 window.editSelectedProduct = editSelectedProduct;
 window.handleKanbanDragStart = handleKanbanDragStart;
 window.handleKanbanDragOver = handleKanbanDragOver;
