@@ -2374,6 +2374,11 @@ function removeBreakTime(breakId, equipment) {
 // SMART SCHEDULING
 // ============================================
 window.showSmartSchedulingModal = async function() {
+    console.log('=== SMART SCHEDULING DEBUG START ===');
+    console.log('Current Factory:', plannerState.currentFactory);
+    console.log('Current Date:', plannerState.currentDate);
+    console.log('Total Goals:', plannerState.goals.length);
+    
     if (!plannerState.currentFactory) {
         showPlannerNotification('Please select a factory first', 'warning');
         return;
@@ -2392,28 +2397,42 @@ window.showSmartSchedulingModal = async function() {
             g.date === plannerState.currentDate && g.remainingQuantity > 0
         );
         
+        console.log('Goals to schedule (filtered by date and remaining qty):', goalsToSchedule);
+        console.log('Goals count:', goalsToSchedule.length);
+        
         if (goalsToSchedule.length === 0) {
             showPlannerNotification('No goals with remaining quantity for today', 'warning');
             return;
         }
         
+        // Prepare items for API request
+        const itemsForRequest = goalsToSchedule.map(g => ({ 背番号: g.背番号, 品番: g.品番 }));
+        console.log('Items being sent to API:', itemsForRequest);
+        
         // Fetch press history trends
+        const requestBody = {
+            factory: plannerState.currentFactory,
+            items: itemsForRequest
+        };
+        console.log('API Request Body:', JSON.stringify(requestBody, null, 2));
+        
         const response = await fetch(BASE_URL + 'api/production-goals/press-history', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                factory: plannerState.currentFactory,
-                items: goalsToSchedule.map(g => ({ 背番号: g.背番号, 品番: g.品番 }))
-            })
+            body: JSON.stringify(requestBody)
         });
         
+        console.log('API Response Status:', response.status);
         const result = await response.json();
+        console.log('API Response Result:', result);
         
         if (!result.success) {
             throw new Error(result.error || 'Failed to fetch trends');
         }
         
         const trends = result.trends;
+        console.log('Trends received:', trends);
+        console.log('Number of trends:', Object.keys(trends).length);
         
         // Auto-assign products to equipment based on trends
         const assignments = {};
@@ -2422,10 +2441,16 @@ window.showSmartSchedulingModal = async function() {
         
         goalsToSchedule.forEach(goal => {
             const identifier = goal.背番号 || goal.品番;
+            console.log(`Processing goal: ${identifier}`);
+            console.log('  Full goal object:', goal);
+            
             const trend = trends[identifier];
+            console.log(`  Trend for ${identifier}:`, trend);
             
             if (trend && trend.mostFrequentEquipment) {
                 const equipment = trend.mostFrequentEquipment;
+                console.log(`  ✓ ASSIGNED to ${equipment} (confidence: ${trend.frequency}/${trend.totalRecords})`);
+                
                 if (!assignments[equipment]) {
                     assignments[equipment] = [];
                 }
@@ -2436,9 +2461,15 @@ window.showSmartSchedulingModal = async function() {
                 });
                 totalAssigned++;
             } else {
+                console.log(`  ✗ NOT ASSIGNED - No trend data found`);
                 totalUnassigned++;
             }
         });
+        
+        console.log('Final assignments:', assignments);
+        console.log('Total Assigned:', totalAssigned);
+        console.log('Total Unassigned:', totalUnassigned);
+        console.log('=== SMART SCHEDULING DEBUG END ===');
         
         // Show confirmation modal
         showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassigned);

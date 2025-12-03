@@ -351,6 +351,10 @@ app.post('/api/production-goals/press-history', async (req, res) => {
     try {
         const { factory, items } = req.body; // items = array of {背番号 or 品番}
         
+        console.log('=== PRESS HISTORY API DEBUG START ===');
+        console.log('Factory:', factory);
+        console.log('Items:', items);
+        
         if (!items || !Array.isArray(items)) {
             return res.status(400).json({ 
                 success: false, 
@@ -361,15 +365,19 @@ app.post('/api/production-goals/press-history', async (req, res) => {
         const db = client.db('submittedDB');
         const collection = db.collection('pressDB');
         
-        // Get last 30 days
+        // Get last 30 days in YYYY-MM-DD format (pressDB uses Date field as string)
+        const today = new Date();
         const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        thirtyDaysAgo.setDate(today.getDate() - 30);
+        const dateThreshold = thirtyDaysAgo.toISOString().split('T')[0]; // "YYYY-MM-DD"
+        
+        console.log('Date threshold (30 days ago):', dateThreshold);
         
         const trends = {};
         
         for (const item of items) {
             const query = {
-                createdAt: { $gte: thirtyDaysAgo }
+                Date: { $gte: dateThreshold }  // Changed from createdAt to Date (string field)
             };
             
             if (factory) {
@@ -382,8 +390,15 @@ app.post('/api/production-goals/press-history', async (req, res) => {
                 query.品番 = item.品番;
             }
             
+            console.log(`Query for ${item.背番号 || item.品番}:`, JSON.stringify(query));
+            
             // Get all records and count by equipment
             const records = await collection.find(query).toArray();
+            console.log(`  Found ${records.length} records`);
+            
+            if (records.length > 0) {
+                console.log('  Sample record:', records[0]);
+            }
             
             const equipmentCounts = {};
             records.forEach(record => {
@@ -392,6 +407,8 @@ app.post('/api/production-goals/press-history', async (req, res) => {
                     equipmentCounts[equipment] = (equipmentCounts[equipment] || 0) + 1;
                 }
             });
+            
+            console.log('  Equipment distribution:', equipmentCounts);
             
             // Find most frequent equipment
             let maxCount = 0;
@@ -404,6 +421,8 @@ app.post('/api/production-goals/press-history', async (req, res) => {
                 }
             }
             
+            console.log(`  Most frequent: ${mostFrequentEquipment} (${maxCount} times)`);
+            
             const identifier = item.背番号 || item.品番;
             trends[identifier] = {
                 mostFrequentEquipment,
@@ -412,6 +431,9 @@ app.post('/api/production-goals/press-history', async (req, res) => {
                 equipmentDistribution: equipmentCounts
             };
         }
+        
+        console.log('Final trends:', trends);
+        console.log('=== PRESS HISTORY API DEBUG END ===');
         
         res.json({ success: true, trends });
     } catch (error) {
