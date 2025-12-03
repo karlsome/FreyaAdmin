@@ -5745,92 +5745,300 @@ function exportSingleProcessData(processIndex, processName) {
 }
 
 /**
+ * Flattens an object recursively, converting nested objects to dot notation keys
+ * @param {Object} obj - The object to flatten
+ * @param {string} prefix - The prefix for nested keys
+ * @returns {Object} - Flattened object with dot notation keys
+ */
+function flattenObject(obj, prefix = '') {
+    const result = {};
+    
+    for (const key in obj) {
+        if (!obj.hasOwnProperty(key)) continue;
+        
+        const newKey = prefix ? `${prefix}.${key}` : key;
+        const value = obj[key];
+        
+        if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+            // Recursively flatten nested objects
+            const nested = flattenObject(value, newKey);
+            Object.assign(result, nested);
+        } else if (Array.isArray(value)) {
+            // Convert arrays to JSON string
+            result[newKey] = JSON.stringify(value);
+        } else {
+            result[newKey] = value;
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * Gets all unique flattened headers from data array
+ * @param {Array} dataArray - Array of data objects
+ * @returns {Set} - Set of all unique flattened headers
+ */
+function getAllFlattenedHeaders(dataArray) {
+    const allHeaders = new Set();
+    
+    dataArray.forEach(item => {
+        const flattened = flattenObject(item);
+        Object.keys(flattened).forEach(key => {
+            allHeaders.add(key);
+        });
+    });
+    
+    return allHeaders;
+}
+
+/**
+ * Loads export templates from database for a specific process type
+ * @param {string} processType - The process type (Kensa, Press, SRS, Slit, All)
+ * @returns {Promise<Array>} - Array of templates
+ */
+async function loadExportTemplates(processType = 'All') {
+    try {
+        const query = processType === 'All' ? {} : { processType: processType };
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "exportTemplatesDB",
+                query: query,
+                sort: { templateName: 1 }
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to load templates');
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Error loading export templates:', error);
+        return [];
+    }
+}
+
+/**
+ * Saves an export template to the database
+ * @param {Object} templateData - The template data to save
+ * @returns {Promise<boolean>} - Success status
+ */
+async function saveExportTemplate(templateData) {
+    try {
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "exportTemplatesDB",
+                insertData: templateData
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to save template');
+        }
+        
+        const result = await response.json();
+        return result.insertedId ? true : false;
+    } catch (error) {
+        console.error('Error saving export template:', error);
+        return false;
+    }
+}
+
+/**
+ * Deletes an export template from the database
+ * @param {string} templateId - The template ID to delete
+ * @returns {Promise<boolean>} - Success status
+ */
+async function deleteExportTemplate(templateId) {
+    try {
+        // Get current user for the delete (archive) operation
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const username = currentUser.username || currentUser.firstName || 'admin';
+        
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "exportTemplatesDB",
+                query: { _id: templateId },
+                delete: true,
+                username: username
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete template');
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error deleting export template:', error);
+        return false;
+    }
+}
+
+/**
+ * Updates an export template in the database
+ * @param {string} templateId - The template ID to update
+ * @param {Object} updateData - The data to update
+ * @returns {Promise<boolean>} - Success status
+ */
+async function updateExportTemplate(templateId, updateData) {
+    try {
+        const response = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "exportTemplatesDB",
+                query: { _id: templateId },
+                update: { $set: updateData }
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to update template');
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error updating export template:', error);
+        return false;
+    }
+}
+
+/**
  * Shows export options modal for selecting and ordering headers
  */
-function showExportOptionsModal(data, filename, exportType = 'single') {
+async function showExportOptionsModal(data, filename, exportType = 'single', processType = 'All') {
     if (!data || data.length === 0) {
         alert("No data to export");
         return;
     }
 
-    // Get all possible headers from the data
-    const allHeaders = new Set();
-    const dataArray = Array.isArray(data) ? data : [data];
+    // Determine process type from filename or data
+    if (processType === 'All') {
+        if (filename.toLowerCase().includes('kensa')) processType = 'Kensa';
+        else if (filename.toLowerCase().includes('press')) processType = 'Press';
+        else if (filename.toLowerCase().includes('srs')) processType = 'SRS';
+        else if (filename.toLowerCase().includes('slit')) processType = 'Slit';
+    }
+
+    // Get all possible headers from the data using flattening
+    let allHeaders = new Set();
     
     if (exportType === 'grouped') {
         // For grouped data, get headers from all processes
         data.forEach(proc => {
             if (proc.data && proc.data.length > 0) {
-                proc.data.forEach(item => {
-                    Object.keys(item).forEach(key => {
-                        if (key === 'Counters' && item[key] && typeof item[key] === 'object') {
-                            Object.keys(item[key]).forEach(counterKey => {
-                                allHeaders.add(`Counters.${counterKey}`);
-                            });
-                        } else if (key !== 'Counters') {
-                            allHeaders.add(key);
-                        }
-                    });
-                });
+                const procHeaders = getAllFlattenedHeaders(proc.data);
+                procHeaders.forEach(h => allHeaders.add(h));
             }
         });
     } else {
         // For single process data
-        dataArray.forEach(item => {
-            Object.keys(item).forEach(key => {
-                if (key === 'Counters' && item[key] && typeof item[key] === 'object') {
-                    Object.keys(item[key]).forEach(counterKey => {
-                        allHeaders.add(`Counters.${counterKey}`);
-                    });
-                } else if (key !== 'Counters') {
-                    allHeaders.add(key);
-                }
-            });
-        });
+        const dataArray = Array.isArray(data) ? data : [data];
+        allHeaders = getAllFlattenedHeaders(dataArray);
     }
 
     const headers = Array.from(allHeaders).sort();
+    
+    // Load existing templates for this process type
+    const templates = await loadExportTemplates(processType);
 
     // Create modal HTML
     const modalHTML = `
         <div id="exportOptionsModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden">
                 <div class="px-6 py-4 border-b border-gray-200">
-                    <h3 class="text-lg font-semibold text-gray-900">エクスポートオプション</h3>
-                    <p class="text-sm text-gray-600 mt-1">エクスポートする列を選択し、順序を設定してください</p>
+                    <h3 class="text-lg font-semibold text-gray-900" data-i18n="exportOptions">エクスポートオプション</h3>
+                    <p class="text-sm text-gray-600 mt-1" data-i18n="exportOptionsDesc">エクスポートする列を選択し、順序を設定してください</p>
                 </div>
                 
-                <div class="p-6 overflow-y-auto max-h-[60vh]">
-                    <div class="mb-4">
-                        <div class="flex gap-2 mb-3">
-                            <button id="selectAllBtn" class="text-blue-600 underline text-sm">すべて選択</button>
-                            <button id="deselectAllBtn" class="text-blue-600 underline text-sm">すべて解除</button>
+                <div class="p-6 overflow-y-auto max-h-[65vh]">
+                    <!-- Template Section -->
+                    <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <div class="flex flex-wrap items-center gap-3 mb-2">
+                            <label class="text-sm font-medium text-blue-800" data-i18n="templates">テンプレート:</label>
+                            <select id="templateSelect" class="flex-1 min-w-[200px] px-3 py-1.5 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">${window.t ? window.t('selectTemplate') : '-- テンプレートを選択 --'}</option>
+                                ${templates.map(t => `<option value="${t._id}">${t.templateName}</option>`).join('')}
+                            </select>
+                            <select id="templateSortSelect" class="px-2 py-1.5 text-xs border border-blue-300 rounded">
+                                <option value="name" data-i18n="sortByName">名前順</option>
+                                <option value="date" data-i18n="sortByDate">日付順</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button id="saveTemplateBtn" class="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors">
+                                <i class="ri-save-line mr-1"></i><span data-i18n="saveAsTemplate">テンプレート保存</span>
+                            </button>
+                            <button id="manageTemplatesBtn" class="px-3 py-1.5 text-xs bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors">
+                                <i class="ri-settings-3-line mr-1"></i><span data-i18n="manageTemplates">テンプレート管理</span>
+                            </button>
                         </div>
                     </div>
                     
+                    <!-- Search Section -->
                     <div class="mb-4">
-                        <label class="block text-sm font-medium mb-2">列の順序を設定:</label>
-                        <div id="headersList" class="space-y-2 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
+                        <div class="relative">
+                            <input type="text" id="headerSearchInput" 
+                                   placeholder="${window.t ? window.t('searchHeaders') : 'ヘッダーを検索...'}" 
+                                   class="w-full px-4 py-2 pl-10 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            <button id="clearSearchBtn" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 hidden">
+                                <i class="ri-close-line"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Selection Controls -->
+                    <div class="mb-4">
+                        <div class="flex gap-2 mb-3">
+                            <button id="selectAllBtn" class="text-blue-600 hover:text-blue-800 text-sm font-medium" data-i18n="selectAll">すべて選択</button>
+                            <span class="text-gray-300">|</span>
+                            <button id="deselectAllBtn" class="text-blue-600 hover:text-blue-800 text-sm font-medium" data-i18n="deselectAll">すべて解除</button>
+                            <span class="text-gray-300">|</span>
+                            <button id="clearOrderBtn" class="text-blue-600 hover:text-blue-800 text-sm font-medium" data-i18n="clearOrder">順序クリア</button>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-2" data-i18n="orderInstructions">
+                            順序番号を入力してください。チェックされた項目のみエクスポートされます。
+                        </p>
+                    </div>
+                    
+                    <!-- Headers List -->
+                    <div class="mb-4">
+                        <div id="headersList" class="space-y-1 border border-gray-200 rounded-md p-3 max-h-80 overflow-y-auto">
                             ${headers.map((header, index) => `
-                                <div class="header-item flex items-center p-2 bg-gray-50 rounded border" data-header="${header}">
-                                    <input type="checkbox" id="header_${index}" checked class="mr-3">
-                                    <span class="flex-1 text-sm">${header}</span>
-                                    <div class="flex gap-1">
-                                        <button class="move-up text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200" ${index === 0 ? 'disabled' : ''}>↑</button>
-                                        <button class="move-down text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200" ${index === headers.length - 1 ? 'disabled' : ''}>↓</button>
-                                    </div>
+                                <div class="header-item flex items-center p-2 bg-gray-50 rounded border hover:bg-gray-100 transition-colors" data-header="${header}">
+                                    <input type="checkbox" id="header_${index}" checked class="mr-3 h-4 w-4 text-blue-600 rounded focus:ring-blue-500">
+                                    <span class="flex-1 text-sm font-mono">${header}</span>
+                                    <input type="number" min="1" placeholder="-" 
+                                           class="order-input w-14 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                           value="">
                                 </div>
                             `).join('')}
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">
+                            <span id="selectedCount">${headers.length}</span> / ${headers.length} <span data-i18n="columnsSelected">列選択中</span>
                         </div>
                     </div>
                 </div>
                 
                 <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-                    <button id="cancelExportBtn" class="px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
-                        キャンセル
+                    <button id="cancelExportBtn" class="px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors">
+                        <span data-i18n="cancel">キャンセル</span>
                     </button>
-                    <button id="executeExportBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                        エクスポート実行
+                    <button id="executeExportBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
+                        <i class="ri-download-line mr-1"></i><span data-i18n="executeExport">エクスポート実行</span>
                     </button>
                 </div>
             </div>
@@ -5846,55 +6054,242 @@ function showExportOptionsModal(data, filename, exportType = 'single') {
     // Add modal to document
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 
+    // Apply translations if available
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(document.getElementById('exportOptionsModal'));
+    }
+
     // Add event listeners
-    setupExportModalEventListeners(data, filename, exportType);
+    setupExportModalEventListeners(data, filename, exportType, processType, headers, templates);
 }
 
 /**
  * Sets up event listeners for the export options modal
  */
-function setupExportModalEventListeners(data, filename, exportType) {
+function setupExportModalEventListeners(data, filename, exportType, processType, headers, templates) {
     const modal = document.getElementById('exportOptionsModal');
     const headersList = document.getElementById('headersList');
+    const searchInput = document.getElementById('headerSearchInput');
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+    const templateSelect = document.getElementById('templateSelect');
+    const templateSortSelect = document.getElementById('templateSortSelect');
+
+    // Update selected count
+    function updateSelectedCount() {
+        const checkedCount = headersList.querySelectorAll('input[type="checkbox"]:checked').length;
+        document.getElementById('selectedCount').textContent = checkedCount;
+    }
+
+    // Get next available order number
+    function getNextOrderNumber() {
+        const orderInputs = headersList.querySelectorAll('.order-input');
+        let maxOrder = 0;
+        orderInputs.forEach(input => {
+            const val = parseInt(input.value);
+            if (!isNaN(val) && val > maxOrder) {
+                maxOrder = val;
+            }
+        });
+        return maxOrder + 1;
+    }
+
+    // Search functionality
+    searchInput.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase().trim();
+        clearSearchBtn.classList.toggle('hidden', !searchTerm);
+        
+        headersList.querySelectorAll('.header-item').forEach(item => {
+            const headerName = item.dataset.header.toLowerCase();
+            const matches = headerName.includes(searchTerm);
+            item.style.display = matches ? 'flex' : 'none';
+        });
+    });
+
+    clearSearchBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        clearSearchBtn.classList.add('hidden');
+        headersList.querySelectorAll('.header-item').forEach(item => {
+            item.style.display = 'flex';
+        });
+    });
 
     // Select/Deselect all buttons
     document.getElementById('selectAllBtn').onclick = () => {
-        headersList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+        let nextOrder = getNextOrderNumber();
+        headersList.querySelectorAll('.header-item').forEach(item => {
+            if (item.style.display !== 'none') {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                const orderInput = item.querySelector('.order-input');
+                if (!checkbox.checked) {
+                    checkbox.checked = true;
+                    orderInput.value = nextOrder++;
+                }
+            }
+        });
+        updateSelectedCount();
     };
 
     document.getElementById('deselectAllBtn').onclick = () => {
-        headersList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        headersList.querySelectorAll('.header-item').forEach(item => {
+            if (item.style.display !== 'none') {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                const orderInput = item.querySelector('.order-input');
+                checkbox.checked = false;
+                orderInput.value = '';
+            }
+        });
+        updateSelectedCount();
     };
 
-    // Move up/down buttons
-    headersList.addEventListener('click', (e) => {
-        const item = e.target.closest('.header-item');
-        if (!item) return;
+    // Clear order button
+    document.getElementById('clearOrderBtn').onclick = () => {
+        headersList.querySelectorAll('.order-input').forEach(input => {
+            input.value = '';
+        });
+    };
 
-        if (e.target.classList.contains('move-up')) {
-            const prev = item.previousElementSibling;
-            if (prev) {
-                item.parentNode.insertBefore(item, prev);
-                updateMoveButtons();
+    // Checkbox change listener for count update and auto-order assignment
+    headersList.addEventListener('change', (e) => {
+        if (e.target.type === 'checkbox') {
+            const item = e.target.closest('.header-item');
+            const orderInput = item.querySelector('.order-input');
+            
+            if (e.target.checked) {
+                // Auto-assign next order number when checking
+                orderInput.value = getNextOrderNumber();
+            } else {
+                // Clear order number when unchecking
+                orderInput.value = '';
             }
-        } else if (e.target.classList.contains('move-down')) {
-            const next = item.nextElementSibling;
-            if (next) {
-                item.parentNode.insertBefore(next, item);
-                updateMoveButtons();
-            }
+            
+            updateSelectedCount();
         }
     });
 
-    function updateMoveButtons() {
-        const items = headersList.querySelectorAll('.header-item');
-        items.forEach((item, index) => {
-            const upBtn = item.querySelector('.move-up');
-            const downBtn = item.querySelector('.move-down');
-            upBtn.disabled = index === 0;
-            downBtn.disabled = index === items.length - 1;
+    // Order input auto-correction
+    headersList.addEventListener('input', (e) => {
+        if (e.target.classList.contains('order-input')) {
+            const newValue = parseInt(e.target.value);
+            if (isNaN(newValue) || newValue < 1) return;
+            
+            // Find other inputs with the same value and push them down
+            headersList.querySelectorAll('.order-input').forEach(input => {
+                if (input !== e.target) {
+                    const currentValue = parseInt(input.value);
+                    if (!isNaN(currentValue) && currentValue >= newValue) {
+                        input.value = currentValue + 1;
+                    }
+                }
+            });
+        }
+    });
+
+    // Template select change
+    templateSelect.addEventListener('change', async (e) => {
+        const templateId = e.target.value;
+        if (!templateId) return;
+        
+        const template = templates.find(t => t._id === templateId);
+        if (!template) return;
+        
+        // Apply template settings
+        // First, uncheck all and clear orders
+        headersList.querySelectorAll('.header-item').forEach(item => {
+            item.querySelector('input[type="checkbox"]').checked = false;
+            item.querySelector('.order-input').value = '';
         });
-    }
+        
+        // Then apply template selections and orders
+        if (template.selectedHeaders && template.selectedHeaders.length > 0) {
+            template.selectedHeaders.forEach(headerConfig => {
+                const item = headersList.querySelector(`[data-header="${headerConfig.name}"]`);
+                if (item) {
+                    item.querySelector('input[type="checkbox"]').checked = true;
+                    if (headerConfig.order) {
+                        item.querySelector('.order-input').value = headerConfig.order;
+                    }
+                }
+            });
+        }
+        
+        updateSelectedCount();
+    });
+
+    // Template sort change
+    templateSortSelect.addEventListener('change', (e) => {
+        const sortBy = e.target.value;
+        const sortedTemplates = [...templates].sort((a, b) => {
+            if (sortBy === 'name') {
+                return a.templateName.localeCompare(b.templateName);
+            } else {
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            }
+        });
+        
+        // Update template select options
+        templateSelect.innerHTML = `<option value="">${window.t ? window.t('selectTemplate') : '-- テンプレートを選択 --'}</option>` +
+            sortedTemplates.map(t => `<option value="${t._id}">${t.templateName}</option>`).join('');
+    });
+
+    // Save template button
+    document.getElementById('saveTemplateBtn').onclick = async () => {
+        const templateName = prompt(window.t ? window.t('enterTemplateName') : 'テンプレート名を入力してください:');
+        if (!templateName || !templateName.trim()) return;
+        
+        // Collect selected headers with their orders
+        const selectedHeaders = [];
+        headersList.querySelectorAll('.header-item').forEach(item => {
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            const orderInput = item.querySelector('.order-input');
+            if (checkbox.checked) {
+                selectedHeaders.push({
+                    name: item.dataset.header,
+                    order: orderInput.value ? parseInt(orderInput.value) : null
+                });
+            }
+        });
+        
+        if (selectedHeaders.length === 0) {
+            alert(window.t ? window.t('selectAtLeastOneColumn') : '少なくとも1つの列を選択してください');
+            return;
+        }
+        
+        // Get current user info
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        
+        const templateData = {
+            templateName: templateName.trim(),
+            processType: processType,
+            selectedHeaders: selectedHeaders,
+            createdBy: currentUser.username || currentUser.firstName || 'Unknown',
+            createdAt: new Date().toISOString()
+        };
+        
+        const success = await saveExportTemplate(templateData);
+        if (success) {
+            alert(window.t ? window.t('templateSaved') : 'テンプレートが保存されました！');
+            // Refresh templates in dropdown
+            const newTemplates = await loadExportTemplates(processType);
+            templates.length = 0;
+            templates.push(...newTemplates);
+            templateSelect.innerHTML = `<option value="">${window.t ? window.t('selectTemplate') : '-- テンプレートを選択 --'}</option>` +
+                newTemplates.map(t => `<option value="${t._id}">${t.templateName}</option>`).join('');
+        } else {
+            alert(window.t ? window.t('templateSaveFailed') : 'テンプレートの保存に失敗しました');
+        }
+    };
+
+    // Manage templates button
+    document.getElementById('manageTemplatesBtn').onclick = () => {
+        showTemplateManagementModal(processType, templates, async () => {
+            // Refresh templates after management
+            const newTemplates = await loadExportTemplates(processType);
+            templates.length = 0;
+            templates.push(...newTemplates);
+            templateSelect.innerHTML = `<option value="">${window.t ? window.t('selectTemplate') : '-- テンプレートを選択 --'}</option>` +
+                newTemplates.map(t => `<option value="${t._id}">${t.templateName}</option>`).join('');
+        });
+    };
 
     // Cancel button
     document.getElementById('cancelExportBtn').onclick = () => {
@@ -5903,20 +6298,28 @@ function setupExportModalEventListeners(data, filename, exportType) {
 
     // Execute export button
     document.getElementById('executeExportBtn').onclick = () => {
-        const selectedHeaders = [];
-        const items = headersList.querySelectorAll('.header-item');
+        // Collect selected headers with their orders
+        const selectedHeadersWithOrder = [];
         
-        items.forEach(item => {
+        headersList.querySelectorAll('.header-item').forEach(item => {
             const checkbox = item.querySelector('input[type="checkbox"]');
+            const orderInput = item.querySelector('.order-input');
             if (checkbox.checked) {
-                selectedHeaders.push(item.dataset.header);
+                selectedHeadersWithOrder.push({
+                    name: item.dataset.header,
+                    order: orderInput.value ? parseInt(orderInput.value) : 9999 // Unordered items go to end
+                });
             }
         });
 
-        if (selectedHeaders.length === 0) {
-            alert('少なくとも1つの列を選択してください');
+        if (selectedHeadersWithOrder.length === 0) {
+            alert(window.t ? window.t('selectAtLeastOneColumn') : '少なくとも1つの列を選択してください');
             return;
         }
+
+        // Sort by order
+        selectedHeadersWithOrder.sort((a, b) => a.order - b.order);
+        const selectedHeaders = selectedHeadersWithOrder.map(h => h.name);
 
         modal.remove();
 
@@ -5937,7 +6340,157 @@ function setupExportModalEventListeners(data, filename, exportType) {
 }
 
 /**
- * Exports data to CSV with custom selected headers and order
+ * Shows template management modal
+ */
+function showTemplateManagementModal(processType, templates, onClose) {
+    // Check if user is admin
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const isAdmin = currentUser.role === 'admin' || currentUser.role === 'super_admin';
+
+    const managementModalHTML = `
+        <div id="templateManagementModal" class="fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900" data-i18n="templateManagement">テンプレート管理</h3>
+                    <p class="text-sm text-gray-600 mt-1">${processType} <span data-i18n="processTemplates">プロセステンプレート</span></p>
+                </div>
+                
+                <div class="p-6 overflow-y-auto max-h-[55vh]">
+                    ${templates.length === 0 ? `
+                        <div class="text-center py-8 text-gray-500">
+                            <i class="ri-folder-open-line text-4xl mb-2"></i>
+                            <p data-i18n="noTemplates">テンプレートがありません</p>
+                        </div>
+                    ` : `
+                        <div class="space-y-3">
+                            ${templates.map(t => `
+                                <div class="template-item flex items-center justify-between p-3 bg-gray-50 rounded-lg border" data-template-id="${t._id}">
+                                    <div class="flex-1 min-w-0">
+                                        <p class="font-medium text-gray-900 truncate">${t.templateName}</p>
+                                        <p class="text-xs text-gray-500">
+                                            ${t.selectedHeaders?.length || 0} <span data-i18n="columns">列</span> • 
+                                            ${t.createdBy || 'Unknown'} • 
+                                            ${new Date(t.createdAt).toLocaleDateString('ja-JP')}
+                                        </p>
+                                    </div>
+                                    <div class="flex gap-2 ml-3">
+                                        <button class="rename-template-btn p-2 text-blue-600 hover:bg-blue-100 rounded transition-colors" title="Rename">
+                                            <i class="ri-edit-line"></i>
+                                        </button>
+                                        ${isAdmin ? `
+                                            <button class="delete-template-btn p-2 text-red-600 hover:bg-red-100 rounded transition-colors" title="Delete">
+                                                <i class="ri-delete-bin-line"></i>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                    ${!isAdmin && templates.length > 0 ? `
+                        <p class="mt-4 text-xs text-gray-500 text-center" data-i18n="adminOnlyDelete">
+                            ※ テンプレートの削除は管理者のみ可能です
+                        </p>
+                    ` : ''}
+                </div>
+                
+                <div class="px-6 py-4 border-t border-gray-200 flex justify-end">
+                    <button id="closeManagementModalBtn" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors">
+                        <span data-i18n="close">閉じる</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', managementModalHTML);
+    
+    const managementModal = document.getElementById('templateManagementModal');
+
+    // Apply translations if available
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(managementModal);
+    }
+
+    // Close button
+    document.getElementById('closeManagementModalBtn').onclick = () => {
+        managementModal.remove();
+        if (onClose) onClose();
+    };
+
+    // Rename buttons
+    managementModal.querySelectorAll('.rename-template-btn').forEach(btn => {
+        btn.onclick = async (e) => {
+            const templateItem = e.target.closest('.template-item');
+            const templateId = templateItem.dataset.templateId;
+            const template = templates.find(t => t._id === templateId);
+            
+            const newName = prompt(
+                window.t ? window.t('enterNewTemplateName') : '新しいテンプレート名を入力してください:',
+                template.templateName
+            );
+            
+            if (newName && newName.trim() && newName.trim() !== template.templateName) {
+                const success = await updateExportTemplate(templateId, { templateName: newName.trim() });
+                if (success) {
+                    templateItem.querySelector('.font-medium').textContent = newName.trim();
+                    // Update in local array
+                    template.templateName = newName.trim();
+                    alert(window.t ? window.t('templateRenamed') : 'テンプレート名が変更されました');
+                } else {
+                    alert(window.t ? window.t('templateRenameFailed') : 'テンプレート名の変更に失敗しました');
+                }
+            }
+        };
+    });
+
+    // Delete buttons (admin only)
+    managementModal.querySelectorAll('.delete-template-btn').forEach(btn => {
+        btn.onclick = async (e) => {
+            const templateItem = e.target.closest('.template-item');
+            const templateId = templateItem.dataset.templateId;
+            const template = templates.find(t => t._id === templateId);
+            
+            if (!confirm(
+                (window.t ? window.t('confirmDeleteTemplate') : 'テンプレートを削除しますか？') + 
+                `\n\n"${template.templateName}"`
+            )) return;
+            
+            const success = await deleteExportTemplate(templateId);
+            if (success) {
+                templateItem.remove();
+                // Remove from local array
+                const index = templates.findIndex(t => t._id === templateId);
+                if (index !== -1) templates.splice(index, 1);
+                
+                // Check if no templates left
+                if (templates.length === 0) {
+                    managementModal.querySelector('.space-y-3').innerHTML = `
+                        <div class="text-center py-8 text-gray-500">
+                            <i class="ri-folder-open-line text-4xl mb-2"></i>
+                            <p data-i18n="noTemplates">テンプレートがありません</p>
+                        </div>
+                    `;
+                }
+                
+                alert(window.t ? window.t('templateDeleted') : 'テンプレートが削除されました');
+            } else {
+                alert(window.t ? window.t('templateDeleteFailed') : 'テンプレートの削除に失敗しました');
+            }
+        };
+    });
+
+    // Close on outside click
+    managementModal.addEventListener('click', (e) => {
+        if (e.target === managementModal) {
+            managementModal.remove();
+            if (onClose) onClose();
+        }
+    });
+}
+
+/**
+ * Exports data to CSV with custom selected headers and order (with proper flattening)
  */
 function exportToCSVWithHeaders(data, selectedHeaders, filename = "export.csv") {
     if (!data || data.length === 0) {
@@ -5945,33 +6498,32 @@ function exportToCSVWithHeaders(data, selectedHeaders, filename = "export.csv") 
         return;
     }
 
+    // Flatten all data first
+    const flattenedData = data.map(item => flattenObject(item));
+
     // Convert data to CSV format with selected headers in specified order
-    const rows = data.map(row => {
+    const rows = flattenedData.map(row => {
         return selectedHeaders.map(header => {
-            if (header.startsWith('Counters.')) {
-                const counterKey = header.replace('Counters.', '');
-                return row.Counters?.[counterKey] ?? "";
-            } else {
-                let value = row[header];
-                if (value === null || value === undefined) {
-                    return "";
-                }
-                // Handle objects that aren't Counters (convert to JSON string)
-                if (typeof value === 'object' && header !== 'Counters') {
-                    return JSON.stringify(value);
-                }
-                // Escape commas and quotes in CSV
-                if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
-                    return `"${value.replace(/"/g, '""')}"`;
-                }
-                return value;
+            let value = row[header];
+            if (value === null || value === undefined) {
+                return "";
             }
+            // Handle any remaining objects (shouldn't happen after flattening, but just in case)
+            if (typeof value === 'object') {
+                return JSON.stringify(value);
+            }
+            // Escape commas, quotes, and newlines in CSV
+            const strValue = String(value);
+            if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
+                return `"${strValue.replace(/"/g, '""')}"`;
+            }
+            return strValue;
         }).join(",");
     });
 
     const csv = [selectedHeaders.join(","), ...rows].join("\n");
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" }); // Added BOM for Excel compatibility
     const link = document.createElement("a");
     link.href = window.URL.createObjectURL(blob);
     link.download = filename;
@@ -5981,7 +6533,7 @@ function exportToCSVWithHeaders(data, selectedHeaders, filename = "export.csv") 
 }
 
 /**
- * Exports grouped data to CSV with custom selected headers and order
+ * Exports grouped data to CSV with custom selected headers and order (with proper flattening)
  */
 function exportToCSVGroupedWithHeaders(processData, selectedHeaders, filename = "export.csv") {
     if (!processData || processData.length === 0) {
@@ -6000,24 +6552,25 @@ function exportToCSVGroupedWithHeaders(processData, selectedHeaders, filename = 
             rows.push([`${proc.name} Process Data`]);
             rows.push(selectedHeaders);
             
-            proc.data.forEach(row => {
+            // Flatten all data for this process
+            const flattenedData = proc.data.map(item => flattenObject(item));
+            
+            flattenedData.forEach(row => {
                 const csvRow = selectedHeaders.map(header => {
-                    if (header.startsWith('Counters.')) {
-                        const counterKey = header.replace('Counters.', '');
-                        return row.Counters?.[counterKey] ?? "";
-                    } else {
-                        let value = row[header];
-                        if (value === null || value === undefined) {
-                            return "";
-                        }
-                        if (typeof value === 'object' && header !== 'Counters') {
-                            return JSON.stringify(value);
-                        }
-                        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
-                            return `"${value.replace(/"/g, '""')}"`;
-                        }
-                        return value;
+                    let value = row[header];
+                    if (value === null || value === undefined) {
+                        return "";
                     }
+                    // Handle any remaining objects
+                    if (typeof value === 'object') {
+                        return JSON.stringify(value);
+                    }
+                    // Escape commas, quotes, and newlines in CSV
+                    const strValue = String(value);
+                    if (strValue.includes(',') || strValue.includes('"') || strValue.includes('\n')) {
+                        return `"${strValue.replace(/"/g, '""')}"`;
+                    }
+                    return strValue;
                 });
                 rows.push(csvRow);
             });
@@ -6025,7 +6578,7 @@ function exportToCSVGroupedWithHeaders(processData, selectedHeaders, filename = 
     });
 
     const csv = rows.map(row => row.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" }); // Added BOM for Excel compatibility
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = filename;
