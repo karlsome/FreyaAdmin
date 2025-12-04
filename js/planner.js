@@ -565,19 +565,41 @@ window.triggerGoalCsvUpload = function() {
 
 // Handle CSV file upload for goals
 window.handleGoalCsvUpload = function(input) {
+    console.log('📁 CSV file selected:', input.files);
+    
     const file = input.files[0];
-    if (!file) return;
+    if (!file) {
+        console.log('❌ No file selected');
+        return;
+    }
+    
+    console.log('📁 File details:', {
+        name: file.name,
+        type: file.type,
+        size: file.size
+    });
     
     if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
+        console.log('❌ Invalid file type');
         showPlannerNotification('Please select a valid CSV file', 'error');
+        input.value = ''; // Reset input
         return;
     }
     
     const reader = new FileReader();
     reader.onload = function(e) {
+        console.log('✓ CSV file loaded, size:', e.target.result.length);
         const csv = e.target.result;
         parseGoalCsv(csv);
+        // Reset input so the same file can be uploaded again
+        input.value = '';
     };
+    reader.onerror = function(e) {
+        console.error('❌ Error reading file:', e);
+        showPlannerNotification('Error reading file', 'error');
+        input.value = '';
+    };
+    console.log('📖 Starting to read file...');
     reader.readAsText(file, 'Shift_JIS'); // JIS encoding like NODA
 };
 
