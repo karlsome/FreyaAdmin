@@ -153,6 +153,12 @@ function switchPlannerMainTab(tab) {
         document.getElementById('planner-goals-tab')?.classList.remove('hidden');
     } else if (tab === 'planning') {
         document.getElementById('planner-planning-tab')?.classList.remove('hidden');
+        
+        // Re-render views when switching to planning tab if factory is selected
+        if (plannerState.currentFactory && plannerState.equipment.length > 0) {
+            updateSelectedProductsSummary();
+            renderAllViews();
+        }
     }
 }
 
@@ -174,6 +180,15 @@ async function loadPlannerFactories() {
                     option.textContent = factory;
                     factorySelect.appendChild(option);
                 });
+                
+                // Restore previously selected factory from localStorage
+                const savedFactory = localStorage.getItem('planner_selected_factory');
+                if (savedFactory && result.data.includes(savedFactory)) {
+                    factorySelect.value = savedFactory;
+                    plannerState.currentFactory = savedFactory;
+                    // Trigger change event to load data for saved factory
+                    factorySelect.dispatchEvent(new Event('change'));
+                }
             }
         }
     } catch (error) {
@@ -305,6 +320,13 @@ async function loadExistingPlans(factory, date) {
 async function handleFactoryChange(e) {
     const factory = e.target.value;
     plannerState.currentFactory = factory;
+    
+    // Save selected factory to localStorage
+    if (factory) {
+        localStorage.setItem('planner_selected_factory', factory);
+    } else {
+        localStorage.removeItem('planner_selected_factory');
+    }
     
     if (!factory) {
         clearPlannerViews();
@@ -1671,6 +1693,8 @@ async function clearAllSelectedProducts() {
         return;
     }
     
+    console.log('🗑️ Clearing all products from timeline...');
+    
     // Restore all goal quantities
     for (const product of plannerState.selectedProducts) {
         if (product.goalId || product._id) {
@@ -1679,15 +1703,25 @@ async function clearAllSelectedProducts() {
             try {
                 const goal = plannerState.goals.find(g => g._id === goalId);
                 if (goal) {
-                    await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+                    // Calculate the new values based on CURRENT goal state
+                    const newRemainingQuantity = goal.remainingQuantity + product.quantity;
+                    const newScheduledQuantity = Math.max(0, goal.scheduledQuantity - product.quantity); // Prevent negative
+                    
+                    console.log(`Restoring ${product.背番号}: scheduled ${goal.scheduledQuantity} -> ${newScheduledQuantity}, remaining ${goal.remainingQuantity} -> ${newRemainingQuantity}`);
+                    
+                    const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            remainingQuantity: goal.remainingQuantity + product.quantity,
-                            scheduledQuantity: goal.scheduledQuantity - product.quantity,
-                            status: 'pending'
+                            remainingQuantity: newRemainingQuantity,
+                            scheduledQuantity: newScheduledQuantity,
+                            status: newScheduledQuantity === 0 ? 'pending' : (newRemainingQuantity === 0 ? 'completed' : 'in-progress')
                         })
                     });
+                    
+                    if (!response.ok) {
+                        console.error('Failed to restore goal:', await response.text());
+                    }
                 }
             } catch (error) {
                 console.error('Error restoring goal quantity:', error);
@@ -1698,15 +1732,15 @@ async function clearAllSelectedProducts() {
     // Clear all selected products
     plannerState.selectedProducts = [];
     
+    // Delete the plan from database (or save empty state)
+    await deletePlanFromDatabase();
+    
     // Reload goals and refresh UI
     await loadGoals();
     renderGoalList();
     renderProductList();
     updateSelectedProductsSummary();
     renderAllViews();
-    
-    // Auto-save the cleared plan
-    await savePlanToDatabase();
     
     showPlannerNotification('All products cleared from timeline', 'success');
 }
@@ -2896,7 +2930,13 @@ async function confirmMultiPickerSelection() {
 
 // Save current plan to database
 async function savePlanToDatabase() {
-    if (!plannerState.currentFactory || plannerState.selectedProducts.length === 0) {
+    if (!plannerState.currentFactory) {
+        return;
+    }
+    
+    // If no products, delete the plan instead of saving empty state
+    if (plannerState.selectedProducts.length === 0) {
+        await deletePlanFromDatabase();
         return;
     }
     
@@ -2987,6 +3027,52 @@ async function savePlanToDatabase() {
     } catch (error) {
         console.error('❌ Error saving plan:', error);
         showPlannerNotification('Warning: Plan may not have been saved', 'warning');
+    }
+}
+
+async function deletePlanFromDatabase() {
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        return;
+    }
+    
+    try {
+        // Find existing plan for this factory/date
+        const existingResponse = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'productionPlansDB',
+                query: { 
+                    factory: plannerState.currentFactory,
+                    date: plannerState.currentDate
+                }
+            })
+        });
+        
+        const existingPlans = await existingResponse.json();
+        
+        if (existingPlans.length > 0) {
+            // Delete the plan
+            const planId = existingPlans[0]._id;
+            console.log('🗑️ Deleting plan:', planId);
+            
+            const deleteResponse = await fetch(`http://localhost:3000/api/production-plans/${planId}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (!deleteResponse.ok) {
+                const error = await deleteResponse.json();
+                throw new Error(error.error || 'Failed to delete plan');
+            }
+            
+            console.log('✅ Plan deleted successfully');
+            plannerState.currentPlan = null;
+        }
+    } catch (error) {
+        console.error('❌ Error deleting plan:', error);
+        showPlannerNotification('Warning: Failed to delete plan from database', 'warning');
     }
 }
 
