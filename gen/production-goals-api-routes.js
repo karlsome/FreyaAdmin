@@ -276,12 +276,12 @@ app.delete('/api/production-goals/:id', async (req, res) => {
 // ==================== CHECK FOR DUPLICATES ====================
 app.post('/api/production-goals/check-duplicates', async (req, res) => {
     try {
-        const { factory, date, items } = req.body; // items = array of {背番号 or 品番}
+        const { factory, items } = req.body; // items = array of {背番号 or 品番, date}
         
-        if (!factory || !date || !items || !Array.isArray(items)) {
+        if (!factory || !items || !Array.isArray(items)) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Missing required fields' 
+                error: 'Missing required fields: factory and items array' 
             });
         }
         
@@ -291,7 +291,13 @@ app.post('/api/production-goals/check-duplicates', async (req, res) => {
         const duplicates = [];
         
         for (const item of items) {
-            const query = { factory, date };
+            // Each item now has its own date
+            const query = { factory };
+            
+            // Use the item's date if provided
+            if (item.date) {
+                query.date = item.date;
+            }
             
             if (item.背番号) {
                 query.背番号 = item.背番号;
@@ -302,10 +308,7 @@ app.post('/api/production-goals/check-duplicates', async (req, res) => {
             const existing = await collection.findOne(query);
             
             if (existing) {
-                duplicates.push({
-                    item,
-                    existing
-                });
+                duplicates.push(existing);
             }
         }
         

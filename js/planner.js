@@ -584,6 +584,9 @@ window.handleGoalCsvUpload = function(input) {
 // Parse goal CSV
 async function parseGoalCsv(csvData) {
     try {
+        // Show loading overlay
+        showCsvLoadingOverlay();
+        
         console.log('📋 Parsing Goal CSV...');
         
         const lines = csvData.split(/\r?\n/).filter(line => line.trim());
@@ -692,13 +695,40 @@ async function parseGoalCsv(csvData) {
             }
         }
         
-        // Show review modal
+        // Hide loading overlay and show review modal
+        hideCsvLoadingOverlay();
         showGoalCsvReviewModal(processedGoals);
         
     } catch (error) {
         console.error('❌ Error parsing CSV:', error);
+        hideCsvLoadingOverlay();
         showPlannerNotification('Error parsing CSV: ' + error.message, 'error');
     }
+}
+
+// Show CSV loading overlay
+function showCsvLoadingOverlay() {
+    const overlayHTML = `
+        <div id="csvLoadingOverlay" class="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-8 max-w-md text-center">
+                <div class="flex justify-center mb-4">
+                    <svg class="animate-spin h-12 w-12 text-blue-600 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Processing CSV...</h3>
+                <p class="text-sm text-gray-600 dark:text-gray-400">Please wait while we validate and prepare your data.</p>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', overlayHTML);
+}
+
+// Hide CSV loading overlay
+function hideCsvLoadingOverlay() {
+    const overlay = document.getElementById('csvLoadingOverlay');
+    if (overlay) overlay.remove();
 }
 
 // Show CSV review modal
@@ -775,14 +805,17 @@ window.confirmGoalCsvUpload = async function() {
     if (!window._pendingGoals || window._pendingGoals.length === 0) return;
     
     try {
-        // Check for duplicates
+        // Check for duplicates - send each goal with its own date
         const response = await fetch(BASE_URL + 'api/production-goals/check-duplicates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 factory: plannerState.currentFactory,
-                date: plannerState.currentDate,
-                items: window._pendingGoals.map(g => ({ 背番号: g.背番号, 品番: g.品番 }))
+                items: window._pendingGoals.map(g => ({ 
+                    背番号: g.背番号, 
+                    品番: g.品番,
+                    date: g.date 
+                }))
             })
         });
         
@@ -798,6 +831,257 @@ window.confirmGoalCsvUpload = async function() {
     } catch (error) {
         console.error('Error checking duplicates:', error);
         showPlannerNotification('Error: ' + error.message, 'error');
+    }
+};
+
+// Show duplicate confirmation modal
+function showDuplicateConfirmationModal(pendingGoals, duplicates) {
+    console.log('📋 Duplicates found:', duplicates);
+    console.log('📋 Pending goals:', pendingGoals);
+    
+    // Create a map of duplicates for quick lookup (key includes date)
+    const dupMap = {};
+    duplicates.forEach(dup => {
+        const key = `${dup.date}_${dup.背番号}_${dup.品番}`;
+        dupMap[key] = dup;
+    });
+    
+    // Filter pending goals to show only duplicates
+    const duplicateGoals = pendingGoals.filter(goal => {
+        const key = `${goal.date}_${goal.背番号}_${goal.品番}`;
+        return dupMap[key];
+    });
+    
+    console.log('📋 Matched duplicate goals:', duplicateGoals);
+    
+    const modalHTML = `
+        <div id="duplicateConfirmModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-red-600 dark:text-red-400 flex items-center gap-2">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        Duplicate Goals Found
+                    </h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                        ${duplicateGoals.length} goal(s) already exist for this date. Choose an action for each:
+                    </p>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-6">
+                    <div class="space-y-2 mb-4">
+                        <label class="flex items-center gap-2 cursor-pointer text-sm">
+                            <input type="checkbox" id="applyToAllDuplicates" class="w-4 h-4">
+                            <span class="font-medium">Apply action to all duplicates:</span>
+                        </label>
+                        <select id="applyToAllAction" disabled class="ml-6 p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm">
+                            <option value="">Select action...</option>
+                            <option value="skip">Skip (keep existing)</option>
+                            <option value="add">Add (increase quantity)</option>
+                            <option value="overwrite">Overwrite (replace quantity)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm border border-gray-200 dark:border-gray-700">
+                            <thead class="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    <th class="px-3 py-2 text-left border-b border-gray-200 dark:border-gray-600">背番号</th>
+                                    <th class="px-3 py-2 text-left border-b border-gray-200 dark:border-gray-600">品番</th>
+                                    <th class="px-3 py-2 text-left border-b border-gray-200 dark:border-gray-600">品名</th>
+                                    <th class="px-3 py-2 text-right border-b border-gray-200 dark:border-gray-600">Existing</th>
+                                    <th class="px-3 py-2 text-right border-b border-gray-200 dark:border-gray-600">New</th>
+                                    <th class="px-3 py-2 text-right border-b border-gray-200 dark:border-gray-600">Result</th>
+                                    <th class="px-3 py-2 text-center border-b border-gray-200 dark:border-gray-600">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="duplicateGoalsList">
+                                ${duplicateGoals.map((goal, idx) => {
+                                    const key = `${goal.date}_${goal.背番号}_${goal.品番}`;
+                                    const existing = dupMap[key];
+                                    return `
+                                        <tr class="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50" data-goal-index="${idx}">
+                                            <td class="px-3 py-2">${goal.背番号}</td>
+                                            <td class="px-3 py-2">${goal.品番}</td>
+                                            <td class="px-3 py-2">${goal.品名 || '-'}</td>
+                                            <td class="px-3 py-2 text-right font-medium text-blue-600 dark:text-blue-400">${existing.targetQuantity}</td>
+                                            <td class="px-3 py-2 text-right font-medium text-green-600 dark:text-green-400">${goal.targetQuantity}</td>
+                                            <td class="px-3 py-2 text-right font-bold result-cell" data-existing="${existing.targetQuantity}" data-new="${goal.targetQuantity}">-</td>
+                                            <td class="px-3 py-2">
+                                                <select class="duplicate-action-select w-full p-1.5 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-xs" 
+                                                        data-goal-id="${existing._id}" 
+                                                        data-existing-qty="${existing.targetQuantity}"
+                                                        data-new-qty="${goal.targetQuantity}"
+                                                        onchange="updateDuplicateResult(this)">
+                                                    <option value="skip" selected>Skip</option>
+                                                    <option value="add">Add (+${goal.targetQuantity})</option>
+                                                    <option value="overwrite">Overwrite</option>
+                                                </select>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                    <p class="text-sm text-gray-600 dark:text-gray-400">
+                        <strong>Note:</strong> Non-duplicate goals will be imported automatically.
+                    </p>
+                    <div class="flex gap-3">
+                        <button onclick="closeDuplicateConfirmModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">Cancel</button>
+                        <button onclick="processDuplicateActions()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Confirm & Import</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Enable/disable "apply to all" action dropdown
+    document.getElementById('applyToAllDuplicates').addEventListener('change', function(e) {
+        const actionSelect = document.getElementById('applyToAllAction');
+        actionSelect.disabled = !e.target.checked;
+        
+        if (e.target.checked && actionSelect.value) {
+            // Apply selected action to all rows
+            document.querySelectorAll('.duplicate-action-select').forEach(select => {
+                select.value = actionSelect.value;
+                updateDuplicateResult(select);
+            });
+        }
+    });
+    
+    // When "apply to all" action changes, update all rows
+    document.getElementById('applyToAllAction').addEventListener('change', function(e) {
+        if (document.getElementById('applyToAllDuplicates').checked && e.target.value) {
+            document.querySelectorAll('.duplicate-action-select').forEach(select => {
+                select.value = e.target.value;
+                updateDuplicateResult(select);
+            });
+        }
+    });
+    
+    // Store pending goals and duplicates map for later use
+    window._duplicatePendingGoals = pendingGoals;
+    window._duplicateMap = dupMap;
+}
+
+// Update the result column when action changes
+window.updateDuplicateResult = function(selectElement) {
+    const row = selectElement.closest('tr');
+    const resultCell = row.querySelector('.result-cell');
+    const existing = parseInt(resultCell.dataset.existing);
+    const newQty = parseInt(resultCell.dataset.new);
+    const action = selectElement.value;
+    
+    let resultText = '-';
+    let resultClass = '';
+    
+    switch(action) {
+        case 'skip':
+            resultText = existing.toString();
+            resultClass = 'text-gray-600 dark:text-gray-400';
+            break;
+        case 'add':
+            resultText = (existing + newQty).toString();
+            resultClass = 'text-green-600 dark:text-green-400';
+            break;
+        case 'overwrite':
+            resultText = newQty.toString();
+            resultClass = 'text-orange-600 dark:text-orange-400';
+            break;
+    }
+    
+    resultCell.textContent = resultText;
+    resultCell.className = 'px-3 py-2 text-right font-bold result-cell ' + resultClass;
+};
+
+// Close duplicate confirmation modal
+window.closeDuplicateConfirmModal = function() {
+    const modal = document.getElementById('duplicateConfirmModal');
+    if (modal) modal.remove();
+    window._duplicatePendingGoals = null;
+    window._duplicateMap = null;
+};
+
+// Process duplicate actions and save goals
+window.processDuplicateActions = async function() {
+    const selects = document.querySelectorAll('.duplicate-action-select');
+    const updates = [];
+    const skippedGoalKeys = new Set();
+    
+    // Collect update operations
+    selects.forEach(select => {
+        const action = select.value;
+        const goalId = select.dataset.goalId;
+        const existingQty = parseInt(select.dataset.existingQty);
+        const newQty = parseInt(select.dataset.newQty);
+        
+        if (action === 'skip') {
+            // Mark this goal as skipped (we'll filter it out from new goals)
+            const row = select.closest('tr');
+            const goalIndex = parseInt(row.dataset.goalIndex);
+            const goal = window._duplicatePendingGoals[goalIndex];
+            skippedGoalKeys.add(`${goal.date}_${goal.背番号}_${goal.品番}`);
+        } else if (action === 'add') {
+            updates.push({
+                goalId: goalId,
+                targetQuantity: existingQty + newQty
+            });
+            // Also skip from new inserts
+            const row = select.closest('tr');
+            const goalIndex = parseInt(row.dataset.goalIndex);
+            const goal = window._duplicatePendingGoals[goalIndex];
+            skippedGoalKeys.add(`${goal.date}_${goal.背番号}_${goal.品番}`);
+        } else if (action === 'overwrite') {
+            updates.push({
+                goalId: goalId,
+                targetQuantity: newQty
+            });
+            // Also skip from new inserts
+            const row = select.closest('tr');
+            const goalIndex = parseInt(row.dataset.goalIndex);
+            const goal = window._duplicatePendingGoals[goalIndex];
+            skippedGoalKeys.add(`${goal.date}_${goal.背番号}_${goal.品番}`);
+        }
+    });
+    
+    try {
+        // Update existing goals based on actions
+        if (updates.length > 0) {
+            const updatePromises = updates.map(update => 
+                updateGoal(update.goalId, { targetQuantity: update.targetQuantity })
+            );
+            await Promise.all(updatePromises);
+        }
+        
+        // Filter out duplicates from pending goals and save the rest
+        const nonDuplicateGoals = window._duplicatePendingGoals.filter(goal => {
+            const key = `${goal.date}_${goal.背番号}_${goal.品番}`;
+            return !skippedGoalKeys.has(key) && !window._duplicateMap[key];
+        });
+        
+        if (nonDuplicateGoals.length > 0) {
+            await saveGoalsBatch(nonDuplicateGoals);
+        } else {
+            // Only updates were performed, close modals and refresh
+            closeDuplicateConfirmModal();
+            closeGoalCsvReviewModal();
+            await loadGoals();
+            renderGoalList();
+            showPlannerNotification(`${updates.length} goal(s) updated successfully`, 'success');
+        }
+        
+        closeDuplicateConfirmModal();
+        
+    } catch (error) {
+        console.error('Error processing duplicates:', error);
+        showPlannerNotification('Error processing duplicates: ' + error.message, 'error');
     }
 };
 
@@ -3100,7 +3384,7 @@ async function deletePlanFromDatabase() {
         if (existingPlans.length > 0) {
             // Delete the plan
             const planId = existingPlans[0]._id;
-            console.log('🗑️ Deleting plan:', planId);
+            console.log('Deleting plan:', planId);
             
             const deleteResponse = await fetch(`http://localhost:3000/api/production-plans/${planId}`, {
                 method: 'DELETE',
