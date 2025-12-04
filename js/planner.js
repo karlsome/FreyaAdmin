@@ -1809,7 +1809,7 @@ function renderGoalCard(goal) {
     
     // List row format
     return `
-        <div class="goal-list-row border-b border-gray-200 dark:border-gray-700 ${statusBgClass} hover:shadow-sm transition-all cursor-pointer" onclick="addGoalToTimeline('${goal._id}')">
+        <div class="goal-list-row border-b border-gray-200 dark:border-gray-700 ${statusBgClass} hover:shadow-sm transition-all cursor-pointer" onclick="openBulkEditGoalsModal()">
             <div class="flex items-center gap-3 py-2 px-3">
                 <div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ${statusDotColor}"></div>
                 <div class="flex-1 grid grid-cols-12 gap-2 items-center">
