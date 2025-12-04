@@ -272,13 +272,15 @@ async function loadEquipmentForFactory(factory) {
 
 async function loadProductsForFactory(factory) {
     try {
+        // Load ALL products from masterDB (not filtered by factory)
+        // This ensures we can always look up 収容数 regardless of factory selection
         const response = await fetch(BASE_URL + 'queries', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 dbName: PLANNER_CONFIG.masterDbName,
                 collectionName: PLANNER_CONFIG.masterCollection,
-                query: { '工場': factory }
+                query: {}  // Load all products
             })
         });
         
@@ -293,7 +295,7 @@ async function loadProductsForFactory(factory) {
             }
         });
         
-        console.log(`📦 Loaded ${plannerState.products.length} products for ${factory}`);
+        console.log(`📦 Loaded ${plannerState.products.length} products from masterDB`);
         
         return plannerState.products;
     } catch (error) {
@@ -327,16 +329,21 @@ async function loadExistingPlans(factory, date) {
             plannerState.currentPlan = plan;
             plannerState.breaks = plan.breaks || [];
             
-            // Restore selected products from plan
+            // Restore selected products from plan and recalculate boxes
             plannerState.selectedProducts = plan.products.map(item => {
                 // Ensure color is assigned
                 if (!plannerState.productColors[item.背番号]) {
                     plannerState.productColors[item.背番号] = getRandomColor();
                 }
+                
+                // Recalculate boxes using current capacity from masterDB
+                const boxes = calculateBoxesNeeded(item, item.quantity);
+                
                 return {
                     ...item,
                     _id: item.goalId || item._id,
-                    color: plannerState.productColors[item.背番号]
+                    color: plannerState.productColors[item.背番号],
+                    boxes: boxes  // Use recalculated boxes
                 };
             });
             
@@ -396,18 +403,26 @@ async function handleFactoryChange(e) {
     }
 }
 
-function handleDateChange(e) {
+async function handleDateChange(e) {
     plannerState.currentDate = e.target.value;
     
     if (plannerState.currentFactory) {
-        Promise.all([
+        // Ensure products are loaded for capacity lookups
+        const loadPromises = [
             loadGoals(),
             loadExistingPlans(plannerState.currentFactory, plannerState.currentDate)
-        ]).then(() => {
-            renderGoalList();
-            updateSelectedProductsSummary();
-            renderAllViews();
-        });
+        ];
+        
+        // Load products if not already loaded
+        if (!plannerState.products || plannerState.products.length === 0) {
+            loadPromises.push(loadProductsForFactory(plannerState.currentFactory));
+        }
+        
+        await Promise.all(loadPromises);
+        
+        renderGoalList();
+        updateSelectedProductsSummary();
+        renderAllViews();
     }
 }
 
@@ -488,10 +503,10 @@ function calculateProductionTime(product, quantity) {
 }
 
 function calculateBoxesNeeded(product, quantity) {
-    let capacity = parseInt(product['収容数']) || 1;
+    let capacity = parseInt(product['収容数']) || 0;
     
-    // If capacity not in product, look it up from plannerState.products
-    if (!product['収容数'] && (product.品番 || product.背番号)) {
+    // If capacity not in product, look it up from plannerState.products (masterDB)
+    if (!capacity && (product.品番 || product.背番号)) {
         const fullProduct = plannerState.products.find(p => 
             (product.品番 && p.品番 === product.品番) || 
             (product.背番号 && p.背番号 === product.背番号)
@@ -499,6 +514,11 @@ function calculateBoxesNeeded(product, quantity) {
         if (fullProduct && fullProduct['収容数']) {
             capacity = parseInt(fullProduct['収容数']);
         }
+    }
+    
+    // Default to 1 if still no capacity found
+    if (!capacity || capacity <= 0) {
+        capacity = 1;
     }
     
     return Math.ceil(quantity / capacity);
@@ -1730,14 +1750,15 @@ function renderGoalList() {
         <div class="bg-gray-100 dark:bg-gray-700 border-b-2 border-gray-300 dark:border-gray-600 sticky top-0 z-10">
             <div class="flex items-center gap-3 py-2 px-3">
                 <div class="w-2"></div>
-                <div class="flex-1 grid grid-cols-12 gap-2">
-                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">背番号</div>
-                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">品番</div>
-                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">品名</div>
-                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">Progress</div>
-                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Quantity</div>
-                    <div class="col-span-1 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Boxes</div>
-                    <div class="col-span-1 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">%</div>
+                <div class="flex-1 grid grid-cols-[2fr_2fr_2fr_2fr_1.5fr_2fr_1fr_1fr] gap-2">
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300">背番号</div>
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300">品番</div>
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300">品名</div>
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300">Progress</div>
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300">Assigned to</div>
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Quantity</div>
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Boxes</div>
+                    <div class="text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">%</div>
                 </div>
             </div>
         </div>
@@ -1769,17 +1790,23 @@ function renderGoalCard(goal) {
     const isInProgress = goal.scheduledQuantity > 0 && goal.remainingQuantity > 0;
     
     // Calculate box quantities with proper capacity lookup
-    let capacity = parseInt(goal['收容数']) || 1;
+    let capacity = parseInt(goal['収容数']) || 0;
     
-    // If capacity not in goal, look it up from plannerState.products
-    if (!goal['収容数'] && (goal.品番 || goal.背番号)) {
+    // If capacity not in goal, look it up from plannerState.products (masterDB)
+    if (!capacity && (goal.品番 || goal.背番号)) {
         const fullProduct = plannerState.products.find(p => 
             (goal.品番 && p.品番 === goal.品番) || 
             (goal.背番号 && p.背番号 === goal.背番号)
         );
+        
         if (fullProduct && fullProduct['収容数']) {
             capacity = parseInt(fullProduct['収容数']);
         }
+    }
+    
+    // Default to 1 if still no capacity found
+    if (!capacity || capacity <= 0) {
+        capacity = 1;
     }
     
     const scheduledBoxes = Math.ceil(goal.scheduledQuantity / capacity);
@@ -1807,33 +1834,46 @@ function renderGoalCard(goal) {
         progressBarColor = 'bg-red-500';
     }
     
+    // Get assigned equipment for this goal
+    const assignedEquipment = plannerState.selectedProducts
+        .filter(p => p.背番号 === goal.背番号)
+        .map(p => p.equipment)
+        .filter((eq, idx, arr) => arr.indexOf(eq) === idx); // unique
+    
+    const equipmentDisplay = assignedEquipment.length > 0 
+        ? assignedEquipment.join(', ')
+        : '-';
+    
     // List row format
     return `
         <div class="goal-list-row border-b border-gray-200 dark:border-gray-700 ${statusBgClass} hover:shadow-sm transition-all cursor-pointer" onclick="openBulkEditGoalsModal()">
             <div class="flex items-center gap-3 py-2 px-3">
                 <div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ${statusDotColor}"></div>
-                <div class="flex-1 grid grid-cols-12 gap-2 items-center">
-                    <div class="col-span-2">
+                <div class="flex-1 grid grid-cols-[2fr_2fr_2fr_2fr_1.5fr_2fr_1fr_1fr] gap-2 items-center">
+                    <div>
                         <p class="font-medium text-sm text-gray-900 dark:text-white">${goal.背番号 || '-'}</p>
                     </div>
-                    <div class="col-span-2">
+                    <div>
                         <p class="text-xs text-gray-600 dark:text-gray-400">${goal.品番 || '-'}</p>
                     </div>
-                    <div class="col-span-2">
+                    <div>
                         <p class="text-xs text-gray-600 dark:text-gray-400 truncate">${goal.品名 || '-'}</p>
                     </div>
-                    <div class="col-span-2">
+                    <div>
                         <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
                             <div class="h-2 rounded-full transition-all ${progressBarColor}" style="width: ${percentage}%"></div>
                         </div>
                     </div>
-                    <div class="col-span-2 text-right">
+                    <div>
+                        <p class="text-xs font-medium text-blue-600 dark:text-blue-400">${equipmentDisplay}</p>
+                    </div>
+                    <div class="text-right">
                         <p class="text-xs font-medium ${statusTextClass}">${goal.scheduledQuantity} / ${goal.targetQuantity} pcs</p>
                     </div>
-                    <div class="col-span-1 text-right">
+                    <div class="text-right">
                         <p class="text-xs text-gray-600 dark:text-gray-400">${scheduledBoxes}/${targetBoxes}</p>
                     </div>
-                    <div class="col-span-1 text-right">
+                    <div class="text-right">
                         <span class="text-xs font-semibold ${statusTextClass}">${percentage}%</span>
                     </div>
                 </div>
@@ -2825,7 +2865,22 @@ function renderKanbanView() {
                                     <i class="ri-drag-drop-line text-2xl mb-2"></i>
                                     <p data-i18n="dropProductsHere">Drop products here</p>
                                 </div>
-                            ` : assignedProducts.map(item => `
+                            ` : assignedProducts.map(item => {
+                                // Calculate boxes from masterDB capacity
+                                let capacity = parseInt(item['収容数']) || 0;
+                                if (!capacity && (item.品番 || item.背番号)) {
+                                    const fullProduct = plannerState.products.find(p => 
+                                        (item.品番 && p.品番 === item.品番) || 
+                                        (item.背番号 && p.背番号 === item.背番号)
+                                    );
+                                    if (fullProduct && fullProduct['収容数']) {
+                                        capacity = parseInt(fullProduct['収容数']);
+                                    }
+                                }
+                                if (!capacity || capacity <= 0) capacity = 1;
+                                const boxes = Math.ceil(item.quantity / capacity);
+                                
+                                return `
                                 <div class="bg-white dark:bg-gray-800 p-3 rounded-lg border dark:border-gray-600 shadow-sm cursor-move"
                                      draggable="true"
                                      ondragstart="handleKanbanDragStart(event, '${item._id}')"
@@ -2848,7 +2903,7 @@ function renderKanbanView() {
                                         </div>
                                         <div class="flex justify-between">
                                             <span data-i18n="boxes">Boxes</span>
-                                            <span>${item.boxes}</span>
+                                            <span>${boxes}</span>
                                         </div>
                                         <div class="flex justify-between">
                                             <span data-i18n="time">Time</span>
@@ -2856,7 +2911,7 @@ function renderKanbanView() {
                                         </div>
                                     </div>
                                 </div>
-                            `).join('')}
+                            `}).join('')}
                         </div>
                     </div>
                 `;
@@ -2928,7 +2983,22 @@ function renderTableView() {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 dark:divide-gray-600">
-                    ${sortedProducts.map(item => `
+                    ${sortedProducts.map(item => {
+                        // Calculate boxes from masterDB capacity
+                        let capacity = parseInt(item['収容数']) || 0;
+                        if (!capacity && (item.品番 || item.背番号)) {
+                            const fullProduct = plannerState.products.find(p => 
+                                (item.品番 && p.品番 === item.品番) || 
+                                (item.背番号 && p.背番号 === item.背番号)
+                            );
+                            if (fullProduct && fullProduct['収容数']) {
+                                capacity = parseInt(fullProduct['収容数']);
+                            }
+                        }
+                        if (!capacity || capacity <= 0) capacity = 1;
+                        const boxes = Math.ceil(item.quantity / capacity);
+                        
+                        return `
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                             <td class="px-4 py-3">
                                 <span class="font-medium text-gray-900 dark:text-white">${item.equipment}</span>
@@ -2942,7 +3012,7 @@ function renderTableView() {
                             <td class="px-4 py-3 text-gray-600 dark:text-gray-400">${item.品番 || '-'}</td>
                             <td class="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-xs truncate">${item.品名 || '-'}</td>
                             <td class="px-4 py-3 text-right text-gray-900 dark:text-white">${item.quantity}</td>
-                            <td class="px-4 py-3 text-right text-gray-900 dark:text-white">${item.boxes}</td>
+                            <td class="px-4 py-3 text-right text-gray-900 dark:text-white">${boxes}</td>
                             <td class="px-4 py-3 text-right text-gray-900 dark:text-white">${item.estimatedTime.formattedTime}</td>
                             <td class="px-4 py-3 text-center">
                                 <button onclick="editSelectedProduct('${item._id}')" class="text-blue-600 hover:text-blue-800 mr-2">
@@ -2953,7 +3023,7 @@ function renderTableView() {
                                 </button>
                             </td>
                         </tr>
-                    `).join('')}
+                    `}).join('')}
                 </tbody>
                 <tfoot class="bg-gray-100 dark:bg-gray-700 font-semibold">
                     <tr>
@@ -2962,7 +3032,20 @@ function renderTableView() {
                             ${sortedProducts.reduce((sum, p) => sum + p.quantity, 0)}
                         </td>
                         <td class="px-4 py-3 text-right text-gray-900 dark:text-white">
-                            ${sortedProducts.reduce((sum, p) => sum + p.boxes, 0)}
+                            ${sortedProducts.reduce((sum, item) => {
+                                let capacity = parseInt(item['収容数']) || 0;
+                                if (!capacity && (item.品番 || item.背番号)) {
+                                    const fullProduct = plannerState.products.find(p => 
+                                        (item.品番 && p.品番 === item.品番) || 
+                                        (item.背番号 && p.背番号 === item.背番号)
+                                    );
+                                    if (fullProduct && fullProduct['収容数']) {
+                                        capacity = parseInt(fullProduct['収容数']);
+                                    }
+                                }
+                                if (!capacity || capacity <= 0) capacity = 1;
+                                return sum + Math.ceil(item.quantity / capacity);
+                            }, 0)}
                         </td>
                         <td class="px-4 py-3 text-right text-gray-900 dark:text-white">
                             ${formatTotalTime(sortedProducts.reduce((sum, p) => sum + p.estimatedTime.totalSeconds, 0))}
@@ -4254,11 +4337,14 @@ async function loadPlan(planId) {
             for (const item of plan.items) {
                 const product = plannerState.products.find(p => p._id === item.productId);
                 if (product) {
+                    // Recalculate boxes to ensure correct capacity
+                    const boxes = calculateBoxesNeeded(product, item.quantity);
+                    
                     plannerState.selectedProducts.push({
                         ...product,
                         quantity: item.quantity,
                         equipment: item.equipment,
-                        boxes: item.boxes,
+                        boxes: boxes,
                         estimatedTime: item.estimatedTime,
                         color: plannerState.productColors[product.背番号]
                     });
