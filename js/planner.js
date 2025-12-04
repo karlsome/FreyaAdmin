@@ -2794,7 +2794,7 @@ function renderActualProductionSlots(timeSlots, equipment, actualProduction, slo
             html += `
                 <div class="flex-shrink-0 border-r dark:border-gray-500 relative group cursor-pointer" 
                      style="width: ${slotWidth}px; background-color: ${darkColor}40"
-                     onclick="showActualProductionModal('${equipment}', '${productForSlot.背番号}', ${JSON.stringify(recordsForSlot).replace(/"/g, '&quot;')})">
+                     onclick="showActualProductionModal('${equipment}', '${productForSlot.背番号}', ${index})">
                     <div class="absolute inset-0 flex items-center justify-center text-xs font-bold truncate px-1" 
                          style="color: ${darkColor}" 
                          title="${productForSlot.背番号} - Actual Production (Click for details)">
@@ -5399,10 +5399,18 @@ window.handleTimelineSlotClick = handleTimelineSlotClick;
 // ============================================
 // ACTUAL PRODUCTION MODAL
 // ============================================
-window.showActualProductionModal = function(equipment, sebanggo, recordsJson) {
-    const records = JSON.parse(recordsJson.replace(/&quot;/g, '"'));
+window.showActualProductionModal = function(equipment, sebanggo, slotIndex) {
+    // Find the actual production data for this equipment and sebanggo
+    const actualProd = plannerState.actualProduction.find(p => 
+        p.equipment === equipment && p.背番号 === sebanggo
+    );
     
-    if (!records || records.length === 0) return;
+    if (!actualProd || !actualProd.records || actualProd.records.length === 0) {
+        console.error('No actual production data found for', equipment, sebanggo);
+        return;
+    }
+    
+    const records = actualProd.records;
     
     // Combine data from all records
     const totalQuantity = records.reduce((sum, r) => sum + (r.Process_Quantity || 0), 0);
