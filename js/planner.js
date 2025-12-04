@@ -1161,10 +1161,11 @@ function renderGoalList() {
                 <div class="flex-1 grid grid-cols-12 gap-2">
                     <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">背番号</div>
                     <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">品番</div>
-                    <div class="col-span-3 text-xs font-semibold text-gray-700 dark:text-gray-300">品名</div>
+                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">品名</div>
+                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">Progress</div>
                     <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Quantity</div>
-                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Boxes</div>
-                    <div class="col-span-1 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Status</div>
+                    <div class="col-span-1 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Boxes</div>
+                    <div class="col-span-1 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">%</div>
                 </div>
             </div>
         </div>
@@ -1208,21 +1209,29 @@ function renderGoalCard(goal) {
         }
     }
     
-    const remainingBoxes = Math.ceil(goal.remainingQuantity / capacity);
+    const scheduledBoxes = Math.ceil(goal.scheduledQuantity / capacity);
     const targetBoxes = Math.ceil(goal.targetQuantity / capacity);
     
     let statusBgClass = '';
     let statusTextClass = '';
     let statusDotColor = '';
+    let progressBarColor = '';
     
     if (isCompleted) {
         statusBgClass = 'bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30';
         statusTextClass = 'text-green-700 dark:text-green-400';
         statusDotColor = '#10B981';
+        progressBarColor = 'bg-green-500';
+    } else if (isInProgress) {
+        statusBgClass = 'bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/30';
+        statusTextClass = 'text-yellow-700 dark:text-yellow-400';
+        statusDotColor = '#F59E0B';
+        progressBarColor = 'bg-yellow-500';
     } else {
         statusBgClass = 'bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30';
         statusTextClass = 'text-red-700 dark:text-red-400';
         statusDotColor = '#EF4444';
+        progressBarColor = 'bg-red-500';
     }
     
     // List row format
@@ -1237,14 +1246,19 @@ function renderGoalCard(goal) {
                     <div class="col-span-2">
                         <p class="text-xs text-gray-600 dark:text-gray-400">${goal.品番 || '-'}</p>
                     </div>
-                    <div class="col-span-3">
+                    <div class="col-span-2">
                         <p class="text-xs text-gray-600 dark:text-gray-400 truncate">${goal.品名 || '-'}</p>
                     </div>
-                    <div class="col-span-2 text-right">
-                        <p class="text-xs font-medium ${statusTextClass}">${goal.remainingQuantity} / ${goal.targetQuantity} pcs</p>
+                    <div class="col-span-2">
+                        <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
+                            <div class="h-2 rounded-full transition-all ${progressBarColor}" style="width: ${percentage}%"></div>
+                        </div>
                     </div>
                     <div class="col-span-2 text-right">
-                        <p class="text-xs text-gray-600 dark:text-gray-400">${targetBoxes} boxes</p>
+                        <p class="text-xs font-medium ${statusTextClass}">${goal.scheduledQuantity} / ${goal.targetQuantity} pcs</p>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <p class="text-xs text-gray-600 dark:text-gray-400">${scheduledBoxes}/${targetBoxes}</p>
                     </div>
                     <div class="col-span-1 text-right">
                         <span class="text-xs font-semibold ${statusTextClass}">${percentage}%</span>
