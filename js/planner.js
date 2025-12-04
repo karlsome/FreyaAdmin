@@ -1884,15 +1884,37 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
                 const product = assignedProducts[i];
                 const productStartMinutes = product.startTime ? timeToMinutes(product.startTime) : 0;
                 const productDurationMinutes = product.estimatedTime.totalSeconds / 60;
-                const productEndMinutes = productStartMinutes + productDurationMinutes;
+                
+                // Calculate actual production minutes used up to this slot (excluding breaks)
+                let productionMinutesUsed = 0;
+                let currentScanMinute = productStartMinutes;
+                
+                // Count production minutes from product start to current slot, skipping breaks
+                while (currentScanMinute < slotMinutes && productionMinutesUsed < productDurationMinutes) {
+                    // Check if current minute is in a break for this equipment
+                    const isInBreak = plannerState.breaks.some(brk => {
+                        const breakStart = timeToMinutes(brk.start);
+                        const breakEnd = timeToMinutes(brk.end);
+                        const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+                        return currentScanMinute >= breakStart && currentScanMinute < breakEnd && isForThisEquipment;
+                    });
+                    
+                    if (!isInBreak) {
+                        productionMinutesUsed += PLANNER_CONFIG.intervalMinutes;
+                    }
+                    currentScanMinute += PLANNER_CONFIG.intervalMinutes;
+                }
                 
                 // Debug first iteration
                 if (i === 0 && index === 0) {
-                    console.log(`🔍 Checking ${product.背番号}: start=${productStartMinutes}min (${product.startTime}), duration=${productDurationMinutes}min, end=${productEndMinutes}min`);
+                    console.log(`🔍 Checking ${product.背番号}: start=${productStartMinutes}min (${product.startTime}), duration=${productDurationMinutes}min, productionMinutesUsed=${productionMinutesUsed}min`);
                 }
                 
-                // Check if current slot falls within this product's time range
-                if (slotMinutes >= productStartMinutes && slotMinutes < productEndMinutes) {
+                // This slot is part of the product if:
+                // 1. Current slot is at or after product start time
+                // 2. We haven't used up all production minutes yet
+                // 3. Current slot is not in a break
+                if (slotMinutes >= productStartMinutes && productionMinutesUsed < productDurationMinutes) {
                     productForSlot = product;
                     break;
                 }
