@@ -2286,37 +2286,45 @@ async function clearAllSelectedProducts() {
     
     console.log('🗑️ Clearing all products from timeline...');
     
-    // Restore all goal quantities
+    // Group products by goalId to handle duplicates
+    const quantitiesByGoal = {};
     for (const product of plannerState.selectedProducts) {
         if (product.goalId || product._id) {
             const goalId = product.goalId || product._id;
-            
-            try {
-                const goal = plannerState.goals.find(g => g._id === goalId);
-                if (goal) {
-                    // Calculate the new values based on CURRENT goal state
-                    const newRemainingQuantity = goal.remainingQuantity + product.quantity;
-                    const newScheduledQuantity = Math.max(0, goal.scheduledQuantity - product.quantity); // Prevent negative
-                    
-                    console.log(`Restoring ${product.背番号}: scheduled ${goal.scheduledQuantity} -> ${newScheduledQuantity}, remaining ${goal.remainingQuantity} -> ${newRemainingQuantity}`);
-                    
-                    const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            remainingQuantity: newRemainingQuantity,
-                            scheduledQuantity: newScheduledQuantity,
-                            status: newScheduledQuantity === 0 ? 'pending' : (newRemainingQuantity === 0 ? 'completed' : 'in-progress')
-                        })
-                    });
-                    
-                    if (!response.ok) {
-                        console.error('Failed to restore goal:', await response.text());
-                    }
-                }
-            } catch (error) {
-                console.error('Error restoring goal quantity:', error);
+            if (!quantitiesByGoal[goalId]) {
+                quantitiesByGoal[goalId] = 0;
             }
+            quantitiesByGoal[goalId] += product.quantity;
+        }
+    }
+    
+    // Restore all goal quantities
+    for (const [goalId, totalQuantity] of Object.entries(quantitiesByGoal)) {
+        try {
+            const goal = plannerState.goals.find(g => g._id === goalId);
+            if (goal) {
+                // Calculate the new values based on CURRENT goal state
+                const newRemainingQuantity = goal.remainingQuantity + totalQuantity;
+                const newScheduledQuantity = Math.max(0, goal.scheduledQuantity - totalQuantity);
+                
+                console.log(`Restoring ${goal.背番号}: scheduled ${goal.scheduledQuantity} -> ${newScheduledQuantity}, remaining ${goal.remainingQuantity} -> ${newRemainingQuantity}`);
+                
+                const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        remainingQuantity: newRemainingQuantity,
+                        scheduledQuantity: newScheduledQuantity,
+                        status: newScheduledQuantity === 0 ? 'pending' : (newRemainingQuantity === 0 ? 'completed' : 'in-progress')
+                    })
+                });
+                
+                if (!response.ok) {
+                    console.error('Failed to restore goal:', await response.text());
+                }
+            }
+        } catch (error) {
+            console.error('Error restoring goal quantity:', error);
         }
     }
     
@@ -2326,7 +2334,7 @@ async function clearAllSelectedProducts() {
     // Delete the plan from database (or save empty state)
     await deletePlanFromDatabase();
     
-    // Reload goals and refresh UI
+    // Reload goals to ensure fresh state and refresh UI
     await loadGoals();
     renderGoalList();
     renderProductList();
@@ -3900,6 +3908,14 @@ function showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassi
                     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
                         ${totalAssigned} products assigned, ${totalUnassigned} without history
                     </p>
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Schedule until:
+                        </label>
+                        <input type="time" id="smartSchedulingTimeLimit" value="17:30" 
+                               class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        <span class="ml-2 text-xs text-gray-500 dark:text-gray-400">(Default: 5:30 PM)</span>
+                    </div>
                 </div>
                 
                 <div class="flex-1 overflow-y-auto p-6">
@@ -3955,7 +3971,10 @@ window.confirmSmartScheduling = async function() {
     const assignments = window._smartSchedulingAssignments;
     if (!assignments) return;
     
-    const MAX_END_TIME = timeToMinutes('19:00'); // 7 PM limit
+    // Get time limit from input field
+    const timeLimitInput = document.getElementById('smartSchedulingTimeLimit');
+    const timeLimitValue = timeLimitInput ? timeLimitInput.value : '17:30';
+    const MAX_END_TIME = timeToMinutes(timeLimitValue);
     
     try {
         // Sort equipment by confidence level and prepare scheduling queue
@@ -4002,11 +4021,11 @@ window.confirmSmartScheduling = async function() {
             const actualEndTime = actualStartTime + productDurationMinutes;
             
             console.log(`\n🤖 Smart Scheduling: ${product.背番号} on ${equipment}`);
-            console.log(`   Start: ${minutesToTime(actualStartTime)}, End: ${minutesToTime(actualEndTime)}, Limit: 19:00`);
+            console.log(`   Start: ${minutesToTime(actualStartTime)}, End: ${minutesToTime(actualEndTime)}, Limit: ${timeLimitValue}`);
             
-            // Check if product would end after 7 PM
+            // Check if product would end after time limit
             if (actualEndTime > MAX_END_TIME) {
-                console.log(`   ⚠️ Would exceed 7 PM limit - trying alternative equipment`);
+                console.log(`   ⚠️ Would exceed ${timeLimitValue} limit - trying alternative equipment`);
                 
                 // Try to find alternative equipment with available capacity
                 let scheduled = false;
@@ -4040,8 +4059,8 @@ window.confirmSmartScheduling = async function() {
                 }
                 
                 if (!scheduled) {
-                    console.log(`   ❌ Could not fit before 7 PM on any equipment - skipping`);
-                    showPlannerNotification(`${product.背番号} could not fit before 7 PM`, 'warning');
+                    console.log(`   ❌ Could not fit before ${timeLimitValue} on any equipment - skipping`);
+                    showPlannerNotification(`${product.背番号} could not fit before ${timeLimitValue}`, 'warning');
                 }
                 continue;
             }
