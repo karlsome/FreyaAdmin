@@ -3950,10 +3950,39 @@ function openBulkEditGoalsModal() {
                 </div>
                 
                 <div class="flex-1 overflow-auto p-6">
+                    <!-- Bulk Action Buttons -->
+                    <div class="mb-4 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <button onclick="toggleSelectAllGoals()" 
+                                    class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center gap-2">
+                                <i class="ri-checkbox-multiple-line"></i>
+                                <span id="selectAllBtnText">Select All</span>
+                            </button>
+                            <button onclick="deleteSelectedGoals()" 
+                                    id="deleteSelectedBtn"
+                                    class="px-3 py-1.5 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 flex items-center gap-2 opacity-50 cursor-not-allowed"
+                                    disabled>
+                                <i class="ri-delete-bin-line"></i>
+                                <span>Delete Selected (<span id="selectedCount">0</span>)</span>
+                            </button>
+                        </div>
+                        <button onclick="deleteAllGoals()" 
+                                class="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 flex items-center gap-2">
+                            <i class="ri-delete-bin-line"></i>
+                            <span>Delete All (${currentGoals.length})</span>
+                        </button>
+                    </div>
+                    
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
                                 <tr>
+                                    <th class="px-4 py-3 text-center w-12">
+                                        <input type="checkbox" 
+                                               id="selectAllCheckbox"
+                                               onchange="toggleSelectAllGoals()"
+                                               class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                    </th>
                                     <th class="px-4 py-3 text-left text-gray-700 dark:text-gray-300 font-semibold">背番号</th>
                                     <th class="px-4 py-3 text-left text-gray-700 dark:text-gray-300 font-semibold">品番</th>
                                     <th class="px-4 py-3 text-left text-gray-700 dark:text-gray-300 font-semibold">品名</th>
@@ -3964,6 +3993,12 @@ function openBulkEditGoalsModal() {
                             <tbody id="bulkEditGoalsTableBody" class="divide-y divide-gray-200 dark:divide-gray-700">
                                 ${currentGoals.map(goal => `
                                     <tr data-goal-id="${goal._id}" class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                                        <td class="px-4 py-3 text-center">
+                                            <input type="checkbox" 
+                                                   class="goal-checkbox w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                   value="${goal._id}"
+                                                   onchange="updateSelectedCount()">
+                                        </td>
                                         <td class="px-4 py-3 text-gray-900 dark:text-white">${goal.背番号 || '-'}</td>
                                         <td class="px-4 py-3 text-gray-900 dark:text-white">${goal.品番 || '-'}</td>
                                         <td class="px-4 py-3 text-gray-600 dark:text-gray-400">${goal.品名 || '-'}</td>
@@ -4136,6 +4171,173 @@ async function deleteGoalFromTable(goalId) {
         showPlannerNotification('Error deleting goal', 'error');
     }
 }
+
+// Update selected count and enable/disable delete button
+window.updateSelectedCount = function() {
+    const checkboxes = document.querySelectorAll('.goal-checkbox:checked');
+    const count = checkboxes.length;
+    const selectedCountEl = document.getElementById('selectedCount');
+    const deleteBtn = document.getElementById('deleteSelectedBtn');
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    const totalCheckboxes = document.querySelectorAll('.goal-checkbox').length;
+    
+    if (selectedCountEl) {
+        selectedCountEl.textContent = count;
+    }
+    
+    if (deleteBtn) {
+        if (count > 0) {
+            deleteBtn.disabled = false;
+            deleteBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        } else {
+            deleteBtn.disabled = true;
+            deleteBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+    }
+    
+    // Update select all checkbox state
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = count === totalCheckboxes && count > 0;
+        selectAllCheckbox.indeterminate = count > 0 && count < totalCheckboxes;
+    }
+};
+
+// Toggle select all checkboxes
+window.toggleSelectAllGoals = function() {
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    const checkboxes = document.querySelectorAll('.goal-checkbox');
+    const selectAllBtn = document.getElementById('selectAllBtnText');
+    
+    if (!selectAllCheckbox) return;
+    
+    const shouldCheck = !selectAllCheckbox.checked;
+    
+    checkboxes.forEach(cb => {
+        cb.checked = shouldCheck;
+    });
+    
+    selectAllCheckbox.checked = shouldCheck;
+    selectAllCheckbox.indeterminate = false;
+    
+    if (selectAllBtn) {
+        selectAllBtn.textContent = shouldCheck ? 'Deselect All' : 'Select All';
+    }
+    
+    updateSelectedCount();
+};
+
+// Delete selected goals
+window.deleteSelectedGoals = async function() {
+    const checkboxes = document.querySelectorAll('.goal-checkbox:checked');
+    const goalIds = Array.from(checkboxes).map(cb => cb.value);
+    
+    if (goalIds.length === 0) {
+        showPlannerNotification('No goals selected', 'warning');
+        return;
+    }
+    
+    if (!confirm(`Delete ${goalIds.length} selected goal(s)? This cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const goalId of goalIds) {
+            try {
+                const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    successCount++;
+                    // Remove from local state
+                    plannerState.goals = plannerState.goals.filter(g => g._id !== goalId);
+                    // Remove from table
+                    const row = document.querySelector(`tr[data-goal-id="${goalId}"]`);
+                    if (row) row.remove();
+                } else {
+                    failCount++;
+                }
+            } catch (error) {
+                console.error('Error deleting goal:', goalId, error);
+                failCount++;
+            }
+        }
+        
+        if (successCount > 0) {
+            showPlannerNotification(`${successCount} goal(s) deleted successfully`, 'success');
+            renderGoalList();
+        }
+        
+        if (failCount > 0) {
+            showPlannerNotification(`${failCount} goal(s) failed to delete`, 'error');
+        }
+        
+        updateSelectedCount();
+    } catch (error) {
+        console.error('Error deleting goals:', error);
+        showPlannerNotification('Error deleting goals', 'error');
+    }
+};
+
+// Delete all goals
+window.deleteAllGoals = async function() {
+    const currentGoals = plannerState.goals.filter(g => 
+        g.date === plannerState.currentDate && g.factory === plannerState.currentFactory
+    );
+    
+    if (currentGoals.length === 0) {
+        showPlannerNotification('No goals to delete', 'warning');
+        return;
+    }
+    
+    if (!confirm(`Delete ALL ${currentGoals.length} goal(s) for ${plannerState.currentFactory} on ${plannerState.currentDate}? This cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const goal of currentGoals) {
+            try {
+                const response = await fetch(BASE_URL + `api/production-goals/${goal._id}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    successCount++;
+                    // Remove from local state
+                    plannerState.goals = plannerState.goals.filter(g => g._id !== goal._id);
+                } else {
+                    failCount++;
+                }
+            } catch (error) {
+                console.error('Error deleting goal:', goal._id, error);
+                failCount++;
+            }
+        }
+        
+        if (successCount > 0) {
+            showPlannerNotification(`${successCount} goal(s) deleted successfully`, 'success');
+            renderGoalList();
+            closeBulkEditGoalsModal();
+        }
+        
+        if (failCount > 0) {
+            showPlannerNotification(`${failCount} goal(s) failed to delete`, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting all goals:', error);
+        showPlannerNotification('Error deleting all goals', 'error');
+    }
+};
 
 // Auto-generation handlers for Add New Goal
 async function handleGoalBackNumberBlur() {
