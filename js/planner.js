@@ -30,6 +30,7 @@ let plannerState = {
     plans: [],
     currentPlan: null,
     selectedProducts: [],
+    actualProduction: [], // pressDB data for actual production
     breaks: [
         { name: 'Lunch Break', start: '12:00', end: '12:45', isDefault: true, id: 'default-lunch' },
         { name: 'Break', start: '15:00', end: '15:15', isDefault: true, id: 'default-break' }
@@ -185,11 +186,21 @@ function switchPlannerMainTab(tab) {
             console.log('📊 Rendering planning views...');
             console.log('   Equipment count:', plannerState.equipment.length);
             console.log('   Selected products count:', plannerState.selectedProducts.length);
+            console.log('   Actual production count:', plannerState.actualProduction.length);
             
-            // If equipment not loaded yet, load it first
-            if (plannerState.equipment.length === 0) {
-                console.log('⚠️ Equipment not loaded, loading now...');
-                loadEquipmentForFactory(plannerState.currentFactory).then(() => {
+            // If equipment or actual production not loaded yet, load them first
+            if (plannerState.equipment.length === 0 || plannerState.actualProduction.length === 0) {
+                console.log('⚠️ Equipment or actual production not loaded, loading now...');
+                const loadPromises = [];
+                
+                if (plannerState.equipment.length === 0) {
+                    loadPromises.push(loadEquipmentForFactory(plannerState.currentFactory));
+                }
+                
+                // Always reload actual production when switching to planning tab to get fresh data
+                loadPromises.push(loadActualProduction(plannerState.currentFactory, plannerState.currentDate));
+                
+                Promise.all(loadPromises).then(() => {
                     updateSelectedProductsSummary();
                     renderAllViews();
                 });
@@ -360,6 +371,124 @@ async function loadExistingPlans(factory, date) {
     }
 }
 
+async function loadActualProduction(factory, date) {
+    console.log(`📊 === LOAD ACTUAL PRODUCTION START ===`);
+    console.log(`📊 Factory: ${factory}`);
+    console.log(`📊 Date: ${date}`);
+    console.log(`📊 DB: ${PLANNER_CONFIG.dbName}`);
+    console.log(`📊 Collection: ${PLANNER_CONFIG.pressCollection}`);
+    
+    try {
+        const requestBody = {
+            dbName: PLANNER_CONFIG.dbName,
+            collectionName: PLANNER_CONFIG.pressCollection,
+            query: { 
+                '工場': factory,
+                'Date': date
+            }
+        };
+        
+        console.log(`📊 Request URL: ${BASE_URL}queries`);
+        console.log(`📊 Request body:`, JSON.stringify(requestBody, null, 2));
+        
+        const response = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        console.log(`📊 Response status: ${response.status} ${response.statusText}`);
+        
+        if (!response.ok) {
+            console.error('❌ PressDB fetch failed:', response.status, response.statusText);
+            const errorText = await response.text();
+            console.error('❌ Error response:', errorText);
+            plannerState.actualProduction = [];
+            return [];
+        }
+        
+        const data = await response.json();
+        console.log(`📦 PressDB raw data received:`, data);
+        console.log(`📦 Data type: ${Array.isArray(data) ? 'Array' : typeof data}`);
+        console.log(`📦 Number of records returned: ${data.length}`);
+        
+        if (data.length > 0) {
+            console.log(`📦 First record:`, data[0]);
+            console.log(`📦 Record keys:`, Object.keys(data[0]));
+        } else {
+            console.log(`⚠️ No records found in pressDB for ${factory} on ${date}`);
+        }
+        
+        // Process and merge records by equipment and 背番号
+        const processedData = processActualProductionData(data);
+        plannerState.actualProduction = processedData;
+        
+        console.log(`✅ Loaded ${data.length} actual production records, processed into ${processedData.length} blocks`);
+        console.log(`✅ Processed data:`, processedData);
+        console.log(`📊 === LOAD ACTUAL PRODUCTION END ===`);
+        
+        return processedData;
+    } catch (error) {
+        console.error('❌ Failed to load actual production:', error);
+        console.error('❌ Error stack:', error.stack);
+        plannerState.actualProduction = [];
+        return [];
+    }
+}
+
+function processActualProductionData(records) {
+    if (!records || records.length === 0) return [];
+    
+    // Helper function to round time to nearest 15 minutes
+    function roundToNearest15(timeStr) {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        const totalMinutes = hours * 60 + minutes;
+        const rounded = Math.round(totalMinutes / 15) * 15;
+        const newHours = Math.floor(rounded / 60);
+        const newMinutes = rounded % 60;
+        return `${newHours.toString().padStart(2, '0')}:${newMinutes.toString().padStart(2, '0')}`;
+    }
+    
+    // Group by equipment and 背番号
+    const grouped = {};
+    
+    records.forEach(record => {
+        const equipment = record.設備 || '';
+        const sebanggo = record.背番号 || '';
+        const key = `${equipment}_${sebanggo}`;
+        
+        if (!grouped[key]) {
+            grouped[key] = {
+                equipment: equipment,
+                背番号: sebanggo,
+                品番: record.品番,
+                品名: record.品名 || '',
+                records: [],
+                startTime: null,
+                endTime: null,
+                totalQuantity: 0
+            };
+        }
+        
+        // Round times to nearest 15 minutes
+        const startTime = roundToNearest15(record.Time_start || '00:00');
+        const endTime = roundToNearest15(record.Time_end || '00:00');
+        
+        grouped[key].records.push(record);
+        grouped[key].totalQuantity += (record.Process_Quantity || 0);
+        
+        // Track earliest start and latest end
+        if (!grouped[key].startTime || startTime < grouped[key].startTime) {
+            grouped[key].startTime = startTime;
+        }
+        if (!grouped[key].endTime || endTime > grouped[key].endTime) {
+            grouped[key].endTime = endTime;
+        }
+    });
+    
+    return Object.values(grouped);
+}
+
 // ============================================
 // EVENT HANDLERS
 // ============================================
@@ -382,12 +511,13 @@ async function handleFactoryChange(e) {
     showPlannerLoading(true);
     
     try {
-        // Load equipment, products (for lookups), goals, and plans in parallel
+        // Load equipment, products (for lookups), goals, plans, and actual production in parallel
         await Promise.all([
             loadEquipmentForFactory(factory),
             loadProductsForFactory(factory),
             loadGoals(),
-            loadExistingPlans(factory, plannerState.currentDate)
+            loadExistingPlans(factory, plannerState.currentDate),
+            loadActualProduction(factory, plannerState.currentDate)
         ]);
         
         // Render views
@@ -410,7 +540,8 @@ async function handleDateChange(e) {
         // Ensure products are loaded for capacity lookups
         const loadPromises = [
             loadGoals(),
-            loadExistingPlans(plannerState.currentFactory, plannerState.currentDate)
+            loadExistingPlans(plannerState.currentFactory, plannerState.currentDate),
+            loadActualProduction(plannerState.currentFactory, plannerState.currentDate)
         ];
         
         // Load products if not already loaded
@@ -2417,12 +2548,14 @@ function renderTimelineView() {
         `;
     });
     
-    // Build equipment rows
+    // Build equipment rows - Planned first, then Actual
     let rowsHTML = '';
     plannerState.equipment.forEach(equipment => {
         const assignedProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
-        console.log(`🔧 ${equipment}: ${assignedProducts.length} products`, assignedProducts.map(p => `${p.背番号} @ ${p.startTime}`));
+        const actualProduction = plannerState.actualProduction.filter(p => p.equipment === equipment);
+        console.log(`🔧 ${equipment}: ${assignedProducts.length} planned, ${actualProduction.length} actual`);
         
+        // Planned row
         rowsHTML += `
             <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-equipment="${equipment}">
                 <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/50 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">
@@ -2430,6 +2563,19 @@ function renderTimelineView() {
                 </div>
                 <div class="flex-1 flex relative">
                     ${renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth)}
+                </div>
+            </div>
+        `;
+        
+        // Actual row (only if there's any actual production or to show IDLE)
+        rowsHTML += `
+            <div class="flex border-b dark:border-gray-600 min-h-[60px] bg-gray-50/30 dark:bg-gray-900/30" data-equipment="${equipment}-actual">
+                <div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-800 border-r dark:border-gray-600 p-2 text-xs font-medium text-gray-600 dark:text-gray-400 sticky left-0 z-10 flex flex-col justify-center">
+                    <div>${equipment}</div>
+                    <div class="text-[10px] text-gray-500 dark:text-gray-500">Actual</div>
+                </div>
+                <div class="flex-1 flex relative">
+                    ${renderActualProductionSlots(timeSlots, equipment, actualProduction, slotWidth)}
                 </div>
             </div>
         `;
@@ -2595,6 +2741,84 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
                     </div>
                 `;
             }
+        }
+    });
+    
+    return html;
+}
+
+function renderActualProductionSlots(timeSlots, equipment, actualProduction, slotWidth) {
+    let html = '';
+    const currentTime = new Date();
+    const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+    
+    // Helper function to darken a color
+    function darkenColor(color) {
+        // Convert hex to RGB
+        const r = parseInt(color.slice(1, 3), 16);
+        const g = parseInt(color.slice(3, 5), 16);
+        const b = parseInt(color.slice(5, 7), 16);
+        
+        // Darken by 40%
+        const darkR = Math.floor(r * 0.6);
+        const darkG = Math.floor(g * 0.6);
+        const darkB = Math.floor(b * 0.6);
+        
+        return `#${darkR.toString(16).padStart(2, '0')}${darkG.toString(16).padStart(2, '0')}${darkB.toString(16).padStart(2, '0')}`;
+    }
+    
+    timeSlots.forEach((slot, index) => {
+        const slotMinutes = timeToMinutes(slot);
+        
+        // Find actual production for this slot
+        let productForSlot = null;
+        let recordsForSlot = [];
+        
+        for (const prod of actualProduction) {
+            const startMinutes = timeToMinutes(prod.startTime);
+            const endMinutes = timeToMinutes(prod.endTime);
+            
+            if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
+                productForSlot = prod;
+                recordsForSlot = prod.records;
+                break;
+            }
+        }
+        
+        if (productForSlot) {
+            const startMinutes = timeToMinutes(productForSlot.startTime);
+            const isFirstSlot = slotMinutes === startMinutes;
+            const originalColor = plannerState.productColors[productForSlot.背番号] || '#6B7280';
+            const darkColor = darkenColor(originalColor);
+            
+            html += `
+                <div class="flex-shrink-0 border-r dark:border-gray-500 relative group cursor-pointer" 
+                     style="width: ${slotWidth}px; background-color: ${darkColor}40"
+                     onclick="showActualProductionModal('${equipment}', '${productForSlot.背番号}', ${JSON.stringify(recordsForSlot).replace(/"/g, '&quot;')})">
+                    <div class="absolute inset-0 flex items-center justify-center text-xs font-bold truncate px-1" 
+                         style="color: ${darkColor}" 
+                         title="${productForSlot.背番号} - Actual Production (Click for details)">
+                        ${isFirstSlot ? productForSlot.背番号 : ''}
+                    </div>
+                </div>
+            `;
+        } else if (slotMinutes <= currentMinutes) {
+            // Show IDLE only up to current time
+            html += `
+                <div class="flex-shrink-0 border-r dark:border-gray-600 relative" 
+                     style="width: ${slotWidth}px; background-color: #1a1a1a">
+                    <div class="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-gray-400">
+                        ${index % 4 === 0 ? 'IDLE' : ''}
+                    </div>
+                </div>
+            `;
+        } else {
+            // Future time - show empty
+            html += `
+                <div class="flex-shrink-0 border-r dark:border-gray-600" 
+                     style="width: ${slotWidth}px">
+                </div>
+            `;
         }
     });
     
@@ -5172,12 +5396,195 @@ window.handleKanbanDragStart = handleKanbanDragStart;
 window.handleKanbanDragOver = handleKanbanDragOver;
 window.handleKanbanDrop = handleKanbanDrop;
 window.handleTimelineSlotClick = handleTimelineSlotClick;
+// ============================================
+// ACTUAL PRODUCTION MODAL
+// ============================================
+window.showActualProductionModal = function(equipment, sebanggo, recordsJson) {
+    const records = JSON.parse(recordsJson.replace(/&quot;/g, '"'));
+    
+    if (!records || records.length === 0) return;
+    
+    // Combine data from all records
+    const totalQuantity = records.reduce((sum, r) => sum + (r.Process_Quantity || 0), 0);
+    const totalNG = records.reduce((sum, r) => sum + (r.Total_NG || 0), 0);
+    const firstRecord = records[0];
+    
+    const modalHTML = `
+        <div id="actualProductionModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-auto">
+                <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 z-10">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">${firstRecord.品番}</h2>
+                        <button onclick="closeActualProductionModal()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-6 space-y-6">
+                    <!-- Basic Info -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg">
+                            <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">品番</label>
+                            <div class="text-lg font-semibold text-gray-900 dark:text-white">${firstRecord.品番}</div>
+                        </div>
+                        <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg">
+                            <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">背番号</label>
+                            <div class="text-lg font-semibold text-gray-900 dark:text-white">${sebanggo}</div>
+                        </div>
+                        <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg">
+                            <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">工場</label>
+                            <div class="text-lg font-semibold text-gray-900 dark:text-white">${firstRecord.工場}</div>
+                        </div>
+                        <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg">
+                            <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">日付</label>
+                            <div class="text-lg font-semibold text-gray-900 dark:text-white">${firstRecord.Date}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Production Records -->
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Production Records (${records.length})</h3>
+                        <div class="space-y-4">
+                            ${records.map((record, idx) => `
+                                <div class="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                                    <div class="grid grid-cols-3 gap-4 mb-4">
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">作業者</label>
+                                            <div class="font-medium text-gray-900 dark:text-white">${record.Worker_Name || '-'}</div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">設備</label>
+                                            <div class="font-medium text-gray-900 dark:text-white">${record.設備}</div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Time</label>
+                                            <div class="font-medium text-gray-900 dark:text-white">${record.Time_start} - ${record.Time_end}</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="grid grid-cols-4 gap-4 mb-4">
+                                        <div class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded">
+                                            <label class="block text-xs text-blue-600 dark:text-blue-400 mb-1">数量</label>
+                                            <div class="text-xl font-bold text-blue-700 dark:text-blue-300">${record.Process_Quantity}</div>
+                                        </div>
+                                        <div class="bg-red-50 dark:bg-red-900/20 p-3 rounded">
+                                            <label class="block text-xs text-red-600 dark:text-red-400 mb-1">不良数</label>
+                                            <div class="text-xl font-bold text-red-700 dark:text-red-300">${record.Total_NG}</div>
+                                        </div>
+                                        <div class="bg-green-50 dark:bg-green-900/20 p-3 rounded">
+                                            <label class="block text-xs text-green-600 dark:text-green-400 mb-1">Total</label>
+                                            <div class="text-xl font-bold text-green-700 dark:text-green-300">${record.Total}</div>
+                                        </div>
+                                        <div class="bg-purple-50 dark:bg-purple-900/20 p-3 rounded">
+                                            <label class="block text-xs text-purple-600 dark:text-purple-400 mb-1">Spare</label>
+                                            <div class="text-xl font-bold text-purple-700 dark:text-purple-300">${record.Spare}</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="grid grid-cols-3 gap-4 mb-4">
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">材料ロット</label>
+                                            <div class="text-sm text-gray-900 dark:text-white">${record.材料ロット || '-'}</div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Cycle Time</label>
+                                            <div class="text-sm text-gray-900 dark:text-white">${record.Cycle_Time || '-'}s</div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">ショット数</label>
+                                            <div class="text-sm text-gray-900 dark:text-white">${record.ショット数 || '-'}</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="grid grid-cols-3 gap-4 mb-4">
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">疵引不良</label>
+                                            <div class="text-sm text-gray-900 dark:text-white">${record.疵引不良 || 0}</div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">加工不良</label>
+                                            <div class="text-sm text-gray-900 dark:text-white">${record.加工不良 || 0}</div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">その他</label>
+                                            <div class="text-sm text-gray-900 dark:text-white">${record.その他 || 0}</div>
+                                        </div>
+                                    </div>
+                                    
+                                    ${record.Comment ? `
+                                        <div class="mb-4">
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Comment</label>
+                                            <div class="text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700/50 p-2 rounded">${record.Comment}</div>
+                                        </div>
+                                    ` : ''}
+                                    
+                                    <!-- Images -->
+                                    ${record.初物チェック画像 || record.終物チェック画像 || (record.materialLabelImages && record.materialLabelImages.length > 0) ? `
+                                        <div class="mt-4">
+                                            <label class="block text-xs text-gray-600 dark:text-gray-400 mb-2">Images</label>
+                                            <div class="grid grid-cols-3 gap-2">
+                                                ${record.初物チェック画像 ? `
+                                                    <div>
+                                                        <p class="text-xs text-gray-500 mb-1">初物チェック</p>
+                                                        <img src="${record.初物チェック画像}" class="w-full h-32 object-cover rounded" onclick="window.open('${record.初物チェック画像}', '_blank')">
+                                                    </div>
+                                                ` : ''}
+                                                ${record.終物チェック画像 ? `
+                                                    <div>
+                                                        <p class="text-xs text-gray-500 mb-1">終物チェック</p>
+                                                        <img src="${record.終物チェック画像}" class="w-full h-32 object-cover rounded" onclick="window.open('${record.終物チェック画像}', '_blank')">
+                                                    </div>
+                                                ` : ''}
+                                                ${record.materialLabelImages && record.materialLabelImages.length > 0 ? record.materialLabelImages.slice(0, 1).map(img => `
+                                                    <div>
+                                                        <p class="text-xs text-gray-500 mb-1">材料ラベル</p>
+                                                        <img src="${img}" class="w-full h-32 object-cover rounded" onclick="window.open('${img}', '_blank')">
+                                                    </div>
+                                                `).join('') : ''}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
+                    <!-- Summary -->
+                    <div class="bg-gray-100 dark:bg-gray-700 p-4 rounded-lg">
+                        <h4 class="font-semibold text-gray-900 dark:text-white mb-3">Summary</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm text-gray-600 dark:text-gray-400">Total Quantity</label>
+                                <div class="text-2xl font-bold text-blue-600 dark:text-blue-400">${totalQuantity} pcs</div>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-600 dark:text-gray-400">Total NG</label>
+                                <div class="text-2xl font-bold text-red-600 dark:text-red-400">${totalNG} pcs</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+window.closeActualProductionModal = function() {
+    const modal = document.getElementById('actualProductionModal');
+    if (modal) modal.remove();
+};
+
 window.handleProductDragStart = handleProductDragStart;
 window.handleProductDragEnd = handleProductDragEnd;
 window.handleTimelineDragOver = handleTimelineDragOver;
 window.handleTimelineDragLeave = handleTimelineDragLeave;
 window.handleTimelineDrop = handleTimelineDrop;
 window.closeTimelineClickModal = closeTimelineClickModal;
+window.showActualProductionModal = showActualProductionModal;
+window.closeActualProductionModal = closeActualProductionModal;
 window.showAddBreakModal = showAddBreakModal;
 window.closeAddBreakModal = closeAddBreakModal;
 window.confirmAddBreak = confirmAddBreak;
