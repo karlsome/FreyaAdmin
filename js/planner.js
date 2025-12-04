@@ -99,7 +99,16 @@ function setupPlannerEventListeners() {
         endDateInput.addEventListener('change', handleEndDateChange);
     }
     
-    // Tab switching
+    // Main tab switching (Goals vs Planning)
+    document.querySelectorAll('.planner-main-tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const mainTab = e.currentTarget.dataset.mainTab || e.currentTarget.getAttribute('data-main-tab');
+            if (mainTab) switchPlannerMainTab(mainTab);
+        });
+    });
+    
+    // Sub-tab switching (Timeline/Kanban/Table)
     document.querySelectorAll('.planner-tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -118,6 +127,32 @@ function setupPlannerEventListeners() {
     const goalSearch = document.getElementById('goalSearch');
     if (goalSearch) {
         goalSearch.addEventListener('input', filterGoals);
+    }
+}
+
+// Switch between main tabs (Production Goals vs Planning)
+function switchPlannerMainTab(tab) {
+    // Update tab buttons
+    document.querySelectorAll('.planner-main-tab-btn').forEach(btn => {
+        const btnTab = btn.dataset.mainTab || btn.getAttribute('data-main-tab');
+        if (btnTab === tab) {
+            btn.classList.remove('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+            btn.classList.add('border-blue-500', 'text-blue-600');
+        } else {
+            btn.classList.remove('border-blue-500', 'text-blue-600');
+            btn.classList.add('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+        }
+    });
+    
+    // Show/hide content
+    document.querySelectorAll('.planner-main-tab-content').forEach(content => {
+        content.classList.add('hidden');
+    });
+    
+    if (tab === 'goals') {
+        document.getElementById('planner-goals-tab')?.classList.remove('hidden');
+    } else if (tab === 'planning') {
+        document.getElementById('planner-planning-tab')?.classList.remove('hidden');
     }
 }
 
@@ -1118,15 +1153,32 @@ function renderGoalList() {
     
     let html = '';
     
+    // Add table header
+    html += `
+        <div class="bg-gray-100 dark:bg-gray-700 border-b-2 border-gray-300 dark:border-gray-600 sticky top-0 z-10">
+            <div class="flex items-center gap-3 py-2 px-3">
+                <div class="w-2"></div>
+                <div class="flex-1 grid grid-cols-12 gap-2">
+                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">背番号</div>
+                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300">品番</div>
+                    <div class="col-span-3 text-xs font-semibold text-gray-700 dark:text-gray-300">品名</div>
+                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Quantity</div>
+                    <div class="col-span-2 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Boxes</div>
+                    <div class="col-span-1 text-xs font-semibold text-gray-700 dark:text-gray-300 text-right">Status</div>
+                </div>
+            </div>
+        </div>
+    `;
+    
     Object.keys(goalsByDate).sort().forEach(date => {
         const goalsForDate = goalsByDate[date];
         const isToday = date === plannerState.currentDate;
         
         html += `
-            <div class="mb-4">
-                <div class="sticky top-0 bg-gray-100 dark:bg-gray-700 px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300 flex items-center justify-between">
+            <div class="mb-2">
+                <div class="bg-gray-50 dark:bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
                     <span>${date}</span>
-                    ${isToday ? '<span class="bg-blue-500 text-white px-2 py-0.5 rounded text-xs">Today</span>' : ''}
+                    ${isToday ? '<span class="bg-blue-500 text-white px-2 py-0.5 rounded text-[10px]">Today</span>' : ''}
                 </div>
                 ${goalsForDate.map(goal => renderGoalCard(goal)).join('')}
             </div>
@@ -1161,40 +1213,61 @@ function renderGoalCard(goal) {
     
     let statusBgClass = '';
     let statusTextClass = '';
+    let statusDotColor = '';
     
     if (isCompleted) {
-        statusBgClass = 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700';
+        statusBgClass = 'bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30';
         statusTextClass = 'text-green-700 dark:text-green-400';
+        statusDotColor = '#10B981';
     } else {
-        // Both in-progress and pending show as red (incomplete)
-        statusBgClass = 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700';
+        statusBgClass = 'bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30';
         statusTextClass = 'text-red-700 dark:text-red-400';
+        statusDotColor = '#EF4444';
     }
     
+    // List row format
     return `
-        <div class="goal-card p-3 border rounded-lg ${statusBgClass} mb-2">
-            <div class="flex items-center gap-3 mb-2">
-                <div class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${color}"></div>
-                <div class="flex-1 min-w-0">
-                    <p class="font-medium text-sm ${statusTextClass} truncate">${goal.背番号 || '-'}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${goal.品番 || '-'}</p>
-                </div>
-                <button onclick="deleteGoal('${goal._id}')" class="text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <i class="ri-delete-bin-line"></i>
-                </button>
-            </div>
-            
-            <div class="space-y-1">
-                <div class="flex justify-between text-xs ${statusTextClass}">
-                    <span><strong>${goal.remainingQuantity}</strong> / ${goal.targetQuantity} pcs - ${targetBoxes} boxes</span>
-                    <span>${percentage}%</span>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-1.5">
-                    <div class="h-1.5 rounded-full transition-all ${isCompleted ? 'bg-green-500' : 'bg-blue-500'}" style="width: ${percentage}%"></div>
+        <div class="goal-list-row border-b border-gray-200 dark:border-gray-700 ${statusBgClass} hover:shadow-sm transition-all cursor-pointer" onclick="addGoalToTimeline('${goal._id}')">
+            <div class="flex items-center gap-3 py-2 px-3">
+                <div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ${statusDotColor}"></div>
+                <div class="flex-1 grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-2">
+                        <p class="font-medium text-sm text-gray-900 dark:text-white">${goal.背番号 || '-'}</p>
+                    </div>
+                    <div class="col-span-2">
+                        <p class="text-xs text-gray-600 dark:text-gray-400">${goal.品番 || '-'}</p>
+                    </div>
+                    <div class="col-span-3">
+                        <p class="text-xs text-gray-600 dark:text-gray-400 truncate">${goal.品名 || '-'}</p>
+                    </div>
+                    <div class="col-span-2 text-right">
+                        <p class="text-xs font-medium ${statusTextClass}">${goal.remainingQuantity} / ${goal.targetQuantity} pcs</p>
+                    </div>
+                    <div class="col-span-2 text-right">
+                        <p class="text-xs text-gray-600 dark:text-gray-400">${targetBoxes} boxes</p>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <span class="text-xs font-semibold ${statusTextClass}">${percentage}%</span>
+                    </div>
                 </div>
             </div>
         </div>
     `;
+}
+
+// Add goal to timeline (called when clicking on a goal in the list)
+function addGoalToTimeline(goalId) {
+    const goal = plannerState.goals.find(g => g._id === goalId);
+    if (!goal || goal.remainingQuantity === 0) {
+        showPlannerNotification('This goal is already completed', 'warning');
+        return;
+    }
+    
+    // Switch to Planning tab and show timeline
+    switchPlannerMainTab('planning');
+    
+    // Show notification
+    showPlannerNotification('Click on a time slot in the timeline to add this product', 'info');
 }
 
 function filterProducts() {
@@ -3709,15 +3782,13 @@ function openBulkEditGoalsModal() {
                                 <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">背番号</label>
                                 <input type="text" id="newGoal背番号" 
                                        class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
-                                       placeholder="背番号"
-                                       onblur="handleGoalBackNumberBlur()">
+                                       placeholder="背番号">
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">品番</label>
                                 <input type="text" id="newGoal品番" 
                                        class="w-full px-2 py-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white text-sm"
-                                       placeholder="品番"
-                                       onblur="handleGoalPartNumberBlur()">
+                                       placeholder="品番">
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-700 dark:text-gray-300 mb-1">品名</label>
@@ -3752,6 +3823,19 @@ function openBulkEditGoalsModal() {
     `;
     
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Setup auto-fill event listeners after modal is added to DOM
+    setTimeout(() => {
+        const backNumberInput = document.getElementById('newGoal背番号');
+        const partNumberInput = document.getElementById('newGoal品番');
+        
+        if (backNumberInput) {
+            backNumberInput.addEventListener('blur', handleGoalBackNumberBlur);
+        }
+        if (partNumberInput) {
+            partNumberInput.addEventListener('blur', handleGoalPartNumberBlur);
+        }
+    }, 100);
 }
 
 function closeBulkEditGoalsModal() {
@@ -3990,6 +4074,8 @@ async function addNewGoalFromTable() {
 // Make functions globally available
 window.initializePlanner = initializePlanner;
 window.handleFactoryChange = handleFactoryChange;
+window.switchPlannerMainTab = switchPlannerMainTab;
+window.addGoalToTimeline = addGoalToTimeline;
 window.switchPlannerTab = switchPlannerTab;
 window.toggleProductSelection = toggleProductSelection;
 window.updateQuantityPreview = updateQuantityPreview;

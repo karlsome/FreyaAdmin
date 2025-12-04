@@ -1808,97 +1808,107 @@ function loadPage(page) {
                 </div>
               </div>
 
-              <!-- Main Content Grid -->
-              <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <!-- Product List Panel (Left) -->
-                <div class="lg:col-span-1 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col" style="max-height: 70vh;">
-                  <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h3 class="font-semibold text-gray-900 dark:text-white mb-3" data-i18n="productionGoals">Production Goals</h3>
-                    <div class="space-y-2 mb-3">
-                      <button onclick="triggerGoalCsvUpload()" class="w-full px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center">
-                        <i class="ri-upload-2-line mr-2"></i><span data-i18n="uploadCSV">Upload CSV</span>
-                      </button>
-                      <button onclick="showManualGoalInput()" class="w-full px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center">
-                        <i class="ri-add-line mr-2"></i><span data-i18n="manualInput">Manual Input</span>
-                      </button>
-                      <button onclick="showSmartSchedulingModal()" class="w-full px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center">
-                        <i class="ri-magic-line mr-2"></i><span data-i18n="smartScheduling">Smart Scheduling</span>
-                      </button>
-                    </div>
-                    <div class="flex items-center gap-2 mb-2">
-                      <input type="text" id="goalSearch" 
-                             class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm" 
-                             data-i18n-placeholder="searchGoals" placeholder="Search goals...">
-                      <button onclick="openBulkEditGoalsModal()" 
-                              class="px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center"
-                              title="Edit Goals">
-                        <i class="ri-edit-line"></i>
-                      </button>
-                    </div>
-                    <input type="file" id="goalCsvFileInput" accept=".csv" style="display: none;" onchange="handleGoalCsvUpload(this)">
-                  </div>
-                  <div id="goalListContainer" class="flex-1 overflow-y-auto p-3 space-y-2">
-                    <div class="text-center py-8 text-gray-500">
-                      <i class="ri-target-line text-4xl mb-2"></i>
-                      <p data-i18n="setGoalsFirst">Please set production goals first</p>
-                    </div>
-                  </div>
+              <!-- Main Tabs: Production Goals & Planning -->
+              <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                <!-- Tab Navigation -->
+                <div class="border-b border-gray-200 dark:border-gray-700">
+                  <nav class="flex -mb-px">
+                    <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-blue-500 text-blue-600" data-main-tab="goals">
+                      <i class="ri-target-line mr-2"></i><span>Production Goals</span>
+                    </button>
+                    <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-main-tab="planning">
+                      <i class="ri-calendar-schedule-line mr-2"></i><span>Planning</span>
+                    </button>
+                  </nav>
                 </div>
 
-                <!-- Planning Panel (Right) -->
-                <div class="lg:col-span-3 space-y-4">
-                  <!-- Selected Products Summary -->
-                  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                    <h3 class="font-semibold text-gray-900 dark:text-white mb-3" data-i18n="selectedProducts">Selected Products</h3>
-                    <div id="selectedProductsSummary">
-                      <div class="text-center py-4 text-gray-500">
-                        <p data-i18n="noProductsSelected">No products selected</p>
+                <!-- Tab Content -->
+                <div class="p-6">
+                  <!-- Production Goals Tab Content -->
+                  <div id="planner-goals-tab" class="planner-main-tab-content">
+                    <div class="mb-4 flex flex-col sm:flex-row gap-3">
+                      <button onclick="triggerGoalCsvUpload()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center">
+                        <i class="ri-upload-2-line mr-2"></i><span data-i18n="uploadCSV">Upload CSV</span>
+                      </button>
+                      <button onclick="showManualGoalInput()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center">
+                        <i class="ri-add-line mr-2"></i><span data-i18n="manualInput">Manual Input</span>
+                      </button>
+                      <button onclick="showSmartSchedulingModal()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center">
+                        <i class="ri-magic-line mr-2"></i><span data-i18n="smartScheduling">Smart Scheduling</span>
+                      </button>
+                      <button onclick="openBulkEditGoalsModal()" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center">
+                        <i class="ri-edit-line mr-2"></i><span>Edit Goals</span>
+                      </button>
+                      <div class="flex-1 flex gap-2">
+                        <input type="text" id="goalSearch" 
+                               class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" 
+                               data-i18n-placeholder="searchGoals" placeholder="Search goals...">
+                      </div>
+                    </div>
+                    <input type="file" id="goalCsvFileInput" accept=".csv" style="display: none;" onchange="handleGoalCsvUpload(this)">
+                    
+                    <!-- Goals List View -->
+                    <div id="goalListContainer" class="space-y-2">
+                      <div class="text-center py-12 text-gray-500">
+                        <i class="ri-target-line text-5xl mb-3"></i>
+                        <p class="text-lg" data-i18n="setGoalsFirst">Please set production goals first</p>
                       </div>
                     </div>
                   </div>
 
-                  <!-- View Tabs -->
-                  <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                    <div class="border-b border-gray-200 dark:border-gray-700">
-                      <nav class="flex -mb-px">
-                        <button class="planner-tab-btn px-6 py-3 text-sm font-medium border-b-2 border-blue-500 text-blue-600" data-tab="timeline">
+                  <!-- Planning Tab Content -->
+                  <div id="planner-planning-tab" class="planner-main-tab-content hidden">
+                    <!-- Selected Products Summary -->
+                    <div class="mb-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600 p-3">
+                      <h3 class="font-medium text-sm text-gray-900 dark:text-white mb-2" data-i18n="selectedProducts">Selected Products</h3>
+                      <div id="selectedProductsSummary">
+                        <div class="text-center py-2 text-gray-500 text-sm">
+                          <p data-i18n="noProductsSelected">No products selected</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- View Tabs (Timeline/Kanban/Table) -->
+                    <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
+                      <nav class="flex -mb-px mb-4">
+                        <button class="planner-tab-btn px-6 py-2 text-sm font-medium border-b-2 border-blue-500 text-blue-600" data-tab="timeline">
                           <i class="ri-time-line mr-2"></i><span data-i18n="timelineView">Timeline</span>
                         </button>
-                        <button class="planner-tab-btn px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-tab="kanban">
+                        <button class="planner-tab-btn px-6 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-tab="kanban">
                           <i class="ri-layout-column-line mr-2"></i><span data-i18n="kanbanView">Kanban</span>
                         </button>
-                        <button class="planner-tab-btn px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-tab="table">
+                        <button class="planner-tab-btn px-6 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-tab="table">
                           <i class="ri-table-line mr-2"></i><span data-i18n="tableView">Table</span>
                         </button>
                       </nav>
-                    </div>
 
-                    <!-- Timeline View -->
-                    <div id="planner-timeline-view" class="planner-view p-4" style="min-height: 400px;">
-                      <div id="timelineContainer">
-                        <div class="text-center py-8 text-gray-500">
-                          <i class="ri-calendar-line text-4xl mb-2"></i>
-                          <p data-i18n="selectFactoryFirst">Please select a factory first</p>
+                      <!-- Timeline View -->
+                      <div id="planner-timeline-view" class="planner-view" style="min-height: 500px;">
+                        <div id="timelineContainer">
+                          <div class="text-center py-12 text-gray-500">
+                            <i class="ri-calendar-line text-5xl mb-3"></i>
+                            <p class="text-lg" data-i18n="selectFactoryFirst">Please select a factory first</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <!-- Kanban View -->
-                    <div id="planner-kanban-view" class="planner-view p-4 hidden" style="min-height: 400px;">
-                      <div id="kanbanContainer">
-                        <div class="text-center py-8 text-gray-500">
-                          <i class="ri-layout-column-line text-4xl mb-2"></i>
-                          <p data-i18n="selectFactoryFirst">Please select a factory first</p>
+                      <!-- Kanban View -->
+                      <div id="planner-kanban-view" class="planner-view hidden" style="min-height: 500px;">
+                        <div id="kanbanContainer">
+                          <div class="text-center py-12 text-gray-500">
+                            <i class="ri-layout-column-line text-5xl mb-3"></i>
+                            <p class="text-lg" data-i18n="selectFactoryFirst">Please select a factory first</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <!-- Table View -->
-                    <div id="planner-table-view" class="planner-view p-4 hidden" style="min-height: 400px;">
-                      <div id="tableContainer">
-                        <div class="text-center py-8 text-gray-500">
-                          <i class="ri-table-line text-4xl mb-2"></i>
-                          <p data-i18n="noProductsInPlan">No products in the plan</p>
+                      <!-- Table View -->
+                      <div id="planner-table-view" class="planner-view hidden" style="min-height: 500px;">
+                        <div id="tableContainer">
+                          <div class="text-center py-12 text-gray-500">
+                            <i class="ri-table-line text-5xl mb-3"></i>
+                            <p class="text-lg" data-i18n="noProductsInPlan">No products in the plan</p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1912,7 +1922,7 @@ function loadPage(page) {
                   <i class="ri-information-line text-xl mr-3"></i>
                   <div class="text-sm">
                     <p><strong data-i18n="workHours">Work Hours:</strong> 8:45 AM - 8:00 PM</p>
-                    <p class="mt-1"><span data-i18n="defaultCycleTimeInfo">Default cycle time: 2 minutes (if not specified in masterDB)</span></p>
+                    <p class="mt-1"><span data-i18n="defaultCycleTimeInfo">Default cycle time: 22.5 seconds per piece (if not specified in masterDB)</span></p>
                   </div>
                 </div>
               </div>
