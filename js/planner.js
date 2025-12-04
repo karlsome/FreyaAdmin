@@ -3878,10 +3878,21 @@ async function updateGoalQuantityInTable(goalId, newQuantity) {
         const result = await response.json();
         
         if (result.success) {
-            // Update local state
+            // Update local state with recalculated values
             const goal = plannerState.goals.find(g => g._id === goalId);
             if (goal) {
+                const currentScheduled = goal.scheduledQuantity || 0;
                 goal.targetQuantity = quantity;
+                goal.remainingQuantity = quantity - currentScheduled;
+                
+                // Update status
+                if (goal.remainingQuantity <= 0) {
+                    goal.status = 'completed';
+                } else if (currentScheduled > 0) {
+                    goal.status = 'in-progress';
+                } else {
+                    goal.status = 'pending';
+                }
             }
             
             showPlannerNotification('Goal quantity updated', 'success');

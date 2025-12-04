@@ -150,13 +150,31 @@ app.put('/api/production-goals/:id', async (req, res) => {
         // Update timestamp
         updates.updatedAt = new Date();
         
-        // Update status based on quantities
-        if (updates.remainingQuantity !== undefined) {
-            if (updates.remainingQuantity === 0) {
-                updates.status = 'completed';
-            } else if (updates.scheduledQuantity > 0) {
-                updates.status = 'in-progress';
-            }
+        // Get current goal to calculate proper remaining quantity and status
+        const currentGoal = await collection.findOne({ _id: new ObjectId(id) });
+        if (!currentGoal) {
+            return res.status(404).json({ success: false, error: 'Goal not found' });
+        }
+        
+        // If targetQuantity is being updated, recalculate remainingQuantity
+        if (updates.targetQuantity !== undefined) {
+            const newTargetQuantity = parseInt(updates.targetQuantity);
+            const currentScheduled = currentGoal.scheduledQuantity || 0;
+            updates.remainingQuantity = newTargetQuantity - currentScheduled;
+        }
+        
+        // Calculate final quantities for status determination
+        const finalTargetQuantity = updates.targetQuantity || currentGoal.targetQuantity;
+        const finalScheduledQuantity = updates.scheduledQuantity || currentGoal.scheduledQuantity || 0;
+        const finalRemainingQuantity = updates.remainingQuantity !== undefined ? updates.remainingQuantity : (finalTargetQuantity - finalScheduledQuantity);
+        
+        // Update status based on final quantities
+        if (finalRemainingQuantity <= 0) {
+            updates.status = 'completed';
+        } else if (finalScheduledQuantity > 0) {
+            updates.status = 'in-progress';
+        } else {
+            updates.status = 'pending';
         }
         
         const result = await collection.updateOne(
