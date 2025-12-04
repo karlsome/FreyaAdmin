@@ -1944,6 +1944,20 @@ function loadPage(page) {
             initializePlanner();
           }
           
+          // Load goals if factory is already selected (from localStorage)
+          setTimeout(() => {
+            if (typeof plannerState !== 'undefined' && plannerState.currentFactory) {
+              console.log('🔄 Loading goals for pre-selected factory:', plannerState.currentFactory);
+              if (typeof loadGoals === 'function') {
+                loadGoals().then(() => {
+                  if (typeof renderGoalList === 'function') {
+                    renderGoalList();
+                  }
+                });
+              }
+            }
+          }, 500); // Small delay to ensure DOM is ready
+          
           if (typeof applyLanguageEnhanced === 'function') {
             applyLanguageEnhanced();
           } else if (typeof applyLanguage === 'function') {

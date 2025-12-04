@@ -99,22 +99,30 @@ function setupPlannerEventListeners() {
         endDateInput.addEventListener('change', handleEndDateChange);
     }
     
-    // Main tab switching (Goals vs Planning)
-    document.querySelectorAll('.planner-main-tab-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+    // Main tab switching (Goals vs Planning) - using event delegation
+    document.addEventListener('click', (e) => {
+        const mainTabBtn = e.target.closest('.planner-main-tab-btn');
+        if (mainTabBtn) {
             e.preventDefault();
-            const mainTab = e.currentTarget.dataset.mainTab || e.currentTarget.getAttribute('data-main-tab');
-            if (mainTab) switchPlannerMainTab(mainTab);
-        });
+            const mainTab = mainTabBtn.dataset.mainTab || mainTabBtn.getAttribute('data-main-tab');
+            if (mainTab) {
+                console.log('🔄 Switching to main tab:', mainTab);
+                switchPlannerMainTab(mainTab);
+            }
+        }
     });
     
-    // Sub-tab switching (Timeline/Kanban/Table)
-    document.querySelectorAll('.planner-tab-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+    // Sub-tab switching (Timeline/Kanban/Table) - using event delegation
+    document.addEventListener('click', (e) => {
+        const tabBtn = e.target.closest('.planner-tab-btn');
+        if (tabBtn) {
             e.preventDefault();
-            const tab = e.currentTarget.dataset.tab || e.currentTarget.getAttribute('data-tab');
-            if (tab) switchPlannerTab(tab);
-        });
+            const tab = tabBtn.dataset.tab || tabBtn.getAttribute('data-tab');
+            if (tab) {
+                console.log('🔄 Switching to sub tab:', tab);
+                switchPlannerTab(tab);
+            }
+        }
     });
     
     // Product search
@@ -132,6 +140,8 @@ function setupPlannerEventListeners() {
 
 // Switch between main tabs (Production Goals vs Planning)
 function switchPlannerMainTab(tab) {
+    console.log('📋 Switching to main tab:', tab, 'Current factory:', plannerState.currentFactory);
+    
     // Update tab buttons
     document.querySelectorAll('.planner-main-tab-btn').forEach(btn => {
         const btnTab = btn.dataset.mainTab || btn.getAttribute('data-main-tab');
@@ -151,13 +161,42 @@ function switchPlannerMainTab(tab) {
     
     if (tab === 'goals') {
         document.getElementById('planner-goals-tab')?.classList.remove('hidden');
+        
+        // Re-render goals list when switching to goals tab if factory is selected
+        if (plannerState.currentFactory) {
+            console.log('🎯 Rendering goals list...');
+            console.log('   Goals count:', plannerState.goals.length);
+            
+            // If goals not loaded yet, load them first
+            if (plannerState.goals.length === 0) {
+                console.log('⚠️ Goals not loaded, loading now...');
+                loadGoals().then(() => {
+                    renderGoalList();
+                });
+            } else {
+                renderGoalList();
+            }
+        }
     } else if (tab === 'planning') {
         document.getElementById('planner-planning-tab')?.classList.remove('hidden');
         
         // Re-render views when switching to planning tab if factory is selected
-        if (plannerState.currentFactory && plannerState.equipment.length > 0) {
-            updateSelectedProductsSummary();
-            renderAllViews();
+        if (plannerState.currentFactory) {
+            console.log('📊 Rendering planning views...');
+            console.log('   Equipment count:', plannerState.equipment.length);
+            console.log('   Selected products count:', plannerState.selectedProducts.length);
+            
+            // If equipment not loaded yet, load it first
+            if (plannerState.equipment.length === 0) {
+                console.log('⚠️ Equipment not loaded, loading now...');
+                loadEquipmentForFactory(plannerState.currentFactory).then(() => {
+                    updateSelectedProductsSummary();
+                    renderAllViews();
+                });
+            } else {
+                updateSelectedProductsSummary();
+                renderAllViews();
+            }
         }
     }
 }
@@ -1127,7 +1166,12 @@ function renderProductList() {
 // Render goal list (replaces product list)
 function renderGoalList() {
     const container = document.getElementById('goalListContainer');
-    if (!container) return;
+    if (!container) {
+        console.warn('⚠️ goalListContainer not found, cannot render goals');
+        return;
+    }
+    
+    console.log('🎯 Rendering goal list with', plannerState.goals.length, 'goals');
     
     const searchTerm = document.getElementById('goalSearch')?.value?.toLowerCase() || '';
     
@@ -1209,6 +1253,7 @@ function renderGoalList() {
     });
     
     container.innerHTML = html;
+    console.log('✅ Goal list rendered successfully with', Object.keys(goalsByDate).length, 'date groups');
 }
 
 function renderGoalCard(goal) {
