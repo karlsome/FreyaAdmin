@@ -1424,7 +1424,7 @@ function confirmAddProduct(productId) {
     renderAllViews();
 }
 
-function updateSelectedProductsSummary() {
+function updateSelectedProductsSummary(searchTerm = '') {
     const container = document.getElementById('selectedProductsSummary');
     if (!container) return;
     
@@ -1450,17 +1450,49 @@ function updateSelectedProductsSummary() {
         byEquipment[item.equipment].totalMinutes += item.estimatedTime.totalSeconds / 60;
     });
     
+    // Calculate total matches if searching
+    let totalMatches = 0;
+    if (searchTerm) {
+        const searchLower = searchTerm.toLowerCase();
+        totalMatches = plannerState.selectedProducts.filter(item =>
+            (item.背番号 || '').toLowerCase().includes(searchLower) ||
+            (item.品番 || '').toLowerCase().includes(searchLower)
+        ).length;
+    }
+    
+    const searchResultInfo = searchTerm ? `
+        <div class="mb-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 rounded text-[10px] text-blue-700 dark:text-blue-300 flex items-center gap-1">
+            <i class="ri-search-line"></i>
+            <span>Found ${totalMatches} matching product(s)</span>
+        </div>
+    ` : '';
+    
     const clearAllButton = `
-        <div class="mb-2 flex justify-end">
+        <div class="mb-1 flex justify-end">
             <button onclick="clearAllSelectedProducts()" 
-                    class="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center gap-1">
-                <i class="ri-delete-bin-line"></i>
+                    class="px-2 py-0.5 text-[10px] bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center gap-1">
+                <i class="ri-delete-bin-line text-xs"></i>
                 <span>Clear All</span>
             </button>
         </div>
     `;
     
-    container.innerHTML = clearAllButton + Object.entries(byEquipment).map(([equipment, data]) => {
+    container.innerHTML = searchResultInfo + clearAllButton + Object.entries(byEquipment).map(([equipment, data]) => {
+        // Filter items if search term is provided
+        const searchLower = searchTerm.toLowerCase();
+        const filteredItems = searchTerm ? data.items.filter(item => 
+            (item.背番号 || '').toLowerCase().includes(searchLower) ||
+            (item.品番 || '').toLowerCase().includes(searchLower)
+        ) : data.items;
+        
+        // Check if this equipment has any matching items
+        const hasMatch = filteredItems.length > 0;
+        
+        // If searching and no match, hide this equipment group
+        if (searchTerm && !hasMatch) {
+            return '';
+        }
+        
         // Calculate time range
         const startTimes = data.items.map(item => timeToMinutes(item.startTime));
         const earliestStart = Math.min(...startTimes);
@@ -1480,36 +1512,39 @@ function updateSelectedProductsSummary() {
         const utilization = Math.round((data.totalMinutes / effectiveWork) * 100);
         const isOverCapacity = utilization > 100;
         
+        // Auto-expand if searching and has matches
+        const isExpanded = searchTerm && hasMatch;
+        
         return `
-            <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg mb-2 overflow-hidden">
+            <div class="bg-gray-50 dark:bg-gray-700/50 rounded mb-1 overflow-hidden ${searchTerm && hasMatch ? 'ring-2 ring-blue-500' : ''}">
                 <!-- Collapsed Summary Card -->
-                <div class="p-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors" 
+                <div class="p-1.5 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors" 
                      onclick="toggleEquipmentCard('${equipment}')">
-                    <div class="flex items-center justify-between">
-                        <div class="flex-1">
-                            <h4 class="font-medium text-sm text-gray-900 dark:text-white mb-0.5">${equipment}</h4>
-                            <div class="text-xs text-gray-600 dark:text-gray-300">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                            <h4 class="font-medium text-xs text-gray-900 dark:text-white truncate">${equipment}</h4>
+                            <div class="text-[10px] text-gray-600 dark:text-gray-300 flex items-center gap-1 flex-wrap">
                                 <span>${itemCount} items</span>
-                                <span class="mx-1">•</span>
+                                <span>•</span>
                                 <span>${totalQuantity}pcs</span>
-                                <span class="mx-1">•</span>
-                                <span>${timeRange}</span>
+                                <span>•</span>
+                                <span class="truncate">${timeRange}</span>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs ${isOverCapacity ? 'text-red-600 font-bold' : 'text-gray-500 dark:text-gray-400'}">
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
+                            <span class="text-[10px] ${isOverCapacity ? 'text-red-600 font-bold' : 'text-gray-500 dark:text-gray-400'} whitespace-nowrap">
                                 ${timeStr} (${utilization}%)
-                                ${isOverCapacity ? '<i class="ri-alert-fill ml-1"></i>' : ''}
+                                ${isOverCapacity ? '<i class="ri-alert-fill ml-0.5"></i>' : ''}
                             </span>
-                            <i class="ri-arrow-down-s-line text-lg text-gray-500 dark:text-gray-400 transition-transform equipment-card-arrow" 
+                            <i class="ri-arrow-down-s-line text-base text-gray-500 dark:text-gray-400 transition-transform equipment-card-arrow ${isExpanded ? 'rotate-180' : ''}" 
                                id="arrow-${equipment}"></i>
                         </div>
                     </div>
                 </div>
                 
                 <!-- Expandable Details -->
-                <div class="hidden border-t border-gray-200 dark:border-gray-600 p-2 space-y-1" id="details-${equipment}">
-                    ${data.items.map(item => {
+                <div class="${isExpanded ? '' : 'hidden'} border-t border-gray-200 dark:border-gray-600 p-1 space-y-0.5" id="details-${equipment}">
+                    ${filteredItems.map(item => {
                         const startTime = item.startTime;
                         const startMinutes = timeToMinutes(startTime);
                         const durationMinutes = item.estimatedTime.totalSeconds / 60;
@@ -1547,28 +1582,33 @@ function updateSelectedProductsSummary() {
                             timeRanges = ranges.join(', ');
                         }
                         
+                        // Highlight matched text
+                        const highlightText = (text) => {
+                            if (!searchTerm || !text) return text;
+                            const regex = new RegExp(`(${searchTerm})`, 'gi');
+                            return text.replace(regex, '<mark class="bg-yellow-300 dark:bg-yellow-600 px-0.5">$1</mark>');
+                        };
+                        
                         return `
-                        <div class="flex items-center justify-between text-xs py-1 border-b border-gray-200 dark:border-gray-600 last:border-0">
-                            <div class="flex items-center gap-1.5 flex-1">
-                                <div class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background-color: ${item.color}"></div>
-                                <div class="flex flex-col">
-                                    <span class="text-gray-700 dark:text-gray-300 font-medium">${item.背番号}</span>
-                                    <span class="text-[10px] text-gray-500 dark:text-gray-400">${timeRanges}</span>
-                                </div>
+                        <div class="flex items-center justify-between text-[10px] py-0.5 border-b border-gray-200 dark:border-gray-600 last:border-0 gap-1 ${searchTerm ? 'bg-blue-50 dark:bg-blue-900/20' : ''}">
+                            <div class="flex items-center gap-1 flex-1 min-w-0">
+                                <div class="w-1 h-1 rounded-full flex-shrink-0" style="background-color: ${item.color}"></div>
+                                <span class="text-gray-700 dark:text-gray-300 font-medium truncate">${highlightText(item.背番号)}</span>
+                                <span class="text-[9px] text-gray-500 dark:text-gray-400 truncate">${timeRanges}</span>
                             </div>
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-1 flex-shrink-0">
                                 <span class="text-gray-500 dark:text-gray-400">${item.quantity}pcs</span>
                                 <span class="text-gray-500 dark:text-gray-400">${item.estimatedTime.formattedTime}</span>
-                                <button onclick="removeSelectedProduct('${item._id}')" class="text-red-500 hover:text-red-700 flex-shrink-0">
-                                    <i class="ri-close-line text-sm"></i>
+                                <button onclick="removeSelectedProduct('${item._id}')" class="text-red-500 hover:text-red-700">
+                                    <i class="ri-close-line text-xs"></i>
                                 </button>
                             </div>
                         </div>
                     `}).join('')}
                 </div>
                 ${isOverCapacity ? `
-                    <div class="mt-2 text-xs text-red-600 dark:text-red-400">
-                        <i class="ri-error-warning-line mr-1"></i>
+                    <div class="px-1.5 pb-1 text-[10px] text-red-600 dark:text-red-400">
+                        <i class="ri-error-warning-line mr-0.5"></i>
                         <span data-i18n="exceedsCapacity">Exceeds daily capacity</span>
                     </div>
                 ` : ''}
@@ -1670,6 +1710,11 @@ async function clearAllSelectedProducts() {
     
     showPlannerNotification('All products cleared from timeline', 'success');
 }
+
+// Filter selected products by search term
+window.filterSelectedProducts = function(searchTerm) {
+    updateSelectedProductsSummary(searchTerm);
+};
 
 // ============================================
 // VIEW RENDERING
