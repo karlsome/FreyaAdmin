@@ -1199,83 +1199,283 @@ window.closeManualGoalModal = function() {
 };
 
 window.confirmManualGoal = async function() {
+    console.log('=== CONFIRM MANUAL GOAL START ===');
+    
     const product = window._selectedGoalProduct;
     const quantity = parseInt(document.getElementById('manualGoalQuantity')?.value);
     const date = document.getElementById('manualGoalDate')?.value;
     
+    console.log('Product:', product);
+    console.log('Quantity:', quantity);
+    console.log('Date:', date);
+    console.log('Current Factory:', plannerState.currentFactory);
+    
     if (!product) {
+        console.log('❌ No product selected');
         showPlannerNotification('Please select a product', 'warning');
         return;
     }
     
     if (!quantity || quantity <= 0) {
+        console.log('❌ Invalid quantity');
         showPlannerNotification('Please enter a valid quantity', 'warning');
         return;
     }
     
     if (!date) {
+        console.log('❌ No date selected');
         showPlannerNotification('Please select a date', 'warning');
         return;
     }
     
     try {
+        console.log('🔍 Checking for duplicates...');
+        console.log('Request URL:', BASE_URL + 'api/production-goals/check-duplicates');
+        console.log('Request body:', {
+            factory: plannerState.currentFactory,
+            items: [{ 背番号: product.背番号, date: date }]
+        });
+        
         // Check for duplicates
         const dupResponse = await fetch(BASE_URL + 'api/production-goals/check-duplicates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 factory: plannerState.currentFactory,
-                date: date,
-                items: [{ 背番号: product.背番号 }]
+                items: [{ 背番号: product.背番号, date: date }]
             })
         });
         
+        console.log('Duplicate check response status:', dupResponse.status);
+        
         const dupResult = await dupResponse.json();
+        console.log('Duplicate check result:', dupResult);
         
         if (dupResult.success && dupResult.hasDuplicates) {
-            // Ask user: overwrite or add?
-            const existing = dupResult.duplicates[0].existing;
-            const choice = await showDuplicateChoiceModal(product, existing, quantity);
+            console.log('✓ Duplicates found:', dupResult.duplicates.length);
+            console.log('Existing goal:', dupResult.duplicates[0]);
             
-            if (choice === 'cancel') return;
+            // Close manual goal modal first to avoid modal stacking
+            console.log('Closing manual goal modal...');
+            closeManualGoalModal();
             
-            if (choice === 'overwrite') {
-                // Update existing goal
-                await updateGoal(existing._id, { targetQuantity: quantity, remainingQuantity: quantity });
-            } else if (choice === 'add') {
-                // Add to existing quantity
-                const newTotal = existing.targetQuantity + quantity;
-                await updateGoal(existing._id, { 
-                    targetQuantity: newTotal, 
-                    remainingQuantity: existing.remainingQuantity + quantity 
-                });
-            }
+            // Show duplicate confirmation for single goal
+            const existing = dupResult.duplicates[0];
+            console.log('Showing duplicate modal...');
+            showSingleGoalDuplicateModal(product, existing, quantity, date);
         } else {
+            console.log('✓ No duplicates found, creating new goal...');
             // Create new goal
-            await fetch(BASE_URL + 'api/production-goals', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    factory: plannerState.currentFactory,
-                    date: date,
-                    背番号: product.背番号,
-                    品番: product.品番,
-                    品名: product.品名,
-                    収容数: product.収容数,
-                    targetQuantity: quantity,
-                    createdBy: window.currentUser?.username || 'system'
-                })
+            await createNewGoal(product, quantity, date);
+        }
+        
+        console.log('=== CONFIRM MANUAL GOAL END ===');
+        
+    } catch (error) {
+        console.error('❌ Error adding goal:', error);
+        console.error('Error stack:', error.stack);
+        showPlannerNotification('Error adding goal: ' + error.message, 'error');
+    }
+};
+
+// Create new goal helper function
+async function createNewGoal(product, quantity, date) {
+    console.log('📝 Creating new goal...');
+    console.log('Product:', product);
+    console.log('Quantity:', quantity);
+    console.log('Date:', date);
+    
+    try {
+        console.log('Request URL:', BASE_URL + 'api/production-goals');
+        console.log('Request body:', {
+            factory: plannerState.currentFactory,
+            date: date,
+            背番号: product.背番号,
+            品番: product.品番,
+            品名: product.品名,
+            収容数: product.収容数,
+            targetQuantity: quantity
+        });
+        
+        const response = await fetch(BASE_URL + 'api/production-goals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: date,
+                背番号: product.背番号,
+                品番: product.品番,
+                品名: product.品名,
+                収容数: product.収容数,
+                targetQuantity: quantity,
+                createdBy: window.currentUser?.username || 'system'
+            })
+        });
+        
+        console.log('Create goal response status:', response.status);
+        
+        const result = await response.json();
+        console.log('Create goal result:', result);
+        
+        if (result.success) {
+            console.log('✓ Goal created successfully');
+            await loadGoals();
+            renderGoalList();
+            closeManualGoalModal();
+            showPlannerNotification('Goal added successfully', 'success');
+        } else {
+            console.error('❌ Failed to create goal:', result.error);
+            throw new Error(result.error || 'Failed to create goal');
+        }
+    } catch (error) {
+        console.error('❌ Error creating goal:', error);
+        console.error('Error stack:', error.stack);
+        showPlannerNotification('Error creating goal: ' + error.message, 'error');
+    }
+}
+
+// Show duplicate modal for single manual goal
+function showSingleGoalDuplicateModal(product, existing, newQuantity, date) {
+    const modalHTML = `
+        <div id="singleGoalDuplicateModal" class="fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-red-600 dark:text-red-400 flex items-center gap-2">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        Duplicate Goal Found
+                    </h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                        A goal for this product already exists on ${date}. What would you like to do?
+                    </p>
+                </div>
+                
+                <div class="p-6">
+                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 mb-6">
+                        <div class="grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                                <p class="text-gray-600 dark:text-gray-400 mb-1">Product</p>
+                                <p class="font-medium text-gray-900 dark:text-white">${product.背番号}</p>
+                                <p class="text-xs text-gray-600 dark:text-gray-400">${product.品番}</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-600 dark:text-gray-400 mb-1">Current Quantity</p>
+                                <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">${existing.targetQuantity}</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-600 dark:text-gray-400 mb-1">New Quantity</p>
+                                <p class="text-2xl font-bold text-green-600 dark:text-green-400">${newQuantity}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        <button onclick="handleSingleGoalDuplicateAction('skip')" 
+                                class="w-full p-4 text-left border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="font-medium text-gray-900 dark:text-white">Skip (Keep Existing)</p>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400">Cancel this operation and keep current quantity</p>
+                                </div>
+                                <div class="text-xl font-bold text-gray-600 dark:text-gray-400">${existing.targetQuantity}</div>
+                            </div>
+                        </button>
+                        
+                        <button onclick="handleSingleGoalDuplicateAction('add')" 
+                                class="w-full p-4 text-left border-2 border-green-300 dark:border-green-600 rounded-lg hover:border-green-400 dark:hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="font-medium text-gray-900 dark:text-white">Add to Existing</p>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400">Increase quantity by ${newQuantity}</p>
+                                </div>
+                                <div class="text-xl font-bold text-green-600 dark:text-green-400">${existing.targetQuantity + newQuantity}</div>
+                            </div>
+                        </button>
+                        
+                        <button onclick="handleSingleGoalDuplicateAction('overwrite')" 
+                                class="w-full p-4 text-left border-2 border-orange-300 dark:border-orange-600 rounded-lg hover:border-orange-400 dark:hover:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <p class="font-medium text-gray-900 dark:text-white">Overwrite</p>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400">Replace current quantity with new value</p>
+                                </div>
+                                <div class="text-xl font-bold text-orange-600 dark:text-orange-400">${newQuantity}</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+                    <button onclick="closeSingleGoalDuplicateModal()" 
+                            class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Store context for action handler
+    window._singleGoalDuplicateContext = {
+        product,
+        existing,
+        newQuantity,
+        date
+    };
+}
+
+// Close single goal duplicate modal
+window.closeSingleGoalDuplicateModal = function() {
+    const modal = document.getElementById('singleGoalDuplicateModal');
+    if (modal) modal.remove();
+    window._singleGoalDuplicateContext = null;
+};
+
+// Handle single goal duplicate action
+window.handleSingleGoalDuplicateAction = async function(action) {
+    const context = window._singleGoalDuplicateContext;
+    if (!context) return;
+    
+    const { product, existing, newQuantity, date } = context;
+    
+    try {
+        if (action === 'skip') {
+            // Close duplicate modal
+            closeSingleGoalDuplicateModal();
+            // Don't do anything, just cancel the operation
+            return;
+        }
+        
+        if (action === 'add') {
+            // Add to existing quantity
+            const newTotal = existing.targetQuantity + newQuantity;
+            const newRemaining = existing.remainingQuantity + newQuantity;
+            await updateGoal(existing._id, { 
+                targetQuantity: newTotal, 
+                remainingQuantity: newRemaining
             });
+            showPlannerNotification(`Goal updated: ${existing.targetQuantity} → ${newTotal}`, 'success');
+        } else if (action === 'overwrite') {
+            // Replace with new quantity
+            const quantityDiff = newQuantity - existing.targetQuantity;
+            const newRemaining = Math.max(0, existing.remainingQuantity + quantityDiff);
+            await updateGoal(existing._id, { 
+                targetQuantity: newQuantity,
+                remainingQuantity: newRemaining
+            });
+            showPlannerNotification(`Goal updated: ${existing.targetQuantity} → ${newQuantity}`, 'success');
         }
         
         await loadGoals();
         renderGoalList();
-        closeManualGoalModal();
-        showPlannerNotification('Goal added successfully', 'success');
+        closeSingleGoalDuplicateModal();
         
     } catch (error) {
-        console.error('Error adding goal:', error);
-        showPlannerNotification('Error adding goal: ' + error.message, 'error');
+        console.error('Error handling duplicate action:', error);
+        showPlannerNotification('Error: ' + error.message, 'error');
     }
 };
 
@@ -4707,17 +4907,25 @@ function showGoalAutoFillNotification(message) {
 }
 
 async function addNewGoalFromTable() {
+    console.log('=== ADD NEW GOAL FROM TABLE START ===');
+    
     const 背番号 = document.getElementById('newGoal背番号')?.value?.trim();
     const 品番 = document.getElementById('newGoal品番')?.value?.trim();
     const 品名 = document.getElementById('newGoal品名')?.value?.trim();
     const quantity = parseInt(document.getElementById('newGoalQuantity')?.value);
     
+    console.log('Input values:', { 背番号, 品番, 品名, quantity });
+    console.log('Current factory:', plannerState.currentFactory);
+    console.log('Current date:', plannerState.currentDate);
+    
     if (!背番号 || !品番) {
+        console.log('❌ Missing required fields');
         showPlannerNotification('背番号 and 品番 are required', 'error');
         return;
     }
     
     if (isNaN(quantity) || quantity < 1) {
+        console.log('❌ Invalid quantity');
         showPlannerNotification('Invalid quantity', 'error');
         return;
     }
@@ -4726,6 +4934,7 @@ async function addNewGoalFromTable() {
         // Look up product details from masterDB if needed
         let productData = { 背番号, 品番, 品名 };
         
+        console.log('🔍 Looking up product in masterDB...');
         // Try to find additional details from masterDB
         const lookupResponse = await fetch(BASE_URL + 'api/production-goals/lookup', {
             method: 'POST',
@@ -4737,9 +4946,43 @@ async function addNewGoalFromTable() {
         });
         
         const lookupResult = await lookupResponse.json();
+        console.log('Lookup result:', lookupResult);
+        
         if (lookupResult.success && lookupResult.data) {
             productData = { ...productData, ...lookupResult.data };
+            console.log('✓ Product data enriched from masterDB');
         }
+        
+        // Check for duplicates BEFORE creating
+        console.log('🔍 Checking for duplicates...');
+        const dupResponse = await fetch(BASE_URL + 'api/production-goals/check-duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                items: [{ 背番号, 品番, date: plannerState.currentDate }]
+            })
+        });
+        
+        const dupResult = await dupResponse.json();
+        console.log('Duplicate check result:', dupResult);
+        
+        if (dupResult.success && dupResult.hasDuplicates) {
+            console.log('✓ Duplicates found:', dupResult.duplicates.length);
+            console.log('Existing goal:', dupResult.duplicates[0]);
+            
+            // Close bulk edit modal first to avoid modal stacking
+            console.log('Closing bulk edit modal...');
+            closeBulkEditGoalsModal();
+            
+            // Show duplicate confirmation
+            const existing = dupResult.duplicates[0];
+            console.log('Showing duplicate modal...');
+            showSingleGoalDuplicateModal(productData, existing, quantity, plannerState.currentDate);
+            return;
+        }
+        
+        console.log('✓ No duplicates found, creating new goal...');
         
         // Create the goal
         const response = await fetch(BASE_URL + 'api/production-goals', {
@@ -4753,9 +4996,14 @@ async function addNewGoalFromTable() {
             })
         });
         
+        console.log('Create response status:', response.status);
+        
         const result = await response.json();
+        console.log('Create result:', result);
         
         if (result.success) {
+            console.log('✓ Goal created successfully');
+            
             // Add to local state
             plannerState.goals.push(result.data);
             
