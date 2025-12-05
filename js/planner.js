@@ -37,7 +37,8 @@ let plannerState = {
     ],
     activeTab: 'timeline',
     productColors: {},
-    colorIndex: 0
+    colorIndex: 0,
+    hideUnavailableEquipment: false // Toggle for hiding greyed out equipment
 };
 
 // Color palette for products
@@ -2570,40 +2571,90 @@ function renderTimelineView() {
         `;
     });
     
+    // Helper function to check if equipment should be greyed out
+    function shouldGreyOutEquipment(equipment, dataSource) {
+        // If equipment contains comma, it's a group - check if any component has data
+        if (equipment.includes(',')) {
+            const components = equipment.split(',').map(e => e.trim());
+            return components.some(comp => 
+                dataSource.some(d => d.equipment === comp)
+            );
+        }
+        
+        // If solo equipment, check if it's part of any group that has data
+        return plannerState.equipment.some(eq => {
+            if (eq.includes(',') && eq.includes(equipment)) {
+                const components = eq.split(',').map(e => e.trim());
+                if (components.includes(equipment)) {
+                    return dataSource.some(d => d.equipment === eq);
+                }
+            }
+            return false;
+        });
+    }
+    
     // Build equipment rows - Planned first, then Actual
     let rowsHTML = '';
     plannerState.equipment.forEach(equipment => {
         const assignedProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
         const actualProduction = plannerState.actualProduction.filter(p => p.equipment === equipment);
-        console.log(`🔧 ${equipment}: ${assignedProducts.length} planned, ${actualProduction.length} actual`);
+        
+        // Check if rows should be greyed out independently
+        const greyOutPlanned = shouldGreyOutEquipment(equipment, plannerState.selectedProducts);
+        const greyOutActual = shouldGreyOutEquipment(equipment, plannerState.actualProduction);
+        
+        console.log(`🔧 ${equipment}: ${assignedProducts.length} planned (grey: ${greyOutPlanned}), ${actualProduction.length} actual (grey: ${greyOutActual})`);
         
         // Planned row
-        rowsHTML += `
-            <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-equipment="${equipment}">
-                <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/50 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">
-                    ${equipment}
-                </div>
-                <div class="flex-1 flex relative">
-                    ${renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth)}
-                </div>
-            </div>
-        `;
+        const plannedRowClasses = greyOutPlanned ? 'opacity-40 pointer-events-none' : '';
+        const hidePlannedRow = plannerState.hideUnavailableEquipment && greyOutPlanned;
         
-        // Actual row (only if there's any actual production or to show IDLE)
-        rowsHTML += `
-            <div class="flex border-b dark:border-gray-600 min-h-[60px] bg-gray-50/30 dark:bg-gray-900/30" data-equipment="${equipment}-actual">
-                <div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-800 border-r dark:border-gray-600 p-2 text-xs font-medium text-gray-600 dark:text-gray-400 sticky left-0 z-10 flex flex-col justify-center">
-                    <div>${equipment}</div>
-                    <div class="text-[10px] text-gray-500 dark:text-gray-500">Actual</div>
+        if (!hidePlannedRow) {
+            rowsHTML += `
+                <div class="flex border-b dark:border-gray-600 min-h-[60px] ${plannedRowClasses}" data-equipment="${equipment}">
+                    <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/50 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">
+                        ${equipment}${greyOutPlanned ? ' <span class="text-[10px] text-gray-500">(unavailable)</span>' : ''}
+                    </div>
+                    <div class="flex-1 flex relative">
+                        ${renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth)}
+                    </div>
                 </div>
-                <div class="flex-1 flex relative">
-                    ${renderActualProductionSlots(timeSlots, equipment, actualProduction, slotWidth)}
+            `;
+        }
+        
+        // Actual row
+        const actualRowClasses = greyOutActual ? 'opacity-40 pointer-events-none' : '';
+        const hideActualRow = plannerState.hideUnavailableEquipment && greyOutActual;
+        
+        if (!hideActualRow) {
+            rowsHTML += `
+                <div class="flex border-b dark:border-gray-600 min-h-[60px] bg-gray-50/30 dark:bg-gray-900/30 ${actualRowClasses}" data-equipment="${equipment}-actual">
+                    <div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-800 border-r dark:border-gray-600 p-2 text-xs font-medium text-gray-600 dark:text-gray-400 sticky left-0 z-10 flex flex-col justify-center">
+                        <div>${equipment}${greyOutActual ? ' <span class="text-[9px] text-gray-500">(unavailable)</span>' : ''}</div>
+                        <div class="text-[10px] text-gray-500 dark:text-gray-500">Actual</div>
+                    </div>
+                    <div class="flex-1 flex relative">
+                        ${renderActualProductionSlots(timeSlots, equipment, actualProduction, slotWidth)}
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
     });
     
     container.innerHTML = `
+        <!-- Toggle Button -->
+        <div class="mb-3 flex items-center justify-end">
+            <button onclick="toggleHideUnavailableEquipment()" 
+                    class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                        plannerState.hideUnavailableEquipment 
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-700 dark:text-blue-400' 
+                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                    }">
+                <i class="ri-${ plannerState.hideUnavailableEquipment ? 'eye-off-line' : 'eye-line' }"></i>
+                <span>${ plannerState.hideUnavailableEquipment ? 'Show' : 'Hide' } Unavailable Equipment</span>
+            </button>
+        </div>
+        
         <div class="border rounded-lg dark:border-gray-600 overflow-hidden">
             <div class="overflow-auto max-h-[calc(100vh-200px)]">
                 <div class="min-w-max relative">
@@ -5614,6 +5665,12 @@ window.showActualProductionModal = function(equipment, sebanggo, slotIndex) {
 window.closeActualProductionModal = function() {
     const modal = document.getElementById('actualProductionModal');
     if (modal) modal.remove();
+};
+
+// Toggle hide/show unavailable equipment
+window.toggleHideUnavailableEquipment = function() {
+    plannerState.hideUnavailableEquipment = !plannerState.hideUnavailableEquipment;
+    renderTimelineView();
 };
 
 window.handleProductDragStart = handleProductDragStart;
