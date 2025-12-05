@@ -89,9 +89,13 @@
               <img src="https://i.pravatar.cc/40" class="w-10 h-10 rounded-full border" alt="Profile" />
             </button>
 
-            <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded shadow-lg z-50">
-              <div class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
-                <span data-i18n="role">Role</span>: <span id="userRole">admin</span>
+            <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded shadow-lg z-50">
+              <div class="px-4 py-3 border-b dark:border-gray-700">
+                <div class="text-sm font-semibold text-gray-900 dark:text-white" id="userFullName">Loading...</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5" id="userUsername">@username</div>
+              </div>
+              <div class="px-4 py-2 text-xs text-gray-600 dark:text-gray-400">
+                <span data-i18n="role">Role</span>: <span id="userRole" class="font-medium text-gray-900 dark:text-white">admin</span>
               </div>
               <div class="border-t dark:border-gray-700"></div>
               <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-i18n="logout">
@@ -157,6 +161,58 @@
   // Add event listener to mobile menu button
   if (menuBtn) {
     menuBtn.addEventListener("click", toggleSidebar);
+  }
+
+  // Function to update user profile dropdown with username and full name
+  async function updateUserProfileDropdown() {
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+      const username = currentUser.username || 'Unknown';
+      
+      // Update username
+      const usernameDisplay = document.getElementById('userUsername');
+      if (usernameDisplay) {
+        usernameDisplay.textContent = `@${username}`;
+      }
+      
+      // Define BASE_URL if not already defined
+      const baseUrl = window.BASE_URL || 'http://localhost:3000/';
+      
+      // Fetch full name from database
+      const response = await fetch(`${baseUrl}queries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dbName: "Sasaki_Coating_MasterDB",
+          collectionName: "users",
+          query: { username: username },
+          projection: { firstName: 1, lastName: 1 }
+        })
+      });
+      
+      if (response.ok) {
+        const users = await response.json();
+        const fullNameDisplay = document.getElementById('userFullName');
+        
+        if (users.length > 0 && fullNameDisplay) {
+          const user = users[0];
+          const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+          fullNameDisplay.textContent = fullName || username;
+        } else if (fullNameDisplay) {
+          fullNameDisplay.textContent = username;
+        }
+      }
+    } catch (error) {
+      console.error('Error updating user profile dropdown:', error);
+    }
+  }
+
+  // Call the function when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', updateUserProfileDropdown);
+  } else {
+    // DOM is already ready
+    updateUserProfileDropdown();
   }
 </script>
 

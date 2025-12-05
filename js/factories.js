@@ -163,11 +163,11 @@ async function getSensorData(factoryName) {
     
     // Check if cached data is still valid
     if (cached && (Date.now() - cached.timestamp) < SENSOR_CACHE_DURATION) {
-        console.log(`Using cached sensor data for ${factoryName}`);
+// console.log(`Using cached sensor data for ${factoryName}`);
         return cached;
     }
     
-    console.log(`Fetching fresh sensor data for ${factoryName}`);
+// console.log(`Fetching fresh sensor data for ${factoryName}`);
     
     try {
         // Get today's date
@@ -195,7 +195,7 @@ async function getSensorData(factoryName) {
         const sensorReadings = await res.json();
         
         if (!sensorReadings || sensorReadings.length === 0) {
-            console.log(`No sensor data found for ${factoryName} on ${today}`);
+// console.log(`No sensor data found for ${factoryName} on ${today}`);
             return {
                 sensors: [],
                 highestTemp: null,
@@ -263,7 +263,7 @@ async function getSensorData(factoryName) {
         
         // Cache the data
         sensorDataCache.set(cacheKey, result);
-        console.log(`Sensor data for ${factoryName}:`, result);
+// console.log(`Sensor data for ${factoryName}:`, result);
         return result;
         
     } catch (error) {
@@ -447,14 +447,14 @@ async function getWeatherData(lat, lon) {
                 coordinates: `${lat}, ${lon}`
             };
             
-            console.log(`Weather API Response for ${lat}, ${lon}:`, {
-                rawTemperature: data.current.temperature_2m,
-                processedTemperature: weatherResult.temperature,
-                apiTime: data.current.time,
-                localTime: new Date().toISOString(),
-                isDay: weatherResult.isDay,
-                weatherCode: weatherResult.weatherCode
-            });
+            // console.log(`Weather API Response for ${lat}, ${lon}:`, {
+            //     rawTemperature: data.current.temperature_2m,
+            //     processedTemperature: weatherResult.temperature,
+            //     apiTime: data.current.time,
+            //     localTime: new Date().toISOString(),
+            //     isDay: weatherResult.isDay,
+            //     weatherCode: weatherResult.weatherCode
+            // });
             
             return weatherResult;
         }
@@ -478,7 +478,7 @@ async function getEnvironmentalData(factoryName) {
         return cached;
     }
     
-    console.log(`Fetching fresh environmental data for ${factoryName}`);
+// console.log(`Fetching fresh environmental data for ${factoryName}`);
     
     try {
         const locationData = await getFactoryLocation(factoryName);
@@ -487,7 +487,7 @@ async function getEnvironmentalData(factoryName) {
             return getDefaultEnvironmentalData();
         }
         
-        console.log(`Location data for ${factoryName}:`, locationData);
+// console.log(`Location data for ${factoryName}:`, locationData);
         
         let coordinates = locationData.coordinates;
         
@@ -503,17 +503,17 @@ async function getEnvironmentalData(factoryName) {
             return getDefaultEnvironmentalData();
         }
         
-        console.log(`Using coordinates for ${factoryName}: ${coordinates.lat}, ${coordinates.lon} (source: ${locationData.source})`);
+// console.log(`Using coordinates for ${factoryName}: ${coordinates.lat}, ${coordinates.lon} (source: ${locationData.source})`);
         
         const weatherData = await getWeatherData(coordinates.lat, coordinates.lon);
         if (!weatherData) {
-            console.log(`Could not fetch weather data for ${factoryName}, using default data`);
+// console.log(`Could not fetch weather data for ${factoryName}, using default data`);
             return getDefaultEnvironmentalData();
         }
         
         // Mark the data source for better tracking
         weatherData.coordinateSource = locationData.source;
-        console.log(`Weather data for ${factoryName} (${locationData.source}):`, weatherData);
+// console.log(`Weather data for ${factoryName} (${locationData.source}):`, weatherData);
         
         // Cache the data
         environmentalDataCache.set(cacheKey, weatherData);
@@ -752,7 +752,7 @@ async function refreshEnvironmentalData(factoryName) {
         // Refresh the factory cards
         await renderFactoryCards();
         
-        console.log(`Environmental and sensor data refreshed for ${factoryName}`);
+// console.log(`Environmental and sensor data refreshed for ${factoryName}`);
         
         // Remove spinning animation
         setTimeout(() => {
@@ -1589,14 +1589,14 @@ window.showSensorModal = showSensorModal;
  * Test function for environmental data (for debugging)
  */
 async function testEnvironmentalData() {
-    console.log("Testing environmental data functionality...");
+// console.log("Testing environmental data functionality...");
     
     const testFactory = "第一工場";
     const envData = await getEnvironmentalData(testFactory);
     const sensorData = await getSensorData(testFactory);
     
     console.log(`Environmental data for ${testFactory}:`, envData);
-    console.log(`Sensor data for ${testFactory}:`, sensorData);
+// console.log(`Sensor data for ${testFactory}:`, sensorData);
     
     const tempStatus = getEnvironmentalStatus(envData.temperature, 'temperature');
     const humidityStatus = getEnvironmentalStatus(envData.humidity, 'humidity');
@@ -1609,13 +1609,13 @@ async function testEnvironmentalData() {
  * Test function for sensor data specifically
  */
 async function testSensorData() {
-    console.log("Testing sensor data functionality...");
+// console.log("Testing sensor data functionality...");
     
     const factoryNames = ["第一工場", "第二工場", "肥田瀬", "天徳", "倉知", "小瀬", "SCNA", "NFH"];
     
     for (const factory of factoryNames) {
         const sensorData = await getSensorData(factory);
-        console.log(`Sensor data for ${factory}:`, sensorData);
+// console.log(`Sensor data for ${factory}:`, sensorData);
         
         if (sensorData.sensorCount > 0) {
             console.log(`  - ${sensorData.sensorCount} sensors`);
@@ -1629,7 +1629,7 @@ async function testSensorData() {
  * Test function for sensor history
  */
 async function testSensorHistory() {
-    console.log("Testing sensor history functionality...");
+// console.log("Testing sensor history functionality...");
     
     // Test with a sample device ID
     const testDeviceId = "84:1F:E8:1A:D1:44";
@@ -1667,13 +1667,13 @@ async function testCurrentDateSensorLogic() {
             const sensorData = await getSensorData(factory);
             const hasHistorical = await hasHistoricalSensorData(factory);
             
-            console.log(`Sensor data for ${factory}:`, {
-                sensorCount: sensorData.sensorCount,
-                hasCurrentDateData: sensorData.hasCurrentDateData,
-                highestTemp: sensorData.highestTemp,
-                averageHumidity: sensorData.averageHumidity,
-                hasHistoricalData: hasHistorical
-            });
+            // console.log(`Sensor data for ${factory}:`, {
+            //     sensorCount: sensorData.sensorCount,
+            //     hasCurrentDateData: sensorData.hasCurrentDateData,
+            //     highestTemp: sensorData.highestTemp,
+            //     averageHumidity: sensorData.averageHumidity,
+            //     hasHistoricalData: hasHistorical
+            // });
             
             if (sensorData.hasCurrentDateData) {
                 console.log(`✅ ${factory} has current date data - will show sensor display`);
@@ -1733,7 +1733,7 @@ window.updateFactoryCoordinates = updateFactoryCoordinates;
  * Debug function to test weather API with specific coordinates
  */
 async function testWeatherAPI(lat, lon, location = '') {
-    console.log(`Testing weather API for coordinates: ${lat}, ${lon} (${location})`);
+// console.log(`Testing weather API for coordinates: ${lat}, ${lon} (${location})`);
     
     try {
         const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m&timezone=Asia/Tokyo`);
@@ -1793,7 +1793,7 @@ async function compareTemperatureSources() {
  * Test multiple weather APIs for comparison
  */
 async function testMultipleWeatherAPIs(lat, lon) {
-    console.log(`Testing multiple weather APIs for: ${lat}, ${lon}`);
+// console.log(`Testing multiple weather APIs for: ${lat}, ${lon}`);
     const results = {};
     
     // Test Open-Meteo (current)
@@ -1853,7 +1853,7 @@ async function enhancedTemperatureTest() {
     const exactLon = 136.8854813107706;
     
     console.log('=== ENHANCED TEMPERATURE ACCURACY TEST ===');
-    console.log(`Testing coordinates: ${exactLat}, ${exactLon} (小瀬 exact location)`);
+// console.log(`Testing coordinates: ${exactLat}, ${exactLon} (小瀬 exact location)`);
     
     // Test current time vs different times
     console.log('Testing current conditions...');
