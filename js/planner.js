@@ -188,17 +188,32 @@ function switchPlannerMainTab(tab) {
             console.log('   Selected products count:', plannerState.selectedProducts.length);
             console.log('   Actual production count:', plannerState.actualProduction.length);
             
-            // If equipment or actual production not loaded yet, load them first
-            if (plannerState.equipment.length === 0 || plannerState.actualProduction.length === 0) {
-                console.log('⚠️ Equipment or actual production not loaded, loading now...');
+            // Check if we need to load any data
+            const needsEquipment = plannerState.equipment.length === 0;
+            const needsPlans = plannerState.selectedProducts.length === 0;
+            const needsActualProduction = plannerState.actualProduction.length === 0;
+            
+            if (needsEquipment || needsPlans || needsActualProduction) {
+                console.log('⚠️ Loading missing data...');
+                console.log('   Needs equipment:', needsEquipment);
+                console.log('   Needs plans:', needsPlans);
+                console.log('   Needs actual production:', needsActualProduction);
+                
                 const loadPromises = [];
                 
-                if (plannerState.equipment.length === 0) {
+                if (needsEquipment) {
                     loadPromises.push(loadEquipmentForFactory(plannerState.currentFactory));
                 }
                 
-                // Always reload actual production when switching to planning tab to get fresh data
-                loadPromises.push(loadActualProduction(plannerState.currentFactory, plannerState.currentDate));
+                // Load existing plans to get selectedProducts
+                if (needsPlans) {
+                    loadPromises.push(loadExistingPlans(plannerState.currentFactory, plannerState.currentDate));
+                }
+                
+                // Load actual production data
+                if (needsActualProduction) {
+                    loadPromises.push(loadActualProduction(plannerState.currentFactory, plannerState.currentDate));
+                }
                 
                 Promise.all(loadPromises).then(() => {
                     updateSelectedProductsSummary();
