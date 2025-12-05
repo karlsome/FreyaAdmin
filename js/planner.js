@@ -2597,15 +2597,17 @@ function renderTimelineView() {
     });
     
     container.innerHTML = `
-        <div class="overflow-x-auto border rounded-lg dark:border-gray-600">
-            <div class="min-w-max">
-                <!-- Header -->
-                <div class="flex border-b dark:border-gray-600 bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
-                    ${headerHTML}
-                </div>
-                <!-- Rows -->
-                <div class="bg-white dark:bg-gray-800">
-                    ${rowsHTML}
+        <div class="border rounded-lg dark:border-gray-600 overflow-hidden">
+            <div class="overflow-auto max-h-[calc(100vh-300px)]">
+                <div class="min-w-max relative">
+                    <!-- Header -->
+                    <div class="flex border-b dark:border-gray-600 bg-gray-50 dark:bg-gray-700 sticky top-0 z-20">
+                        ${headerHTML}
+                    </div>
+                    <!-- Rows -->
+                    <div class="bg-white dark:bg-gray-800">
+                        ${rowsHTML}
+                    </div>
                 </div>
             </div>
         </div>
