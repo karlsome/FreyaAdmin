@@ -1944,17 +1944,23 @@ function loadPage(page) {
             initializePlanner();
           }
           
-          // Load goals if factory is already selected (from localStorage)
+          // Load products and goals if factory is already selected (from localStorage)
           setTimeout(() => {
             if (typeof plannerState !== 'undefined' && plannerState.currentFactory) {
-              console.log('🔄 Loading goals for pre-selected factory:', plannerState.currentFactory);
-              if (typeof loadGoals === 'function') {
-                loadGoals().then(() => {
-                  if (typeof renderGoalList === 'function') {
-                    renderGoalList();
-                  }
-                });
-              }
+              console.log('🔄 Loading data for pre-selected factory:', plannerState.currentFactory);
+              
+              // Load products first, then goals
+              (async () => {
+                if (typeof loadProductsForFactory === 'function') {
+                  await loadProductsForFactory(plannerState.currentFactory);
+                }
+                if (typeof loadGoals === 'function') {
+                  await loadGoals();
+                }
+                if (typeof renderGoalList === 'function') {
+                  renderGoalList();
+                }
+              })();
             }
           }, 500); // Small delay to ensure DOM is ready
           

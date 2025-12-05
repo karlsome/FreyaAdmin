@@ -168,13 +168,27 @@ function switchPlannerMainTab(tab) {
         if (plannerState.currentFactory) {
             console.log('🎯 Rendering goals list...');
             console.log('   Goals count:', plannerState.goals.length);
+            console.log('   Products count:', plannerState.products ? plannerState.products.length : 0);
             
-            // If goals not loaded yet, load them first
-            if (plannerState.goals.length === 0) {
-                console.log('⚠️ Goals not loaded, loading now...');
-                loadGoals().then(() => {
+            // Check if we need to load data
+            const needsGoals = plannerState.goals.length === 0;
+            const needsProducts = !plannerState.products || plannerState.products.length === 0;
+            
+            if (needsGoals || needsProducts) {
+                console.log('⚠️ Loading missing data for goals...');
+                console.log('   Needs goals:', needsGoals);
+                console.log('   Needs products:', needsProducts);
+                
+                // Load products first if needed, then goals
+                (async () => {
+                    if (needsProducts) {
+                        await loadProductsForFactory(plannerState.currentFactory);
+                    }
+                    if (needsGoals) {
+                        await loadGoals();
+                    }
                     renderGoalList();
-                });
+                })();
             } else {
                 renderGoalList();
             }
@@ -191,35 +205,45 @@ function switchPlannerMainTab(tab) {
             
             // Check if we need to load any data
             const needsEquipment = plannerState.equipment.length === 0;
+            const needsProducts = !plannerState.products || plannerState.products.length === 0;
             const needsPlans = plannerState.selectedProducts.length === 0;
             const needsActualProduction = plannerState.actualProduction.length === 0;
             
-            if (needsEquipment || needsPlans || needsActualProduction) {
+            if (needsEquipment || needsProducts || needsPlans || needsActualProduction) {
                 console.log('⚠️ Loading missing data...');
                 console.log('   Needs equipment:', needsEquipment);
+                console.log('   Needs products:', needsProducts);
                 console.log('   Needs plans:', needsPlans);
                 console.log('   Needs actual production:', needsActualProduction);
                 
-                const loadPromises = [];
-                
-                if (needsEquipment) {
-                    loadPromises.push(loadEquipmentForFactory(plannerState.currentFactory));
-                }
-                
-                // Load existing plans to get selectedProducts
-                if (needsPlans) {
-                    loadPromises.push(loadExistingPlans(plannerState.currentFactory, plannerState.currentDate));
-                }
-                
-                // Load actual production data
-                if (needsActualProduction) {
-                    loadPromises.push(loadActualProduction(plannerState.currentFactory, plannerState.currentDate));
-                }
-                
-                Promise.all(loadPromises).then(() => {
+                // Load products FIRST before plans (plans need products for box calculation)
+                (async () => {
+                    const loadPromises = [];
+                    
+                    if (needsEquipment) {
+                        loadPromises.push(loadEquipmentForFactory(plannerState.currentFactory));
+                    }
+                    
+                    // Load products first if needed
+                    if (needsProducts) {
+                        await loadProductsForFactory(plannerState.currentFactory);
+                    }
+                    
+                    // Then load plans (which needs products for box calculation)
+                    if (needsPlans) {
+                        loadPromises.push(loadExistingPlans(plannerState.currentFactory, plannerState.currentDate));
+                    }
+                    
+                    // Load actual production data
+                    if (needsActualProduction) {
+                        loadPromises.push(loadActualProduction(plannerState.currentFactory, plannerState.currentDate));
+                    }
+                    
+                    await Promise.all(loadPromises);
+                    
                     updateSelectedProductsSummary();
                     renderAllViews();
-                });
+                })();
             } else {
                 updateSelectedProductsSummary();
                 renderAllViews();
