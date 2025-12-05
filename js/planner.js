@@ -1499,6 +1499,11 @@ async function createNewGoal(product, quantity, date) {
     console.log('Date:', date);
     
     try {
+        // Get user's full name from database
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        const currentUsername = currentUser?.username || 'system';
+        const createdBy = await getUserFullName(currentUsername);
+        
         console.log('Request URL:', BASE_URL + 'api/production-goals');
         console.log('Request body:', {
             factory: plannerState.currentFactory,
@@ -1507,7 +1512,8 @@ async function createNewGoal(product, quantity, date) {
             品番: product.品番,
             品名: product.品名,
             収容数: product.収容数,
-            targetQuantity: quantity
+            targetQuantity: quantity,
+            createdBy: createdBy
         });
         
         const response = await fetch(BASE_URL + 'api/production-goals', {
@@ -1521,7 +1527,7 @@ async function createNewGoal(product, quantity, date) {
                 品名: product.品名,
                 収容数: product.収容数,
                 targetQuantity: quantity,
-                createdBy: window.currentUser?.username || 'system'
+                createdBy: createdBy
             })
         });
         
@@ -1724,16 +1730,48 @@ async function loadGoals() {
 }
 
 // Save goals batch
+// Get user full name from database
+async function getUserFullName(username) {
+    try {
+        const response = await fetch(`${BASE_URL}queries`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "users",
+                query: { username: username },
+                projection: { firstName: 1, lastName: 1 }
+            })
+        });
+        
+        if (response.ok) {
+            const users = await response.json();
+            if (users.length > 0) {
+                const user = users[0];
+                const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || username;
+                return fullName;
+            }
+        }
+        return username; // Fallback to username if full name not found
+    } catch (error) {
+        console.error('Error getting user full name:', error);
+        return username;
+    }
+}
+
 async function saveGoalsBatch(goals) {
     try {
+        // Get user's full name from database
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        const currentUsername = currentUser?.username || 'Unknown';
+        const createdBy = await getUserFullName(currentUsername);
+        
         const response = await fetch(BASE_URL + 'api/production-goals/batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 goals: goals,
-                createdBy: (window.currentUser?.firstName && window.currentUser?.lastName) 
-                    ? `${window.currentUser.firstName} ${window.currentUser.lastName}`
-                    : (window.currentUser?.username || 'Unknown')
+                createdBy: createdBy
             })
         });
         
@@ -5441,6 +5479,11 @@ async function addNewGoalFromTable() {
         
         console.log('✓ No duplicates found, creating new goal...');
         
+        // Get user's full name from database
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        const currentUsername = currentUser?.username || 'system';
+        const createdBy = await getUserFullName(currentUsername);
+        
         // Create the goal
         const response = await fetch(BASE_URL + 'api/production-goals', {
             method: 'POST',
@@ -5449,6 +5492,7 @@ async function addNewGoalFromTable() {
                 factory: plannerState.currentFactory,
                 date: plannerState.currentDate,
                 targetQuantity: quantity,
+                createdBy: createdBy,
                 ...productData
             })
         });
