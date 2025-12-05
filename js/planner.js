@@ -2550,6 +2550,13 @@ function renderTimelineView() {
     const timeSlots = getTimeSlots();
     const slotWidth = 60; // pixels per 15-minute slot
     
+    // Calculate current time position for red line
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
+    const minutesFromStart = currentMinutes - startMinutes;
+    const currentTimePosition = (minutesFromStart / PLANNER_CONFIG.intervalMinutes) * slotWidth + 96; // 96px = equipment column width (24 * 4)
+    
     // Build timeline header
     let headerHTML = '<div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" data-i18n="equipment">Equipment</div>';
     
@@ -2598,8 +2605,15 @@ function renderTimelineView() {
     
     container.innerHTML = `
         <div class="border rounded-lg dark:border-gray-600 overflow-hidden">
-            <div class="overflow-auto max-h-[calc(100vh-300px)]">
+            <div class="overflow-auto max-h-[calc(100vh-200px)]">
                 <div class="min-w-max relative">
+                    <!-- Current Time Indicator -->
+                    ${currentMinutes >= startMinutes ? `
+                        <div class="absolute top-0 bottom-0 w-0.5 bg-red-500 z-30 pointer-events-none" 
+                             style="left: ${currentTimePosition}px;">
+                            <div class="absolute -top-1 -left-1 w-2 h-2 bg-red-500 rounded-full"></div>
+                        </div>
+                    ` : ''}
                     <!-- Header -->
                     <div class="flex border-b dark:border-gray-600 bg-gray-50 dark:bg-gray-700 sticky top-0 z-20">
                         ${headerHTML}
