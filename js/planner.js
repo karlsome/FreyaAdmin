@@ -5124,6 +5124,18 @@ async function deleteGoalFromTable(goalId) {
     }
     
     try {
+        // First, remove any scheduled items from the timeline for this goal
+        const scheduledItems = plannerState.selectedProducts.filter(p => 
+            (p.goalId === goalId || p._id === goalId)
+        );
+        
+        if (scheduledItems.length > 0) {
+            console.log(`Removing ${scheduledItems.length} scheduled item(s) from timeline for goal ${goalId}`);
+            plannerState.selectedProducts = plannerState.selectedProducts.filter(p => 
+                p.goalId !== goalId && p._id !== goalId
+            );
+        }
+        
         const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
             method: 'DELETE'
         });
@@ -5138,6 +5150,14 @@ async function deleteGoalFromTable(goalId) {
             const row = document.querySelector(`tr[data-goal-id="${goalId}"]`);
             if (row) {
                 row.remove();
+            }
+            
+            // Update UI to reflect timeline changes
+            if (scheduledItems.length > 0) {
+                // Delete plan from database since timeline items were removed
+                await deletePlanFromDatabase();
+                updateSelectedProductsSummary();
+                renderAllViews();
             }
             
             showPlannerNotification('Goal deleted', 'success');
@@ -5222,9 +5242,17 @@ window.deleteSelectedGoals = async function() {
     try {
         let successCount = 0;
         let failCount = 0;
+        let removedTimelineItems = 0;
         
         for (const goalId of goalIds) {
             try {
+                // Remove any scheduled items from the timeline for this goal
+                const initialLength = plannerState.selectedProducts.length;
+                plannerState.selectedProducts = plannerState.selectedProducts.filter(p => 
+                    p.goalId !== goalId && p._id !== goalId
+                );
+                removedTimelineItems += (initialLength - plannerState.selectedProducts.length);
+                
                 const response = await fetch(BASE_URL + `api/production-goals/${goalId}`, {
                     method: 'DELETE'
                 });
@@ -5250,6 +5278,15 @@ window.deleteSelectedGoals = async function() {
         if (successCount > 0) {
             showPlannerNotification(`${successCount} goal(s) deleted successfully`, 'success');
             renderGoalList();
+            
+            // Update UI to reflect timeline changes
+            if (removedTimelineItems > 0) {
+                console.log(`Removed ${removedTimelineItems} item(s) from timeline`);
+                // Delete plan from database since timeline items were removed
+                await deletePlanFromDatabase();
+                updateSelectedProductsSummary();
+                renderAllViews();
+            }
         }
         
         if (failCount > 0) {
@@ -5281,6 +5318,18 @@ window.deleteAllGoals = async function() {
     try {
         let successCount = 0;
         let failCount = 0;
+        const goalIdsToDelete = currentGoals.map(g => g._id);
+        
+        // Remove all scheduled items from timeline for these goals
+        const initialLength = plannerState.selectedProducts.length;
+        plannerState.selectedProducts = plannerState.selectedProducts.filter(p => 
+            !goalIdsToDelete.includes(p.goalId) && !goalIdsToDelete.includes(p._id)
+        );
+        const removedTimelineItems = initialLength - plannerState.selectedProducts.length;
+        
+        if (removedTimelineItems > 0) {
+            console.log(`Removing ${removedTimelineItems} item(s) from timeline`);
+        }
         
         for (const goal of currentGoals) {
             try {
@@ -5307,6 +5356,14 @@ window.deleteAllGoals = async function() {
             showPlannerNotification(`${successCount} goal(s) deleted successfully`, 'success');
             renderGoalList();
             closeBulkEditGoalsModal();
+            
+            // Update UI to reflect timeline changes
+            if (removedTimelineItems > 0) {
+                // Delete plan from database since timeline items were removed
+                await deletePlanFromDatabase();
+                updateSelectedProductsSummary();
+                renderAllViews();
+            }
         }
         
         if (failCount > 0) {
