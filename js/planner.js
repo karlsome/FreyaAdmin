@@ -1316,7 +1316,13 @@ window.showManualGoalInput = function() {
                     <div class="space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="date">Date</label>
-                            <input type="date" id="manualGoalDate" value="${plannerState.currentDate}" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                            <div class="flex gap-2">
+                                <input type="date" id="manualGoalDate" value="${plannerState.currentDate}" class="flex-1 p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white">
+                                <button onclick="openBarcodeScanner()" class="px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2">
+                                    <i class="ri-qr-scan-2-line text-xl"></i>
+                                    <span data-i18n="scanBarcode">Scan</span>
+                                </button>
+                            </div>
                         </div>
                         
                         <div>
@@ -5585,6 +5591,484 @@ async function addNewGoalFromTable() {
         showPlannerNotification('Error adding goal', 'error');
     }
 }
+
+// ============================================
+// BARCODE SCANNER
+// ============================================
+let barcodeScanner = {
+    codeReader: null,
+    scanning: false,
+    lastScanTime: 0,
+    scannedItems: [],
+    scanDate: null
+};
+
+window.openBarcodeScanner = function() {
+    if (!plannerState.currentFactory) {
+        showPlannerNotification('Please select a factory first', 'warning');
+        return;
+    }
+    
+    const dateInput = document.getElementById('manualGoalDate');
+    barcodeScanner.scanDate = dateInput ? dateInput.value : plannerState.currentDate;
+    barcodeScanner.scannedItems = [];
+    
+    const modalHTML = `
+        <div id="barcodeScannerModal" class="fixed inset-0 bg-black bg-opacity-90 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                        <i class="ri-qr-scan-2-line mr-2"></i>
+                        <span data-i18n="barcodeScanner">Barcode Scanner</span>
+                    </h3>
+                    <button onclick="closeBarcodeScanner()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-2xl"></i>
+                    </button>
+                </div>
+                
+                <div class="flex-1 overflow-y-auto p-6">
+                    <!-- Camera Preview -->
+                    <div class="mb-4">
+                        <div class="relative bg-black rounded-lg overflow-hidden" style="height: 400px;">
+                            <div id="barcodeScannerVideo" class="w-full h-full"></div>
+                            <div id="scannerOverlay" class="absolute inset-0 pointer-events-none">
+                                <!-- Html5Qrcode will handle the scanning box -->
+                            </div>
+                            <!-- Success Flash -->
+                            <div id="successFlash" class="absolute inset-0 bg-green-500 opacity-0 transition-opacity duration-300 pointer-events-none flex items-center justify-center">
+                                <i class="ri-checkbox-circle-fill text-white text-6xl"></i>
+                            </div>
+                            <!-- Error Flash -->
+                            <div id="errorFlash" class="absolute inset-0 bg-red-500 opacity-0 transition-opacity duration-300 pointer-events-none flex items-center justify-center">
+                                <i class="ri-close-circle-fill text-white text-6xl"></i>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-center">
+                            <span id="scannerStatus" class="text-sm text-gray-600 dark:text-gray-400">Initializing camera...</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Scanned Items List -->
+                    <div class="border border-gray-300 dark:border-gray-600 rounded-lg">
+                        <div class="p-3 bg-gray-50 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600">
+                            <h4 class="text-sm font-semibold text-gray-900 dark:text-white">
+                                <span data-i18n="scannedItems">Scanned Items</span>
+                                <span class="ml-2 text-gray-500 dark:text-gray-400">(<span id="scannedItemsCount">0</span>)</span>
+                            </h4>
+                        </div>
+                        <div id="scannedItemsList" class="max-h-60 overflow-y-auto">
+                            <div class="p-8 text-center text-gray-500 dark:text-gray-400">
+                                <i class="ri-inbox-line text-4xl mb-2"></i>
+                                <p class="text-sm" data-i18n="noItemsScanned">No items scanned yet</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-between gap-3">
+                    <button onclick="closeBarcodeScanner()" class="px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors flex items-center gap-2">
+                        <i class="ri-stop-circle-line"></i>
+                        <span data-i18n="stopScanning">Stop Scanning</span>
+                    </button>
+                    <button onclick="confirmScannedItems()" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2" id="confirmScannedBtn" disabled>
+                        <i class="ri-checkbox-circle-line"></i>
+                        <span data-i18n="confirmAddAll">Confirm & Add All</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+    
+    // Initialize barcode scanner
+    initializeBarcodeScanner();
+};
+
+async function initializeBarcodeScanner() {
+    try {
+        const statusElement = document.getElementById('scannerStatus');
+        statusElement.textContent = 'Starting camera...';
+        console.log('🎥 Initializing barcode scanner...');
+        
+        // Create Html5Qrcode instance
+        barcodeScanner.codeReader = new Html5Qrcode('barcodeScannerVideo');
+        
+        const config = {
+            fps: 10, // Scanning frequency
+            qrbox: { width: 250, height: 250 }, // Scanning area
+            aspectRatio: 1.777778 // 16:9 aspect ratio
+        };
+        
+        // Get available cameras
+        const devices = await Html5Qrcode.getCameras();
+        console.log('📹 Available cameras:', devices.length);
+        
+        if (devices.length === 0) {
+            throw new Error('No camera found');
+        }
+        
+        // Prefer back camera
+        let cameraId = devices[0].id;
+        const backCamera = devices.find(device => 
+            device.label.toLowerCase().includes('back') || 
+            device.label.toLowerCase().includes('rear') ||
+            device.label.toLowerCase().includes('environment')
+        );
+        
+        if (backCamera) {
+            cameraId = backCamera.id;
+            console.log('📸 Using back camera:', backCamera.label);
+        } else {
+            console.log('📸 Using camera:', devices[0].label);
+        }
+        
+        statusElement.textContent = 'Ready to scan QR codes';
+        barcodeScanner.scanning = true;
+        
+        console.log('🔍 Starting continuous decode...');
+        
+        // Start scanning
+        await barcodeScanner.codeReader.start(
+            cameraId,
+            config,
+            (decodedText, decodedResult) => {
+                console.log('✅ Code detected:', decodedText);
+                handleBarcodeScanned(decodedText);
+            },
+            (errorMessage) => {
+                // Silently ignore "No code found" errors
+            }
+        );
+        
+    } catch (error) {
+        console.error('Failed to initialize barcode scanner:', error);
+        const statusElement = document.getElementById('scannerStatus');
+        if (statusElement) {
+            statusElement.textContent = 'Failed to access camera. Please check permissions.';
+            statusElement.classList.add('text-red-600');
+        }
+        showPlannerNotification('Failed to access camera', 'error');
+    }
+}
+
+async function handleBarcodeScanned(seiban) {
+    // Check if we should pause (2 second cooldown)
+    const now = Date.now();
+    if (now - barcodeScanner.lastScanTime < 2000) {
+        return; // Still in cooldown period
+    }
+    
+    // Validate barcode format - filter out garbage scans
+    if (!seiban || typeof seiban !== 'string') {
+        return;
+    }
+    
+    // Trim whitespace
+    seiban = seiban.trim().toUpperCase();
+    
+    // Only accept reasonable barcode lengths (2-10 characters for 背番号)
+    if (seiban.length < 2 || seiban.length > 10) {
+        console.log('Invalid barcode length, ignoring:', seiban);
+        showScanFeedback('error');
+        showPlannerNotification(`Invalid barcode format: "${seiban}"`, 'error');
+        barcodeScanner.lastScanTime = now; // Set cooldown for errors too
+        return;
+    }
+    
+    // 背番号 format validation: Must be alphanumeric and contain at least one letter
+    // Examples: 1GL, 2TL, 3PD, etc. (not pure numbers like "196945936650172")
+    if (!/^[A-Z0-9]+$/.test(seiban) || !/[A-Z]/.test(seiban)) {
+        console.log('Invalid 背番号 format (must contain letters), ignoring:', seiban);
+        showScanFeedback('error');
+        showPlannerNotification(`Invalid 背番号 format: "${seiban}"`, 'error');
+        barcodeScanner.lastScanTime = now; // Set cooldown for errors too
+        return;
+    }
+    
+    // Reject very long numeric strings (these are likely garbage from face detection)
+    if (/^\d{10,}$/.test(seiban)) {
+        console.log('Rejected long numeric code (likely false detection):', seiban);
+        showScanFeedback('error');
+        showPlannerNotification('Invalid barcode detected', 'error');
+        barcodeScanner.lastScanTime = now; // Set cooldown for errors too
+        return;
+    }
+    
+    barcodeScanner.lastScanTime = now;
+    
+    console.log('Valid barcode scanned:', seiban);
+    
+    try {
+        // Look up product in masterDB
+        const product = await findProductBySeiban(seiban);
+        
+        if (!product) {
+            // Show error flash
+            showScanFeedback('error');
+            showPlannerNotification(`背番号 "${seiban}" not found`, 'error');
+            return;
+        }
+        
+        // Get box quantity (収容数)
+        const boxQuantity = parseInt(product['収容数']) || 1;
+        
+        // Check if already in scanned items
+        const existingIndex = barcodeScanner.scannedItems.findIndex(item => item.seiban === seiban);
+        
+        if (existingIndex >= 0) {
+            // Add to existing quantity
+            barcodeScanner.scannedItems[existingIndex].quantity += boxQuantity;
+        } else {
+            // Add new item
+            barcodeScanner.scannedItems.push({
+                seiban: seiban,
+                hinban: product['品番'] || '',
+                quantity: boxQuantity,
+                product: product
+            });
+        }
+        
+        // Show success flash
+        showScanFeedback('success');
+        
+        // Update scanned items list
+        renderScannedItemsList();
+        
+    } catch (error) {
+        console.error('Error processing scanned barcode:', error);
+        showScanFeedback('error');
+        showPlannerNotification('Error processing barcode', 'error');
+    }
+}
+
+async function findProductBySeiban(seiban) {
+    try {
+        // Validate seiban - only accept alphanumeric codes (not random numbers from face detection)
+        if (!seiban || seiban.length < 2 || seiban.length > 10) {
+            console.log('Invalid barcode format, ignoring:', seiban);
+            return null;
+        }
+        
+        // Use /queries endpoint (your existing backend) with BASE_URL
+        const response = await fetch(`${BASE_URL}queries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: PLANNER_CONFIG.masterDbName,
+                collectionName: PLANNER_CONFIG.masterCollection,
+                query: {
+                    '背番号': seiban,
+                    '工場': plannerState.currentFactory
+                }
+            })
+        });
+        
+        if (!response.ok) {
+            console.error('API request failed:', response.status);
+            return null;
+        }
+        
+        const data = await response.json();
+        return data && data.length > 0 ? data[0] : null;
+    } catch (error) {
+        console.error('Error finding product:', error);
+        return null;
+    }
+}
+
+function showScanFeedback(type) {
+    const flashElement = document.getElementById(type === 'success' ? 'successFlash' : 'errorFlash');
+    if (!flashElement) return;
+    
+    flashElement.style.opacity = '0.8';
+    setTimeout(() => {
+        flashElement.style.opacity = '0';
+    }, 300);
+}
+
+function renderScannedItemsList() {
+    const listContainer = document.getElementById('scannedItemsList');
+    const countElement = document.getElementById('scannedItemsCount');
+    const confirmBtn = document.getElementById('confirmScannedBtn');
+    
+    if (!listContainer) return;
+    
+    countElement.textContent = barcodeScanner.scannedItems.length;
+    
+    if (barcodeScanner.scannedItems.length === 0) {
+        listContainer.innerHTML = `
+            <div class="p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-inbox-line text-4xl mb-2"></i>
+                <p class="text-sm" data-i18n="noItemsScanned">No items scanned yet</p>
+            </div>
+        `;
+        confirmBtn.disabled = true;
+        confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        return;
+    }
+    
+    confirmBtn.disabled = false;
+    confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    
+    const itemsHTML = barcodeScanner.scannedItems.map((item, index) => `
+        <div class="p-3 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex justify-between items-center">
+            <div class="flex-1">
+                <div class="flex items-center gap-3">
+                    <span class="font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">${item.seiban}</span>
+                    <span class="text-sm text-gray-600 dark:text-gray-400">${item.hinban}</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="text-sm font-semibold text-gray-900 dark:text-white">
+                    ${item.quantity} <span class="text-gray-500 dark:text-gray-400" data-i18n="pcs">pcs</span>
+                </span>
+                <button onclick="removeScannedItem(${index})" class="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                    <i class="ri-delete-bin-line text-lg"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    listContainer.innerHTML = itemsHTML;
+    
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+window.removeScannedItem = function(index) {
+    barcodeScanner.scannedItems.splice(index, 1);
+    renderScannedItemsList();
+};
+
+window.closeBarcodeScanner = async function() {
+    // Stop the scanner
+    if (barcodeScanner.codeReader && barcodeScanner.scanning) {
+        try {
+            await barcodeScanner.codeReader.stop();
+            console.log('🛑 Scanner stopped');
+        } catch (error) {
+            console.error('Error stopping scanner:', error);
+        }
+        barcodeScanner.codeReader = null;
+    }
+    barcodeScanner.scanning = false;
+    barcodeScanner.scannedItems = [];
+    
+    const modal = document.getElementById('barcodeScannerModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+window.confirmScannedItems = async function() {
+    if (barcodeScanner.scannedItems.length === 0) {
+        showPlannerNotification('No items to add', 'warning');
+        return;
+    }
+    
+    try {
+        // Close scanner modal first
+        closeBarcodeScanner();
+        
+        showCsvLoadingOverlay();
+        
+        // Process each scanned item
+        const goals = [];
+        for (const item of barcodeScanner.scannedItems) {
+            goals.push({
+                product: item.product,
+                quantity: item.quantity,
+                date: barcodeScanner.scanDate
+            });
+        }
+        
+        // Check for duplicates and save
+        const existingGoals = await loadGoals();
+        const duplicates = [];
+        const newGoals = [];
+        
+        for (const goal of goals) {
+            const existing = existingGoals.find(g => 
+                g['背番号'] === goal.product['背番号'] && 
+                g.date === goal.date
+            );
+            
+            if (existing) {
+                duplicates.push({
+                    existing: existing,
+                    new: goal
+                });
+            } else {
+                newGoals.push(goal);
+            }
+        }
+        
+        hideCsvLoadingOverlay();
+        
+        // If there are duplicates, show confirmation modal
+        if (duplicates.length > 0) {
+            // For now, auto-merge duplicates (add quantities)
+            const mergedGoals = [];
+            
+            for (const dup of duplicates) {
+                await updateGoal(dup.existing._id, {
+                    '目標数量': dup.existing['目標数量'] + dup.new.quantity
+                });
+            }
+            
+            // Save new goals
+            if (newGoals.length > 0) {
+                const goalsToSave = newGoals.map(g => ({
+                    '背番号': g.product['背番号'],
+                    '品番': g.product['品番'],
+                    '品名': g.product['品名'],
+                    '目標数量': g.quantity,
+                    '工場': plannerState.currentFactory,
+                    'date': g.date,
+                    'assignedEquipment': [],
+                    'createdAt': new Date().toISOString()
+                }));
+                
+                await saveGoalsBatch(goalsToSave);
+            }
+            
+            showPlannerNotification(
+                `Added ${newGoals.length} new goals, merged ${duplicates.length} duplicates`, 
+                'success'
+            );
+        } else {
+            // No duplicates, save all
+            const goalsToSave = newGoals.map(g => ({
+                '背番号': g.product['背番号'],
+                '品番': g.product['品番'],
+                '品名': g.product['品名'],
+                '目標数量': g.quantity,
+                '工場': plannerState.currentFactory,
+                'date': g.date,
+                'assignedEquipment': [],
+                'createdAt': new Date().toISOString()
+            }));
+            
+            await saveGoalsBatch(goalsToSave);
+            showPlannerNotification(`Added ${goals.length} goals successfully`, 'success');
+        }
+        
+        // Reload goals
+        await loadGoals();
+        renderGoalList();
+        
+    } catch (error) {
+        console.error('Error saving scanned goals:', error);
+        hideCsvLoadingOverlay();
+        showPlannerNotification('Failed to save goals', 'error');
+    }
+};
 
 // Make functions globally available
 window.initializePlanner = initializePlanner;
