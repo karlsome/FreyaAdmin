@@ -243,9 +243,7 @@ function switchPlannerMainTab(tab) {
                     await Promise.all(loadPromises);
                     
                     // Always load in-progress data when switching to planning tab
-                    console.log('🔄 Loading in-progress data for planning tab...');
                     plannerState.inProgressData = await loadInProgressData(plannerState.currentFactory, plannerState.currentDate);
-                    console.log('✅ In-progress data loaded for planning tab');
                     
                     updateSelectedProductsSummary();
                     renderAllViews();
@@ -253,9 +251,7 @@ function switchPlannerMainTab(tab) {
             } else {
                 // Even if data exists, reload in-progress data (it changes frequently)
                 (async () => {
-                    console.log('🔄 Refreshing in-progress data...');
                     plannerState.inProgressData = await loadInProgressData(plannerState.currentFactory, plannerState.currentDate);
-                    console.log('✅ In-progress data refreshed');
                     updateSelectedProductsSummary();
                     renderAllViews();
                 })();
@@ -424,23 +420,15 @@ async function loadExistingPlans(factory, date) {
 }
 
 async function loadInProgressData(factory, date) {
-    console.log(`🔄 === LOAD IN-PROGRESS DATA START ===`);
-    console.log(`🔄 Factory: ${factory}`);
-    console.log(`🔄 Date: ${date}`);
-    
     try {
         const requestBody = {
             dbName: 'submittedDB',
             collectionName: 'tabletLogDB',
             query: {
                 '工場': factory,
-                'Date': date,
-                'Status': 'in-progress'
+                'Date': date
             }
         };
-        
-        console.log(`🔄 Request URL: ${BASE_URL}queries`);
-        console.log(`🔄 Request body:`, JSON.stringify(requestBody, null, 2));
         
         const response = await fetch(BASE_URL + 'queries', {
             method: 'POST',
@@ -454,29 +442,9 @@ async function loadInProgressData(factory, date) {
         }
         
         const data = await response.json();
-        console.log(`📦 TabletLogDB raw response:`, data);
-        console.log(`📦 TabletLogDB records found: ${Array.isArray(data) ? data.length : 'Not an array!'}`);
-        console.log(`📦 Query was: Factory="${factory}", Date="${date}", Status="in-progress"`);
-        
-        // Log all records for debugging
-        if (Array.isArray(data) && data.length > 0) {
-            console.log('📋 All TabletLogDB records:');
-            data.forEach((record, index) => {
-                console.log(`  [${index + 1}] 背番号: ${record['背番号']}, 設備: ${record['設備']}, Date: ${record['Date']}, Time: ${record['Time']}, Timestamp: ${record['Timestamp']}, Status: ${record['Status']}`);
-            });
-        } else {
-            console.log('⚠️ No in-progress records found in tabletLogDB');
-            console.log('⚠️ This could mean:');
-            console.log('   - No records match the query (factory, date, or status mismatch)');
-            console.log('   - The query returned an error');
-            console.log('   - The response format is unexpected');
-        }
         
         // Process in-progress data by time slots
         const inProgressBySlot = processInProgressData(Array.isArray(data) ? data : []);
-        console.log(`✅ Processed in-progress data:`, inProgressBySlot);
-        console.log(`✅ Equipment in processed data:`, Object.keys(inProgressBySlot));
-        console.log(`🔄 === LOAD IN-PROGRESS DATA END ===`);
         
         return inProgressBySlot;
     } catch (error) {
@@ -489,51 +457,94 @@ async function loadInProgressData(factory, date) {
 function processInProgressData(records) {
     if (!records || records.length === 0) return {};
     
-    // Group by equipment and time slot
-    const slotData = {};
+    // Group by equipment and sessionID
+    const sessionData = {};
     
     records.forEach(record => {
         const equipment = record['設備'];
+        const sessionID = record['sessionID'];
+        const status = record['Status'];
         const timestamp = record['Timestamp'];
         const seiban = record['背番号'];
         
-        if (!equipment || !timestamp || !seiban) {
-            console.log('⚠️ Skipping record - missing data:', { equipment, timestamp, seiban });
-            return;
+        if (!equipment || !sessionID || !timestamp) return;
+        
+        if (!sessionData[equipment]) {
+            sessionData[equipment] = {};
         }
         
-        // Parse timestamp (UTC) and convert to local time
-        const date = new Date(timestamp);
-        console.log(`⏰ Processing record: ${seiban} on ${equipment} at ${timestamp}`);
-        console.log(`⏰ Parsed date (local time): ${date.toLocaleString()}`);
-        
-        // Get local hours and minutes
-        const hours = date.getHours();
-        const minutes = Math.floor(date.getMinutes() / 15) * 15;
-        const timeSlot = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-        
-        console.log(`⏰ Time slot assigned: ${timeSlot} (from ${hours}:${date.getMinutes()})`);
-        
-        // Initialize equipment if not exists
-        if (!slotData[equipment]) {
-            slotData[equipment] = {};
-        }
-        
-        // Store the most recent record for this slot
-        if (!slotData[equipment][timeSlot] || new Date(slotData[equipment][timeSlot].Timestamp) < date) {
-            slotData[equipment][timeSlot] = {
+        if (!sessionData[equipment][sessionID]) {
+            sessionData[equipment][sessionID] = {
                 背番号: seiban,
                 品番: record['品番'],
-                Timestamp: timestamp,
-                sessionID: record['sessionID']
+                firstTimestamp: timestamp,
+                lastTimestamp: timestamp,
+                lastStatus: status
             };
-            console.log(`✅ Assigned ${seiban} to ${equipment} at ${timeSlot}`);
         } else {
-            console.log(`⏭️ Skipping older record for ${equipment} at ${timeSlot}`);
+            // Update if this is a more recent record
+            const existingLast = new Date(sessionData[equipment][sessionID].lastTimestamp);
+            const currentTime = new Date(timestamp);
+            
+            if (currentTime > existingLast) {
+                sessionData[equipment][sessionID].lastTimestamp = timestamp;
+                sessionData[equipment][sessionID].lastStatus = status;
+            }
+            
+            // Update first timestamp if earlier
+            const existingFirst = new Date(sessionData[equipment][sessionID].firstTimestamp);
+            if (currentTime < existingFirst) {
+                sessionData[equipment][sessionID].firstTimestamp = timestamp;
+            }
         }
     });
     
-    console.log('📊 Final in-progress data by slot:', slotData);
+    // Convert to slot-based data: show in-progress for all slots from first to last activity
+    // unless last status is Completed or Reset
+    const slotData = {};
+    
+    for (const equipment in sessionData) {
+        slotData[equipment] = {};
+        
+        for (const sessionID in sessionData[equipment]) {
+            const session = sessionData[equipment][sessionID];
+            
+            // Skip if session is completed or reset
+            if (session.lastStatus === 'Completed' || session.lastStatus === 'Reset') {
+                continue;
+            }
+            
+            // Get start and end times
+            const startDate = new Date(session.firstTimestamp);
+            // If still in progress, extend to current time, otherwise use last timestamp
+            const now = new Date();
+            const endDate = new Date(session.lastTimestamp);
+            const effectiveEndDate = endDate > now ? endDate : now;
+            
+            // Generate all 15-minute slots from start to effective end (current time or last activity)
+            let currentTime = new Date(startDate);
+            currentTime.setMinutes(Math.floor(currentTime.getMinutes() / 15) * 15, 0, 0);
+            
+            while (currentTime <= effectiveEndDate) {
+                const hours = currentTime.getHours();
+                const minutes = currentTime.getMinutes();
+                const timeSlot = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+                
+                // Only set if not already set (first session wins)
+                if (!slotData[equipment][timeSlot]) {
+                    slotData[equipment][timeSlot] = {
+                        背番号: session['背番号'],
+                        品番: session['品番'],
+                        sessionID: sessionID
+                    };
+                }
+                
+                // Move to next 15-minute slot
+                currentTime.setMinutes(currentTime.getMinutes() + 15);
+            }
+        }
+    }
+    
     return slotData;
 }
 
@@ -662,10 +673,6 @@ async function handleFactoryChange(e) {
     const factory = e.target.value;
     plannerState.currentFactory = factory;
     
-    console.log('🏭 === FACTORY CHANGE START ===');
-    console.log('🏭 Selected factory:', factory);
-    console.log('🏭 Current date:', plannerState.currentDate);
-    
     // Save selected factory to localStorage
     if (factory) {
         localStorage.setItem('planner_selected_factory', factory);
@@ -690,10 +697,8 @@ async function handleFactoryChange(e) {
             loadActualProduction(factory, plannerState.currentDate)
         ]);
         
-        console.log('🔄 About to load in-progress data...');
         // Load in-progress data
         plannerState.inProgressData = await loadInProgressData(factory, plannerState.currentDate);
-        console.log('✅ In-progress data loaded:', plannerState.inProgressData);
         
         // Render views
         renderGoalList();
@@ -3104,12 +3109,7 @@ function renderActualProductionSlots(timeSlots, equipment, actualProduction, slo
             `;
         } else if (slotMinutes <= currentMinutes) {
             // Check for in-progress data from tabletLogDB
-            console.log(`🔍 Checking slot ${slot} for equipment ${equipment}`);
-            console.log(`   Available equipment in inProgressData:`, Object.keys(plannerState.inProgressData));
-            console.log(`   Slots for ${equipment}:`, plannerState.inProgressData[equipment] ? Object.keys(plannerState.inProgressData[equipment]) : 'none');
-            
             const inProgress = plannerState.inProgressData[equipment]?.[slot];
-            console.log(`   In-progress data for ${equipment} at ${slot}:`, inProgress);
             
             if (inProgress) {
                 // Show in-progress item
