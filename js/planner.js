@@ -3114,8 +3114,9 @@ function renderActualProductionSlots(timeSlots, equipment, actualProduction, slo
             if (inProgress) {
                 // Show in-progress item
                 html += `
-                    <div class="flex-shrink-0 border-r border-amber-400 dark:border-amber-600 relative" 
-                         style="width: ${slotWidth}px; background-color: #fef3c7">
+                    <div class="flex-shrink-0 border-r border-amber-400 dark:border-amber-600 relative cursor-pointer hover:bg-amber-200 transition-colors" 
+                         style="width: ${slotWidth}px; background-color: #fef3c7"
+                         onclick="showInProgressModal('${equipment}', '${slot}', '${inProgress.sessionID}')">
                         <div class="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-amber-700 dark:text-amber-500 gap-1">
                             <i class="ri-loader-4-line animate-spin text-xs"></i>
                             <span class="truncate">${inProgress['\u80cc\u756a\u53f7']}</span>
@@ -6262,6 +6263,148 @@ window.handleKanbanDragOver = handleKanbanDragOver;
 window.handleKanbanDrop = handleKanbanDrop;
 window.handleTimelineSlotClick = handleTimelineSlotClick;
 // ============================================
+// IN-PROGRESS SESSION MODAL
+// ============================================
+window.showInProgressModal = async function(equipment, timeSlot, sessionID) {
+    try {
+        // Query tabletLogDB for all records with this sessionID
+        const response = await fetch(`${BASE_URL}queries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'tabletLogDB',
+                query: { sessionID: sessionID }
+            })
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch session data');
+        
+        const records = await response.json();
+        
+        if (!records || records.length === 0) {
+            showPlannerNotification('No session data found', 'error');
+            return;
+        }
+        
+        // Sort by timestamp
+        records.sort((a, b) => new Date(a.Timestamp) - new Date(b.Timestamp));
+        
+        const firstRecord = records[0];
+        const lastRecord = records[records.length - 1];
+        
+        // Format timestamps
+        const startTime = new Date(firstRecord.Timestamp).toLocaleString('ja-JP');
+        const lastTime = new Date(lastRecord.Timestamp).toLocaleString('ja-JP');
+        const duration = Math.round((new Date(lastRecord.Timestamp) - new Date(firstRecord.Timestamp)) / 60000); // minutes
+        
+        // Build activity timeline HTML
+        const activitiesHTML = records.map((record, index) => {
+            const time = new Date(record.Timestamp).toLocaleTimeString('ja-JP');
+            const action = record.Action || 'Activity';
+            const status = record.Status || '';
+            
+            return `
+                <div class="flex gap-3 pb-3 ${index < records.length - 1 ? 'border-b border-gray-200 dark:border-gray-700' : ''}">
+                    <div class="flex-shrink-0 w-20 text-xs text-gray-600 dark:text-gray-400 font-mono">${time}</div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium text-gray-900 dark:text-white">${action}</p>
+                        ${status ? `<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Status: ${status}</p>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        const modalHTML = `
+            <div id="inProgressModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+                    <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                    <i class="ri-time-line text-amber-600"></i>
+                                    In-Progress Session Details
+                                </h3>
+                                <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Clicked time slot: ${timeSlot}</p>
+                            </div>
+                            <button onclick="closeInProgressModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                                <i class="ri-close-line text-2xl"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div>
+                                <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Equipment</p>
+                                <p class="font-semibold text-gray-900 dark:text-white">${equipment}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Product (背番号)</p>
+                                <p class="font-semibold text-gray-900 dark:text-white">${firstRecord['背番号'] || '-'}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">品番</p>
+                                <p class="font-semibold text-gray-900 dark:text-white">${firstRecord['品番'] || '-'}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Worker</p>
+                                <p class="font-semibold text-gray-900 dark:text-white">${firstRecord['作業者名'] || firstRecord['Worker'] || '-'}</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4 mt-4">
+                            <div>
+                                <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Session Start</p>
+                                <p class="text-sm font-medium text-gray-900 dark:text-white">${startTime}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Last Activity</p>
+                                <p class="text-sm font-medium text-gray-900 dark:text-white">${lastTime}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Duration</p>
+                                <p class="text-sm font-medium text-gray-900 dark:text-white">${duration} minutes</p>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Session ID</p>
+                            <p class="text-xs font-mono text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 px-2 py-1 rounded">${sessionID}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <i class="ri-list-check-2 text-blue-600"></i>
+                            Activity Timeline (${records.length} events)
+                        </h4>
+                        <div class="space-y-3">
+                            ${activitiesHTML}
+                        </div>
+                    </div>
+                    
+                    <div class="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+                        <button onclick="closeInProgressModal()" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+    } catch (error) {
+        console.error('Error loading in-progress session:', error);
+        showPlannerNotification('Failed to load session details', 'error');
+    }
+};
+
+window.closeInProgressModal = function() {
+    const modal = document.getElementById('inProgressModal');
+    if (modal) modal.remove();
+};
+
+// ============================================
 // ACTUAL PRODUCTION MODAL
 // ============================================
 window.showActualProductionModal = function(equipment, sebanggo, slotIndex) {
@@ -6462,6 +6605,8 @@ window.handleTimelineDragOver = handleTimelineDragOver;
 window.handleTimelineDragLeave = handleTimelineDragLeave;
 window.handleTimelineDrop = handleTimelineDrop;
 window.closeTimelineClickModal = closeTimelineClickModal;
+window.showInProgressModal = showInProgressModal;
+window.closeInProgressModal = closeInProgressModal;
 window.showActualProductionModal = showActualProductionModal;
 window.closeActualProductionModal = closeActualProductionModal;
 window.showAddBreakModal = showAddBreakModal;
