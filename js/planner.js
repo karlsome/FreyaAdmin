@@ -6293,6 +6293,21 @@ window.showInProgressModal = async function(equipment, timeSlot, sessionID) {
         const firstRecord = records[0];
         const lastRecord = records[records.length - 1];
         
+        // Extract worker name from AdditionalData or direct fields
+        let workerName = firstRecord['作業者名'] || firstRecord['Worker'] || '-';
+        
+        // Check all records for worker name in AdditionalData
+        for (const record of records) {
+            if (record.AdditionalData?.workerName) {
+                workerName = record.AdditionalData.workerName;
+                break;
+            }
+            if (record.AdditionalData?.WorkerName) {
+                workerName = record.AdditionalData.WorkerName;
+                break;
+            }
+        }
+        
         // Format timestamps
         const startTime = new Date(firstRecord.Timestamp).toLocaleString('ja-JP');
         const lastTime = new Date(lastRecord.Timestamp).toLocaleString('ja-JP');
@@ -6349,7 +6364,7 @@ window.showInProgressModal = async function(equipment, timeSlot, sessionID) {
                             </div>
                             <div>
                                 <p class="text-xs text-gray-600 dark:text-gray-400 mb-1">Worker</p>
-                                <p class="font-semibold text-gray-900 dark:text-white">${firstRecord['作業者名'] || firstRecord['Worker'] || '-'}</p>
+                                <p class="font-semibold text-gray-900 dark:text-white">${workerName}</p>
                             </div>
                         </div>
                         <div class="grid grid-cols-3 gap-4 mt-4">
