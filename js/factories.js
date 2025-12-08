@@ -2761,20 +2761,22 @@ async function renderFactoryCards() {
     // Show animated loading state
     container.innerHTML = `
       <div class="col-span-full flex flex-col items-center justify-center py-16 space-y-6">
-        <!-- Animated Spinner -->
-        <div class="relative">
-          <div class="w-20 h-20 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-          <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-            <i class="ri-factory-line text-3xl text-blue-600"></i>
-          </div>
+        <!-- Bouncing Balls Loader -->
+        <div class="loader-wrapper">
+          <div class="loader-circle"></div>
+          <div class="loader-circle"></div>
+          <div class="loader-circle"></div>
+          <div class="loader-shadow"></div>
+          <div class="loader-shadow"></div>
+          <div class="loader-shadow"></div>
         </div>
         
-        <!-- Loading Text with Pulse Animation -->
+        <!-- Loading Text -->
         <div class="text-center space-y-2">
-          <h3 class="text-xl font-semibold text-gray-700 animate-pulse" data-i18n="loadingFactories">
+          <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300" data-i18n="loadingFactories">
             Loading Factory Data...
           </h3>
-          <p class="text-sm text-gray-500 animate-pulse" data-i18n="pleaseWait">
+          <p class="text-sm text-gray-500 dark:text-gray-400" data-i18n="pleaseWait">
             Please wait while we fetch the latest information
           </p>
         </div>
@@ -2857,7 +2859,7 @@ async function renderFactoryCards() {
         const isClickable = role !== "member"; // All roles except member can click
         return `
           <div
-            class="${isClickable ? "cursor-pointer hover:shadow-md" : "opacity-100 cursor-not-allowed"} bg-white p-4 sm:p-6 rounded-lg shadow border transition"
+            class="${isClickable ? "cursor-pointer" : "opacity-100 cursor-not-allowed"} neumorphic-card p-4 sm:p-6 transition-all duration-300"
             ${isClickable ? `onclick="loadFactoryPage('${factory}')"` : ""}
           >
             <h4 class="text-base sm:text-lg font-bold mb-3">${factory}</h4>
