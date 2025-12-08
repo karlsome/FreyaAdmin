@@ -31,6 +31,7 @@ let plannerState = {
     currentPlan: null,
     selectedProducts: [],
     actualProduction: [], // pressDB data for actual production
+    inProgressData: {}, // tabletLogDB in-progress data by equipment and time slot
     breaks: [
         { name: 'Lunch Break', start: '12:00', end: '12:45', isDefault: true, id: 'default-lunch' },
         { name: 'Break', start: '15:00', end: '15:15', isDefault: true, id: 'default-break' }
@@ -241,12 +242,23 @@ function switchPlannerMainTab(tab) {
                     
                     await Promise.all(loadPromises);
                     
+                    // Always load in-progress data when switching to planning tab
+                    console.log('🔄 Loading in-progress data for planning tab...');
+                    plannerState.inProgressData = await loadInProgressData(plannerState.currentFactory, plannerState.currentDate);
+                    console.log('✅ In-progress data loaded for planning tab');
+                    
                     updateSelectedProductsSummary();
                     renderAllViews();
                 })();
             } else {
-                updateSelectedProductsSummary();
-                renderAllViews();
+                // Even if data exists, reload in-progress data (it changes frequently)
+                (async () => {
+                    console.log('🔄 Refreshing in-progress data...');
+                    plannerState.inProgressData = await loadInProgressData(plannerState.currentFactory, plannerState.currentDate);
+                    console.log('✅ In-progress data refreshed');
+                    updateSelectedProductsSummary();
+                    renderAllViews();
+                })();
             }
         }
     }
@@ -411,6 +423,120 @@ async function loadExistingPlans(factory, date) {
     }
 }
 
+async function loadInProgressData(factory, date) {
+    console.log(`🔄 === LOAD IN-PROGRESS DATA START ===`);
+    console.log(`🔄 Factory: ${factory}`);
+    console.log(`🔄 Date: ${date}`);
+    
+    try {
+        const requestBody = {
+            dbName: 'submittedDB',
+            collectionName: 'tabletLogDB',
+            query: {
+                '工場': factory,
+                'Date': date,
+                'Status': 'in-progress'
+            }
+        };
+        
+        console.log(`🔄 Request URL: ${BASE_URL}queries`);
+        console.log(`🔄 Request body:`, JSON.stringify(requestBody, null, 2));
+        
+        const response = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+            console.error('❌ TabletLogDB fetch failed:', response.status);
+            return [];
+        }
+        
+        const data = await response.json();
+        console.log(`📦 TabletLogDB raw response:`, data);
+        console.log(`📦 TabletLogDB records found: ${Array.isArray(data) ? data.length : 'Not an array!'}`);
+        console.log(`📦 Query was: Factory="${factory}", Date="${date}", Status="in-progress"`);
+        
+        // Log all records for debugging
+        if (Array.isArray(data) && data.length > 0) {
+            console.log('📋 All TabletLogDB records:');
+            data.forEach((record, index) => {
+                console.log(`  [${index + 1}] 背番号: ${record['背番号']}, 設備: ${record['設備']}, Date: ${record['Date']}, Time: ${record['Time']}, Timestamp: ${record['Timestamp']}, Status: ${record['Status']}`);
+            });
+        } else {
+            console.log('⚠️ No in-progress records found in tabletLogDB');
+            console.log('⚠️ This could mean:');
+            console.log('   - No records match the query (factory, date, or status mismatch)');
+            console.log('   - The query returned an error');
+            console.log('   - The response format is unexpected');
+        }
+        
+        // Process in-progress data by time slots
+        const inProgressBySlot = processInProgressData(Array.isArray(data) ? data : []);
+        console.log(`✅ Processed in-progress data:`, inProgressBySlot);
+        console.log(`✅ Equipment in processed data:`, Object.keys(inProgressBySlot));
+        console.log(`🔄 === LOAD IN-PROGRESS DATA END ===`);
+        
+        return inProgressBySlot;
+    } catch (error) {
+        console.error('❌ Failed to load in-progress data:', error);
+        console.error('❌ Error details:', error.message);
+        return {};
+    }
+}
+
+function processInProgressData(records) {
+    if (!records || records.length === 0) return {};
+    
+    // Group by equipment and time slot
+    const slotData = {};
+    
+    records.forEach(record => {
+        const equipment = record['設備'];
+        const timestamp = record['Timestamp'];
+        const seiban = record['背番号'];
+        
+        if (!equipment || !timestamp || !seiban) {
+            console.log('⚠️ Skipping record - missing data:', { equipment, timestamp, seiban });
+            return;
+        }
+        
+        // Parse timestamp (UTC) and convert to local time
+        const date = new Date(timestamp);
+        console.log(`⏰ Processing record: ${seiban} on ${equipment} at ${timestamp}`);
+        console.log(`⏰ Parsed date (local time): ${date.toLocaleString()}`);
+        
+        // Get local hours and minutes
+        const hours = date.getHours();
+        const minutes = Math.floor(date.getMinutes() / 15) * 15;
+        const timeSlot = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+        
+        console.log(`⏰ Time slot assigned: ${timeSlot} (from ${hours}:${date.getMinutes()})`);
+        
+        // Initialize equipment if not exists
+        if (!slotData[equipment]) {
+            slotData[equipment] = {};
+        }
+        
+        // Store the most recent record for this slot
+        if (!slotData[equipment][timeSlot] || new Date(slotData[equipment][timeSlot].Timestamp) < date) {
+            slotData[equipment][timeSlot] = {
+                背番号: seiban,
+                品番: record['品番'],
+                Timestamp: timestamp,
+                sessionID: record['sessionID']
+            };
+            console.log(`✅ Assigned ${seiban} to ${equipment} at ${timeSlot}`);
+        } else {
+            console.log(`⏭️ Skipping older record for ${equipment} at ${timeSlot}`);
+        }
+    });
+    
+    console.log('📊 Final in-progress data by slot:', slotData);
+    return slotData;
+}
+
 async function loadActualProduction(factory, date) {
     console.log(`📊 === LOAD ACTUAL PRODUCTION START ===`);
     console.log(`📊 Factory: ${factory}`);
@@ -536,6 +662,10 @@ async function handleFactoryChange(e) {
     const factory = e.target.value;
     plannerState.currentFactory = factory;
     
+    console.log('🏭 === FACTORY CHANGE START ===');
+    console.log('🏭 Selected factory:', factory);
+    console.log('🏭 Current date:', plannerState.currentDate);
+    
     // Save selected factory to localStorage
     if (factory) {
         localStorage.setItem('planner_selected_factory', factory);
@@ -560,6 +690,11 @@ async function handleFactoryChange(e) {
             loadActualProduction(factory, plannerState.currentDate)
         ]);
         
+        console.log('🔄 About to load in-progress data...');
+        // Load in-progress data
+        plannerState.inProgressData = await loadInProgressData(factory, plannerState.currentDate);
+        console.log('✅ In-progress data loaded:', plannerState.inProgressData);
+        
         // Render views
         renderGoalList();
         updateSelectedProductsSummary();
@@ -583,6 +718,21 @@ async function handleDateChange(e) {
             loadExistingPlans(plannerState.currentFactory, plannerState.currentDate),
             loadActualProduction(plannerState.currentFactory, plannerState.currentDate)
         ];
+        
+        // Also load in-progress data
+        await Promise.all(loadPromises);
+        plannerState.inProgressData = await loadInProgressData(plannerState.currentFactory, plannerState.currentDate);
+        
+        // Render views
+        renderGoalList();
+        updateSelectedProductsSummary();
+        renderAllViews();
+        return; // Early return to avoid double rendering
+    }
+    
+    // Fallback for backwards compatibility
+    {
+        const loadPromises = []; // Empty array to avoid errors
         
         // Load products if not already loaded
         if (!plannerState.products || plannerState.products.length === 0) {
@@ -2953,15 +3103,39 @@ function renderActualProductionSlots(timeSlots, equipment, actualProduction, slo
                 </div>
             `;
         } else if (slotMinutes <= currentMinutes) {
-            // Show IDLE only up to current time
-            html += `
-                <div class="flex-shrink-0 border-r dark:border-gray-600 relative" 
-                     style="width: ${slotWidth}px; background-color: #1a1a1a">
-                    <div class="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-gray-400">
-                        ${index % 4 === 0 ? 'IDLE' : ''}
+            // Check for in-progress data from tabletLogDB
+            console.log(`🔍 Checking slot ${slot} for equipment ${equipment}`);
+            console.log(`   Available equipment in inProgressData:`, Object.keys(plannerState.inProgressData));
+            console.log(`   Slots for ${equipment}:`, plannerState.inProgressData[equipment] ? Object.keys(plannerState.inProgressData[equipment]) : 'none');
+            
+            const inProgress = plannerState.inProgressData[equipment]?.[slot];
+            console.log(`   In-progress data for ${equipment} at ${slot}:`, inProgress);
+            
+            if (inProgress) {
+                // Show in-progress item
+                html += `
+                    <div class="flex-shrink-0 border-r border-amber-400 dark:border-amber-600 relative" 
+                         style="width: ${slotWidth}px; background-color: #fef3c7">
+                        <div class="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-amber-700 dark:text-amber-500 gap-1">
+                            <i class="ri-loader-4-line animate-spin text-xs"></i>
+                            <span class="truncate">${inProgress['\u80cc\u756a\u53f7']}</span>
+                        </div>
+                        <div class="absolute bottom-0 left-0 right-0 text-center text-[7px] text-amber-600 font-medium">
+                            In Progress
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                // Show IDLE only up to current time
+                html += `
+                    <div class="flex-shrink-0 border-r dark:border-gray-600 relative" 
+                         style="width: ${slotWidth}px; background-color: #1a1a1a">
+                        <div class="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-gray-400">
+                            ${index % 4 === 0 ? 'IDLE' : ''}
+                        </div>
+                    </div>
+                `;
+            }
         } else {
             // Future time - show empty
             html += `
