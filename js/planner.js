@@ -3687,10 +3687,17 @@ function showMultiColumnProductPicker(equipment, startTime) {
                     <div class="w-1/3 border-r border-gray-200 dark:border-gray-700 flex flex-col">
                         <div class="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
                             <h4 class="font-semibold text-gray-900 dark:text-white mb-2" data-i18n="availableProducts">Available Products</h4>
-                            <input type="text" id="multiPickerSearch" 
-                                   class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white" 
-                                   placeholder="Search..." 
-                                   oninput="filterMultiPickerProducts()">
+                            <div class="flex gap-2 mb-2">
+                                <input type="text" id="multiPickerSearch" 
+                                       class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white" 
+                                       placeholder="Search..." 
+                                       oninput="filterMultiPickerProducts()">
+                                <button onclick="openTimelineBarcodeScanner('${equipment}', '${startTime}')" 
+                                        class="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-1"
+                                        title="Scan Barcode">
+                                    <i class="ri-qr-scan-2-line text-lg"></i>
+                                </button>
+                            </div>
                         </div>
                         <div id="multiPickerAvailable" class="flex-1 overflow-y-auto p-3 space-y-2">
                             <!-- Will be populated -->
@@ -3751,6 +3758,30 @@ function closeMultiColumnPicker() {
     const modal = document.getElementById('multiPickerModal');
     if (modal) modal.remove();
     multiPickerState = { equipment: null, startTime: null, availableProducts: [], selectedProducts: [], orderedProducts: [] };
+}
+
+// Show multi-column picker with scanned items already in order column
+function showMultiColumnProductPickerWithScanned(equipment, startTime) {
+    console.log('📦 === SHOW MULTI-COLUMN PICKER WITH SCANNED ===');
+    console.log('📦 Equipment:', equipment);
+    console.log('📦 Start Time:', startTime);
+    console.log('📦 Ordered products count:', multiPickerState.orderedProducts.length);
+    console.log('📦 Ordered products:', multiPickerState.orderedProducts);
+    
+    // Re-open the modal with scanned items
+    showMultiColumnProductPicker(equipment, startTime);
+    
+    console.log('📦 Modal opened, rendering ordered products...');
+    
+    // Render the ordered products (from scanner)
+    renderMultiPickerOrdered();
+    updateMultiPickerStats();
+    
+    console.log('📦 Ordered products rendered');
+    
+    showPlannerNotification(`${multiPickerState.orderedProducts.length} products scanned and ready to add`, 'success');
+    
+    console.log('📦 === MULTI-COLUMN PICKER SHOWN ===');
 }
 
 function filterMultiPickerProducts() {
@@ -5770,14 +5801,27 @@ async function addNewGoalFromTable() {
 // ============================================
 // BARCODE SCANNER
 // ============================================
+// Barcode scanner has two modes:
+// 1. Goal Mode (openBarcodeScanner): Scans products to add to Production Goals only
+// 2. Timeline Mode (openTimelineBarcodeScanner): Scans products to add to both Goals AND Timeline
+//    - Preserves equipment and start time context
+//    - Auto-creates/updates goals in productionGoalsDB
+//    - Returns to multi-column picker with scanned items ready to add to timeline
+//    - Uses 収容数 (capacity) from masterDB as default quantity
+//    - Accumulates quantity if same product scanned multiple times
 let barcodeScanner = {
     codeReader: null,
     scanning: false,
     lastScanTime: 0,
     scannedItems: [],
-    scanDate: null
+    scanDate: null,
+    // Timeline-specific context
+    isTimelineScanner: false,
+    timelineEquipment: null,
+    timelineStartTime: null
 };
 
+// Open barcode scanner for goals (from Production Goals tab)
 window.openBarcodeScanner = function() {
     if (!plannerState.currentFactory) {
         showPlannerNotification('Please select a factory first', 'warning');
@@ -5787,6 +5831,48 @@ window.openBarcodeScanner = function() {
     const dateInput = document.getElementById('manualGoalDate');
     barcodeScanner.scanDate = dateInput ? dateInput.value : plannerState.currentDate;
     barcodeScanner.scannedItems = [];
+    barcodeScanner.isTimelineScanner = false;
+    barcodeScanner.timelineEquipment = null;
+    barcodeScanner.timelineStartTime = null;
+    
+    _openBarcodeScannerModal();
+};
+
+// Open barcode scanner for timeline (from Add Products to Timeline modal)
+window.openTimelineBarcodeScanner = function(equipment, startTime) {
+    console.log('📸 === OPENING TIMELINE BARCODE SCANNER ===');
+    console.log('📸 Equipment:', equipment);
+    console.log('📸 Start Time:', startTime);
+    console.log('📸 Current Factory:', plannerState.currentFactory);
+    console.log('📸 Current Date:', plannerState.currentDate);
+    
+    if (!plannerState.currentFactory) {
+        console.log('❌ No factory selected');
+        showPlannerNotification('Please select a factory first', 'warning');
+        return;
+    }
+    
+    // Close multi-column picker modal
+    closeMultiColumnPicker();
+    
+    barcodeScanner.scanDate = plannerState.currentDate;
+    barcodeScanner.scannedItems = [];
+    barcodeScanner.isTimelineScanner = true;
+    barcodeScanner.timelineEquipment = equipment;
+    barcodeScanner.timelineStartTime = startTime;
+    
+    console.log('📸 Scanner state set:');
+    console.log('   - isTimelineScanner:', barcodeScanner.isTimelineScanner);
+    console.log('   - timelineEquipment:', barcodeScanner.timelineEquipment);
+    console.log('   - timelineStartTime:', barcodeScanner.timelineStartTime);
+    console.log('   - scanDate:', barcodeScanner.scanDate);
+    
+    _openBarcodeScannerModal();
+    console.log('📸 === TIMELINE SCANNER OPENED ===');
+};
+
+// Internal function to render scanner modal
+function _openBarcodeScannerModal() {
     
     const modalHTML = `
         <div id="barcodeScannerModal" class="fixed inset-0 bg-black bg-opacity-90 z-[60] flex items-center justify-center p-4">
@@ -5862,7 +5948,7 @@ window.openBarcodeScanner = function() {
     
     // Initialize barcode scanner
     initializeBarcodeScanner();
-};
+}
 
 async function initializeBarcodeScanner() {
     try {
@@ -6142,16 +6228,37 @@ window.closeBarcodeScanner = async function() {
 };
 
 window.confirmScannedItems = async function() {
+    console.log('🔔 === CONFIRM SCANNED ITEMS CALLED ===');
+    console.log('🔔 Scanned items count:', barcodeScanner.scannedItems.length);
+    console.log('🔔 Current factory:', plannerState.currentFactory);
+    console.log('🔔 Is timeline scanner?', barcodeScanner.isTimelineScanner);
+    
     if (barcodeScanner.scannedItems.length === 0) {
+        console.log('❌ No items to add');
         showPlannerNotification('No items to add', 'warning');
         return;
     }
     
     if (!plannerState.currentFactory) {
+        console.log('❌ No factory selected');
         showPlannerNotification('Please select a factory first', 'warning');
         return;
     }
     
+    // Route to appropriate handler based on scanner type
+    if (barcodeScanner.isTimelineScanner) {
+        console.log('✅ Routing to TIMELINE scanner handler');
+        await confirmTimelineScannedItems();
+    } else {
+        console.log('✅ Routing to GOAL scanner handler');
+        await confirmGoalScannedItems();
+    }
+    
+    console.log('🔔 === CONFIRM SCANNED ITEMS END ===');
+};
+
+// Confirm scanned items for Production Goals tab
+async function confirmGoalScannedItems() {
     try {
         // Close scanner modal first
         closeBarcodeScanner();
@@ -6251,7 +6358,168 @@ window.confirmScannedItems = async function() {
         hideCsvLoadingOverlay();
         showPlannerNotification('Failed to save goals', 'error');
     }
-};
+}
+
+// Confirm scanned items for Timeline (add to both goals and timeline)
+async function confirmTimelineScannedItems() {
+    console.log('🎯 === CONFIRM TIMELINE SCANNED ITEMS START ===');
+    console.log('🎯 isTimelineScanner:', barcodeScanner.isTimelineScanner);
+    console.log('🎯 Equipment:', barcodeScanner.timelineEquipment);
+    console.log('🎯 Start Time:', barcodeScanner.timelineStartTime);
+    console.log('🎯 Scanned Items:', barcodeScanner.scannedItems);
+    console.log('🎯 Scan Date:', barcodeScanner.scanDate);
+    
+    try {
+        // CRITICAL: Save scanned items BEFORE closing scanner (which clears them)
+        const scannedItemsCopy = [...barcodeScanner.scannedItems];
+        const equipment = barcodeScanner.timelineEquipment;
+        const startTime = barcodeScanner.timelineStartTime;
+        const scanDate = barcodeScanner.scanDate;
+        
+        console.log('🎯 Saved copies - Items:', scannedItemsCopy.length, 'Equipment:', equipment, 'Start:', startTime);
+        
+        // Close scanner modal
+        closeBarcodeScanner();
+        
+        showCsvLoadingOverlay();
+        
+        console.log('🎯 Step 1: Create/update goals for scanned products');
+        
+        // 1. Create/update goals for scanned products
+        const existingGoals = await loadGoals();
+        console.log('🎯 Existing goals count:', existingGoals.length);
+        
+        for (const item of scannedItemsCopy) {
+            console.log('🎯 Processing item:', item.seiban, 'Quantity:', item.quantity);
+            
+            const existing = existingGoals.find(g => 
+                g['背番号'] === item.product['背番号'] && 
+                g.date === scanDate
+            );
+            
+            if (existing) {
+                console.log('🎯 Found existing goal, updating:', existing._id);
+                // Update existing goal
+                await updateGoal(existing._id, {
+                    targetQuantity: existing.targetQuantity + item.quantity,
+                    remainingQuantity: existing.remainingQuantity + item.quantity
+                });
+                console.log('🎯 Goal updated successfully');
+            } else {
+                console.log('🎯 Creating new goal for:', item.seiban);
+                // Create new goal
+                const goalsToSave = [{
+                    背番号: item.product['背番号'],
+                    品番: item.product['品番'],
+                    品名: item.product['品名'],
+                    targetQuantity: item.quantity,
+                    remainingQuantity: item.quantity,
+                    scheduledQuantity: 0,
+                    factory: plannerState.currentFactory,
+                    date: scanDate,
+                    status: 'pending'
+                }];
+                
+                console.log('🎯 Goal to save:', goalsToSave);
+                await saveGoalsBatch(goalsToSave);
+                console.log('🎯 Goal created successfully');
+            }
+        }
+        
+        console.log('🎯 Step 2: Reload goals');
+        // Reload goals to get updated goal IDs
+        await loadGoals();
+        renderGoalList();
+        
+        console.log('🎯 Step 3: Add scanned products directly to timeline');
+        
+        // 2. Add scanned products directly to timeline
+        let currentTime = timeToMinutes(startTime);
+        
+        for (const item of scannedItemsCopy) {
+            const product = item.product;
+            const quantity = item.quantity;
+            
+            console.log(`🎯 Adding ${quantity} pcs of ${product['背番号']} to timeline at ${equipment} starting ${startTime}`);
+            
+            const timeInfo = calculateProductionTime(product, quantity);
+            const boxes = calculateBoxesNeeded(product, quantity);
+            const productDurationMinutes = timeInfo.totalSeconds / 60;
+            
+            // Find actual start time, skipping any breaks
+            const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
+            
+            // Find the matching goal
+            const matchingGoal = plannerState.goals.find(g => 
+                g['背番号'] === product['背番号'] && 
+                g.date === scanDate
+            );
+            
+            if (!matchingGoal) {
+                console.error(`❌ No matching goal found for ${product['背番号']}`);
+                continue;
+            }
+            
+            console.log(`   Matching goal: ${matchingGoal._id}, remaining: ${matchingGoal.remainingQuantity}`);
+            
+            // Add to timeline
+            plannerState.selectedProducts.push({
+                ...product,
+                quantity: quantity,
+                equipment: equipment,
+                boxes: boxes,
+                estimatedTime: timeInfo,
+                color: plannerState.productColors[product['背番号']],
+                startTime: minutesToTime(actualStartTime),
+                goalId: matchingGoal._id
+            });
+            
+            // Update goal scheduled quantity
+            try {
+                const response = await fetch(BASE_URL + `api/production-goals/${matchingGoal._id}/schedule`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quantityToSchedule: quantity })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log(`✅ Goal ${matchingGoal._id} scheduled: ${quantity} pcs, remaining: ${result.remainingQuantity}`);
+                } else {
+                    console.error(`❌ Failed to schedule goal ${matchingGoal._id}`);
+                }
+            } catch (error) {
+                console.error(`❌ Error scheduling goal:`, error);
+            }
+            
+            // Move to next time slot
+            currentTime = actualStartTime + productDurationMinutes;
+        }
+        
+        console.log('🎯 Step 4: Reload goals and render views');
+        // Reload goals to show updated quantities
+        await loadGoals();
+        renderGoalList();
+        updateSelectedProductsSummary();
+        renderAllViews();
+        
+        console.log('🎯 Step 5: Save plan to database');
+        // Save the plan to productionPlansDB
+        await savePlanToDatabase();
+        
+        hideCsvLoadingOverlay();
+        
+        showPlannerNotification(`Added ${scannedItemsCopy.length} products to timeline`, 'success');
+        
+        console.log('🎯 === CONFIRM TIMELINE SCANNED ITEMS END ===');
+        
+    } catch (error) {
+        console.error('❌ Error processing timeline scanned items:', error);
+        console.error('❌ Error stack:', error.stack);
+        hideCsvLoadingOverlay();
+        showPlannerNotification('Failed to process scanned items', 'error');
+    }
+}
 
 // Make functions globally available
 window.initializePlanner = initializePlanner;
