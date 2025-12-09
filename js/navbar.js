@@ -152,9 +152,54 @@ function renderSidebarNavigation() {
   if (roleDisplay) {
     roleDisplay.textContent = userRole;
   }
+  
+  // Update user profile information in dropdown
+  updateUserProfileDropdown();
 }
 
-// Event listener for when the entire HTML document has been loaded and parsed.
+// Function to update user profile dropdown with username and full name
+async function updateUserProfileDropdown() {
+  try {
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    const username = currentUser.username || 'Unknown';
+    
+    // Update username
+    const usernameDisplay = document.getElementById('userUsername');
+    if (usernameDisplay) {
+      usernameDisplay.textContent = `@${username}`;
+    }
+    
+    // Define BASE_URL if not already defined
+    const baseUrl = window.BASE_URL || 'http://localhost:3000/';
+    
+    // Fetch full name from database
+    const response = await fetch(`${baseUrl}queries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "Sasaki_Coating_MasterDB",
+        collectionName: "users",
+        query: { username: username },
+        projection: { firstName: 1, lastName: 1 }
+      })
+    });
+    
+    if (response.ok) {
+      const users = await response.json();
+      const fullNameDisplay = document.getElementById('userFullName');
+      
+      if (users.length > 0 && fullNameDisplay) {
+        const user = users[0];
+        const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        fullNameDisplay.textContent = fullName || username;
+      } else if (fullNameDisplay) {
+        fullNameDisplay.textContent = username;
+      }
+    }
+  } catch (error) {
+    console.error('Error updating user profile dropdown:', error);
+  }
+}// Event listener for when the entire HTML document has been loaded and parsed.
 document.addEventListener("DOMContentLoaded", function() {
   // Check if the main sidebar structure is already present in the DOM.
   // This prevents injecting duplicate HTML if the page already includes it statically.
@@ -196,12 +241,16 @@ document.addEventListener("DOMContentLoaded", function() {
                 <button onclick="toggleDropdown()" class="focus:outline-none">
                   <img src="https://i.pravatar.cc/40" class="w-10 h-10 rounded-full border" alt="Profile" />
                 </button>
-                <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-48 bg-white border rounded shadow-lg z-50">
-                  <div class="px-4 py-2 text-sm text-gray-700">
-                    Role: <span id="userRole">admin</span>
+                <div id="dropdownContent" class="hidden absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded shadow-lg z-50">
+                  <div class="px-4 py-3 border-b dark:border-gray-700">
+                    <div class="text-sm font-semibold text-gray-900 dark:text-white" id="userFullName">Loading...</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5" id="userUsername">@username</div>
                   </div>
-                  <div class="border-t"></div>
-                  <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100">
+                  <div class="px-4 py-2 text-xs text-gray-600 dark:text-gray-400">
+                    Role: <span id="userRole" class="font-medium text-gray-900 dark:text-white">admin</span>
+                  </div>
+                  <div class="border-t dark:border-gray-700"></div>
+                  <button onclick="logout()" class="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700">
                     Logout
                   </button>
                 </div>
@@ -281,4 +330,7 @@ document.addEventListener("DOMContentLoaded", function() {
   if (!localStorage.getItem("authUser")) {
     window.location.href = "login.html";
   }
+  
+  // Update user profile dropdown after DOM is loaded
+  updateUserProfileDropdown();
 });
