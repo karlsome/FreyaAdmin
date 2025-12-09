@@ -6147,6 +6147,11 @@ window.confirmScannedItems = async function() {
         return;
     }
     
+    if (!plannerState.currentFactory) {
+        showPlannerNotification('Please select a factory first', 'warning');
+        return;
+    }
+    
     try {
         // Close scanner modal first
         closeBarcodeScanner();
@@ -6158,7 +6163,7 @@ window.confirmScannedItems = async function() {
         for (const item of barcodeScanner.scannedItems) {
             goals.push({
                 product: item.product,
-                quantity: item.quantity,
+                quantity: parseInt(item.quantity) || 0,
                 date: barcodeScanner.scanDate
             });
         }
@@ -6193,21 +6198,23 @@ window.confirmScannedItems = async function() {
             
             for (const dup of duplicates) {
                 await updateGoal(dup.existing._id, {
-                    '目標数量': dup.existing['目標数量'] + dup.new.quantity
+                    targetQuantity: dup.existing.targetQuantity + dup.new.quantity,
+                    remainingQuantity: dup.existing.remainingQuantity + dup.new.quantity
                 });
             }
             
             // Save new goals
             if (newGoals.length > 0) {
                 const goalsToSave = newGoals.map(g => ({
-                    '背番号': g.product['背番号'],
-                    '品番': g.product['品番'],
-                    '品名': g.product['品名'],
-                    '目標数量': g.quantity,
-                    '工場': plannerState.currentFactory,
-                    'date': g.date,
-                    'assignedEquipment': [],
-                    'createdAt': new Date().toISOString()
+                    背番号: g.product['背番号'],
+                    品番: g.product['品番'],
+                    品名: g.product['品名'],
+                    targetQuantity: g.quantity,
+                    remainingQuantity: g.quantity,
+                    scheduledQuantity: 0,
+                    factory: plannerState.currentFactory,
+                    date: g.date,
+                    status: 'pending'
                 }));
                 
                 await saveGoalsBatch(goalsToSave);
@@ -6220,14 +6227,15 @@ window.confirmScannedItems = async function() {
         } else {
             // No duplicates, save all
             const goalsToSave = newGoals.map(g => ({
-                '背番号': g.product['背番号'],
-                '品番': g.product['品番'],
-                '品名': g.product['品名'],
-                '目標数量': g.quantity,
-                '工場': plannerState.currentFactory,
-                'date': g.date,
-                'assignedEquipment': [],
-                'createdAt': new Date().toISOString()
+                背番号: g.product['背番号'],
+                品番: g.product['品番'],
+                品名: g.product['品名'],
+                targetQuantity: g.quantity,
+                remainingQuantity: g.quantity,
+                scheduledQuantity: 0,
+                factory: plannerState.currentFactory,
+                date: g.date,
+                status: 'pending'
             }));
             
             await saveGoalsBatch(goalsToSave);
