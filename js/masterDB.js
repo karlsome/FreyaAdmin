@@ -242,6 +242,9 @@ document.getElementById("masterImageUploadInput").addEventListener("change", asy
     reader.onloadend = async () => {
       const base64 = reader.result.split(",")[1];
 
+      // Show loading overlay
+      showMasterImageUploadLoading();
+
       try {
         // Get current tab to determine which collection to update
         // Map materialDB tab to materialMasterDB2 collection
@@ -261,12 +264,18 @@ document.getElementById("masterImageUploadInput").addEventListener("change", asy
         });
 
         const result = await res.json();
+        
+        // Hide loading overlay
+        hideMasterImageUploadLoading();
+        
         if (!res.ok || !result.imageURL) throw new Error(result.error || "Image upload failed");
 
         alert(t('imageUploadedSuccessfully'));
         data.imageURL = result.imageURL;
         showMasterSidebar(data); // Refresh
       } catch (err) {
+        // Hide loading overlay
+        hideMasterImageUploadLoading();
         alert(t('imageUploadFailed'));
         console.error(err);
       }
@@ -287,6 +296,55 @@ function closeMasterSidebar() {
 }
 
 /**
+ * Shows the image upload loading overlay with animated loader
+ */
+function showMasterImageUploadLoading() {
+  // Remove existing overlay if present
+  hideMasterImageUploadLoading();
+  
+  const overlay = document.createElement('div');
+  overlay.id = 'masterImageUploadOverlay';
+  overlay.className = 'fixed inset-0 bg-black bg-opacity-60 z-[60] flex flex-col items-center justify-center';
+  overlay.innerHTML = `
+    <div class="loader">
+      <div class="circle">
+        <div class="dot"></div>
+        <div class="outline"></div>
+      </div>
+      <div class="circle">
+        <div class="dot"></div>
+        <div class="outline"></div>
+      </div>
+      <div class="circle">
+        <div class="dot"></div>
+        <div class="outline"></div>
+      </div>
+      <div class="circle">
+        <div class="dot"></div>
+        <div class="outline"></div>
+      </div>
+      <div class="circle">
+        <div class="dot"></div>
+        <div class="outline"></div>
+      </div>
+    </div>
+    <p class="text-white text-lg font-semibold mt-6">Uploading image...</p>
+  `;
+  
+  document.body.appendChild(overlay);
+}
+
+/**
+ * Hides the image upload loading overlay
+ */
+function hideMasterImageUploadLoading() {
+  const overlay = document.getElementById('masterImageUploadOverlay');
+  if (overlay) {
+    overlay.remove();
+  }
+}
+
+/**
  * Handles uploading a new image for a master record.
  * @param {string} recordId - The record ID to update
  */
@@ -297,6 +355,9 @@ async function triggerMasterImageUpload(recordId) {
   input.onchange = async () => {
     const file = input.files[0];
     if (!file) return;
+
+    // Show loading overlay
+    showMasterImageUploadLoading();
 
     const storageRef = firebase.storage().ref(); // Assuming Firebase is initialized
     const path = `masterImage/${recordId}_${Date.now()}_${file.name}`;
@@ -323,6 +384,9 @@ async function triggerMasterImageUpload(recordId) {
         })
       });
 
+      // Hide loading overlay
+      hideMasterImageUploadLoading();
+
       alert(t('imageUploadedSuccessfully'));
       // Reload data without switching tabs by calling loadMasterDB if available
       if (typeof loadMasterDB === 'function') {
@@ -332,6 +396,8 @@ async function triggerMasterImageUpload(recordId) {
       }
 
     } catch (err) {
+      // Hide loading overlay
+      hideMasterImageUploadLoading();
       console.error("Firebase upload failed:", err);
       alert(t('uploadFailed'));
     }
