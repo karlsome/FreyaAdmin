@@ -2,6 +2,30 @@
 // PRODUCTION GOALS API ROUTES
 // Copy this to your server.js file
 // ============================================
+//
+// NEW FEATURE ADDED: Material Lot Lookup (材料ロット検索)
+// 
+// INSTRUCTIONS TO IMPLEMENT:
+// 1. Copy the new API endpoint at the bottom of this file to your server.js
+//    Route: POST /api/material-lot-lookup
+//    Location: Lines 730-847 (after the production goals summary route)
+//
+// 2. The frontend changes have already been made in:
+//    - /FreyaAdmin/js/factories.js
+//    
+// WHAT IT DOES:
+// - When viewing pressDB records in the factory details sidebar, 
+//   the 材料ロット field values are now clickable
+// - Clicking a 材料ロット opens a modal showing related materialRequestDB records
+// - The API queries materialRequestDB using:
+//   1. First gets 材料背番号 from masterDB using 品番
+//   2. Then searches materialRequestDB matching 材料背番号 and either:
+//      - lotNumbers array contains the clicked 材料ロット, OR
+//      - 作業日 matches the date extracted from 材料ロット (fallback)
+// - Handles multiple date formats: yymmdd-##, yyyymmdd-##, yyyy-mm-dd, yyyy-mm-dd-##
+// - Displays all matching records with complete details in a beautiful modal
+//
+// ============================================
 
 // Production Goals Collection: productionGoalsDB in submittedDB database
 // Schema:
@@ -725,3 +749,118 @@ app.get('/api/production-goals/summary', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+// ==================== MATERIAL LOT LOOKUP ====================
+/**
+ * Lookup materialRequestDB records by 材料ロット
+ * This endpoint is used in the factory details sidebar to find material request info
+ * POST /api/material-lot-lookup
+ */
+app.post('/api/material-lot-lookup', async (req, res) => {
+    try {
+        const { 品番, 材料ロット } = req.body;
+        
+        console.log('🔍 Material lot lookup request:', { 品番, 材料ロット });
+        
+        if (!品番 || !材料ロット) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing required fields: 品番 and 材料ロット' 
+            });
+        }
+        
+        // Step 1: Get 材料背番号 from masterDB
+        const masterDb = client.db('Sasaki_Coating_MasterDB');
+        const masterCollection = masterDb.collection('masterDB');
+        
+        const masterDoc = await masterCollection.findOne({ 品番 });
+        
+        if (!masterDoc || !masterDoc.材料背番号) {
+            return res.json({ 
+                success: false, 
+                error: '品番 not found in masterDB or missing 材料背番号',
+                results: []
+            });
+        }
+        
+        const 材料背番号 = masterDoc.材料背番号;
+        console.log(`✅ Found 材料背番号: ${材料背番号} for 品番: ${品番}`);
+        
+        // Step 2: Query materialRequestDB
+        const submittedDb = client.db('submittedDB');
+        const materialCollection = submittedDb.collection('materialRequestDB');
+        
+        // Extract date from 材料ロット (handle multiple formats)
+        // Formats: yymmdd-##, yyyymmdd-##, yyyy-mm-dd, yyyy-mm-dd-##
+        const extractDate = (lotNumber) => {
+            // Remove all non-digit characters to get just numbers
+            const numbersOnly = lotNumber.replace(/[^\d]/g, '');
+            
+            // Try different patterns
+            if (numbersOnly.length >= 6) {
+                // Could be yymmdd or yyyymmdd
+                if (numbersOnly.length >= 8) {
+                    // Likely yyyymmdd format
+                    const year = numbersOnly.substring(0, 4);
+                    const month = numbersOnly.substring(4, 6);
+                    const day = numbersOnly.substring(6, 8);
+                    return `${year.substring(2)}${month}${day}`; // Return as yymmdd
+                } else {
+                    // Likely yymmdd format
+                    return numbersOnly.substring(0, 6);
+                }
+            }
+            return null;
+        };
+        
+        const dateFromLot = extractDate(材料ロット);
+        console.log(`📅 Extracted date from lot: ${dateFromLot}`);
+        
+        // Build query with multiple conditions
+        const query = {
+            材料背番号: 材料背番号,
+            $or: []
+        };
+        
+        // Condition 1: Search in lotNumbers array
+        query.$or.push({
+            'PrintLog.lotNumbers': { 
+                $elemMatch: { 
+                    $regex: new RegExp(材料ロット.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') 
+                } 
+            }
+        });
+        
+        // Condition 2: Fallback to 作業日 if we could extract a date
+        if (dateFromLot) {
+            query.$or.push({
+                作業日: { $regex: new RegExp(dateFromLot, 'i') }
+            });
+        }
+        
+        console.log('🔍 Querying materialRequestDB with:', JSON.stringify(query, null, 2));
+        
+        const results = await materialCollection.find(query)
+            .sort({ LastPrintTimestamp: -1 })
+            .limit(10) // Limit to 10 results to avoid too much data
+            .toArray();
+        
+        console.log(`✅ Found ${results.length} matching records`);
+        
+        res.json({ 
+            success: true, 
+            results: results,
+            材料背番号: 材料背番号,
+            searchedLot: 材料ロット
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in material lot lookup:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+console.log("📦 Material lot lookup route loaded successfully");

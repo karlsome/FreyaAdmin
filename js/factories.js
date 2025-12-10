@@ -1428,6 +1428,234 @@ window.closeFactorySensorHistoryModal = function() {
     }
 };
 
+/**
+ * Open Material Lot Modal - Shows materialRequestDB data for a specific 材料ロット
+ * @param {string} materialLot - The 材料ロット value clicked
+ * @param {string} hinban - The 品番 from the current item
+ */
+window.openMaterialLotModal = async function(materialLot, hinban) {
+    console.log('Opening material lot modal:', { materialLot, hinban });
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'materialLotModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900">材料ロット詳細</h3>
+                    <p class="text-sm text-gray-600 mt-1">材料ロット: ${materialLot}</p>
+                </div>
+                <button onclick="closeMaterialLotModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="ri-close-line text-2xl"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 overflow-y-auto flex-1" id="materialLotContent">
+                <div class="text-center py-8">
+                    <i class="ri-loader-4-line animate-spin text-3xl text-blue-500"></i>
+                    <p class="mt-2 text-gray-600">データを読み込み中...</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Fetch data
+    try {
+        const response = await fetch(BASE_URL + 'api/material-lot-lookup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                品番: hinban,
+                材料ロット: materialLot
+            })
+        });
+        
+        const data = await response.json();
+        const content = document.getElementById('materialLotContent');
+        
+        if (!response.ok || !data.success) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="ri-error-warning-line text-4xl text-red-500 mb-3"></i>
+                    <p class="text-red-600 font-medium">${data.error || 'データの取得に失敗しました'}</p>
+                </div>
+            `;
+            return;
+        }
+        
+        if (!data.results || data.results.length === 0) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="ri-file-search-line text-4xl text-gray-400 mb-3"></i>
+                    <p class="text-gray-600 font-medium">該当する材料リクエストが見つかりませんでした</p>
+                    <p class="text-sm text-gray-500 mt-2">材料背番号: ${data.材料背番号 || 'N/A'}</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Display results
+        content.innerHTML = `
+            <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div class="text-sm text-gray-700">
+                    <span class="font-semibold">検索結果:</span> ${data.results.length} 件
+                    ${data.材料背番号 ? `<span class="ml-4"><span class="font-semibold">材料背番号:</span> ${data.材料背番号}</span>` : ''}
+                </div>
+            </div>
+            
+            <div class="space-y-6">
+                ${data.results.map((item, index) => {
+                    const lotNumbers = item.PrintLog?.[0]?.lotNumbers?.join(', ') || 'なし';
+                    const printTimestamp = item.LastPrintTimestamp 
+                        ? new Date(item.LastPrintTimestamp).toLocaleString('ja-JP')
+                        : 'なし';
+                    const completionTimestamp = item.CompletionTimestamp
+                        ? new Date(item.CompletionTimestamp).toLocaleString('ja-JP')
+                        : 'なし';
+                    
+                    return `
+                        <div class="border border-gray-200 rounded-lg overflow-hidden">
+                            <div class="flex justify-between items-center px-5 py-3 bg-gray-50 border-b border-gray-200">
+                                <h4 class="text-base font-semibold text-gray-900">記録 #${index + 1}</h4>
+                                <span class="px-3 py-1 rounded-full text-xs font-medium ${
+                                    item.STATUS === 'Completed' ? 'bg-green-100 text-green-800' :
+                                    item.STATUS === 'In Progress' ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-gray-100 text-gray-800'
+                                }">
+                                    ${item.STATUS || 'なし'}
+                                </span>
+                            </div>
+                            
+                            <div class="p-5">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="space-y-2">
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">品番:</span>
+                                        <span class="text-gray-900">${item.品番 || 'なし'}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">材料品番:</span>
+                                        <span class="text-gray-900">${item.材料品番 || 'なし'}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">材料背番号:</span>
+                                        <span class="text-gray-900 font-semibold">${item.材料背番号 || 'なし'}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">作業日:</span>
+                                        <span class="text-gray-900">${item.作業日 || 'なし'}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">納期:</span>
+                                        <span class="text-gray-900">${item.納期 || 'なし'}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">工場:</span>
+                                        <span class="text-gray-900">${item.PrintLog?.[0]?.factory || 'なし'}</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="space-y-2">
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">生産数:</span>
+                                        <span class="text-gray-900 font-semibold">${item.生産数 || 'なし'}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">生産順番:</span>
+                                        <span class="text-gray-900">${item.生産順番 || 'なし'}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">作業時間:</span>
+                                        <span class="text-gray-900">${item.作業時間 || 'なし'} 時間</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">人員数:</span>
+                                        <span class="text-gray-900">${item.人員数 || 'なし'} 人</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">幅:</span>
+                                        <span class="text-gray-900">${item.幅 || 'なし'} mm</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">型番:</span>
+                                        <span class="text-gray-900">${item.型番 || 'なし'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-4 pt-4 border-t border-gray-200">
+                                <h5 class="font-semibold text-gray-900 mb-3 flex items-center">
+                                    <i class="ri-barcode-line mr-2 text-blue-600"></i>ロット情報
+                                </h5>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">ロット番号:</span>
+                                        <span class="text-gray-900 font-semibold">${lotNumbers}</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">印刷枚数:</span>
+                                        <span class="text-gray-900">${item.PrintLog?.[0]?.count || 0} 枚</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">総印刷枚数:</span>
+                                        <span class="text-gray-900 font-semibold">${item.TotalLabelsPrintedForOrder || 0} 枚</span>
+                                    </div>
+                                    <div class="flex justify-between py-1">
+                                        <span class="text-gray-600 font-medium">印刷者:</span>
+                                        <span class="text-gray-900">${item.PrintLog?.[0]?.printedBy || 'なし'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mt-4 pt-4 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                                <div class="flex justify-between py-1">
+                                    <span class="text-gray-600 font-medium">加工条件管理番号:</span>
+                                    <span class="text-gray-900">${item.加工条件管理番号 || 'なし'}</span>
+                                </div>
+                                <div class="flex justify-between py-1">
+                                    <span class="text-gray-600 font-medium">印刷日時:</span>
+                                    <span class="text-gray-900">${printTimestamp}</span>
+                                </div>
+                                <div class="flex justify-between py-1">
+                                    <span class="text-gray-600 font-medium">完了日時:</span>
+                                    <span class="text-gray-900">${completionTimestamp}</span>
+                                </div>
+                            </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+        
+    } catch (error) {
+        console.error('Error fetching material lot data:', error);
+        const content = document.getElementById('materialLotContent');
+        content.innerHTML = `
+            <div class="text-center py-8">
+                <i class="ri-error-warning-line text-4xl text-red-500 mb-3"></i>
+                <p class="text-red-600 font-medium">エラーが発生しました</p>
+                <p class="text-sm text-gray-600 mt-2">${error.message}</p>
+            </div>
+        `;
+    }
+};
+
+/**
+ * Close Material Lot Modal
+ */
+window.closeMaterialLotModal = function() {
+    const modal = document.getElementById('materialLotModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
 window.showSensorModalForFactory = async function(factoryName) {
     try {
         const sensorData = await getSensorData(factoryName);
@@ -3781,6 +4009,8 @@ function showSidebar(item) {
     <div class="space-y-2" id="sidebarFields">
       ${entries.map(([label, value]) => {
         const isComment = label === "コメント" || label === "Comment";
+        const isMaterialLot = label === "材料ロット" && isPress;
+        
         if (isComment) {
           return `
             <div class="flex items-start gap-2">
@@ -3790,6 +4020,20 @@ function showSidebar(item) {
                         disabled
                         style="min-height: 2.5rem;"
                         oninput="this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'">${value ?? ""}</textarea>
+            </div>
+          `;
+        } else if (isMaterialLot && value) {
+          // Make 材料ロット clickable - split by comma or space and make each clickable
+          const lots = value.toString().split(/[,\s]+/).filter(lot => lot.trim());
+          const clickableLots = lots.map(lot => 
+            `<span class="material-lot-link text-blue-600 hover:text-blue-800 cursor-pointer underline" 
+                   onclick="openMaterialLotModal('${lot.trim()}', '${item["品番"] ?? ""}')">${lot.trim()}</span>`
+          ).join(', ');
+          
+          return `
+            <div class="flex items-center gap-2">
+              <label class="font-medium w-32 shrink-0">${label}</label>
+              <div class="editable-input p-1 border rounded w-full bg-gray-100" data-label="${label}" data-raw-value="${value ?? ""}">${clickableLots}</div>
             </div>
           `;
         } else {
@@ -3872,6 +4116,19 @@ function showSidebar(item) {
 
   document.getElementById("editSidebarBtn").onclick = () => {
     inputs().forEach(i => {
+      // Special handling for material lot field (it's a div, not an input)
+      if (i.dataset.label === "材料ロット" && i.tagName.toLowerCase() === 'div') {
+        const rawValue = i.dataset.rawValue || '';
+        const parent = i.parentElement;
+        const newInput = document.createElement('input');
+        newInput.type = 'text';
+        newInput.className = 'editable-input p-1 border rounded w-full bg-gray-100';
+        newInput.dataset.label = '材料ロット';
+        newInput.value = rawValue;
+        parent.replaceChild(newInput, i);
+        return;
+      }
+      
       i.disabled = false;
       i.addEventListener("input", () => {
         recalculateLive();
