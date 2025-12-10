@@ -3179,26 +3179,28 @@ function showManufacturingLotResults(results, searchTerm, isLoading = false) {
         
         modal.innerHTML = `
             <div class="bg-white rounded-lg shadow-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-                <div class="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+                <!-- Header matching other modals -->
+                <div class="px-6 py-4 bg-white border-b border-gray-200">
                     <div class="flex justify-between items-center">
                         <div>
-                            <h3 class="text-lg font-semibold" data-i18n="searchResults">検索結果</h3>
-                            <p class="text-sm text-gray-600">
+                            <h3 class="text-lg font-semibold text-gray-900" data-i18n="searchResults">検索結果</h3>
+                            <p class="text-sm text-gray-600 mt-1">
                                 <span data-i18n="manufacturingLot">製造ロット</span>: 
-                                <span class="font-mono font-semibold">${searchTerm}</span>
+                                <span class="font-mono font-semibold text-gray-900">${searchTerm}</span>
                                 <span class="ml-2 text-gray-500">(${totalResults} <span data-i18n="recordsFound">件</span>)</span>
                             </p>
                         </div>
-                        <button onclick="closeManufacturingLotResultsModal()" class="text-gray-400 hover:text-gray-600">
-                            <i class="ri-close-line text-xl"></i>
+                        <button onclick="closeManufacturingLotResultsModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="ri-close-line text-2xl"></i>
                         </button>
                     </div>
                 </div>
                 
-                <div class="overflow-y-auto flex-1 p-6">
+                <!-- Content area with consistent styling -->
+                <div class="overflow-y-auto flex-1 p-6 bg-gray-50">
                     ${totalResults === 0 ? `
-                        <div class="text-center py-8">
-                            <i class="ri-search-line text-4xl text-gray-300 mb-4"></i>
+                        <div class="text-center py-12 bg-white rounded-lg border border-gray-200">
+                            <i class="ri-search-line text-5xl text-gray-300 mb-4"></i>
                             <p class="text-gray-600" data-i18n="noResultsFound">検索結果が見つかりませんでした</p>
                         </div>
                     ` : `
@@ -3229,59 +3231,74 @@ function renderProcessSection(processName, data, searchTerm) {
     
     const isPSA = processName === 'PSA';
     
+    // Color scheme matching the Daily Production view
+    const colorScheme = {
+        'Kensa': { bg: 'bg-yellow-50', dot: 'bg-yellow-500', text: 'text-yellow-900' },
+        'Press': { bg: 'bg-green-50', dot: 'bg-green-500', text: 'text-green-900' },
+        'SRS': { bg: 'bg-gray-100', dot: 'bg-gray-500', text: 'text-gray-900' },
+        'Slit': { bg: 'bg-blue-50', dot: 'bg-blue-500', text: 'text-blue-900' },
+        'PSA': { bg: 'bg-purple-50', dot: 'bg-purple-500', text: 'text-purple-900' }
+    };
+    
+    const colors = colorScheme[processName] || { bg: 'bg-gray-50', dot: 'bg-gray-500', text: 'text-gray-900' };
+    
     return `
-        <div class="mb-6">
-            <h4 class="text-md font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <i class="ri-inbox-line"></i>
-                ${processName} (${data.length})
-            </h4>
-            <div class="overflow-x-auto">
-                <table class="min-w-full bg-white border border-gray-200 rounded-lg">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">工場</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">品番</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">背番号</th>
-                            ${isPSA ? `
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">作業日</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">材料ロット</th>
-                            ` : `
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">Date</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">製造ロット</th>
-                            `}
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">Worker</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.map(item => {
-                            const encodedData = safeEncodeItemData(item);
-                            const lotField = isPSA ? (item.材料ロット || '-') : (item.製造ロット || '-');
-                            const dateField = isPSA ? (item.作業日 || '-') : (item.Date || '-');
-                            
-                            return `
-                                <tr class="border-t border-gray-100 hover:bg-gray-50 cursor-pointer" 
-                                    onclick="${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this)"
-                                    data-item='${encodedData.encodedItem}'
-                                    ${encodedData.comment ? `data-comment='${encodedData.comment}'` : ''}>
-                                    <td class="px-4 py-2 text-sm">${item.工場 || '-'}</td>
-                                    <td class="px-4 py-2 text-sm font-mono">${item.品番 || '-'}</td>
-                                    <td class="px-4 py-2 text-sm">${item.背番号 || '-'}</td>
-                                    <td class="px-4 py-2 text-sm">${dateField}</td>
-                                    <td class="px-4 py-2 text-sm font-mono">${lotField}</td>
-                                    <td class="px-4 py-2 text-sm">${item.Worker_Name || '-'}</td>
-                                    <td class="px-4 py-2 text-sm">
-                                        <button 
-                                            onclick="event.stopPropagation(); ${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this.closest('tr'))"
-                                            class="text-blue-600 hover:text-blue-700">
-                                            <i class="ri-eye-line"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
+        <div class="mb-4">
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                <div class="px-4 py-3 ${colors.bg} border-b border-gray-200">
+                    <h4 class="text-sm font-semibold ${colors.text} flex items-center gap-2">
+                        <div class="w-3 h-3 rounded-full ${colors.dot}"></div>
+                        ${processName} Process <span class="text-gray-600 font-normal">(${data.length})</span>
+                    </h4>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">工場</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">品番</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">背番号</th>
+                                ${isPSA ? `
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">作業日</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">材料ロット</th>
+                                ` : `
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Date</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">製造ロット</th>
+                                `}
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Worker</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${data.map(item => {
+                                const encodedData = safeEncodeItemData(item);
+                                const lotField = isPSA ? (item.材料ロット || '-') : (item.製造ロット || '-');
+                                const dateField = isPSA ? (item.作業日 || '-') : (item.Date || '-');
+                                
+                                return `
+                                    <tr class="hover:bg-gray-50 cursor-pointer transition-colors" 
+                                        onclick="${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this)"
+                                        data-item='${encodedData.encodedItem}'
+                                        ${encodedData.comment ? `data-comment='${encodedData.comment}'` : ''}>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${item.工場 || '-'}</td>
+                                        <td class="px-4 py-3 text-sm font-mono text-gray-900">${item.品番 || '-'}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${item.背番号 || '-'}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${dateField}</td>
+                                        <td class="px-4 py-3 text-sm font-mono text-gray-900">${lotField}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${item.Worker_Name || '-'}</td>
+                                        <td class="px-4 py-3 text-sm">
+                                            <button 
+                                                onclick="event.stopPropagation(); ${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this.closest('tr'))"
+                                                class="text-blue-600 hover:text-blue-800 transition-colors">
+                                                <i class="ri-eye-line text-lg"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     `;
