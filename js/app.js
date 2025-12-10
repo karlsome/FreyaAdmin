@@ -13,17 +13,18 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
-  部長: ["dashboard", "factories", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
-  係長: ["dashboard", "factories", "planner", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "planner", "approvals", "masterDB", "equipment", "scna", "noda"],
+  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
+  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
+  係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
+  班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "scna", "noda"],
   member: ["dashboard", "noda"]
 };
 
 const navItemsConfig = {
   dashboard: { icon: "ri-dashboard-line", label: "dashboard" },
   factories: { icon: "ri-building-line", label: "factories" },
+  factoryStatus: { icon: "ri-bar-chart-box-line", label: "factoryStatus" },
   planner: { icon: "ri-calendar-schedule-line", label: "planner" },
   masterDB: { icon: "ri-settings-line", label: "masterDB" },
   inventory: { icon: "ri-archive-line", label: "inventory" },
@@ -1755,6 +1756,79 @@ function loadPage(page) {
               </div>
           `;
           renderFactoryList();
+          if (typeof applyLanguageEnhanced === 'function') {
+            applyLanguageEnhanced();
+          } else if (typeof applyLanguage === 'function') {
+            applyLanguage();
+          }
+          break;
+
+        case "factoryStatus":
+          mainContent.innerHTML = `
+            <div class="space-y-6">
+              <!-- Header Section -->
+              <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                  <h2 class="text-3xl font-bold text-gray-900 dark:text-white" data-i18n="factoryStatus">Factory Status</h2>
+                  <p class="mt-2 text-gray-600 dark:text-gray-400" data-i18n="factoryStatusSubtitle">Real-time factory production progress</p>
+                </div>
+              </div>
+
+              <!-- Filters Section -->
+              <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="factory">Factory</label>
+                    <select id="factoryStatusFactory" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white">
+                      <option value="all">All Factories</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="date">Date</label>
+                    <input type="date" id="factoryStatusDate" value="${new Date().toISOString().split('T')[0]}" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white">
+                  </div>
+                  <div>
+                    <div id="factoryStatusLoader" class="hidden flex items-center justify-center h-full">
+                      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Chart Section -->
+              <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div class="mb-4 flex items-center justify-between">
+                  <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="productionProgress">Production Progress</h3>
+                  <div class="flex items-center gap-4 text-sm">
+                    <div class="flex items-center gap-2">
+                      <div class="w-4 h-4 bg-blue-400 rounded"></div>
+                      <span class="text-gray-600 dark:text-gray-400">Current Production</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <div class="w-4 h-1 bg-red-500"></div>
+                      <span class="text-gray-600 dark:text-gray-400">Goal</span>
+                    </div>
+                  </div>
+                </div>
+                <div id="factoryStatusChart" class="w-full" style="height: 500px;"></div>
+              </div>
+
+              <!-- Info Section -->
+              <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                <div class="flex items-start gap-3">
+                  <i class="ri-information-line text-blue-600 dark:text-blue-400 text-xl flex-shrink-0 mt-0.5"></i>
+                  <div class="text-sm text-blue-800 dark:text-blue-300">
+                    <p class="font-medium mb-1">Auto-refresh enabled</p>
+                    <p>This graph automatically updates every 60 seconds to show real-time production progress.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+          // Initialize factory status
+          if (typeof initializeFactoryStatus === 'function') {
+            setTimeout(() => initializeFactoryStatus(), 100);
+          }
           if (typeof applyLanguageEnhanced === 'function') {
             applyLanguageEnhanced();
           } else if (typeof applyLanguage === 'function') {
