@@ -2449,12 +2449,18 @@ function generateFilterUI(factoryName) {
                 </div>
             </div>
             
-            <!-- Apply Button -->
+            <!-- Apply Button and Manufacturing Lot Finder -->
             <div class="px-4 pb-4 pt-2 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-                <button onclick="applyDynamicFilters()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
-                    <i class="ri-filter-line"></i>
-                    <span data-i18n="applyFilters">Apply Filters</span>
-                </button>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <button onclick="applyDynamicFilters()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
+                        <i class="ri-filter-line"></i>
+                        <span data-i18n="applyFilters">Apply Filters</span>
+                    </button>
+                    <button onclick="openManufacturingLotFinder()" class="bg-purple-600 hover:bg-purple-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
+                        <i class="ri-search-2-line"></i>
+                        <span data-i18n="manufacturingLotFinder">Manufacturing Lot Finder</span>
+                    </button>
+                </div>
             </div>
         </div>
     `;
@@ -2979,6 +2985,319 @@ window.deleteFilterPreset = function(presetName) {
 };
 
 // ==================== END DYNAMIC FILTER FUNCTIONS ====================
+
+// ==================== MANUFACTURING LOT FINDER ====================
+
+/**
+ * Opens the Manufacturing Lot Finder modal for global search across all factories
+ */
+window.openManufacturingLotFinder = function() {
+    const modal = document.createElement('div');
+    modal.id = 'manufacturingLotFinderModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    
+    const currentLang = localStorage.getItem("lang") || "en";
+    const t = translations[currentLang];
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-lg font-semibold" data-i18n="manufacturingLotFinder">製造ロット検索</h3>
+                    <button onclick="closeManufacturingLotFinder()" class="text-gray-400 hover:text-gray-600">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6">
+                <div class="mb-4">
+                    <p class="text-sm text-gray-600 mb-4" data-i18n="lotFinderDescription">
+                        すべての工場とプロセス（Press、Kensa、SRS、Slit、PSA）から製造ロットを検索します
+                    </p>
+                    
+                    <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="manufacturingLot">
+                        製造ロット
+                    </label>
+                    <input 
+                        type="text" 
+                        id="globalLotSearchInput" 
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500" 
+                        placeholder="例: 250915-1"
+                        onkeydown="if(event.key === 'Enter') searchManufacturingLotGlobal()"
+                        autofocus
+                    >
+                </div>
+                
+                <div class="flex gap-3">
+                    <button 
+                        onclick="searchManufacturingLotGlobal()" 
+                        class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2"
+                    >
+                        <i class="ri-search-2-line"></i>
+                        <span data-i18n="search">検索</span>
+                    </button>
+                    <button 
+                        onclick="closeManufacturingLotFinder()" 
+                        class="px-4 py-2.5 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+                        data-i18n="cancel"
+                    >
+                        キャンセル
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Apply translations
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
+    
+    // Focus input
+    setTimeout(() => {
+        document.getElementById('globalLotSearchInput')?.focus();
+    }, 100);
+};
+
+/**
+ * Closes the Manufacturing Lot Finder modal
+ */
+window.closeManufacturingLotFinder = function() {
+    const modal = document.getElementById('manufacturingLotFinderModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+/**
+ * Searches for manufacturing lot across all factories and processes
+ */
+window.searchManufacturingLotGlobal = async function() {
+    const input = document.getElementById('globalLotSearchInput');
+    const searchTerm = input?.value.trim();
+    
+    if (!searchTerm) {
+        const currentLang = localStorage.getItem("lang") || "en";
+        const t = translations[currentLang];
+        alert(t.enterManufacturingLot || '製造ロットを入力してください');
+        return;
+    }
+    
+    // Close the input modal
+    closeManufacturingLotFinder();
+    
+    // Show loading modal
+    showManufacturingLotResults(null, searchTerm, true);
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/search-manufacturing-lot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ manufacturingLot: searchTerm })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Search failed');
+        }
+        
+        const response_data = await response.json();
+        
+        // Debug: Log the results structure
+        console.log('🔍 Manufacturing Lot Search Response:', response_data);
+        
+        // Extract the actual results from the response
+        const results = response_data.results || response_data;
+        
+        console.log('📊 Extracted Results:', {
+            Press: results.Press?.length,
+            Kensa: results.Kensa?.length,
+            SRS: results.SRS?.length,
+            Slit: results.Slit?.length,
+            PSA: results.PSA?.length
+        });
+        
+        // Show results modal
+        showManufacturingLotResults(results, searchTerm, false);
+        
+    } catch (error) {
+        console.error('Error searching manufacturing lot:', error);
+        const currentLang = localStorage.getItem("lang") || "en";
+        const t = translations[currentLang];
+        alert(t.searchError || '検索中にエラーが発生しました');
+        closeManufacturingLotResultsModal();
+    }
+};
+
+/**
+ * Shows the results modal for manufacturing lot search
+ */
+function showManufacturingLotResults(results, searchTerm, isLoading = false) {
+    const existingModal = document.getElementById('manufacturingLotResultsModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'manufacturingLotResultsModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    
+    const currentLang = localStorage.getItem("lang") || "en";
+    const t = translations[currentLang];
+    
+    if (isLoading) {
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-lg max-w-2xl w-full">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold" data-i18n="searchResults">検索結果</h3>
+                </div>
+                <div class="p-8 text-center">
+                    <i class="ri-loader-4-line animate-spin text-4xl text-purple-600 mb-4"></i>
+                    <p class="text-gray-600" data-i18n="searching">検索中...</p>
+                </div>
+            </div>
+        `;
+    } else {
+        // Extract data using the process names from the API response (Press, Kensa, SRS, Slit, PSA)
+        const pressData = results.Press || [];
+        const kensaData = results.Kensa || [];
+        const srsData = results.SRS || [];
+        const slitData = results.Slit || [];
+        const psaData = results.PSA || [];
+        
+        const totalResults = pressData.length + kensaData.length + srsData.length + slitData.length + psaData.length;
+        
+        console.log('📊 Total results calculated:', totalResults, {
+            Press: pressData.length,
+            Kensa: kensaData.length,
+            SRS: srsData.length,
+            Slit: slitData.length,
+            PSA: psaData.length
+        });
+        
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-lg font-semibold" data-i18n="searchResults">検索結果</h3>
+                            <p class="text-sm text-gray-600">
+                                <span data-i18n="manufacturingLot">製造ロット</span>: 
+                                <span class="font-mono font-semibold">${searchTerm}</span>
+                                <span class="ml-2 text-gray-500">(${totalResults} <span data-i18n="recordsFound">件</span>)</span>
+                            </p>
+                        </div>
+                        <button onclick="closeManufacturingLotResultsModal()" class="text-gray-400 hover:text-gray-600">
+                            <i class="ri-close-line text-xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="overflow-y-auto flex-1 p-6">
+                    ${totalResults === 0 ? `
+                        <div class="text-center py-8">
+                            <i class="ri-search-line text-4xl text-gray-300 mb-4"></i>
+                            <p class="text-gray-600" data-i18n="noResultsFound">検索結果が見つかりませんでした</p>
+                        </div>
+                    ` : `
+                        ${renderProcessSection('Press', pressData, searchTerm)}
+                        ${renderProcessSection('Kensa', kensaData, searchTerm)}
+                        ${renderProcessSection('SRS', srsData, searchTerm)}
+                        ${renderProcessSection('Slit', slitData, searchTerm)}
+                        ${renderProcessSection('PSA', psaData, searchTerm)}
+                    `}
+                </div>
+            </div>
+        `;
+    }
+    
+    document.body.appendChild(modal);
+    
+    // Apply translations
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
+};
+
+/**
+ * Renders a process section in the manufacturing lot results
+ */
+function renderProcessSection(processName, data, searchTerm) {
+    if (!data || data.length === 0) return '';
+    
+    const isPSA = processName === 'PSA';
+    
+    return `
+        <div class="mb-6">
+            <h4 class="text-md font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <i class="ri-inbox-line"></i>
+                ${processName} (${data.length})
+            </h4>
+            <div class="overflow-x-auto">
+                <table class="min-w-full bg-white border border-gray-200 rounded-lg">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">工場</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">品番</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">背番号</th>
+                            ${isPSA ? `
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">作業日</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">材料ロット</th>
+                            ` : `
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">Date</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">製造ロット</th>
+                            `}
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">Worker</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-600">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${data.map(item => {
+                            const encodedData = safeEncodeItemData(item);
+                            const lotField = isPSA ? (item.材料ロット || '-') : (item.製造ロット || '-');
+                            const dateField = isPSA ? (item.作業日 || '-') : (item.Date || '-');
+                            
+                            return `
+                                <tr class="border-t border-gray-100 hover:bg-gray-50 cursor-pointer" 
+                                    onclick="${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this)"
+                                    data-item='${encodedData.encodedItem}'
+                                    ${encodedData.comment ? `data-comment='${encodedData.comment}'` : ''}>
+                                    <td class="px-4 py-2 text-sm">${item.工場 || '-'}</td>
+                                    <td class="px-4 py-2 text-sm font-mono">${item.品番 || '-'}</td>
+                                    <td class="px-4 py-2 text-sm">${item.背番号 || '-'}</td>
+                                    <td class="px-4 py-2 text-sm">${dateField}</td>
+                                    <td class="px-4 py-2 text-sm font-mono">${lotField}</td>
+                                    <td class="px-4 py-2 text-sm">${item.Worker_Name || '-'}</td>
+                                    <td class="px-4 py-2 text-sm">
+                                        <button 
+                                            onclick="event.stopPropagation(); ${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this.closest('tr'))"
+                                            class="text-blue-600 hover:text-blue-700">
+                                            <i class="ri-eye-line"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Closes the manufacturing lot results modal
+ */
+window.closeManufacturingLotResultsModal = function() {
+    const modal = document.getElementById('manufacturingLotResultsModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+// ==================== END MANUFACTURING LOT FINDER ====================
 
 /**
  * Renders the dashboard cards for each factory, showing total, NG, and defect rate.
