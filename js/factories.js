@@ -4025,12 +4025,25 @@ function showManufacturingLotDetailModal(item, isPSA = false) {
                             <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
                                 <i class="ri-barcode-line mr-2"></i>ロット情報
                             </h4>
-                            <div class="flex items-center gap-2 p-2 bg-purple-50 rounded">
-                                <span class="font-medium text-gray-600">製造ロット:</span>
-                                <span class="text-purple-700 font-mono font-semibold cursor-pointer hover:underline"
-                                    onclick="event.stopPropagation(); openMaterialLotModal('${item.材料ロット || item.製造ロット || ''}', '${item.品番 || ''}')">
-                                    ${item.材料ロット || item.製造ロット || '-'}
-                                </span>
+                            <div class="p-2 bg-purple-50 rounded">
+                                <span class="font-medium text-gray-600 block mb-2">製造ロット:</span>
+                                <div class="flex flex-wrap gap-2">
+                                    ${(() => {
+                                        const lotValue = item.材料ロット || item.製造ロット || '';
+                                        if (!lotValue || lotValue === '-') {
+                                            return '<span class="text-gray-500">-</span>';
+                                        }
+                                        // Split by comma and/or space, filter empty values
+                                        const lots = lotValue.split(/[,\s]+/).filter(l => l.trim());
+                                        return lots.map(lot => 
+                                            `<span class="inline-flex items-center gap-1 bg-white px-3 py-1 rounded border border-purple-200 text-purple-700 font-mono text-sm font-semibold cursor-pointer hover:bg-purple-100 transition-colors"
+                                                onclick="event.stopPropagation(); openMaterialLotModal('${lot.trim()}', '${item.品番 || ''}')">
+                                                <i class="ri-barcode-line text-xs"></i>
+                                                ${lot.trim()}
+                                            </span>`
+                                        ).join('');
+                                    })()}
+                                </div>
                             </div>
                         </div>
                         
