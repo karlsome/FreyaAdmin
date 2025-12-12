@@ -3352,7 +3352,7 @@ function renderProcessSection(processName, data, searchTerm) {
                                 
                                 return `
                                     <tr class="hover:bg-gray-50 cursor-pointer transition-colors" 
-                                        onclick="${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this)"
+                                        onclick="showManufacturingLotDetailFromElement(this, ${isPSA})"
                                         data-item='${encodedData.encodedItem}'
                                         ${encodedData.comment ? `data-comment='${encodedData.comment}'` : ''}>
                                         <td class="px-4 py-3 text-sm text-gray-900">${item.工場 || '-'}</td>
@@ -3363,7 +3363,7 @@ function renderProcessSection(processName, data, searchTerm) {
                                         <td class="px-4 py-3 text-sm text-gray-900">${item.Worker_Name || '-'}</td>
                                         <td class="px-4 py-3 text-sm">
                                             <button 
-                                                onclick="event.stopPropagation(); ${isPSA ? 'showPSASidebarFromElement' : 'showSidebarFromElement'}(this.closest('tr'))"
+                                                onclick="event.stopPropagation(); showManufacturingLotDetailFromElement(this.closest('tr'), ${isPSA})"
                                                 class="text-blue-600 hover:text-blue-800 transition-colors">
                                                 <i class="ri-eye-line text-lg"></i>
                                             </button>
@@ -3685,6 +3685,413 @@ function renderMLFManufacturingLotTags() {
 window.focusMLFManufacturingLotInput = function() {
     const input = document.getElementById('filterManufacturingLot');
     if (input) input.focus();
+};
+
+/**
+ * Show detail modal from table row element
+ */
+window.showManufacturingLotDetailFromElement = function(el, isPSA = false) {
+    try {
+        const encodedData = el.dataset.item;
+        const decodedData = decodeURIComponent(encodedData);
+        const item = JSON.parse(decodedData);
+        
+        showManufacturingLotDetailModal(item, isPSA);
+    } catch (error) {
+        console.error('Error parsing item data:', error);
+        alert('データの読み込みに失敗しました。');
+    }
+};
+
+/**
+ * Show detail modal for manufacturing lot search result
+ */
+function showManufacturingLotDetailModal(item, isPSA = false) {
+    // Hide results modal temporarily
+    const resultsModal = document.getElementById('manufacturingLotResultsModal');
+    if (resultsModal) {
+        resultsModal.style.display = 'none';
+    }
+    
+    // Remove existing detail modal if any
+    const existingModal = document.getElementById('manufacturingLotDetailModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'manufacturingLotDetailModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    
+    const currentLang = localStorage.getItem("lang") || "en";
+    
+    // Build content based on process type
+    let content = '';
+    
+    if (isPSA) {
+        // PSA Process
+        const printLog = item.PrintLog && item.PrintLog[0] ? item.PrintLog[0] : {};
+        const lotNumbers = printLog.lotNumbers || [];
+        
+        content = `
+            <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Header -->
+                <div class="px-6 py-4 bg-white border-b border-gray-200">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">PSA Process - 詳細情報</h3>
+                            <p class="text-sm text-gray-600 mt-1">${item.品番 || ''}</p>
+                        </div>
+                        <button onclick="closeManufacturingLotDetailModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Content -->
+                <div class="overflow-y-auto flex-1 p-6 bg-gray-50">
+                    <div class="space-y-4">
+                        <!-- Basic Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-information-line mr-2"></i>基本情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">品番:</span>
+                                    <span class="text-gray-900 font-mono">${item.品番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">材料品番:</span>
+                                    <span class="text-gray-900 font-mono">${item.材料品番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">材料背番号:</span>
+                                    <span class="text-gray-900">${item.材料背番号 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">工場:</span>
+                                    <span class="text-gray-900">${printLog.factory || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">作業日:</span>
+                                    <span class="text-gray-900">${item.作業日 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">納期:</span>
+                                    <span class="text-gray-900">${item.納期 || '-'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Production Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-factory-line mr-2"></i>生産情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">生産順番:</span>
+                                    <span class="text-gray-900">${item.生産順番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">生産数:</span>
+                                    <span class="text-gray-900">${item.生産数 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">作業時間:</span>
+                                    <span class="text-gray-900">${item.作業時間 || '-'} 時間</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">人員数:</span>
+                                    <span class="text-gray-900">${item.人員数 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">幅:</span>
+                                    <span class="text-gray-900">${item.幅 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">型番:</span>
+                                    <span class="text-gray-900">${item.型番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">加工条件管理番号:</span>
+                                    <span class="text-gray-900">${item.加工条件管理番号 || '-'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Material Lot Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-barcode-line mr-2"></i>材料ロット情報
+                            </h4>
+                            <div class="space-y-2">
+                                ${lotNumbers.map((lot, index) => `
+                                    <div class="flex items-center gap-2 p-2 bg-purple-50 rounded">
+                                        <span class="font-medium text-gray-600">ロット ${index + 1}:</span>
+                                        <span class="text-purple-700 font-mono font-semibold cursor-pointer hover:underline"
+                                            onclick="event.stopPropagation(); openMaterialLotModal('${lot}', '${item.品番 || ''}')">
+                                            ${lot}
+                                        </span>
+                                    </div>
+                                `).join('')}
+                                <div class="flex justify-between pt-2 border-t">
+                                    <span class="font-medium text-gray-600">印刷枚数合計:</span>
+                                    <span class="text-gray-900">${item.TotalLabelsPrintedForOrder || 0}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Status Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-check-line mr-2"></i>ステータス情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">STATUS:</span>
+                                    <span class="px-3 py-1 rounded-full text-sm font-medium ${
+                                        item.STATUS === 'Completed' ? 'bg-green-100 text-green-800' :
+                                        item.STATUS === 'In Progress' ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-gray-100 text-gray-800'
+                                    }">
+                                        ${item.STATUS || '-'}
+                                    </span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">完了日時:</span>
+                                    <span class="text-gray-900 text-sm">
+                                        ${item.CompletionTimestamp 
+                                            ? new Date(item.CompletionTimestamp).toLocaleString('ja-JP')
+                                            : '-'
+                                        }
+                                    </span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">最終印刷日時:</span>
+                                    <span class="text-gray-900 text-sm">
+                                        ${item.LastPrintTimestamp 
+                                            ? new Date(item.LastPrintTimestamp).toLocaleString('ja-JP')
+                                            : '-'
+                                        }
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        // Press, Kensa, SRS, Slit processes
+        const processName = item.設備 ? (
+            item.設備.includes('検査') ? 'Kensa' :
+            item.設備.includes('S') && !item.設備.includes('OZNC') ? 'SRS' :
+            item.設備.includes('スリット') ? 'Slit' : 'Press'
+        ) : 'Press';
+        
+        // Collect all images
+        const images = [];
+        
+        // Material Label Images (Press only - array)
+        if (item.materialLabelImages && Array.isArray(item.materialLabelImages)) {
+            item.materialLabelImages.forEach((url, index) => {
+                images.push({ title: `Material Label ${index + 1}`, url });
+            });
+        }
+        
+        // First/Final Check Images
+        if (item.初物チェック画像) {
+            images.push({ title: 'First Article Check Image', url: item.初物チェック画像 });
+        }
+        if (item.終物チェック画像) {
+            images.push({ title: 'Final Article Check Image', url: item.終物チェック画像 });
+        }
+        
+        // Legacy single material label image (if exists and not in array)
+        if (item.材料ラベル画像 && !item.materialLabelImages) {
+            images.push({ title: 'Material Label Image', url: item.材料ラベル画像 });
+        }
+        
+        content = `
+            <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Header -->
+                <div class="px-6 py-4 bg-white border-b border-gray-200">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">${processName} Process - 詳細情報</h3>
+                            <p class="text-sm text-gray-600 mt-1">${item.品番 || ''} - ${item.背番号 || ''}</p>
+                        </div>
+                        <button onclick="closeManufacturingLotDetailModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Content -->
+                <div class="overflow-y-auto flex-1 p-6 bg-gray-50">
+                    <div class="space-y-4">
+                        <!-- Basic Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-information-line mr-2"></i>基本情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">品番:</span>
+                                    <span class="text-gray-900 font-mono">${item.品番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">背番号:</span>
+                                    <span class="text-gray-900">${item.背番号 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">工場:</span>
+                                    <span class="text-gray-900">${item.工場 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">設備:</span>
+                                    <span class="text-gray-900">${item.設備 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Worker:</span>
+                                    <span class="text-gray-900">${item.Worker_Name || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Date:</span>
+                                    <span class="text-gray-900">${item.Date || '-'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Production Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-factory-line mr-2"></i>生産情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Time Start:</span>
+                                    <span class="text-gray-900">${item.Time_start || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Time End:</span>
+                                    <span class="text-gray-900">${item.Time_end || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Total:</span>
+                                    <span class="text-gray-900 font-semibold">${item.Total || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Process Quantity:</span>
+                                    <span class="text-gray-900">${item.Process_Quantity || '-'}</span>
+                                </div>
+                                ${item.Remaining_Quantity !== undefined ? `
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Remaining Quantity:</span>
+                                    <span class="text-gray-900">${item.Remaining_Quantity}</span>
+                                </div>
+                                ` : ''}
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Total NG:</span>
+                                    <span class="text-gray-900 ${item.Total_NG > 0 ? 'text-red-600 font-semibold' : ''}">${item.Total_NG || 0}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Spare:</span>
+                                    <span class="text-gray-900">${item.Spare || 0}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Cycle Time:</span>
+                                    <span class="text-gray-900">${item.Cycle_Time || '-'}</span>
+                                </div>
+                                ${item.ショット数 !== undefined ? `
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">ショット数:</span>
+                                    <span class="text-gray-900">${item.ショット数}</span>
+                                </div>
+                                ` : ''}
+                                ${item.SRSコード ? `
+                                <div class="flex justify-between col-span-2">
+                                    <span class="font-medium text-gray-600">SRSコード:</span>
+                                    <span class="text-gray-900 font-mono">${item.SRSコード}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                        
+                        <!-- Manufacturing Lot -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-barcode-line mr-2"></i>ロット情報
+                            </h4>
+                            <div class="flex items-center gap-2 p-2 bg-purple-50 rounded">
+                                <span class="font-medium text-gray-600">製造ロット:</span>
+                                <span class="text-purple-700 font-mono font-semibold cursor-pointer hover:underline"
+                                    onclick="event.stopPropagation(); openMaterialLotModal('${item.材料ロット || item.製造ロット || ''}', '${item.品番 || ''}')">
+                                    ${item.材料ロット || item.製造ロット || '-'}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        ${item.Comment ? `
+                        <!-- Comment -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-message-3-line mr-2"></i>コメント
+                            </h4>
+                            <p class="text-gray-700 whitespace-pre-wrap">${item.Comment}</p>
+                        </div>
+                        ` : ''}
+                        
+                        ${images.length > 0 ? `
+                        <!-- Images -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-image-line mr-2"></i>Images
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                ${images.map(img => `
+                                    <div class="space-y-2">
+                                        <p class="text-sm font-medium text-gray-700">${img.title}</p>
+                                        <img src="${img.url}" 
+                                            alt="${img.title}"
+                                            class="w-full h-48 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-75 transition-opacity"
+                                            onclick="openImageTab('${img.url}', '${img.title}')">
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    modal.innerHTML = content;
+    document.body.appendChild(modal);
+    
+    // Apply translations
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
+}
+
+/**
+ * Close detail modal and restore results modal
+ */
+window.closeManufacturingLotDetailModal = function() {
+    const detailModal = document.getElementById('manufacturingLotDetailModal');
+    if (detailModal) {
+        detailModal.remove();
+    }
+    
+    // Restore results modal
+    const resultsModal = document.getElementById('manufacturingLotResultsModal');
+    if (resultsModal) {
+        resultsModal.style.display = 'flex';
+    }
 };
 
 // ==================== END MANUFACTURING LOT FINDER ====================
