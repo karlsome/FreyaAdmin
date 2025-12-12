@@ -3177,6 +3177,10 @@ function showManufacturingLotResults(results, searchTerm, isLoading = false) {
             PSA: psaData.length
         });
         
+        // Collect unique values for dropdowns
+        const allData = [...pressData, ...kensaData, ...srsData, ...slitData, ...psaData];
+        const factories = [...new Set(allData.map(item => item.工場).filter(Boolean))].sort();
+        
         modal.innerHTML = `
             <div class="bg-white rounded-lg shadow-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                 <!-- Header matching other modals -->
@@ -3187,7 +3191,7 @@ function showManufacturingLotResults(results, searchTerm, isLoading = false) {
                             <p class="text-sm text-gray-600 mt-1">
                                 <span data-i18n="manufacturingLot">製造ロット</span>: 
                                 <span class="font-mono font-semibold text-gray-900">${searchTerm}</span>
-                                <span class="ml-2 text-gray-500">(${totalResults} <span data-i18n="recordsFound">件</span>)</span>
+                                <span class="ml-2 text-gray-500">(<span id="filteredResultCount">${totalResults}</span> <span data-i18n="recordsFound">件</span>)</span>
                             </p>
                         </div>
                         <button onclick="closeManufacturingLotResultsModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
@@ -3196,8 +3200,70 @@ function showManufacturingLotResults(results, searchTerm, isLoading = false) {
                     </div>
                 </div>
                 
+                <!-- Filter Section -->
+                <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                        <!-- Factory Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">工場</label>
+                            <select id="filterFactory" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                <option value="">全て</option>
+                                ${factories.map(f => `<option value="${f}">${f}</option>`).join('')}
+                            </select>
+                        </div>
+                        
+                        <!-- Part Number Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">品番</label>
+                            <div class="tag-input-container border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-transparent p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text bg-white" onclick="focusMLFPartNumberInput()">
+                                <div id="mlfPartNumberTags" class="flex flex-wrap gap-1"></div>
+                                <input type="text" id="filterPartNumber" class="flex-1 min-w-[100px] border-none outline-none text-sm" placeholder="例: C13/MLAH2B (Enter)" onkeydown="handleMLFPartNumberKeydown(event)">
+                            </div>
+                        </div>
+                        
+                        <!-- Serial Number Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">背番号</label>
+                            <div class="tag-input-container border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-transparent p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text bg-white" onclick="focusMLFSerialNumberInput()">
+                                <div id="mlfSerialNumberTags" class="flex flex-wrap gap-1"></div>
+                                <input type="text" id="filterSerialNumber" class="flex-1 min-w-[100px] border-none outline-none text-sm" placeholder="例: GD (Enter)" onkeydown="handleMLFSerialNumberKeydown(event)">
+                            </div>
+                        </div>
+                        
+                        <!-- Date Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Date</label>
+                            <input type="date" id="filterDate"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        </div>
+                        
+                        <!-- Manufacturing Lot Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">製造ロット</label>
+                            <div class="tag-input-container border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-transparent p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text bg-white" onclick="focusMLFManufacturingLotInput()">
+                                <div id="mlfManufacturingLotTags" class="flex flex-wrap gap-1"></div>
+                                <input type="text" id="filterManufacturingLot" class="flex-1 min-w-[100px] border-none outline-none text-sm" placeholder="例: 251020 (Enter)" onkeydown="handleMLFManufacturingLotKeydown(event)">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Filter Actions -->
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="applyManufacturingLotFilters()" 
+                            class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2">
+                            <i class="ri-filter-line"></i>
+                            <span data-i18n="applyFilters">フィルター適用</span>
+                        </button>
+                        <button onclick="clearManufacturingLotFilters()" 
+                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors flex items-center gap-2">
+                            <i class="ri-close-circle-line"></i>
+                            <span data-i18n="clearFilters">クリア</span>
+                        </button>
+                    </div>
+                </div>
+                
                 <!-- Content area with consistent styling -->
-                <div class="overflow-y-auto flex-1 p-6 bg-gray-50">
+                <div id="manufacturingLotResultsContent" class="overflow-y-auto flex-1 p-6 bg-gray-50">
                     ${totalResults === 0 ? `
                         <div class="text-center py-12 bg-white rounded-lg border border-gray-200">
                             <i class="ri-search-line text-5xl text-gray-300 mb-4"></i>
@@ -3213,6 +3279,15 @@ function showManufacturingLotResults(results, searchTerm, isLoading = false) {
                 </div>
             </div>
         `;
+        
+        // Store original data for filtering
+        modal.dataset.originalData = JSON.stringify({
+            Press: pressData,
+            Kensa: kensaData,
+            SRS: srsData,
+            Slit: slitData,
+            PSA: psaData
+        });
     }
     
     document.body.appendChild(modal);
@@ -3312,6 +3387,304 @@ window.closeManufacturingLotResultsModal = function() {
     if (modal) {
         modal.remove();
     }
+};
+
+/**
+ * Apply filters to manufacturing lot search results
+ */
+window.applyManufacturingLotFilters = function() {
+    const modal = document.getElementById('manufacturingLotResultsModal');
+    if (!modal) return;
+    
+    // Get filter values
+    const factoryFilter = document.getElementById('filterFactory')?.value || '';
+    const dateFilter = document.getElementById('filterDate')?.value || '';
+    
+    // Get tag arrays (multiple values)
+    const partNumberFilters = mlfPartNumberTags;
+    const serialNumberFilters = mlfSerialNumberTags;
+    const lotFilters = mlfManufacturingLotTags;
+    
+    // Get original data
+    const originalData = JSON.parse(modal.dataset.originalData || '{}');
+    
+    // Filter function
+    const filterItem = (item, isPSA = false) => {
+        // Factory filter
+        if (factoryFilter && item.工場 !== factoryFilter) return false;
+        
+        // Part number filter (multiple values - OR logic)
+        if (partNumberFilters.length > 0) {
+            const itemPartNumber = (item.品番 || '').toLowerCase();
+            const matches = partNumberFilters.some(filter => {
+                try {
+                    const regex = new RegExp(filter, 'i');
+                    return regex.test(item.品番 || '');
+                } catch (e) {
+                    return itemPartNumber.includes(filter.toLowerCase());
+                }
+            });
+            if (!matches) return false;
+        }
+        
+        // Serial number filter (multiple values - OR logic)
+        if (serialNumberFilters.length > 0) {
+            const itemSerialNumber = (item.背番号 || '').toLowerCase();
+            const matches = serialNumberFilters.some(filter => {
+                try {
+                    const regex = new RegExp(filter, 'i');
+                    return regex.test(item.背番号 || '');
+                } catch (e) {
+                    return itemSerialNumber.includes(filter.toLowerCase());
+                }
+            });
+            if (!matches) return false;
+        }
+        
+        // Date filter
+        if (dateFilter) {
+            const itemDate = isPSA ? item.作業日 : item.Date;
+            if (itemDate !== dateFilter) return false;
+        }
+        
+        // Manufacturing/Material lot filter (multiple values - OR logic)
+        if (lotFilters.length > 0) {
+            const itemLot = (isPSA ? (item.材料ロット || '') : (item.製造ロット || '')).toLowerCase();
+            const matches = lotFilters.some(filter => {
+                try {
+                    const regex = new RegExp(filter, 'i');
+                    return regex.test(isPSA ? (item.材料ロット || '') : (item.製造ロット || ''));
+                } catch (e) {
+                    return itemLot.includes(filter.toLowerCase());
+                }
+            });
+            if (!matches) return false;
+        }
+        
+        return true;
+    };
+    
+    // Apply filters to each process
+    const filteredData = {
+        Press: (originalData.Press || []).filter(item => filterItem(item, false)),
+        Kensa: (originalData.Kensa || []).filter(item => filterItem(item, false)),
+        SRS: (originalData.SRS || []).filter(item => filterItem(item, false)),
+        Slit: (originalData.Slit || []).filter(item => filterItem(item, false)),
+        PSA: (originalData.PSA || []).filter(item => filterItem(item, true))
+    };
+    
+    const totalFiltered = filteredData.Press.length + filteredData.Kensa.length + 
+                          filteredData.SRS.length + filteredData.Slit.length + filteredData.PSA.length;
+    
+    // Get the search term from the modal
+    const searchTermElement = modal.querySelector('.font-mono.font-semibold.text-gray-900');
+    const searchTerm = searchTermElement?.textContent || '';
+    
+    // Update content
+    const contentDiv = document.getElementById('manufacturingLotResultsContent');
+    if (contentDiv) {
+        if (totalFiltered === 0) {
+            contentDiv.innerHTML = `
+                <div class="text-center py-12 bg-white rounded-lg border border-gray-200">
+                    <i class="ri-filter-off-line text-5xl text-gray-300 mb-4"></i>
+                    <p class="text-gray-600">フィルター条件に一致する結果が見つかりませんでした</p>
+                </div>
+            `;
+        } else {
+            contentDiv.innerHTML = `
+                ${renderProcessSection('Press', filteredData.Press, searchTerm)}
+                ${renderProcessSection('Kensa', filteredData.Kensa, searchTerm)}
+                ${renderProcessSection('SRS', filteredData.SRS, searchTerm)}
+                ${renderProcessSection('Slit', filteredData.Slit, searchTerm)}
+                ${renderProcessSection('PSA', filteredData.PSA, searchTerm)}
+            `;
+        }
+        
+        // Update count
+        const countElement = document.getElementById('filteredResultCount');
+        if (countElement) {
+            countElement.textContent = totalFiltered;
+        }
+        
+        // Apply translations
+        if (window.translateDynamicContent) {
+            window.translateDynamicContent(contentDiv);
+        }
+    }
+};
+
+/**
+ * Clear all filters and show original results
+ */
+window.clearManufacturingLotFilters = function() {
+    // Clear all filter inputs
+    const factoryFilter = document.getElementById('filterFactory');
+    const dateFilter = document.getElementById('filterDate');
+    
+    if (factoryFilter) factoryFilter.value = '';
+    if (dateFilter) dateFilter.value = '';
+    
+    // Clear tag arrays
+    mlfPartNumberTags = [];
+    mlfSerialNumberTags = [];
+    mlfManufacturingLotTags = [];
+    
+    // Re-render tags
+    renderMLFPartNumberTags();
+    renderMLFSerialNumberTags();
+    renderMLFManufacturingLotTags();
+    
+    // Reapply filters (which will now show all results)
+    applyManufacturingLotFilters();
+};
+
+// Manufacturing Lot Finder Tag Functions
+
+// Part Number Tags
+window.handleMLFPartNumberKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addMLFPartNumberTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && mlfPartNumberTags.length > 0) {
+        window.removeMLFPartNumberTag(mlfPartNumberTags.length - 1);
+    }
+};
+
+window.addMLFPartNumberTag = function(value) {
+    if (!mlfPartNumberTags.includes(value)) {
+        mlfPartNumberTags.push(value);
+        renderMLFPartNumberTags();
+    }
+};
+
+window.removeMLFPartNumberTag = function(index) {
+    mlfPartNumberTags.splice(index, 1);
+    renderMLFPartNumberTags();
+};
+
+function renderMLFPartNumberTags() {
+    const container = document.getElementById('mlfPartNumberTags');
+    if (!container) return;
+    
+    const input = container.parentElement.querySelector('input');
+    
+    // Clear existing tags
+    container.innerHTML = '';
+    
+    // Add tags
+    mlfPartNumberTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'inline-flex items-center gap-1 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removeMLFPartNumberTag(${index})" class="hover:bg-purple-200 rounded px-1 text-sm leading-none">×</button>
+        `;
+        container.appendChild(tagElement);
+    });
+}
+
+window.focusMLFPartNumberInput = function() {
+    const input = document.getElementById('filterPartNumber');
+    if (input) input.focus();
+};
+
+// Serial Number Tags
+window.handleMLFSerialNumberKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addMLFSerialNumberTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && mlfSerialNumberTags.length > 0) {
+        window.removeMLFSerialNumberTag(mlfSerialNumberTags.length - 1);
+    }
+};
+
+window.addMLFSerialNumberTag = function(value) {
+    if (!mlfSerialNumberTags.includes(value)) {
+        mlfSerialNumberTags.push(value);
+        renderMLFSerialNumberTags();
+    }
+};
+
+window.removeMLFSerialNumberTag = function(index) {
+    mlfSerialNumberTags.splice(index, 1);
+    renderMLFSerialNumberTags();
+};
+
+function renderMLFSerialNumberTags() {
+    const container = document.getElementById('mlfSerialNumberTags');
+    if (!container) return;
+    
+    const input = container.parentElement.querySelector('input');
+    
+    // Clear existing tags
+    container.innerHTML = '';
+    
+    // Add tags
+    mlfSerialNumberTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'inline-flex items-center gap-1 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removeMLFSerialNumberTag(${index})" class="hover:bg-purple-200 rounded px-1 text-sm leading-none">×</button>
+        `;
+        container.appendChild(tagElement);
+    });
+}
+
+window.focusMLFSerialNumberInput = function() {
+    const input = document.getElementById('filterSerialNumber');
+    if (input) input.focus();
+};
+
+// Manufacturing Lot Tags
+window.handleMLFManufacturingLotKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addMLFManufacturingLotTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && mlfManufacturingLotTags.length > 0) {
+        window.removeMLFManufacturingLotTag(mlfManufacturingLotTags.length - 1);
+    }
+};
+
+window.addMLFManufacturingLotTag = function(value) {
+    if (!mlfManufacturingLotTags.includes(value)) {
+        mlfManufacturingLotTags.push(value);
+        renderMLFManufacturingLotTags();
+    }
+};
+
+window.removeMLFManufacturingLotTag = function(index) {
+    mlfManufacturingLotTags.splice(index, 1);
+    renderMLFManufacturingLotTags();
+};
+
+function renderMLFManufacturingLotTags() {
+    const container = document.getElementById('mlfManufacturingLotTags');
+    if (!container) return;
+    
+    const input = container.parentElement.querySelector('input');
+    
+    // Clear existing tags
+    container.innerHTML = '';
+    
+    // Add tags
+    mlfManufacturingLotTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'inline-flex items-center gap-1 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removeMLFManufacturingLotTag(${index})" class="hover:bg-purple-200 rounded px-1 text-sm leading-none">×</button>
+        `;
+        container.appendChild(tagElement);
+    });
+}
+
+window.focusMLFManufacturingLotInput = function() {
+    const input = document.getElementById('filterManufacturingLot');
+    if (input) input.focus();
 };
 
 // ==================== END MANUFACTURING LOT FINDER ====================
@@ -7188,6 +7561,11 @@ function exportToCSVGroupedWithHeaders(processData, selectedHeaders, filename = 
 // Tag input functionality for part numbers and serial numbers
 let partNumberTags = [];
 let serialNumberTags = [];
+
+// Tag input functionality for Manufacturing Lot Finder
+let mlfPartNumberTags = [];
+let mlfSerialNumberTags = [];
+let mlfManufacturingLotTags = [];
 
 // Part Number Tag Functions
 window.handlePartNumberKeydown = function(event) {
