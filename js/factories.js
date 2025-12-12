@@ -2449,12 +2449,18 @@ function generateFilterUI(factoryName) {
                 </div>
             </div>
             
-            <!-- Apply Button -->
+            <!-- Apply Button and Manufacturing Lot Finder -->
             <div class="px-4 pb-4 pt-2 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-                <button onclick="applyDynamicFilters()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
-                    <i class="ri-filter-line"></i>
-                    <span data-i18n="applyFilters">Apply Filters</span>
-                </button>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <button onclick="applyDynamicFilters()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
+                        <i class="ri-filter-line"></i>
+                        <span data-i18n="applyFilters">Apply Filters</span>
+                    </button>
+                    <button onclick="openManufacturingLotFinder()" class="bg-purple-600 hover:bg-purple-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2">
+                        <i class="ri-search-2-line"></i>
+                        <span data-i18n="manufacturingLotFinder">Manufacturing Lot Finder</span>
+                    </button>
+                </div>
             </div>
         </div>
     `;
@@ -2980,6 +2986,1129 @@ window.deleteFilterPreset = function(presetName) {
 
 // ==================== END DYNAMIC FILTER FUNCTIONS ====================
 
+// ==================== MANUFACTURING LOT FINDER ====================
+
+/**
+ * Opens the Manufacturing Lot Finder modal for global search across all factories
+ */
+window.openManufacturingLotFinder = function() {
+    const modal = document.createElement('div');
+    modal.id = 'manufacturingLotFinderModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    
+    const currentLang = localStorage.getItem("lang") || "en";
+    const t = translations[currentLang];
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-lg font-semibold" data-i18n="manufacturingLotFinder">製造ロット検索</h3>
+                    <button onclick="closeManufacturingLotFinder()" class="text-gray-400 hover:text-gray-600">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6">
+                <div class="mb-4">
+                    <p class="text-sm text-gray-600 mb-4" data-i18n="lotFinderDescription">
+                        すべての工場とプロセス（Press、Kensa、SRS、Slit、PSA）から製造ロットを検索します
+                    </p>
+                    
+                    <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="manufacturingLot">
+                        製造ロット
+                    </label>
+                    <input 
+                        type="text" 
+                        id="globalLotSearchInput" 
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500" 
+                        placeholder="例: 250915-1"
+                        onkeydown="if(event.key === 'Enter') searchManufacturingLotGlobal()"
+                        autofocus
+                    >
+                </div>
+                
+                <div class="flex gap-3">
+                    <button 
+                        onclick="searchManufacturingLotGlobal()" 
+                        class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-medium py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2"
+                    >
+                        <i class="ri-search-2-line"></i>
+                        <span data-i18n="search">検索</span>
+                    </button>
+                    <button 
+                        onclick="closeManufacturingLotFinder()" 
+                        class="px-4 py-2.5 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
+                        data-i18n="cancel"
+                    >
+                        キャンセル
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Apply translations
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
+    
+    // Focus input
+    setTimeout(() => {
+        document.getElementById('globalLotSearchInput')?.focus();
+    }, 100);
+};
+
+/**
+ * Closes the Manufacturing Lot Finder modal
+ */
+window.closeManufacturingLotFinder = function() {
+    const modal = document.getElementById('manufacturingLotFinderModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+/**
+ * Searches for manufacturing lot across all factories and processes
+ */
+window.searchManufacturingLotGlobal = async function() {
+    const input = document.getElementById('globalLotSearchInput');
+    const searchTerm = input?.value.trim();
+    
+    if (!searchTerm) {
+        const currentLang = localStorage.getItem("lang") || "en";
+        const t = translations[currentLang];
+        alert(t.enterManufacturingLot || '製造ロットを入力してください');
+        return;
+    }
+    
+    // Close the input modal
+    closeManufacturingLotFinder();
+    
+    // Show loading modal
+    showManufacturingLotResults(null, searchTerm, true);
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/search-manufacturing-lot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ manufacturingLot: searchTerm })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Search failed');
+        }
+        
+        const response_data = await response.json();
+        
+        // Debug: Log the results structure
+        console.log('🔍 Manufacturing Lot Search Response:', response_data);
+        
+        // Extract the actual results from the response
+        const results = response_data.results || response_data;
+        
+        console.log('📊 Extracted Results:', {
+            Press: results.Press?.length,
+            Kensa: results.Kensa?.length,
+            SRS: results.SRS?.length,
+            Slit: results.Slit?.length,
+            PSA: results.PSA?.length
+        });
+        
+        // Show results modal
+        showManufacturingLotResults(results, searchTerm, false);
+        
+    } catch (error) {
+        console.error('Error searching manufacturing lot:', error);
+        const currentLang = localStorage.getItem("lang") || "en";
+        const t = translations[currentLang];
+        alert(t.searchError || '検索中にエラーが発生しました');
+        closeManufacturingLotResultsModal();
+    }
+};
+
+/**
+ * Shows the results modal for manufacturing lot search
+ */
+function showManufacturingLotResults(results, searchTerm, isLoading = false) {
+    const existingModal = document.getElementById('manufacturingLotResultsModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'manufacturingLotResultsModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    
+    const currentLang = localStorage.getItem("lang") || "en";
+    const t = translations[currentLang];
+    
+    if (isLoading) {
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-lg max-w-2xl w-full">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold" data-i18n="searchResults">検索結果</h3>
+                </div>
+                <div class="p-8 text-center">
+                    <i class="ri-loader-4-line animate-spin text-4xl text-purple-600 mb-4"></i>
+                    <p class="text-gray-600" data-i18n="searching">検索中...</p>
+                </div>
+            </div>
+        `;
+    } else {
+        // Extract data using the process names from the API response (Press, Kensa, SRS, Slit, PSA)
+        const pressData = results.Press || [];
+        const kensaData = results.Kensa || [];
+        const srsData = results.SRS || [];
+        const slitData = results.Slit || [];
+        const psaData = results.PSA || [];
+        
+        const totalResults = pressData.length + kensaData.length + srsData.length + slitData.length + psaData.length;
+        
+        console.log('📊 Total results calculated:', totalResults, {
+            Press: pressData.length,
+            Kensa: kensaData.length,
+            SRS: srsData.length,
+            Slit: slitData.length,
+            PSA: psaData.length
+        });
+        
+        // Collect unique values for dropdowns
+        const allData = [...pressData, ...kensaData, ...srsData, ...slitData, ...psaData];
+        const factories = [...new Set(allData.map(item => item.工場).filter(Boolean))].sort();
+        
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Header matching other modals -->
+                <div class="px-6 py-4 bg-white border-b border-gray-200">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900" data-i18n="searchResults">検索結果</h3>
+                            <p class="text-sm text-gray-600 mt-1">
+                                <span data-i18n="manufacturingLot">製造ロット</span>: 
+                                <span class="font-mono font-semibold text-gray-900">${searchTerm}</span>
+                                <span class="ml-2 text-gray-500">(<span id="filteredResultCount">${totalResults}</span> <span data-i18n="recordsFound">件</span>)</span>
+                            </p>
+                        </div>
+                        <button onclick="closeManufacturingLotResultsModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Filter Section -->
+                <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                        <!-- Factory Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">工場</label>
+                            <select id="filterFactory" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                                <option value="">全て</option>
+                                ${factories.map(f => `<option value="${f}">${f}</option>`).join('')}
+                            </select>
+                        </div>
+                        
+                        <!-- Part Number Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">品番</label>
+                            <div class="tag-input-container border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-transparent p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text bg-white" onclick="focusMLFPartNumberInput()">
+                                <div id="mlfPartNumberTags" class="flex flex-wrap gap-1"></div>
+                                <input type="text" id="filterPartNumber" class="flex-1 min-w-[100px] border-none outline-none text-sm" placeholder="例: C13/MLAH2B (Enter)" onkeydown="handleMLFPartNumberKeydown(event)">
+                            </div>
+                        </div>
+                        
+                        <!-- Serial Number Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">背番号</label>
+                            <div class="tag-input-container border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-transparent p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text bg-white" onclick="focusMLFSerialNumberInput()">
+                                <div id="mlfSerialNumberTags" class="flex flex-wrap gap-1"></div>
+                                <input type="text" id="filterSerialNumber" class="flex-1 min-w-[100px] border-none outline-none text-sm" placeholder="例: GD (Enter)" onkeydown="handleMLFSerialNumberKeydown(event)">
+                            </div>
+                        </div>
+                        
+                        <!-- Date Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Date</label>
+                            <input type="date" id="filterDate"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                        </div>
+                        
+                        <!-- Manufacturing Lot Filter -->
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">製造ロット</label>
+                            <div class="tag-input-container border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-transparent p-2 min-h-[42px] flex flex-wrap gap-1 items-center cursor-text bg-white" onclick="focusMLFManufacturingLotInput()">
+                                <div id="mlfManufacturingLotTags" class="flex flex-wrap gap-1"></div>
+                                <input type="text" id="filterManufacturingLot" class="flex-1 min-w-[100px] border-none outline-none text-sm" placeholder="例: 251020 (Enter)" onkeydown="handleMLFManufacturingLotKeydown(event)">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Filter Actions -->
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="applyManufacturingLotFilters()" 
+                            class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors flex items-center gap-2">
+                            <i class="ri-filter-line"></i>
+                            <span data-i18n="applyFilters">フィルター適用</span>
+                        </button>
+                        <button onclick="clearManufacturingLotFilters()" 
+                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors flex items-center gap-2">
+                            <i class="ri-close-circle-line"></i>
+                            <span data-i18n="clearFilters">クリア</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Content area with consistent styling -->
+                <div id="manufacturingLotResultsContent" class="overflow-y-auto flex-1 p-6 bg-gray-50">
+                    ${totalResults === 0 ? `
+                        <div class="text-center py-12 bg-white rounded-lg border border-gray-200">
+                            <i class="ri-search-line text-5xl text-gray-300 mb-4"></i>
+                            <p class="text-gray-600" data-i18n="noResultsFound">検索結果が見つかりませんでした</p>
+                        </div>
+                    ` : `
+                        ${renderProcessSection('Press', pressData, searchTerm)}
+                        ${renderProcessSection('Kensa', kensaData, searchTerm)}
+                        ${renderProcessSection('SRS', srsData, searchTerm)}
+                        ${renderProcessSection('Slit', slitData, searchTerm)}
+                        ${renderProcessSection('PSA', psaData, searchTerm)}
+                    `}
+                </div>
+            </div>
+        `;
+        
+        // Store original data for filtering
+        modal.dataset.originalData = JSON.stringify({
+            Press: pressData,
+            Kensa: kensaData,
+            SRS: srsData,
+            Slit: slitData,
+            PSA: psaData
+        });
+    }
+    
+    document.body.appendChild(modal);
+    
+    // Apply translations
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
+};
+
+/**
+ * Renders a process section in the manufacturing lot results
+ */
+function renderProcessSection(processName, data, searchTerm) {
+    if (!data || data.length === 0) return '';
+    
+    const isPSA = processName === 'PSA';
+    
+    // Color scheme matching the Daily Production view
+    const colorScheme = {
+        'Kensa': { bg: 'bg-yellow-50', dot: 'bg-yellow-500', text: 'text-yellow-900' },
+        'Press': { bg: 'bg-green-50', dot: 'bg-green-500', text: 'text-green-900' },
+        'SRS': { bg: 'bg-gray-100', dot: 'bg-gray-500', text: 'text-gray-900' },
+        'Slit': { bg: 'bg-blue-50', dot: 'bg-blue-500', text: 'text-blue-900' },
+        'PSA': { bg: 'bg-purple-50', dot: 'bg-purple-500', text: 'text-purple-900' }
+    };
+    
+    const colors = colorScheme[processName] || { bg: 'bg-gray-50', dot: 'bg-gray-500', text: 'text-gray-900' };
+    
+    return `
+        <div class="mb-4">
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                <div class="px-4 py-3 ${colors.bg} border-b border-gray-200">
+                    <h4 class="text-sm font-semibold ${colors.text} flex items-center gap-2">
+                        <div class="w-3 h-3 rounded-full ${colors.dot}"></div>
+                        ${processName} Process <span class="text-gray-600 font-normal">(${data.length})</span>
+                    </h4>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">工場</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">品番</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">背番号</th>
+                                ${isPSA ? `
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">作業日</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">材料ロット</th>
+                                ` : `
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Date</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">製造ロット</th>
+                                `}
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Worker</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${data.map(item => {
+                                const encodedData = safeEncodeItemData(item);
+                                const lotField = isPSA ? (item.材料ロット || '-') : (item.製造ロット || '-');
+                                const dateField = isPSA ? (item.作業日 || '-') : (item.Date || '-');
+                                
+                                return `
+                                    <tr class="hover:bg-gray-50 cursor-pointer transition-colors" 
+                                        onclick="showManufacturingLotDetailFromElement(this, ${isPSA})"
+                                        data-item='${encodedData.encodedItem}'
+                                        ${encodedData.comment ? `data-comment='${encodedData.comment}'` : ''}>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${item.工場 || '-'}</td>
+                                        <td class="px-4 py-3 text-sm font-mono text-gray-900">${item.品番 || '-'}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${item.背番号 || '-'}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${dateField}</td>
+                                        <td class="px-4 py-3 text-sm font-mono text-gray-900">${lotField}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-900">${item.Worker_Name || '-'}</td>
+                                        <td class="px-4 py-3 text-sm">
+                                            <button 
+                                                onclick="event.stopPropagation(); showManufacturingLotDetailFromElement(this.closest('tr'), ${isPSA})"
+                                                class="text-blue-600 hover:text-blue-800 transition-colors">
+                                                <i class="ri-eye-line text-lg"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Closes the manufacturing lot results modal
+ */
+window.closeManufacturingLotResultsModal = function() {
+    const modal = document.getElementById('manufacturingLotResultsModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+/**
+ * Apply filters to manufacturing lot search results
+ */
+window.applyManufacturingLotFilters = function() {
+    const modal = document.getElementById('manufacturingLotResultsModal');
+    if (!modal) return;
+    
+    // Get filter values
+    const factoryFilter = document.getElementById('filterFactory')?.value || '';
+    const dateFilter = document.getElementById('filterDate')?.value || '';
+    
+    // Get tag arrays (multiple values)
+    const partNumberFilters = mlfPartNumberTags;
+    const serialNumberFilters = mlfSerialNumberTags;
+    const lotFilters = mlfManufacturingLotTags;
+    
+    // Get original data
+    const originalData = JSON.parse(modal.dataset.originalData || '{}');
+    
+    // Filter function
+    const filterItem = (item, isPSA = false) => {
+        // Factory filter
+        if (factoryFilter && item.工場 !== factoryFilter) return false;
+        
+        // Part number filter (multiple values - OR logic)
+        if (partNumberFilters.length > 0) {
+            const itemPartNumber = (item.品番 || '').toLowerCase();
+            const matches = partNumberFilters.some(filter => {
+                try {
+                    const regex = new RegExp(filter, 'i');
+                    return regex.test(item.品番 || '');
+                } catch (e) {
+                    return itemPartNumber.includes(filter.toLowerCase());
+                }
+            });
+            if (!matches) return false;
+        }
+        
+        // Serial number filter (multiple values - OR logic)
+        if (serialNumberFilters.length > 0) {
+            const itemSerialNumber = (item.背番号 || '').toLowerCase();
+            const matches = serialNumberFilters.some(filter => {
+                try {
+                    const regex = new RegExp(filter, 'i');
+                    return regex.test(item.背番号 || '');
+                } catch (e) {
+                    return itemSerialNumber.includes(filter.toLowerCase());
+                }
+            });
+            if (!matches) return false;
+        }
+        
+        // Date filter
+        if (dateFilter) {
+            const itemDate = isPSA ? item.作業日 : item.Date;
+            if (itemDate !== dateFilter) return false;
+        }
+        
+        // Manufacturing/Material lot filter (multiple values - OR logic)
+        if (lotFilters.length > 0) {
+            const itemLot = (isPSA ? (item.材料ロット || '') : (item.製造ロット || '')).toLowerCase();
+            const matches = lotFilters.some(filter => {
+                try {
+                    const regex = new RegExp(filter, 'i');
+                    return regex.test(isPSA ? (item.材料ロット || '') : (item.製造ロット || ''));
+                } catch (e) {
+                    return itemLot.includes(filter.toLowerCase());
+                }
+            });
+            if (!matches) return false;
+        }
+        
+        return true;
+    };
+    
+    // Apply filters to each process
+    const filteredData = {
+        Press: (originalData.Press || []).filter(item => filterItem(item, false)),
+        Kensa: (originalData.Kensa || []).filter(item => filterItem(item, false)),
+        SRS: (originalData.SRS || []).filter(item => filterItem(item, false)),
+        Slit: (originalData.Slit || []).filter(item => filterItem(item, false)),
+        PSA: (originalData.PSA || []).filter(item => filterItem(item, true))
+    };
+    
+    const totalFiltered = filteredData.Press.length + filteredData.Kensa.length + 
+                          filteredData.SRS.length + filteredData.Slit.length + filteredData.PSA.length;
+    
+    // Get the search term from the modal
+    const searchTermElement = modal.querySelector('.font-mono.font-semibold.text-gray-900');
+    const searchTerm = searchTermElement?.textContent || '';
+    
+    // Update content
+    const contentDiv = document.getElementById('manufacturingLotResultsContent');
+    if (contentDiv) {
+        if (totalFiltered === 0) {
+            contentDiv.innerHTML = `
+                <div class="text-center py-12 bg-white rounded-lg border border-gray-200">
+                    <i class="ri-filter-off-line text-5xl text-gray-300 mb-4"></i>
+                    <p class="text-gray-600">フィルター条件に一致する結果が見つかりませんでした</p>
+                </div>
+            `;
+        } else {
+            contentDiv.innerHTML = `
+                ${renderProcessSection('Press', filteredData.Press, searchTerm)}
+                ${renderProcessSection('Kensa', filteredData.Kensa, searchTerm)}
+                ${renderProcessSection('SRS', filteredData.SRS, searchTerm)}
+                ${renderProcessSection('Slit', filteredData.Slit, searchTerm)}
+                ${renderProcessSection('PSA', filteredData.PSA, searchTerm)}
+            `;
+        }
+        
+        // Update count
+        const countElement = document.getElementById('filteredResultCount');
+        if (countElement) {
+            countElement.textContent = totalFiltered;
+        }
+        
+        // Apply translations
+        if (window.translateDynamicContent) {
+            window.translateDynamicContent(contentDiv);
+        }
+    }
+};
+
+/**
+ * Clear all filters and show original results
+ */
+window.clearManufacturingLotFilters = function() {
+    // Clear all filter inputs
+    const factoryFilter = document.getElementById('filterFactory');
+    const dateFilter = document.getElementById('filterDate');
+    
+    if (factoryFilter) factoryFilter.value = '';
+    if (dateFilter) dateFilter.value = '';
+    
+    // Clear tag arrays
+    mlfPartNumberTags = [];
+    mlfSerialNumberTags = [];
+    mlfManufacturingLotTags = [];
+    
+    // Re-render tags
+    renderMLFPartNumberTags();
+    renderMLFSerialNumberTags();
+    renderMLFManufacturingLotTags();
+    
+    // Reapply filters (which will now show all results)
+    applyManufacturingLotFilters();
+};
+
+// Manufacturing Lot Finder Tag Functions
+
+// Part Number Tags
+window.handleMLFPartNumberKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addMLFPartNumberTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && mlfPartNumberTags.length > 0) {
+        window.removeMLFPartNumberTag(mlfPartNumberTags.length - 1);
+    }
+};
+
+window.addMLFPartNumberTag = function(value) {
+    if (!mlfPartNumberTags.includes(value)) {
+        mlfPartNumberTags.push(value);
+        renderMLFPartNumberTags();
+    }
+};
+
+window.removeMLFPartNumberTag = function(index) {
+    mlfPartNumberTags.splice(index, 1);
+    renderMLFPartNumberTags();
+};
+
+function renderMLFPartNumberTags() {
+    const container = document.getElementById('mlfPartNumberTags');
+    if (!container) return;
+    
+    const input = container.parentElement.querySelector('input');
+    
+    // Clear existing tags
+    container.innerHTML = '';
+    
+    // Add tags
+    mlfPartNumberTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'inline-flex items-center gap-1 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removeMLFPartNumberTag(${index})" class="hover:bg-purple-200 rounded px-1 text-sm leading-none">×</button>
+        `;
+        container.appendChild(tagElement);
+    });
+}
+
+window.focusMLFPartNumberInput = function() {
+    const input = document.getElementById('filterPartNumber');
+    if (input) input.focus();
+};
+
+// Serial Number Tags
+window.handleMLFSerialNumberKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addMLFSerialNumberTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && mlfSerialNumberTags.length > 0) {
+        window.removeMLFSerialNumberTag(mlfSerialNumberTags.length - 1);
+    }
+};
+
+window.addMLFSerialNumberTag = function(value) {
+    if (!mlfSerialNumberTags.includes(value)) {
+        mlfSerialNumberTags.push(value);
+        renderMLFSerialNumberTags();
+    }
+};
+
+window.removeMLFSerialNumberTag = function(index) {
+    mlfSerialNumberTags.splice(index, 1);
+    renderMLFSerialNumberTags();
+};
+
+function renderMLFSerialNumberTags() {
+    const container = document.getElementById('mlfSerialNumberTags');
+    if (!container) return;
+    
+    const input = container.parentElement.querySelector('input');
+    
+    // Clear existing tags
+    container.innerHTML = '';
+    
+    // Add tags
+    mlfSerialNumberTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'inline-flex items-center gap-1 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removeMLFSerialNumberTag(${index})" class="hover:bg-purple-200 rounded px-1 text-sm leading-none">×</button>
+        `;
+        container.appendChild(tagElement);
+    });
+}
+
+window.focusMLFSerialNumberInput = function() {
+    const input = document.getElementById('filterSerialNumber');
+    if (input) input.focus();
+};
+
+// Manufacturing Lot Tags
+window.handleMLFManufacturingLotKeydown = function(event) {
+    if (event.key === 'Enter' && event.target.value.trim()) {
+        event.preventDefault();
+        window.addMLFManufacturingLotTag(event.target.value.trim());
+        event.target.value = '';
+    } else if (event.key === 'Backspace' && !event.target.value && mlfManufacturingLotTags.length > 0) {
+        window.removeMLFManufacturingLotTag(mlfManufacturingLotTags.length - 1);
+    }
+};
+
+window.addMLFManufacturingLotTag = function(value) {
+    if (!mlfManufacturingLotTags.includes(value)) {
+        mlfManufacturingLotTags.push(value);
+        renderMLFManufacturingLotTags();
+    }
+};
+
+window.removeMLFManufacturingLotTag = function(index) {
+    mlfManufacturingLotTags.splice(index, 1);
+    renderMLFManufacturingLotTags();
+};
+
+function renderMLFManufacturingLotTags() {
+    const container = document.getElementById('mlfManufacturingLotTags');
+    if (!container) return;
+    
+    const input = container.parentElement.querySelector('input');
+    
+    // Clear existing tags
+    container.innerHTML = '';
+    
+    // Add tags
+    mlfManufacturingLotTags.forEach((tag, index) => {
+        const tagElement = document.createElement('span');
+        tagElement.className = 'inline-flex items-center gap-1 bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-medium';
+        tagElement.innerHTML = `
+            ${tag}
+            <button type="button" onclick="removeMLFManufacturingLotTag(${index})" class="hover:bg-purple-200 rounded px-1 text-sm leading-none">×</button>
+        `;
+        container.appendChild(tagElement);
+    });
+}
+
+window.focusMLFManufacturingLotInput = function() {
+    const input = document.getElementById('filterManufacturingLot');
+    if (input) input.focus();
+};
+
+/**
+ * Show detail modal from table row element
+ */
+window.showManufacturingLotDetailFromElement = function(el, isPSA = false) {
+    try {
+        const encodedData = el.dataset.item;
+        const decodedData = decodeURIComponent(encodedData);
+        const item = JSON.parse(decodedData);
+        
+        showManufacturingLotDetailModal(item, isPSA);
+    } catch (error) {
+        console.error('Error parsing item data:', error);
+        alert('データの読み込みに失敗しました。');
+    }
+};
+
+/**
+ * Show detail modal for manufacturing lot search result
+ */
+function showManufacturingLotDetailModal(item, isPSA = false) {
+    // Hide results modal temporarily
+    const resultsModal = document.getElementById('manufacturingLotResultsModal');
+    if (resultsModal) {
+        resultsModal.style.display = 'none';
+    }
+    
+    // Remove existing detail modal if any
+    const existingModal = document.getElementById('manufacturingLotDetailModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'manufacturingLotDetailModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    
+    const currentLang = localStorage.getItem("lang") || "en";
+    
+    // Build content based on process type
+    let content = '';
+    
+    if (isPSA) {
+        // PSA Process
+        const printLog = item.PrintLog && item.PrintLog[0] ? item.PrintLog[0] : {};
+        const lotNumbers = printLog.lotNumbers || [];
+        
+        content = `
+            <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Header -->
+                <div class="px-6 py-4 bg-white border-b border-gray-200">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">PSA Process - 詳細情報</h3>
+                            <p class="text-sm text-gray-600 mt-1">${item.品番 || ''}</p>
+                        </div>
+                        <button onclick="closeManufacturingLotDetailModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Content -->
+                <div class="overflow-y-auto flex-1 p-6 bg-gray-50">
+                    <div class="space-y-4">
+                        <!-- Basic Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-information-line mr-2"></i>基本情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">品番:</span>
+                                    <span class="text-gray-900 font-mono">${item.品番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">材料品番:</span>
+                                    <span class="text-gray-900 font-mono">${item.材料品番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">材料背番号:</span>
+                                    <span class="text-gray-900">${item.材料背番号 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">工場:</span>
+                                    <span class="text-gray-900">${printLog.factory || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">作業日:</span>
+                                    <span class="text-gray-900">${item.作業日 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">納期:</span>
+                                    <span class="text-gray-900">${item.納期 || '-'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Production Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-factory-line mr-2"></i>生産情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">生産順番:</span>
+                                    <span class="text-gray-900">${item.生産順番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">生産数:</span>
+                                    <span class="text-gray-900">${item.生産数 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">作業時間:</span>
+                                    <span class="text-gray-900">${item.作業時間 || '-'} 時間</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">人員数:</span>
+                                    <span class="text-gray-900">${item.人員数 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">幅:</span>
+                                    <span class="text-gray-900">${item.幅 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">型番:</span>
+                                    <span class="text-gray-900">${item.型番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">加工条件管理番号:</span>
+                                    <span class="text-gray-900">${item.加工条件管理番号 || '-'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Material Lot Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-barcode-line mr-2"></i>材料ロット情報
+                            </h4>
+                            <div class="space-y-2">
+                                ${lotNumbers.map((lot, index) => `
+                                    <div class="flex items-center gap-2 p-2 bg-purple-50 rounded">
+                                        <span class="font-medium text-gray-600">ロット ${index + 1}:</span>
+                                        <span class="text-purple-700 font-mono font-semibold cursor-pointer hover:underline"
+                                            onclick="event.stopPropagation(); openMaterialLotModal('${lot}', '${item.品番 || ''}')">
+                                            ${lot}
+                                        </span>
+                                    </div>
+                                `).join('')}
+                                <div class="flex justify-between pt-2 border-t">
+                                    <span class="font-medium text-gray-600">印刷枚数合計:</span>
+                                    <span class="text-gray-900">${item.TotalLabelsPrintedForOrder || 0}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Status Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-check-line mr-2"></i>ステータス情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">STATUS:</span>
+                                    <span class="px-3 py-1 rounded-full text-sm font-medium ${
+                                        item.STATUS === 'Completed' ? 'bg-green-100 text-green-800' :
+                                        item.STATUS === 'In Progress' ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-gray-100 text-gray-800'
+                                    }">
+                                        ${item.STATUS || '-'}
+                                    </span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">完了日時:</span>
+                                    <span class="text-gray-900 text-sm">
+                                        ${item.CompletionTimestamp 
+                                            ? new Date(item.CompletionTimestamp).toLocaleString('ja-JP')
+                                            : '-'
+                                        }
+                                    </span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">最終印刷日時:</span>
+                                    <span class="text-gray-900 text-sm">
+                                        ${item.LastPrintTimestamp 
+                                            ? new Date(item.LastPrintTimestamp).toLocaleString('ja-JP')
+                                            : '-'
+                                        }
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        // Press, Kensa, SRS, Slit processes
+        const processName = item.設備 ? (
+            item.設備.includes('検査') ? 'Kensa' :
+            item.設備.includes('S') && !item.設備.includes('OZNC') ? 'SRS' :
+            item.設備.includes('スリット') ? 'Slit' : 'Press'
+        ) : 'Press';
+        
+        // Collect all images
+        const images = [];
+        
+        // Material Label Images (Press only - array)
+        if (item.materialLabelImages && Array.isArray(item.materialLabelImages)) {
+            item.materialLabelImages.forEach((url, index) => {
+                images.push({ title: `Material Label ${index + 1}`, url });
+            });
+        }
+        
+        // First/Final Check Images
+        if (item.初物チェック画像) {
+            images.push({ title: 'First Article Check Image', url: item.初物チェック画像 });
+        }
+        if (item.終物チェック画像) {
+            images.push({ title: 'Final Article Check Image', url: item.終物チェック画像 });
+        }
+        
+        // Legacy single material label image (if exists and not in array)
+        if (item.材料ラベル画像 && !item.materialLabelImages) {
+            images.push({ title: 'Material Label Image', url: item.材料ラベル画像 });
+        }
+        
+        content = `
+            <div class="bg-white rounded-lg shadow-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Header -->
+                <div class="px-6 py-4 bg-white border-b border-gray-200">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">${processName} Process - 詳細情報</h3>
+                            <p class="text-sm text-gray-600 mt-1">${item.品番 || ''} - ${item.背番号 || ''}</p>
+                        </div>
+                        <button onclick="closeManufacturingLotDetailModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Content -->
+                <div class="overflow-y-auto flex-1 p-6 bg-gray-50">
+                    <div class="space-y-4">
+                        <!-- Basic Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-information-line mr-2"></i>基本情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">品番:</span>
+                                    <span class="text-gray-900 font-mono">${item.品番 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">背番号:</span>
+                                    <span class="text-gray-900">${item.背番号 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">工場:</span>
+                                    <span class="text-gray-900">${item.工場 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">設備:</span>
+                                    <span class="text-gray-900">${item.設備 || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Worker:</span>
+                                    <span class="text-gray-900">${item.Worker_Name || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Date:</span>
+                                    <span class="text-gray-900">${item.Date || '-'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Production Information -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-factory-line mr-2"></i>生産情報
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Time Start:</span>
+                                    <span class="text-gray-900">${item.Time_start || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Time End:</span>
+                                    <span class="text-gray-900">${item.Time_end || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Total:</span>
+                                    <span class="text-gray-900 font-semibold">${item.Total || '-'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Process Quantity:</span>
+                                    <span class="text-gray-900">${item.Process_Quantity || '-'}</span>
+                                </div>
+                                ${item.Remaining_Quantity !== undefined ? `
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Remaining Quantity:</span>
+                                    <span class="text-gray-900">${item.Remaining_Quantity}</span>
+                                </div>
+                                ` : ''}
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Total NG:</span>
+                                    <span class="text-gray-900 ${item.Total_NG > 0 ? 'text-red-600 font-semibold' : ''}">${item.Total_NG || 0}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Spare:</span>
+                                    <span class="text-gray-900">${item.Spare || 0}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">Cycle Time:</span>
+                                    <span class="text-gray-900">${item.Cycle_Time || '-'}</span>
+                                </div>
+                                ${item.ショット数 !== undefined ? `
+                                <div class="flex justify-between">
+                                    <span class="font-medium text-gray-600">ショット数:</span>
+                                    <span class="text-gray-900">${item.ショット数}</span>
+                                </div>
+                                ` : ''}
+                                ${item.SRSコード ? `
+                                <div class="flex justify-between col-span-2">
+                                    <span class="font-medium text-gray-600">SRSコード:</span>
+                                    <span class="text-gray-900 font-mono">${item.SRSコード}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                        
+                        <!-- Manufacturing Lot -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-barcode-line mr-2"></i>ロット情報
+                            </h4>
+                            <div class="p-2 bg-purple-50 rounded">
+                                <span class="font-medium text-gray-600 block mb-2">製造ロット:</span>
+                                <div class="flex flex-wrap gap-2">
+                                    ${(() => {
+                                        const lotValue = item.材料ロット || item.製造ロット || '';
+                                        if (!lotValue || lotValue === '-') {
+                                            return '<span class="text-gray-500">-</span>';
+                                        }
+                                        // Split by comma and/or space, filter empty values
+                                        const lots = lotValue.split(/[,\s]+/).filter(l => l.trim());
+                                        return lots.map(lot => 
+                                            `<span class="inline-flex items-center gap-1 bg-white px-3 py-1 rounded border border-purple-200 text-purple-700 font-mono text-sm font-semibold cursor-pointer hover:bg-purple-100 transition-colors"
+                                                onclick="event.stopPropagation(); openMaterialLotModal('${lot.trim()}', '${item.品番 || ''}')">
+                                                <i class="ri-barcode-line text-xs"></i>
+                                                ${lot.trim()}
+                                            </span>`
+                                        ).join('');
+                                    })()}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${item.Comment ? `
+                        <!-- Comment -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-message-3-line mr-2"></i>コメント
+                            </h4>
+                            <p class="text-gray-700 whitespace-pre-wrap">${item.Comment}</p>
+                        </div>
+                        ` : ''}
+                        
+                        ${images.length > 0 ? `
+                        <!-- Images -->
+                        <div class="bg-white p-4 rounded-lg border border-gray-200">
+                            <h4 class="font-semibold text-gray-800 mb-3 flex items-center">
+                                <i class="ri-image-line mr-2"></i>Images
+                            </h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                ${images.map(img => `
+                                    <div class="space-y-2">
+                                        <p class="text-sm font-medium text-gray-700">${img.title}</p>
+                                        <img src="${img.url}" 
+                                            alt="${img.title}"
+                                            class="w-full h-48 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-75 transition-opacity"
+                                            onclick="openImageTab('${img.url}', '${img.title}')">
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    modal.innerHTML = content;
+    document.body.appendChild(modal);
+    
+    // Apply translations
+    if (window.translateDynamicContent) {
+        window.translateDynamicContent(modal);
+    }
+}
+
+/**
+ * Close detail modal and restore results modal
+ */
+window.closeManufacturingLotDetailModal = function() {
+    const detailModal = document.getElementById('manufacturingLotDetailModal');
+    if (detailModal) {
+        detailModal.remove();
+    }
+    
+    // Restore results modal
+    const resultsModal = document.getElementById('manufacturingLotResultsModal');
+    if (resultsModal) {
+        resultsModal.style.display = 'flex';
+    }
+};
+
+// ==================== END MANUFACTURING LOT FINDER ====================
+
 /**
  * Renders the dashboard cards for each factory, showing total, NG, and defect rate.
  */
@@ -3433,14 +4562,6 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
         </div>
 
-        <!-- Apply Filters -->
-        <div class="mt-6">
-            <button id="applyFilterBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600" data-i18n="applyFilter">
-            Apply Filters
-            </button>
-        </div>
-        </div>
-
         <!-- Production Results -->
         <div id="dailyProduction" class="mb-10"></div>
 
@@ -3499,24 +4620,6 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
         </div>
     `;
-
-    // Attach event listener for Apply Filters
-    document.getElementById("applyFilterBtn").addEventListener("click", () => {
-        const from = document.getElementById("filterFromDate").value;
-        const to = document.getElementById("filterToDate").value;
-        const partNumbers = getPartNumberTags();
-        const serialNumbers = getSerialNumberTags();
-        const manufacturingLot = document.getElementById("filterManufacturingLot").value.trim();
-        
-        // Check if manufacturing lot search is being used
-        if (manufacturingLot && manufacturingLot.length >= 3) {
-            // Use manufacturing lot search instead of regular production search
-            loadProductionByManufacturingLot(manufacturingLot, partNumbers, serialNumbers);
-        } else {
-            // Regular production search
-            loadProductionByPeriod(factoryName, from, to, partNumbers, serialNumbers);
-        }
-    });
 
     // Initialize dynamic filters with today's date
     const today = new Date().toISOString().split("T")[0];
@@ -4836,10 +5939,33 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                 ? sortState.direction > 0 ? " ↑" : " ↓"
                 : "";
 
+            // Color scheme matching other views
+            const bgClassMap = {
+              Kensa: "bg-yellow-50",
+              Press: "bg-green-50",
+              SRS: "bg-gray-100",
+              Slit: "bg-blue-50"
+            };
+            const bgClass = bgClassMap[procLabel] || "bg-white";
+
             return `
-              <div class="bg-white p-4 rounded-xl shadow mb-6">
-                <h3 class="text-xl font-semibold mb-2">${procLabel} Process (${sorted.length})</h3>
-                <div class="overflow-x-auto">
+              <div class="bg-white rounded-xl shadow-md border overflow-hidden mb-6">
+                <!-- Header with color scheme -->
+                <div class="bg-gradient-to-r ${bgClass} px-6 py-4 border-b">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                      <div class="w-3 h-3 rounded-full ${
+                        procLabel === 'Kensa' ? 'bg-yellow-500' :
+                        procLabel === 'Press' ? 'bg-green-500' :
+                        procLabel === 'SRS' ? 'bg-gray-500' : 'bg-blue-500'
+                      }"></div>
+                      <h3 class="text-xl font-semibold">${procLabel} Process (${sorted.length})</h3>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="p-4">
+                  <div class="overflow-x-auto">
                   <table class="w-full text-sm min-w-[600px] mb-2">
                     <thead>
                       <tr class="border-b font-semibold text-left">
@@ -4898,8 +6024,9 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                     </tbody>
                   </table>
                 </div>
+                </div>
 
-                <div class="mt-4 overflow-x-auto">
+                <div class="p-4 bg-gray-50 border-t">
                   <h5 class="font-semibold mb-2">${procLabel} Summary</h5>
                   <table class="w-full text-sm border-t min-w-[500px] mb-2">
                     <thead>
@@ -6854,6 +7981,11 @@ function exportToCSVGroupedWithHeaders(processData, selectedHeaders, filename = 
 // Tag input functionality for part numbers and serial numbers
 let partNumberTags = [];
 let serialNumberTags = [];
+
+// Tag input functionality for Manufacturing Lot Finder
+let mlfPartNumberTags = [];
+let mlfSerialNumberTags = [];
+let mlfManufacturingLotTags = [];
 
 // Part Number Tag Functions
 window.handlePartNumberKeydown = function(event) {
