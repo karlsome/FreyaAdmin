@@ -3769,14 +3769,6 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
         </div>
 
-        <!-- Apply Filters -->
-        <div class="mt-6">
-            <button id="applyFilterBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600" data-i18n="applyFilter">
-            Apply Filters
-            </button>
-        </div>
-        </div>
-
         <!-- Production Results -->
         <div id="dailyProduction" class="mb-10"></div>
 
@@ -3835,24 +3827,6 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
         </div>
     `;
-
-    // Attach event listener for Apply Filters
-    document.getElementById("applyFilterBtn").addEventListener("click", () => {
-        const from = document.getElementById("filterFromDate").value;
-        const to = document.getElementById("filterToDate").value;
-        const partNumbers = getPartNumberTags();
-        const serialNumbers = getSerialNumberTags();
-        const manufacturingLot = document.getElementById("filterManufacturingLot").value.trim();
-        
-        // Check if manufacturing lot search is being used
-        if (manufacturingLot && manufacturingLot.length >= 3) {
-            // Use manufacturing lot search instead of regular production search
-            loadProductionByManufacturingLot(manufacturingLot, partNumbers, serialNumbers);
-        } else {
-            // Regular production search
-            loadProductionByPeriod(factoryName, from, to, partNumbers, serialNumbers);
-        }
-    });
 
     // Initialize dynamic filters with today's date
     const today = new Date().toISOString().split("T")[0];
@@ -5172,10 +5146,33 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                 ? sortState.direction > 0 ? " ↑" : " ↓"
                 : "";
 
+            // Color scheme matching other views
+            const bgClassMap = {
+              Kensa: "bg-yellow-50",
+              Press: "bg-green-50",
+              SRS: "bg-gray-100",
+              Slit: "bg-blue-50"
+            };
+            const bgClass = bgClassMap[procLabel] || "bg-white";
+
             return `
-              <div class="bg-white p-4 rounded-xl shadow mb-6">
-                <h3 class="text-xl font-semibold mb-2">${procLabel} Process (${sorted.length})</h3>
-                <div class="overflow-x-auto">
+              <div class="bg-white rounded-xl shadow-md border overflow-hidden mb-6">
+                <!-- Header with color scheme -->
+                <div class="bg-gradient-to-r ${bgClass} px-6 py-4 border-b">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                      <div class="w-3 h-3 rounded-full ${
+                        procLabel === 'Kensa' ? 'bg-yellow-500' :
+                        procLabel === 'Press' ? 'bg-green-500' :
+                        procLabel === 'SRS' ? 'bg-gray-500' : 'bg-blue-500'
+                      }"></div>
+                      <h3 class="text-xl font-semibold">${procLabel} Process (${sorted.length})</h3>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="p-4">
+                  <div class="overflow-x-auto">
                   <table class="w-full text-sm min-w-[600px] mb-2">
                     <thead>
                       <tr class="border-b font-semibold text-left">
@@ -5234,8 +5231,9 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                     </tbody>
                   </table>
                 </div>
+                </div>
 
-                <div class="mt-4 overflow-x-auto">
+                <div class="p-4 bg-gray-50 border-t">
                   <h5 class="font-semibold mb-2">${procLabel} Summary</h5>
                   <table class="w-full text-sm border-t min-w-[500px] mb-2">
                     <thead>
