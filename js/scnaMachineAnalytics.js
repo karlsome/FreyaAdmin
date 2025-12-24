@@ -296,16 +296,23 @@ function renderMachineDowntimeChart() {
         // Create container for this machine
         const machineContainer = document.createElement('div');
         machineContainer.className = 'mb-8';
+        const machineId = machine.replace(/[^a-zA-Z0-9]/g, '');
         machineContainer.innerHTML = `
             <div class="bg-yellow-200 text-gray-700 px-4 py-2 rounded-t font-semibold text-center">
                 ${machine}
             </div>
-            <div id="chart-${machine.replace(/[^a-zA-Z0-9]/g, '')}" style="width: 100%; height: 400px; border: 1px solid #e5e7eb; border-top: none;"></div>
+            <div id="chart-${machineId}" style="width: 100%; height: 400px; border: 1px solid #e5e7eb; border-top: none;"></div>
+            <div class="bg-gray-50 px-4 py-2 border-x border-b border-gray-200 rounded-b flex justify-end">
+                <button onclick="exportMachinePDF('${machine}', '${machineId}')" 
+                        class="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center">
+                    <i class="ri-file-pdf-line mr-1"></i>Export PDF
+                </button>
+            </div>
         `;
         chartContainer.appendChild(machineContainer);
         
         // Initialize chart for this machine
-        const chartId = `chart-${machine.replace(/[^a-zA-Z0-9]/g, '')}`;
+        const chartId = `chart-${machineId}`;
         const chartElement = document.getElementById(chartId);
         
         if (chartElement) {
@@ -2007,7 +2014,271 @@ function closeMachineAnalyticsImageModal() {
     }
 }
 
+/**
+ * Export individual machine PDF with chart and data table
+ */
+async function exportMachinePDF(machineName, machineId) {
+    try {
+        // Check if jsPDF is available
+        if (!window.jspdf) {
+            alert('PDF export functionality is not available. Please refresh the page.');
+            return;
+        }
+
+        // Get machine data
+        const selectedMachines = getSelectedMachines();
+        let filteredData = machineAnalyticsData;
+        if (selectedMachines.length > 0) {
+            filteredData = machineAnalyticsData.filter(item => 
+                selectedMachines.includes(item.設備)
+            );
+        }
+        
+        const machineData = filteredData.filter(item => item.設備 === machineName);
+        
+        if (machineData.length === 0) {
+            alert('No data available for this machine');
+            return;
+        }
+
+        const fromDate = document.getElementById('scnaMachineDateFrom').value;
+        const toDate = document.getElementById('scnaMachineDateTo').value;
+        
+        // Get the chart instance
+        const chartElement = document.getElementById(`chart-${machineId}`);
+        if (!chartElement) {
+            alert('Chart not found');
+            return;
+        }
+        
+        const chartInstance = echarts.getInstanceByDom(chartElement);
+        if (!chartInstance) {
+            alert('Chart instance not found');
+            return;
+        }
+        
+        // Export chart as base64 image with high quality
+        const chartImage = chartInstance.getDataURL({
+            type: 'png',
+            pixelRatio: 4,  // Increased for sharper text
+            backgroundColor: '#fff'
+        });
+        
+        // Create PDF
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({
+            orientation: 'landscape',
+            unit: 'mm',
+            format: 'a3'
+        });
+
+        // Page 1: Chart Image
+        addChartImageToPDF(doc, machineName, chartImage, fromDate, toDate);
+        
+        // Page 2+: Data Table with autoTable
+        doc.addPage();
+        addMachineDataTableToPDF(doc, machineName, machineData, fromDate, toDate);
+        
+        // Save PDF
+        const filename = `${machineName.replace(/[^a-zA-Z0-9]/g, '_')}_machine_analytics_${fromDate}_${toDate}.pdf`;
+        doc.save(filename);
+        
+        console.log(`✅ PDF exported for machine: ${machineName}`);
+        
+    } catch (error) {
+        console.error('Error exporting machine PDF:', error);
+        alert('Error generating PDF. Please try again.');
+    }
+}
+
+/**
+ * Add chart image to PDF
+ */
+function addChartImageToPDF(doc, machineName, chartImage, fromDate, toDate) {
+    const pageWidth = 420; // A3 landscape width in mm
+    const pageHeight = 297; // A3 landscape height in mm
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Machine Analytics - ${machineName}`, pageWidth / 2, 20, { align: 'center' });
+    
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Period: ${fromDate} to ${toDate}`, pageWidth / 2, 35, { align: 'center' });
+    
+    // Add chart image with proper aspect ratio
+    const imageMargin = 20;
+    const maxImageWidth = pageWidth - (imageMargin * 2);
+    const maxImageHeight = pageHeight - 80;
+    
+    // Calculate aspect ratio to prevent stretching
+    // Assuming the chart is wider than it is tall (typical for timeline charts)
+    const chartAspectRatio = 3; // Approximate ratio: width/height
+    let imageWidth = maxImageWidth;
+    let imageHeight = imageWidth / chartAspectRatio;
+    
+    // If calculated height exceeds max height, resize based on height
+    if (imageHeight > maxImageHeight) {
+        imageHeight = maxImageHeight;
+        imageWidth = imageHeight * chartAspectRatio;
+    }
+    
+    // Center the image
+    const imageX = (pageWidth - imageWidth) / 2;
+    const imageY = 50;
+    
+    try {
+        doc.addImage(chartImage, 'PNG', imageX, imageY, imageWidth, imageHeight, undefined, 'SLOW');
+    } catch (error) {
+        console.error('Error adding chart image:', error);
+        doc.setFontSize(12);
+        doc.text('Error loading chart image', pageWidth / 2, pageHeight / 2, { align: 'center' });
+    }
+}
+
+/**
+ * Add machine data table to PDF using autoTable
+ */
+function addMachineDataTableToPDF(doc, machineName, machineData, fromDate, toDate) {
+    const pageWidth = 420; // A3 landscape width
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Machine Data - ${machineName}`, pageWidth / 2, 20, { align: 'center' });
+    
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Period: ${fromDate} to ${toDate}`, pageWidth / 2, 30, { align: 'center' });
+    
+    // Prepare table data
+    const tableColumns = [
+        { header: 'Date', dataKey: 'date' },
+        { header: 'Target Machines', dataKey: 'targetMachines' },
+        { header: 'Worker', dataKey: 'worker' },
+        { header: 'Part Number', dataKey: 'partNumber' },
+        { header: 'Background No.', dataKey: 'backgroundNo' },
+        { header: 'Machine', dataKey: 'machine' },
+        { header: 'Start Time', dataKey: 'startTime' },
+        { header: 'End Time', dataKey: 'endTime' },
+        { header: 'Work Hours', dataKey: 'workHours' },
+        { header: 'Cycle Time', dataKey: 'cycleTime' },
+        { header: 'Process Qty', dataKey: 'processQty' },
+        { header: 'Total Prod.', dataKey: 'totalProd' },
+        { header: 'Material Lot', dataKey: 'materialLot' },
+        { header: 'Total NG', dataKey: 'totalNG' },
+        { header: 'Quality Checks', dataKey: 'qualityChecks' },
+        { header: 'SKU', dataKey: 'sku' }
+    ];
+    
+    const tableData = machineData.map(record => {
+        // Get target machines from WorkOrder_Info
+        let targetMachines = '';
+        if (record.WorkOrder_Info && record.WorkOrder_Info.targetMachines) {
+            targetMachines = Array.isArray(record.WorkOrder_Info.targetMachines) 
+                ? record.WorkOrder_Info.targetMachines.join(', ') 
+                : record.WorkOrder_Info.targetMachines;
+        }
+        
+        // Get SKU from WorkOrder_Info
+        let sku = '';
+        if (record.WorkOrder_Info && record.WorkOrder_Info.sku) {
+            sku = record.WorkOrder_Info.sku;
+        }
+        
+        // Get quality checks count
+        let qualityChecks = '';
+        if (record['2HourQualityCheck'] && record['2HourQualityCheck'].totalChecks) {
+            qualityChecks = record['2HourQualityCheck'].totalChecks;
+        }
+        
+        return {
+            date: record.Date ? new Date(record.Date).toLocaleDateString('en-CA') : '',
+            targetMachines: targetMachines,
+            worker: record.Worker_Name || '',
+            partNumber: record.品番 || '',
+            backgroundNo: record.背番号 || '',
+            machine: record.設備 || '',
+            startTime: record.Time_start || '',
+            endTime: record.Time_end || '',
+            workHours: record.Total_Work_Hours || '',
+            cycleTime: record.Cycle_Time || '',
+            processQty: record.Process_Quantity || '',
+            totalProd: record.Total || '',
+            materialLot: record.材料ロット || '',
+            totalNG: record.Total_NG || '',
+            qualityChecks: qualityChecks,
+            sku: sku
+        };
+    });
+    
+    // Use autoTable plugin
+    doc.autoTable({
+        startY: 40,
+        head: [tableColumns.map(col => col.header)],
+        body: tableData.map(row => tableColumns.map(col => row[col.dataKey])),
+        theme: 'grid',
+        styles: {
+            fontSize: 9,
+            cellPadding: 3,
+            overflow: 'linebreak',
+            cellWidth: 'auto',
+            minCellWidth: 15
+        },
+        headStyles: {
+            fillColor: [59, 130, 246],
+            textColor: 255,
+            fontStyle: 'bold',
+            halign: 'center',
+            fontSize: 10
+        },
+        alternateRowStyles: {
+            fillColor: [248, 248, 248]
+        },
+        columnStyles: {
+            0: { cellWidth: 25 },  // Date
+            1: { cellWidth: 28 },  // Target Machines
+            2: { cellWidth: 25 },  // Worker
+            3: { cellWidth: 30 },  // Part Number
+            4: { cellWidth: 25 },  // Background No
+            5: { cellWidth: 22 },  // Machine
+            6: { cellWidth: 20 },  // Start Time
+            7: { cellWidth: 20 },  // End Time
+            8: { cellWidth: 22 },  // Work Hours
+            9: { cellWidth: 22 },  // Cycle Time
+            10: { cellWidth: 23 }, // Process Qty
+            11: { cellWidth: 23 }, // Total Prod
+            12: { cellWidth: 30 }, // Material Lot
+            13: { cellWidth: 20 }, // Total NG
+            14: { cellWidth: 25 }, // Quality Checks
+            15: { cellWidth: 28 }  // SKU
+        },
+        margin: { top: 40, left: 10, right: 10 },
+        didDrawPage: function(data) {
+            // Footer with page number
+            const pageCount = doc.internal.getNumberOfPages();
+            const currentPage = doc.internal.getCurrentPageInfo().pageNumber;
+            
+            doc.setFontSize(10);
+            doc.text(
+                `Page ${currentPage} of ${pageCount}`,
+                pageWidth / 2,
+                doc.internal.pageSize.height - 10,
+                { align: 'center' }
+            );
+        }
+    });
+    
+    // Add summary at the end
+    const finalY = doc.lastAutoTable.finalY || 40;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Total Records: ${machineData.length}`, 10, finalY + 10);
+}
+
 // Make functions globally available
+window.exportMachinePDF = exportMachinePDF;
 window.initializeSCNAMachineAnalytics = initializeSCNAMachineAnalytics;
 window.loadSCNAMachineData = loadSCNAMachineData;
 window.toggleAllMachines = toggleAllMachines;
