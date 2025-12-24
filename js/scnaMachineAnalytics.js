@@ -887,47 +887,729 @@ function showSCNAMachineErrorState(message) {
 /**
  * Export machine analytics data to CSV
  */
+/**
+ * Export machine analytics data to CSV with advanced options
+ */
 window.exportSCNAMachineData = function() {
     if (!machineAnalyticsData || machineAnalyticsData.length === 0) {
         alert('No machine data to export');
         return;
     }
     
+    const selectedMachines = getSelectedMachines();
+    
+    // Filter data based on selected machines
+    let filteredData = machineAnalyticsData;
+    if (selectedMachines.length > 0) {
+        filteredData = machineAnalyticsData.filter(item => 
+            selectedMachines.includes(item.設備)
+        );
+    }
+    
+    if (filteredData.length === 0) {
+        alert('No data available for selected machines');
+        return;
+    }
+    
+    // Show advanced export options modal
+    showMachineAnalyticsExportModal(filteredData);
+};
+
+/**
+ * Show machine analytics export modal with field selection
+ */
+async function showMachineAnalyticsExportModal(data) {
+    if (!data || data.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    // Get all possible headers from the data using flattening
+    const allHeaders = getMachineAnalyticsHeaders(data);
+    const headers = Array.from(allHeaders).sort();
+    
+    // Load existing templates for machine analytics
+    const templates = await loadMachineAnalyticsTemplates();
+
+    // Create modal HTML
+    const modalHTML = `
+        <div id="machineAnalyticsExportModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">Export Options</h3>
+                    <p class="text-sm text-gray-600 mt-1">Select columns to export and set their order</p>
+                </div>
+                
+                <div class="p-6 overflow-y-auto max-h-[65vh]">
+                    <!-- Template Section -->
+                    <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <div class="flex flex-wrap items-center gap-3 mb-2">
+                            <label class="text-sm font-medium text-blue-800">Templates:</label>
+                            <select id="machineTemplateSelect" class="flex-1 min-w-[200px] px-3 py-1.5 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">-- Select Template --</option>
+                                ${templates.map(t => `<option value="${t._id}">${t.templateName}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button id="machineTemplateBtn" class="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors">
+                                <i class="ri-save-line mr-1"></i>Save Template
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Search Section -->
+                    <div class="mb-4">
+                        <div class="relative">
+                            <input type="text" id="machineHeaderSearch" 
+                                   placeholder="Search headers..." 
+                                   class="w-full px-4 py-2 pl-10 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                        </div>
+                    </div>
+                    
+                    <!-- Selection Controls -->
+                    <div class="mb-4">
+                        <div class="flex gap-2 mb-3">
+                            <button id="machineSelectAllBtn" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Select All</button>
+                            <span class="text-gray-300">|</span>
+                            <button id="machineDeselectAllBtn" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Deselect All</button>
+                            <span class="text-gray-300">|</span>
+                            <button id="machineClearOrderBtn" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Clear Order</button>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-2">
+                            Enter order numbers. Only checked items will be exported.
+                        </p>
+                    </div>
+                    
+                    <!-- Headers organized by category -->
+                    ${generateMachineHeaderCategories(headers)}
+                </div>
+                
+                <div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+                    <button id="machineCancelExportBtn" class="px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors">
+                        Cancel
+                    </button>
+                    <button id="machineExecuteExportBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
+                        <i class="ri-download-line mr-1"></i>Execute Export
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('machineAnalyticsExportModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to document
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    // Set up event listeners
+    setupMachineExportModalEventListeners(data, headers, templates);
+}
+
+/**
+ * Generate header categories for better organization
+ */
+function generateMachineHeaderCategories(headers) {
+    const categories = {
+        'Basic Information': {
+            order: 1,
+            fields: ['Machine', 'Equipment', 'Date', 'Part Number', 'Background Number', 'Worker Name', 'Factory']
+        },
+        'Production Times': {
+            order: 2,
+            fields: ['Start Time', 'End Time', 'Total Work Hours']
+        },
+        'Production Data': {
+            order: 3,
+            fields: ['Total Production', 'Process Quantity', 'Material Lot', 'Cycle Time', 'Shot Count', 'Spare Parts Count']
+        },
+        'Quality Data': {
+            order: 4,
+            fields: ['Total NG', 'Internal Defects', 'Processing Defects', 'Other Defects', 'Spare']
+        },
+        'Break Times': {
+            order: 5,
+            fields: headers.filter(h => h.includes('break') || h.includes('Break'))
+        },
+        'Quality Checks': {
+            order: 6,
+            fields: headers.filter(h => h.includes('QualityCheck') || h.includes('2HourQualityCheck'))
+        },
+        'Work Orders': {
+            order: 7,
+            fields: headers.filter(h => h.includes('WorkOrder'))
+        },
+        'Maintenance': {
+            order: 8,
+            fields: headers.filter(h => h.includes('Maintenance') || h.includes('Trouble'))
+        },
+        'Images': {
+            order: 9,
+            fields: headers.filter(h => h.includes('Image') || h.includes('画像'))
+        },
+        'Other': {
+            order: 10,
+            fields: []
+        }
+    };
+
+    // Map Japanese field names to English
+    const fieldMapping = getMachineFieldMapping();
+    
+    // Categorize headers
+    const categorizedHeaders = {};
+    const usedHeaders = new Set();
+
+    // First pass - assign headers to categories based on matching
+    headers.forEach(header => {
+        let assigned = false;
+        for (const [categoryName, category] of Object.entries(categories)) {
+            if (categoryName === 'Other') continue;
+            
+            const englishHeader = fieldMapping[header] || header;
+            if (category.fields.some(field => 
+                englishHeader.toLowerCase().includes(field.toLowerCase()) ||
+                field.toLowerCase().includes(englishHeader.toLowerCase()) ||
+                header.toLowerCase().includes(field.toLowerCase())
+            )) {
+                if (!categorizedHeaders[categoryName]) categorizedHeaders[categoryName] = [];
+                categorizedHeaders[categoryName].push(header);
+                usedHeaders.add(header);
+                assigned = true;
+                break;
+            }
+        }
+        
+        // If not assigned to any category, put in 'Other'
+        if (!assigned) {
+            if (!categorizedHeaders['Other']) categorizedHeaders['Other'] = [];
+            categorizedHeaders['Other'].push(header);
+        }
+    });
+
+    // Generate HTML for each category
+    let categoryHTML = '';
+    let overallIndex = 0;
+    
+    Object.entries(categories)
+        .sort(([,a], [,b]) => a.order - b.order)
+        .forEach(([categoryName, category]) => {
+            const categoryHeaders = categorizedHeaders[categoryName] || [];
+            if (categoryHeaders.length === 0) return;
+
+            const isBasicProduction = categoryName === 'Basic Information' || categoryName === 'Production Times' || categoryName === 'Production Data';
+            
+            categoryHTML += `
+                <div class="mb-4">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                        <span>${categoryName}</span>
+                        <button type="button" class="ml-2 text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 category-toggle" data-category="${categoryName}">
+                            ${isBasicProduction ? 'Select All' : 'Toggle All'}
+                        </button>
+                    </h4>
+                    <div class="grid grid-cols-1 gap-1 border border-gray-200 rounded-md p-3 max-h-60 overflow-y-auto category-headers" data-category="${categoryName}">
+                        ${categoryHeaders.map(header => {
+                            const englishName = fieldMapping[header] || header;
+                            const isDefaultSelected = isBasicProduction;
+                            return `
+                                <div class="header-item flex items-center p-2 bg-gray-50 rounded border hover:bg-gray-100 transition-colors" data-header="${header}">
+                                    <input type="checkbox" id="header_${overallIndex++}" ${isDefaultSelected ? 'checked' : ''} class="mr-3 h-4 w-4 text-blue-600 rounded focus:ring-blue-500">
+                                    <span class="flex-1 text-sm" title="${header}">
+                                        <strong>${englishName}</strong>
+                                        ${header !== englishName ? `<span class="text-xs text-gray-500"> (${header})</span>` : ''}
+                                    </span>
+                                    <input type="number" min="1" placeholder="-" 
+                                           class="order-input w-14 px-2 py-1 text-sm text-center border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                           value="${isDefaultSelected ? (overallIndex) : ''}">
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        });
+
+    // Add overall count
+    categoryHTML += `
+        <div class="mt-2 text-xs text-gray-500">
+            <span id="machineSelectedCount">${headers.filter((_, i) => i < 15).length}</span> / ${headers.length} columns selected
+        </div>
+    `;
+
+    return categoryHTML;
+}
+
+/**
+ * Get all machine analytics headers with flattening
+ */
+function getMachineAnalyticsHeaders(data) {
+    const allHeaders = new Set();
+    
+    data.forEach(item => {
+        const flattened = flattenMachineObject(item);
+        Object.keys(flattened).forEach(key => allHeaders.add(key));
+    });
+    
+    return allHeaders;
+}
+
+/**
+ * Flatten machine object with dot notation for nested properties
+ */
+function flattenMachineObject(obj, prefix = '') {
+    const flattened = {};
+    
+    for (const key in obj) {
+        if (obj[key] === null || obj[key] === undefined) {
+            flattened[prefix + key] = '';
+            continue;
+        }
+        
+        if (typeof obj[key] === 'object' && !Array.isArray(obj[key]) && !(obj[key] instanceof Date)) {
+            const nested = flattenMachineObject(obj[key], prefix + key + '.');
+            Object.assign(flattened, nested);
+        } else if (Array.isArray(obj[key])) {
+            // Handle arrays by joining them or flattening if they contain objects
+            if (obj[key].length > 0 && typeof obj[key][0] === 'object') {
+                obj[key].forEach((item, index) => {
+                    const nested = flattenMachineObject(item, prefix + key + `[${index}].`);
+                    Object.assign(flattened, nested);
+                });
+            } else {
+                flattened[prefix + key] = obj[key].join(', ');
+            }
+        } else {
+            flattened[prefix + key] = obj[key];
+        }
+    }
+    
+    return flattened;
+}
+
+/**
+ * Get field mapping from Japanese to English
+ */
+function getMachineFieldMapping() {
+    return {
+        // Basic fields
+        '設備': 'Machine',
+        '品番': 'Part Number',
+        '背番号': 'Background Number',
+        '工場': 'Factory',
+        'Worker_Name': 'Worker Name',
+        'Date': 'Date',
+        'Time_start': 'Start Time',
+        'Time_end': 'End Time',
+        'Total_Work_Hours': 'Total Work Hours',
+        
+        // Production data
+        'Total': 'Total Production',
+        'Process_Quantity': 'Process Quantity',
+        '材料ロット': 'Material Lot',
+        'Cycle_Time': 'Cycle Time',
+        'ショット数': 'Shot Count',
+        'スペアからの部分数': 'Spare Parts Count',
+        'Spare': 'Spare',
+        
+        // Quality data
+        'Total_NG': 'Total NG',
+        '疵引不良': 'Internal Defects',
+        '加工不良': 'Processing Defects',
+        'その他': 'Other Defects',
+        
+        // Break time data
+        'Break_Time_Data.break1.start': 'Break 1 Start',
+        'Break_Time_Data.break1.end': 'Break 1 End',
+        'Break_Time_Data.break2.start': 'Break 2 Start',
+        'Break_Time_Data.break2.end': 'Break 2 End',
+        'Break_Time_Data.break3.start': 'Break 3 Start',
+        'Break_Time_Data.break3.end': 'Break 3 End',
+        'Break_Time_Data.break4.start': 'Break 4 Start',
+        'Break_Time_Data.break4.end': 'Break 4 End',
+        'Total_Break_Minutes': 'Total Break Minutes',
+        'Total_Break_Hours': 'Total Break Hours',
+        
+        // Maintenance
+        'Maintenance_Data.totalMinutes': 'Maintenance Minutes',
+        'Maintenance_Data.totalHours': 'Maintenance Hours',
+        'Total_Trouble_Minutes': 'Trouble Minutes',
+        'Total_Trouble_Hours': 'Trouble Hours',
+        
+        // Quality checks
+        '2HourQualityCheck.totalChecks': 'Quality Checks Count',
+        '2HourQualityCheck.lastCheckTimestamp': 'Last Check Time',
+        
+        // Work orders
+        'WorkOrder_Info.isWorkOrder': 'Is Work Order',
+        'WorkOrder_Info.workOrderNumber': 'Work Order Number',
+        'WorkOrder_Info.assignedTo': 'Assigned To',
+        'WorkOrder_Info.status': 'Work Order Status',
+        'WorkOrder_Info.sku': 'SKU',
+        'WorkOrder_Info.ncProgramSent': 'NC Program Sent',
+        
+        // Images
+        '初物チェック画像': 'First Cycle Check Image',
+        '終物チェック画像': 'Last Cycle Check Image',
+        '材料ラベル画像': 'Material Label Image',
+        'materialLabelImageCount': 'Material Label Count',
+        
+        // Other
+        'Comment': 'Comment',
+        'shot1': 'Shot 1',
+        'shot2': 'Shot 2'
+    };
+}
+
+/**
+ * Setup event listeners for machine export modal
+ */
+function setupMachineExportModalEventListeners(data, headers, templates) {
+    const modal = document.getElementById('machineAnalyticsExportModal');
+    const headersList = modal.querySelectorAll('.header-item');
+    const searchInput = document.getElementById('machineHeaderSearch');
+    const templateSelect = document.getElementById('machineTemplateSelect');
+
+    // Update selected count
+    function updateSelectedCount() {
+        const checkedCount = modal.querySelectorAll('input[type="checkbox"]:checked').length;
+        document.getElementById('machineSelectedCount').textContent = checkedCount;
+    }
+
+    // Get next available order number
+    function getNextOrderNumber() {
+        const orderInputs = modal.querySelectorAll('.order-input');
+        let maxOrder = 0;
+        orderInputs.forEach(input => {
+            const val = parseInt(input.value);
+            if (!isNaN(val) && val > maxOrder) {
+                maxOrder = val;
+            }
+        });
+        return maxOrder + 1;
+    }
+
+    // Search functionality
+    searchInput.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase().trim();
+        
+        headersList.forEach(item => {
+            const headerName = item.dataset.header.toLowerCase();
+            const englishName = item.querySelector('strong').textContent.toLowerCase();
+            const matches = headerName.includes(searchTerm) || englishName.includes(searchTerm);
+            item.style.display = matches ? 'flex' : 'none';
+        });
+    });
+
+    // Category toggle buttons
+    modal.querySelectorAll('.category-toggle').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const categoryName = e.target.dataset.category;
+            const categoryContainer = modal.querySelector(`[data-category="${categoryName}"]`);
+            const checkboxes = categoryContainer.querySelectorAll('input[type="checkbox"]');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            
+            let nextOrder = getNextOrderNumber();
+            checkboxes.forEach(checkbox => {
+                const item = checkbox.closest('.header-item');
+                const orderInput = item.querySelector('.order-input');
+                
+                if (allChecked) {
+                    // Uncheck all
+                    checkbox.checked = false;
+                    orderInput.value = '';
+                } else {
+                    // Check all
+                    if (!checkbox.checked) {
+                        checkbox.checked = true;
+                        orderInput.value = nextOrder++;
+                    }
+                }
+            });
+            updateSelectedCount();
+        });
+    });
+
+    // Select/Deselect all buttons
+    document.getElementById('machineSelectAllBtn').onclick = () => {
+        let nextOrder = getNextOrderNumber();
+        headersList.forEach(item => {
+            if (item.style.display !== 'none') {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                const orderInput = item.querySelector('.order-input');
+                if (!checkbox.checked) {
+                    checkbox.checked = true;
+                    orderInput.value = nextOrder++;
+                }
+            }
+        });
+        updateSelectedCount();
+    };
+
+    document.getElementById('machineDeselectAllBtn').onclick = () => {
+        headersList.forEach(item => {
+            if (item.style.display !== 'none') {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                const orderInput = item.querySelector('.order-input');
+                checkbox.checked = false;
+                orderInput.value = '';
+            }
+        });
+        updateSelectedCount();
+    };
+
+    // Clear order button
+    document.getElementById('machineClearOrderBtn').onclick = () => {
+        modal.querySelectorAll('.order-input').forEach(input => {
+            input.value = '';
+        });
+    };
+
+    // Checkbox change listener
+    modal.addEventListener('change', (e) => {
+        if (e.target.type === 'checkbox') {
+            const item = e.target.closest('.header-item');
+            const orderInput = item.querySelector('.order-input');
+            
+            if (e.target.checked) {
+                orderInput.value = getNextOrderNumber();
+            } else {
+                orderInput.value = '';
+            }
+            
+            updateSelectedCount();
+        }
+    });
+
+    // Template select change
+    templateSelect.addEventListener('change', async (e) => {
+        const templateId = e.target.value;
+        if (!templateId) return;
+        
+        const template = templates.find(t => t._id === templateId);
+        if (!template) return;
+        
+        // Apply template settings
+        headersList.forEach(item => {
+            item.querySelector('input[type="checkbox"]').checked = false;
+            item.querySelector('.order-input').value = '';
+        });
+        
+        // Apply template selections
+        if (template.selectedHeaders && template.selectedHeaders.length > 0) {
+            template.selectedHeaders.forEach(headerConfig => {
+                const item = modal.querySelector(`[data-header="${headerConfig.name}"]`);
+                if (item) {
+                    item.querySelector('input[type="checkbox"]').checked = true;
+                    if (headerConfig.order) {
+                        item.querySelector('.order-input').value = headerConfig.order;
+                    }
+                }
+            });
+        }
+        
+        updateSelectedCount();
+    });
+
+    // Save template button
+    document.getElementById('machineTemplateBtn').onclick = async () => {
+        const templateName = prompt('Enter template name:');
+        if (!templateName || !templateName.trim()) return;
+        
+        // Collect selected headers with their orders
+        const selectedHeaders = [];
+        headersList.forEach(item => {
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            const orderInput = item.querySelector('.order-input');
+            if (checkbox.checked) {
+                selectedHeaders.push({
+                    name: item.dataset.header,
+                    order: orderInput.value ? parseInt(orderInput.value) : null
+                });
+            }
+        });
+        
+        if (selectedHeaders.length === 0) {
+            alert('Please select at least one column');
+            return;
+        }
+        
+        const templateData = {
+            templateName: templateName.trim(),
+            processType: 'MachineAnalytics',
+            selectedHeaders: selectedHeaders,
+            createdBy: 'User',
+            createdAt: new Date().toISOString()
+        };
+        
+        const success = await saveMachineAnalyticsTemplate(templateData);
+        if (success) {
+            alert('Template saved!');
+            // Add to dropdown
+            const option = document.createElement('option');
+            option.value = templateData.templateName;
+            option.textContent = templateData.templateName;
+            templateSelect.appendChild(option);
+        } else {
+            alert('Failed to save template');
+        }
+    };
+
+    // Cancel button
+    document.getElementById('machineCancelExportBtn').onclick = () => {
+        modal.remove();
+    };
+
+    // Execute export button
+    document.getElementById('machineExecuteExportBtn').onclick = () => {
+        // Collect selected headers with their orders
+        const selectedHeadersWithOrder = [];
+        
+        headersList.forEach(item => {
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            const orderInput = item.querySelector('.order-input');
+            if (checkbox.checked) {
+                selectedHeadersWithOrder.push({
+                    name: item.dataset.header,
+                    order: orderInput.value ? parseInt(orderInput.value) : 9999
+                });
+            }
+        });
+
+        if (selectedHeadersWithOrder.length === 0) {
+            alert('Please select at least one column');
+            return;
+        }
+
+        // Sort by order
+        selectedHeadersWithOrder.sort((a, b) => a.order - b.order);
+        const selectedHeaders = selectedHeadersWithOrder.map(h => h.name);
+
+        modal.remove();
+
+        // Execute the export with selected headers
+        executeMachineAnalyticsExport(data, selectedHeaders);
+    };
+
+    // Close modal when clicking outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+
+    // Initialize selected count
+    updateSelectedCount();
+}
+
+/**
+ * Execute machine analytics CSV export with selected headers
+ */
+function executeMachineAnalyticsExport(data, selectedHeaders) {
     const fromDate = document.getElementById('scnaMachineDateFrom').value;
     const toDate = document.getElementById('scnaMachineDateTo').value;
+    const fieldMapping = getMachineFieldMapping();
     
-    // Create CSV content
+    // Flatten all data first
+    const flattenedData = data.map(item => flattenMachineObject(item));
+    
+    // Create CSV content with English headers
     let csvContent = "data:text/csv;charset=utf-8,";
     csvContent += "Machine Analytics Export\n";
     csvContent += `Period,${fromDate} to ${toDate}\n\n`;
-    csvContent += "Machine,Date,Product,Worker,Start Time,End Time,Duration (h),Total Production,Break Minutes\n";
     
-    machineAnalyticsData.forEach(item => {
-        const duration = item.Total_Work_Hours || 0;
-        const breakMinutes = item.Total_Break_Minutes || 0;
+    // Create header row with English names
+    const englishHeaders = selectedHeaders.map(header => fieldMapping[header] || header);
+    csvContent += englishHeaders.join(',') + '\n';
+    
+    // Add data rows
+    flattenedData.forEach(row => {
+        const values = selectedHeaders.map(header => {
+            let value = row[header];
+            if (value === null || value === undefined) {
+                return "";
+            }
+            
+            // Handle special formatting
+            if (header === 'Date' && value) {
+                value = new Date(value).toLocaleDateString('en-CA');
+            }
+            
+            // Convert value to string and escape commas
+            const str = String(value);
+            return str.includes(',') ? `"${str}"` : str;
+        });
         
-        csvContent += [
-            item.設備 || '',
-            item.Date || '',
-            item.品番 || '',
-            item.Worker_Name || '',
-            item.Time_start || '',
-            item.Time_end || '',
-            duration,
-            item.Total || 0,
-            breakMinutes
-        ].join(',') + '\n';
+        csvContent += values.join(',') + '\n';
     });
     
     // Create and download file
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `scna_machine_analytics_${fromDate}_${toDate}.csv`);
+    link.setAttribute("download", `scna_machine_analytics_custom_${fromDate}_${toDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-};
+    
+    console.log(`✅ Exported ${flattenedData.length} records with ${selectedHeaders.length} columns`);
+}
+
+/**
+ * Load machine analytics templates (mock implementation)
+ */
+async function loadMachineAnalyticsTemplates() {
+    try {
+        // Check localStorage for saved templates
+        const savedTemplates = localStorage.getItem('machineAnalyticsTemplates');
+        if (savedTemplates) {
+            return JSON.parse(savedTemplates);
+        }
+        
+        // Return default template
+        return [{
+            _id: 'default-basic',
+            templateName: 'Basic Production Data',
+            processType: 'MachineAnalytics',
+            selectedHeaders: [
+                { name: '設備', order: 1 },
+                { name: 'Date', order: 2 },
+                { name: '品番', order: 3 },
+                { name: 'Worker_Name', order: 4 },
+                { name: 'Time_start', order: 5 },
+                { name: 'Time_end', order: 6 },
+                { name: 'Total_Work_Hours', order: 7 },
+                { name: 'Total', order: 8 },
+                { name: 'Total_Break_Minutes', order: 9 }
+            ],
+            createdBy: 'System',
+            createdAt: new Date().toISOString()
+        }];
+    } catch (error) {
+        console.error('Error loading templates:', error);
+        return [];
+    }
+}
+
+/**
+ * Save machine analytics template
+ */
+async function saveMachineAnalyticsTemplate(templateData) {
+    try {
+        const existingTemplates = await loadMachineAnalyticsTemplates();
+        templateData._id = `template-${Date.now()}`;
+        existingTemplates.push(templateData);
+        
+        localStorage.setItem('machineAnalyticsTemplates', JSON.stringify(existingTemplates));
+        return true;
+    } catch (error) {
+        console.error('Error saving template:', error);
+        return false;
+    }
+}
 
 /**
  * Show loading state
