@@ -6373,7 +6373,7 @@ function groupAndSummarize(records) {
                 count: 0
             };
         }
-        grouped[key].Total += item.Total ?? item.Process_Quantity ?? 0;
+        grouped[key].Total += item.Process_Quantity ?? 0;
         grouped[key].Total_NG += item.Total_NG ?? 0;
         grouped[key].count += 1;
         
