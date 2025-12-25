@@ -2152,6 +2152,35 @@ async function fetchDistinctValues(collection, field, factory) {
             return values;
         }
         
+        // Special handling for 設備 field - fetch from all collections and combine
+        if (field === '設備') {
+            const collections = ['kensaDB', 'pressDB', 'SRSDB', 'slitDB'];
+            const allValuesPromises = collections.map(coll => 
+                fetch(`${BASE_URL}api/distinct`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        dbName: 'submittedDB',
+                        collectionName: coll,
+                        field: field,
+                        filter: { 工場: factory }
+                    })
+                }).then(res => res.json()).then(data => data.values || []).catch(() => [])
+            );
+            
+            const allValuesArrays = await Promise.all(allValuesPromises);
+            // Merge and deduplicate
+            const mergedValues = [...new Set(allValuesArrays.flat())].filter(v => v).sort();
+            
+            // Cache the results
+            filterDropdownCache.set(cacheKey, {
+                values: mergedValues,
+                timestamp: Date.now()
+            });
+            
+            return mergedValues;
+        }
+        
         // Standard field handling - fetch from process collection
         const response = await fetch(`${BASE_URL}api/distinct`, {
             method: 'POST',
