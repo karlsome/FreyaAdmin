@@ -1656,6 +1656,241 @@ window.closeMaterialLotModal = function() {
     }
 };
 
+/**
+ * Open Press Detail Modal from Kensa 製造ロット
+ * @param {string} lotValue - The 製造ロット value clicked
+ * @param {string} hinban - The 品番 from kensa record
+ * @param {string} sebanggo - The 背番号 from kensa record
+ */
+window.openPressDetailModal = async function(lotValue, hinban, sebanggo) {
+    try {
+        // Parse the date from lot value
+        const parsedDate = parseManufacturingLotDate(lotValue);
+        
+        if (!parsedDate) {
+            alert('製造ロットの日付フォーマットが無効です: ' + lotValue);
+            return;
+        }
+        
+        console.log('Querying pressDB with:', { Date: parsedDate, 品番: hinban, 背番号: sebanggo });
+        
+        // Show loading modal
+        const loadingModal = document.createElement('div');
+        loadingModal.id = 'pressDetailModal';
+        loadingModal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4';
+        loadingModal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="p-6">
+                    <div class="flex items-center justify-center">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                        <span class="ml-3 text-gray-600">読み込み中...</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(loadingModal);
+        
+        // Query pressDB
+        const response = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'pressDB',
+                query: {
+                    Date: parsedDate,
+                    品番: hinban,
+                    背番号: sebanggo
+                }
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch press data');
+        }
+        
+        const results = await response.json();
+        
+        if (!results || results.length === 0) {
+            loadingModal.remove();
+            alert('該当するプレスデータが見つかりませんでした');
+            return;
+        }
+        
+        // Display results
+        showPressDetailResults(results, lotValue, parsedDate, hinban, sebanggo);
+        
+    } catch (error) {
+        console.error('Error fetching press data:', error);
+        const modal = document.getElementById('pressDetailModal');
+        if (modal) modal.remove();
+        alert('プレスデータの取得に失敗しました');
+    }
+};
+
+/**
+ * Show press detail results in modal
+ */
+function showPressDetailResults(results, originalLot, parsedDate, hinban, sebanggo) {
+    const modal = document.getElementById('pressDetailModal');
+    if (!modal) return;
+    
+    // Flatten nested objects
+    const flattenObject = (obj, prefix = '') => {
+        const flattened = {};
+        for (const key in obj) {
+            if (obj[key] === null || obj[key] === undefined) {
+                flattened[prefix + key] = '-';
+            } else if (typeof obj[key] === 'object' && !Array.isArray(obj[key]) && !(obj[key] instanceof Date) && !obj[key].$oid && !obj[key].$date) {
+                Object.assign(flattened, flattenObject(obj[key], prefix + key + '.'));
+            } else if (obj[key].$date) {
+                flattened[prefix + key] = new Date(obj[key].$date).toLocaleString('ja-JP');
+            } else if (obj[key].$oid) {
+                flattened[prefix + key] = obj[key].$oid;
+            } else {
+                flattened[prefix + key] = obj[key];
+            }
+        }
+        return flattened;
+    };
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <!-- Header -->
+            <div class="bg-gradient-to-r from-green-500 to-green-600 px-6 py-4 flex items-center justify-between">
+                <h2 class="text-xl font-bold text-white">プレス工程詳細</h2>
+                <button onclick="closePressDetailModal()" class="text-white hover:text-gray-200 transition-colors">
+                    <i class="ri-close-line text-2xl"></i>
+                </button>
+            </div>
+            
+            <!-- Info Bar -->
+            <div class="bg-blue-50 px-6 py-3 border-b text-sm">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                    <div><span class="font-medium">製造ロット:</span> ${originalLot}</div>
+                    <div><span class="font-medium">日付:</span> ${parsedDate}</div>
+                    <div><span class="font-medium">品番:</span> ${hinban}</div>
+                    <div><span class="font-medium">背番号:</span> ${sebanggo}</div>
+                </div>
+                <div class="mt-2">
+                    <span class="font-medium">検索結果: ${results.length} 件</span>
+                </div>
+            </div>
+            
+            <!-- Content -->
+            <div class="flex-1 overflow-y-auto p-6">
+                <div class="space-y-6">
+                    ${results.map((record, index) => {
+                        const flattened = flattenObject(record);
+                        // Remove _id from display
+                        delete flattened._id;
+                        
+                        // Collect material label images from array or individual fields
+                        const materialLabelImages = [];
+                        
+                        // Check for materialLabelImages array (new format)
+                        if (record.materialLabelImages && Array.isArray(record.materialLabelImages)) {
+                            record.materialLabelImages.forEach((url, idx) => {
+                                materialLabelImages.push({ 
+                                    key: `Material Label ${idx + 1}`, 
+                                    value: url 
+                                });
+                            });
+                        }
+                        
+                        // Also check for individual numbered fields in flattened data (legacy format)
+                        Object.entries(flattened).forEach(([key, value]) => {
+                            if (key.match(/^材料ラベル画像\d+$/)) {
+                                const match = key.match(/\d+$/);
+                                const num = match ? match[0] : '';
+                                materialLabelImages.push({ key: `材料ラベル画像${num}`, value });
+                            }
+                        });
+                        
+                        // Remove material label related fields from regular display
+                        delete flattened.materialLabelImages;
+                        delete flattened.materialLabelImageCount;
+                        delete flattened['材料ラベル画像'];
+                        Object.keys(flattened).forEach(key => {
+                            if (key.match(/^材料ラベル画像\d+$/)) {
+                                delete flattened[key];
+                            }
+                        });
+                        
+                        return `
+                            <div class="border rounded-lg overflow-hidden ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">
+                                <div class="bg-gradient-to-r from-green-100 to-green-50 px-4 py-3 border-b">
+                                    <h3 class="font-bold text-lg text-green-800">記録 #${index + 1}</h3>
+                                </div>
+                                <div class="p-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                        ${Object.entries(flattened).map(([key, value]) => {
+                                            // Skip internal fields
+                                            if (key.startsWith('_') || key === 'uniqueID' || key === 'createdAt') return '';
+                                            
+                                            // Check if value is an image URL
+                                            const isImage = typeof value === 'string' && (value.includes('http') && (value.includes('image') || value.includes('.jpg') || value.includes('.png') || key.includes('画像')));
+                                            
+                                            if (isImage) {
+                                                return `
+                                                    <div class="col-span-2">
+                                                        <div class="font-medium text-gray-700 mb-1">${key}:</div>
+                                                        <a href="#" onclick="openImageTab('${value}', '${key}'); return false;">
+                                                            <img src="${value}" alt="${key}" class="rounded shadow max-h-48 object-contain hover:opacity-90 cursor-zoom-in" />
+                                                        </a>
+                                                    </div>
+                                                `;
+                                            }
+                                            
+                                            return `
+                                                <div class="flex flex-col">
+                                                    <span class="font-medium text-gray-700">${key}:</span>
+                                                    <span class="text-gray-900">${value}</span>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                        
+                                        ${materialLabelImages.length > 0 ? `
+                                            <div class="col-span-2 mt-4">
+                                                <div class="font-medium text-gray-700 mb-2">材料ラベル画像 (${materialLabelImages.length}枚):</div>
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                    ${materialLabelImages.map(({ key, value }) => `
+                                                        <div class="border rounded-lg p-2 bg-white">
+                                                            <div class="text-xs text-gray-600 mb-1">${key}</div>
+                                                            <a href="#" onclick="openImageTab('${value}', '${key}'); return false;">
+                                                                <img src="${value}" alt="${key}" class="rounded shadow w-full h-32 object-contain hover:opacity-90 cursor-zoom-in" />
+                                                            </a>
+                                                        </div>
+                                                    `).join('')}
+                                                </div>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="bg-gray-50 px-6 py-4 border-t flex justify-end">
+                <button onclick="closePressDetailModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 transition-colors">
+                    閉じる
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Close Press Detail Modal
+ */
+window.closePressDetailModal = function() {
+    const modal = document.getElementById('pressDetailModal');
+    if (modal) modal.remove();
+};
+
 window.showSensorModalForFactory = async function(factoryName) {
     try {
         const sensorData = await getSensorData(factoryName);
@@ -3016,6 +3251,49 @@ window.deleteFilterPreset = function(presetName) {
 // ==================== END DYNAMIC FILTER FUNCTIONS ====================
 
 // ==================== MANUFACTURING LOT FINDER ====================
+
+/**
+ * Parse manufacturing lot date format and convert to yyyy-mm-dd
+ * Handles formats: 20251219, 25122502, 2025-12-25-02, 2512-25
+ * @param {string} lotValue - The lot value to parse
+ * @returns {string} - Date in yyyy-mm-dd format or null if invalid
+ */
+function parseManufacturingLotDate(lotValue) {
+    if (!lotValue) return null;
+    
+    const cleanValue = lotValue.toString().trim();
+    
+    // Format: 2025-12-25-02 or 2025-12-25 (already yyyy-mm-dd)
+    if (cleanValue.match(/^\d{4}-\d{2}-\d{2}/)) {
+        return cleanValue.substring(0, 10); // Take first 10 chars (yyyy-mm-dd)
+    }
+    
+    // Extract digits only
+    const digitsOnly = cleanValue.replace(/[^0-9]/g, '');
+    
+    // Format: 20251219 (8 digits: YYYYMMDD)
+    if (digitsOnly.length >= 8) {
+        const yyyy = digitsOnly.substring(0, 4);
+        const mm = digitsOnly.substring(4, 6);
+        const dd = digitsOnly.substring(6, 8);
+        
+        return `${yyyy}-${mm}-${dd}`;
+    }
+    
+    // Format: 251219 (6 digits: YYMMDD)
+    if (digitsOnly.length >= 6) {
+        const yy = digitsOnly.substring(0, 2);
+        const mm = digitsOnly.substring(2, 4);
+        const dd = digitsOnly.substring(4, 6);
+        
+        // Convert YY to full year (assume 20xx)
+        const yyyy = '20' + yy;
+        
+        return `${yyyy}-${mm}-${dd}`;
+    }
+    
+    return null;
+}
 
 /**
  * Opens the Manufacturing Lot Finder modal for global search across all factories
@@ -5142,6 +5420,7 @@ function showSidebar(item) {
       ${entries.map(([label, value]) => {
         const isComment = label === "コメント" || label === "Comment";
         const isMaterialLot = label === "材料ロット" && isPress;
+        const isManufacturingLot = label === "製造ロット" && isKensa;
         
         if (isComment) {
           return `
@@ -5160,6 +5439,20 @@ function showSidebar(item) {
           const clickableLots = lots.map(lot => 
             `<span class="material-lot-link text-blue-600 hover:text-blue-800 cursor-pointer underline" 
                    onclick="openMaterialLotModal('${lot.trim()}', '${item["品番"] ?? ""}')">${lot.trim()}</span>`
+          ).join(', ');
+          
+          return `
+            <div class="flex items-center gap-2">
+              <label class="font-medium w-32 shrink-0">${label}</label>
+              <div class="editable-input p-1 border rounded w-full bg-gray-100" data-label="${label}" data-raw-value="${value ?? ""}">${clickableLots}</div>
+            </div>
+          `;
+        } else if (isManufacturingLot && value) {
+          // Make 製造ロット clickable for Kensa - opens pressDB detail
+          const lots = value.toString().split(/[,\s]+/).filter(lot => lot.trim());
+          const clickableLots = lots.map(lot => 
+            `<span class="manufacturing-lot-link text-blue-600 hover:text-blue-800 cursor-pointer underline" 
+                   onclick="openPressDetailModal('${lot.trim()}', '${item["品番"] ?? ""}', '${item["背番号"] ?? ""}')">${lot.trim()}</span>`
           ).join(', ');
           
           return `
