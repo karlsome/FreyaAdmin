@@ -5857,7 +5857,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                                   <i class="ri-download-line mr-1"></i>
                                   Summary CSV
                                 </button>
-                                <button onclick='exportToPDFGrouped([{ name: "${proc.name}", summary: ${JSON.stringify(summary)} }], "${label} ${proc.name} Summary")' 
+                                <button onclick='exportToPDFGrouped([{ name: "${proc.name}", summary: ${JSON.stringify(summary)} }], "${label} ${proc.name} Summary", { from: document.getElementById("filterDateFrom")?.value, to: document.getElementById("filterDateTo")?.value })' 
                                         class="inline-flex items-center px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors">
                                   <i class="ri-file-pdf-line mr-1"></i>
                                   PDF
@@ -6065,7 +6065,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                   <div class="flex gap-4">
                     <button onclick='exportSingleProcessData(${index},"${procLabel}")' class="text-blue-600 underline text-sm">Export CSV</button>
                     <button onclick='exportSummaryToCSV(${JSON.stringify(summary)},"${procLabel}_summary.csv")' class="text-blue-600 underline text-sm">Export Summary CSV</button>
-                    <button onclick='exportToPDFGrouped([{ name: "${procLabel}", summary: ${JSON.stringify(summary)} }], "${procLabel} Summary")' class="text-blue-600 underline text-sm">Export PDF</button>
+                    <button onclick='exportToPDFGrouped([{ name: "${procLabel}", summary: ${JSON.stringify(summary)} }], "${procLabel} Summary", { from: document.getElementById("filterDateFrom")?.value, to: document.getElementById("filterDateTo")?.value })' class="text-blue-600 underline text-sm">Export PDF</button>
                   </div>
                 </div>
               </div>
@@ -6120,7 +6120,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
               <div class="flex gap-4">
                 <button onclick='exportAllProcessesData()' class="text-blue-600 underline text-sm">Export CSV</button>
                 <button onclick='exportSummaryToCSVGrouped(window.currentSummaryData,"all_processes_summary.csv")' class="text-blue-600 underline text-sm">Export Summary CSV</button>
-                <button onclick='exportToPDFGrouped(window.currentSummaryData)' class="text-blue-600 underline text-sm">Export PDF</button>
+                <button onclick='exportToPDFGrouped(window.currentSummaryData, "all_processes_summary.pdf", { from: document.getElementById("filterDateFrom")?.value, to: document.getElementById("filterDateTo")?.value })' class="text-blue-600 underline text-sm">Export PDF</button>
               </div>
             </div>
           `;
@@ -6767,7 +6767,7 @@ function exportToCSVGrouped(processData, filename = "export.csv") {
   /**
    * Exports grouped process summaries to PDF.
    */
-  function exportToPDFGrouped(processSummaries, filename = "summary.pdf") {
+  function exportToPDFGrouped(processSummaries, filename = "summary.pdf", dateRange = null) {
     try {
         // Check if jsPDF is available
         if (!window.jspdf) {
@@ -6813,7 +6813,16 @@ function exportToCSVGrouped(processData, filename = "export.csv") {
         doc.setFont('NotoSansJP', 'normal');
         doc.text(`作成日時: ${new Date().toLocaleString('ja-JP')}`, 14, 25);
         
+        // Add date range if provided
         let y = 35;
+        if (dateRange && dateRange.from && dateRange.to) {
+          if (dateRange.from === dateRange.to) {
+            doc.text(`データ: ${dateRange.from}`, 14, 30);
+          } else {
+            doc.text(`データ: ${dateRange.from} to ${dateRange.to}`, 14, 30);
+          }
+          y = 40;
+        }
       
         processSummaries.forEach((proc, index) => {
           if (proc.summary.length === 0) return;
