@@ -1028,8 +1028,12 @@ window.handleNodaCsvUpload = function(input) {
     
     const reader = new FileReader();
     reader.onload = function(e) {
+        showCsvLoadingOverlay();
         const csv = e.target.result;
-        parseAndShowCsvReview(csv);
+        // Small delay to ensure loading overlay renders
+        setTimeout(() => {
+            parseAndShowCsvReview(csv);
+        }, 100);
     };
     reader.readAsText(file, 'Shift_JIS'); // JIS encoding
 };
@@ -1056,20 +1060,35 @@ async function parseAndShowCsvReview(csvData) {
         let dateColumn = null;
         let itemColumn = null;
         let quantityColumn = null;
+        let deliveryOrderColumn = null;  // 便
+        let deliveryNoteColumn = null;   // 納品書番号
         
-        // Check for Japanese headers
-        if (headers.includes('日付') && headers.includes('背番号') && headers.includes('収容数')) {
+        // Check for delivery instruction format (new format)
+        if (headers.includes('納入指示日') && headers.includes('背番号') && headers.includes('納入指示数')) {
+            formatType = '背番号';
+            dateColumn = '納入指示日';
+            itemColumn = '背番号';
+            quantityColumn = '納入指示数';
+            deliveryOrderColumn = '便';
+            deliveryNoteColumn = '納品書番号';
+            console.log('📋 Detected NEW delivery instruction format');
+        }
+        // Check for legacy Japanese headers
+        else if (headers.includes('日付') && headers.includes('背番号') && headers.includes('収容数')) {
             formatType = '背番号';
             dateColumn = '日付';
             itemColumn = '背番号';
             quantityColumn = '収容数';
+            console.log('📋 Detected LEGACY format: 背番号');
         } else if (headers.includes('日付') && headers.includes('品番') && headers.includes('収容数')) {
             formatType = '品番';
             dateColumn = '日付';
             itemColumn = '品番';
             quantityColumn = '収容数';
+            console.log('📋 Detected LEGACY format: 品番');
         } else {
-            showToast('Invalid CSV format. Expected headers: 日付,背番号,収容数 or 日付,品番,収容数', 'error');
+            hideCsvLoadingOverlay();
+            showToast('Invalid CSV format. Expected headers: 日付,背番号,収容数 or 日付,品番,収容数 or 納入指示日,背番号,納入指示数', 'error');
             return;
         }
         
@@ -1078,6 +1097,8 @@ async function parseAndShowCsvReview(csvData) {
         // Parse data rows
         const rawItems = [];
         const dates = new Set();
+        const deliveryOrders = new Set();  // Track 便 values
+        const deliveryNotes = new Set();   // Track 納品書番号 values
         
         for (let i = 1; i < lines.length; i++) {
             const values = lines[i].split(',').map(v => v.trim());
@@ -1092,31 +1113,54 @@ async function parseAndShowCsvReview(csvData) {
             const item = rowData[itemColumn];
             const quantity = parseInt(rowData[quantityColumn]);
             
-            if (date && item && quantity > 0) {
-                dates.add(date);
+            // Extract delivery order and note if present
+            const deliveryOrder = deliveryOrderColumn ? rowData[deliveryOrderColumn] : null;
+            const deliveryNote = deliveryNoteColumn ? rowData[deliveryNoteColumn] : null;
+            
+            // Convert date format if needed (YYYYMMDD -> YYYY-MM-DD)
+            let formattedDate = date;
+            if (date && /^\d{8}$/.test(date)) {
+                // Format: 20260109 -> 2026-01-09
+                formattedDate = `${date.substring(0, 4)}-${date.substring(4, 6)}-${date.substring(6, 8)}`;
+            }
+            
+            if (formattedDate && item && quantity > 0) {
+                dates.add(formattedDate);
+                if (deliveryOrder) deliveryOrders.add(deliveryOrder);
+                if (deliveryNote) deliveryNotes.add(deliveryNote);
+                
                 rawItems.push({
-                    date: date,
+                    date: formattedDate,
                     [formatType]: item,
                     quantity: quantity,
-                    rowIndex: i
+                    rowIndex: i,
+                    deliveryOrder: deliveryOrder,
+                    deliveryNote: deliveryNote
                 });
             }
         }
         
         // Validate dates (all must be the same)
         if (dates.size === 0) {
+            hideCsvLoadingOverlay();
             showToast('No valid data rows found in CSV', 'error');
             return;
         }
         
         if (dates.size > 1) {
+            hideCsvLoadingOverlay();
             showToast(`Invalid CSV: Multiple dates detected (${Array.from(dates).join(', ')}). All items in a picking order must have the same date.`, 'error');
             return;
         }
         
-        const pickupDate = Array.from(dates)[0];
-        console.log(`📋 Single pickup date detected: ${pickupDate}`);
+        const deadlineDate = Array.from(dates)[0];
+        const deliveryOrder = deliveryOrders.size > 0 ? Array.from(deliveryOrders)[0] : null;
+        const deliveryNote = deliveryNotes.size > 0 ? Array.from(deliveryNotes)[0] : null;
+        
+        console.log(`📋 Deadline date detected: ${deadlineDate}`);
         console.log(`📋 Found ${rawItems.length} valid items`);
+        if (deliveryOrder) console.log(`📋 Delivery Order (便): ${deliveryOrder}`);
+        if (deliveryNote) console.log(`📋 Delivery Note (納品書番号): ${deliveryNote}`);
         
         // Process items and auto-fill missing data
         const processedItems = [];
@@ -1153,14 +1197,33 @@ async function parseAndShowCsvReview(csvData) {
                     const inventoryResult = await getInventoryAvailability(backNumber);
                     if (inventoryResult.success) {
                         processedItem.availableQuantity = inventoryResult.availableQuantity;
-                        processedItem.status = inventoryResult.availableQuantity >= processedItem.quantity ? 'Valid' : 'Insufficient';
+                        processedItem.requestedQuantity = processedItem.quantity; // Store original requested amount
+                        
+                        if (inventoryResult.availableQuantity >= processedItem.quantity) {
+                            // Sufficient inventory
+                            processedItem.status = 'Valid';
+                            processedItem.shortfallQuantity = 0;
+                        } else if (inventoryResult.availableQuantity > 0) {
+                            // Partial inventory available
+                            processedItem.status = 'Partial';
+                            processedItem.shortfallQuantity = processedItem.quantity - inventoryResult.availableQuantity;
+                            processedItem.quantity = inventoryResult.availableQuantity; // Use only what's available
+                        } else {
+                            // No inventory
+                            processedItem.status = 'No inventory';
+                            processedItem.shortfallQuantity = processedItem.quantity;
+                        }
                     } else {
                         processedItem.availableQuantity = 0;
+                        processedItem.requestedQuantity = processedItem.quantity;
+                        processedItem.shortfallQuantity = processedItem.quantity;
                         processedItem.status = 'No inventory';
                         processedItem.error = processedItem.error || 'Inventory not found';
                     }
                 } else {
                     processedItem.availableQuantity = 0;
+                    processedItem.requestedQuantity = processedItem.quantity;
+                    processedItem.shortfallQuantity = processedItem.quantity;
                     processedItem.status = 'Invalid';
                 }
                 
@@ -1173,12 +1236,145 @@ async function parseAndShowCsvReview(csvData) {
             processedItems.push(processedItem);
         }
         
-        // Show review modal
-        showCsvReviewModal(processedItems, pickupDate, formatType);
+        // Separate items into two lists:
+        // 1. Items with some/full inventory (will go into request)
+        // 2. Insufficient items (for export)
+        const validItems = processedItems.filter(item => 
+            item.status === 'Valid' || item.status === 'Partial'
+        );
+        
+        const insufficientItems = [];
+        processedItems.forEach(item => {
+            if (item.shortfallQuantity > 0) {
+                // Create entry for insufficient portion
+                insufficientItems.push({
+                    ...item,
+                    quantity: item.shortfallQuantity,
+                    originalQuantity: item.requestedQuantity,
+                    fulfilledQuantity: item.quantity
+                });
+            }
+        });
+        
+        console.log(`✅ Valid/Partial items: ${validItems.length}`);
+        console.log(`❌ Insufficient items: ${insufficientItems.length}`);
+        
+        // Show review modal with additional request-level data
+        hideCsvLoadingOverlay();
+        showCsvReviewModal(processedItems, validItems, insufficientItems, deadlineDate, formatType, {
+            deliveryOrder: deliveryOrder,
+            deliveryNote: deliveryNote
+        });
         
     } catch (error) {
         console.error('Error parsing CSV:', error);
+        hideCsvLoadingOverlay();
         showToast('Error parsing CSV file: ' + error.message, 'error');
+    }
+}
+
+/**
+ * Show CSV loading overlay
+ */
+function showCsvLoadingOverlay() {
+    // Remove existing overlay if any
+    hideCsvLoadingOverlay();
+    
+    const overlayHtml = `
+        <div id="csvLoadingOverlay" class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50">
+            <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+                <div class="flex flex-col items-center space-y-4">
+                    <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600"></div>
+                    <h3 class="text-lg font-semibold text-gray-900">Processing CSV File</h3>
+                    <p class="text-sm text-gray-600 text-center">Please wait while we validate your data...</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                        <div class="bg-blue-600 h-2 rounded-full animate-pulse" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', overlayHtml);
+}
+
+/**
+ * Hide CSV loading overlay
+ */
+function hideCsvLoadingOverlay() {
+    const overlay = document.getElementById('csvLoadingOverlay');
+    if (overlay) {
+        overlay.remove();
+    }
+}
+
+/**
+ * Show delete loading overlay
+ */
+function showDeleteLoadingOverlay() {
+    // Remove existing overlay if any
+    hideDeleteLoadingOverlay();
+    
+    const overlayHtml = `
+        <div id="deleteLoadingOverlay" class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50">
+            <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+                <div class="flex flex-col items-center space-y-4">
+                    <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-red-600"></div>
+                    <h3 class="text-lg font-semibold text-gray-900">Deleting Request</h3>
+                    <p class="text-sm text-gray-600 text-center">Please wait while we process your deletion...</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                        <div class="bg-red-600 h-2 rounded-full animate-pulse" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', overlayHtml);
+}
+
+/**
+ * Hide delete loading overlay
+ */
+function hideDeleteLoadingOverlay() {
+    const overlay = document.getElementById('deleteLoadingOverlay');
+    if (overlay) {
+        overlay.remove();
+    }
+}
+
+/**
+ * Show bulk request processing modal
+ */
+function showBulkRequestProcessingModal() {
+    // Remove existing overlay if any
+    hideBulkRequestProcessingModal();
+    
+    const overlayHtml = `
+        <div id="bulkRequestProcessingOverlay" class="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50">
+            <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full mx-4">
+                <div class="flex flex-col items-center space-y-4">
+                    <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600"></div>
+                    <h3 class="text-lg font-semibold text-gray-900">Creating Bulk Request</h3>
+                    <p class="text-sm text-gray-600 text-center">Please wait while we process your request...</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                        <div class="bg-blue-600 h-2 rounded-full animate-pulse" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', overlayHtml);
+}
+
+/**
+ * Hide bulk request processing modal
+ */
+function hideBulkRequestProcessingModal() {
+    const overlay = document.getElementById('bulkRequestProcessingOverlay');
+    if (overlay) {
+        overlay.remove();
     }
 }
 
@@ -1210,7 +1406,11 @@ async function lookupMasterData(searchType, searchValue) {
 /**
  * Show CSV review modal
  */
-function showCsvReviewModal(items, pickupDate, formatType) {
+function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDate, formatType, additionalData = {}) {
+    const { deliveryOrder, deliveryNote } = additionalData;
+    // Set default pickup date to today
+    const today = new Date().toISOString().split('T')[0];
+    
     // Create modal HTML
     const modalHtml = `
         <div id="csvReviewModal" class="fixed inset-0 z-50 overflow-y-auto">
@@ -1223,11 +1423,32 @@ function showCsvReviewModal(items, pickupDate, formatType) {
                     </div>
                     
                     <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                        <div class="grid grid-cols-3 gap-4 text-sm">
+                        <div class="grid grid-cols-3 gap-4 text-sm mb-4">
                             <div><strong>Format Detected:</strong> ${formatType} based CSV</div>
-                            <div><strong>Pickup Date:</strong> ${pickupDate}</div>
-                            <div><strong>Total Items:</strong> ${items.length}</div>
+                            <div><strong>Deadline (納入指示日):</strong> <span class="text-red-600 font-semibold">${deadlineDate}</span></div>
+                            <div><strong>Total Items:</strong> ${allItems.length}</div>
                         </div>
+                        <div class="grid grid-cols-3 gap-4 text-sm">
+                            ${deliveryOrder ? `<div><strong>便 (Delivery Order):</strong> ${deliveryOrder}</div>` : '<div></div>'}
+                            ${deliveryNote ? `<div><strong>納品書番号 (Delivery Note):</strong> ${deliveryNote}</div>` : '<div></div>'}
+                            <div>
+                                <label class="block font-semibold mb-1">Pickup Date: <span class="text-red-500">*</span></label>
+                                <input type="date" id="csvPickupDateInput" value="${today}" 
+                                    class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+                                    required />
+                            </div>
+                        </div>
+                        ${insufficientItems.length > 0 ? `
+                        <div class="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
+                            <div class="text-sm text-orange-600 font-medium">
+                                ⚠️ ${insufficientItems.length} items have insufficient inventory
+                            </div>
+                            <button onclick="exportInsufficientItems()" 
+                                class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-medium">
+                                📥 Export 足りない分 (${insufficientItems.length} items)
+                            </button>
+                        </div>
+                        ` : ''}
                     </div>
                     
                     <div class="overflow-y-auto max-h-96 px-6 py-4">
@@ -1244,24 +1465,38 @@ function showCsvReviewModal(items, pickupDate, formatType) {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${items.map(item => `
-                                    <tr class="border-b border-gray-200 ${item.status === 'Valid' ? '' : 'bg-red-50'}">
+                                ${allItems.map(item => {
+                                    let statusBg = 'bg-green-100 text-green-800';
+                                    let rowBg = '';
+                                    if (item.status === 'Partial') {
+                                        statusBg = 'bg-orange-100 text-orange-800';
+                                        rowBg = 'bg-orange-50';
+                                    } else if (item.status === 'No inventory' || item.status === 'Invalid') {
+                                        statusBg = 'bg-red-100 text-red-800';
+                                        rowBg = 'bg-red-50';
+                                    }
+                                    
+                                    return `
+                                    <tr class="border-b border-gray-200 ${rowBg}">
                                         <td class="px-3 py-2">${item.rowIndex}</td>
                                         <td class="px-3 py-2">${item.品番 || '-'}</td>
                                         <td class="px-3 py-2">${item.背番号 || '-'}</td>
                                         <td class="px-3 py-2 text-xs">${item.品名 || '-'}</td>
-                                        <td class="px-3 py-2">${item.quantity}</td>
+                                        <td class="px-3 py-2">
+                                            ${item.requestedQuantity || item.quantity}
+                                            ${item.status === 'Partial' ? `<div class="text-xs text-orange-600 mt-1">→ ${item.quantity} available</div>` : ''}
+                                        </td>
                                         <td class="px-3 py-2">${item.availableQuantity || 0}</td>
                                         <td class="px-3 py-2">
-                                            <span class="px-2 py-1 text-xs font-medium rounded-full ${
-                                                item.status === 'Valid' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                            }">
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full ${statusBg}">
                                                 ${item.status}
                                             </span>
+                                            ${item.shortfallQuantity > 0 ? `<div class="text-xs text-red-600 mt-1">足りない: ${item.shortfallQuantity}</div>` : ''}
                                             ${item.error ? `<div class="text-xs text-red-600 mt-1">${item.error}</div>` : ''}
                                         </td>
                                     </tr>
-                                `).join('')}
+                                `;
+                                }).join('')}
                             </tbody>
                         </table>
                     </div>
@@ -1269,15 +1504,16 @@ function showCsvReviewModal(items, pickupDate, formatType) {
                     <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
                         <div class="flex justify-between items-center">
                             <div class="text-sm text-gray-600">
-                                Valid: ${items.filter(i => i.status === 'Valid').length} | 
-                                Invalid: ${items.filter(i => i.status !== 'Valid').length}
+                                ✅ Valid: ${allItems.filter(i => i.status === 'Valid').length} | 
+                                🟠 Partial: ${allItems.filter(i => i.status === 'Partial').length} | 
+                                ❌ No inventory: ${allItems.filter(i => i.status === 'No inventory' || i.status === 'Invalid').length}
                             </div>
                             <div class="flex space-x-3">
                                 <button onclick="closeCsvReviewModal()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
                                     Cancel
                                 </button>
-                                <button onclick="submitCsvBulkRequest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${items.filter(i => i.status === 'Valid').length === 0 ? 'opacity-50 cursor-not-allowed' : ''}">
-                                    Create Bulk Request (${items.filter(i => i.status === 'Valid').length} items)
+                                <button onclick="submitCsvBulkRequest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${validItems.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}">
+                                    Create Bulk Request (${validItems.length} items)
                                 </button>
                             </div>
                         </div>
@@ -1292,8 +1528,12 @@ function showCsvReviewModal(items, pickupDate, formatType) {
     
     // Store data for submission
     window.csvReviewData = {
-        items: items.filter(i => i.status === 'Valid'), // Only valid items
-        pickupDate: pickupDate
+        items: validItems, // Items with full or partial inventory
+        allItems: allItems, // All items for reference
+        insufficientItems: insufficientItems, // Items with shortfall
+        deadlineDate: deadlineDate,
+        deliveryOrder: deliveryOrder,
+        deliveryNote: deliveryNote
     };
 }
 
@@ -1309,6 +1549,72 @@ window.closeCsvReviewModal = function() {
 };
 
 /**
+ * Export insufficient items (足りない分) to CSV
+ */
+window.exportInsufficientItems = function() {
+    if (!window.csvReviewData || !window.csvReviewData.insufficientItems || window.csvReviewData.insufficientItems.length === 0) {
+        showToast('No insufficient items to export', 'error');
+        return;
+    }
+    
+    try {
+        const insufficientItems = window.csvReviewData.insufficientItems;
+        const deliveryNote = window.csvReviewData.deliveryNote || 'unknown';
+        const deliveryOrder = window.csvReviewData.deliveryOrder || 'unknown';
+        const deadlineDate = window.csvReviewData.deadlineDate || '';
+        
+        // Generate request number preview (will be similar to actual request number)
+        const dateStr = deadlineDate.replace(/-/g, '');
+        const requestNumberPreview = `NODAPO-${dateStr}`;
+        
+        // Create CSV header
+        const headers = ['Row', '品番', '背番号', '品名', 'Requested Quantity', 'Available Quantity', 'Shortfall Quantity', 'Status', 'Error'];
+        
+        // Create CSV rows
+        const rows = insufficientItems.map(item => [
+            item.rowIndex || '',
+            item.品番 || '',
+            item.背番号 || '',
+            item.品名 || '',
+            item.originalQuantity || item.quantity,
+            item.availableQuantity || 0,
+            item.quantity, // This is the shortfall quantity
+            item.status || '',
+            item.error || ''
+        ]);
+        
+        // Combine header and rows
+        const csvContent = [headers, ...rows]
+            .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+            .join('\\r\\n');
+        
+        // Convert to Shift_JIS encoding
+        const sjisArray = Encoding.convert(Encoding.stringToCode(csvContent), {
+            to: 'SJIS',
+            from: 'UNICODE'
+        });
+        const uint8Array = new Uint8Array(sjisArray);
+        const blob = new Blob([uint8Array], { type: 'text/csv;charset=shift_jis' });
+        
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${requestNumberPreview}_${deliveryNote}_${deliveryOrder}_足りない分.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        showToast(`Exported ${insufficientItems.length} insufficient items`, 'success');
+        
+    } catch (error) {
+        console.error('Error exporting insufficient items:', error);
+        showToast('Error exporting CSV: ' + error.message, 'error');
+    }
+};
+
+/**
  * Submit CSV bulk request
  */
 window.submitCsvBulkRequest = async function() {
@@ -1318,6 +1624,22 @@ window.submitCsvBulkRequest = async function() {
     }
     
     try {
+        // Get pickup date from input
+        const pickupDateInput = document.getElementById('csvPickupDateInput');
+        if (!pickupDateInput || !pickupDateInput.value) {
+            showToast('Please select a pickup date', 'error');
+            return;
+        }
+        
+        const pickupDate = pickupDateInput.value;
+        
+        // Save data before closing modal (closeCsvReviewModal sets window.csvReviewData to null)
+        const savedReviewData = { ...window.csvReviewData };
+        
+        // Close CSV review modal and show processing modal
+        closeCsvReviewModal();
+        showBulkRequestProcessingModal();
+        
         // Get current user
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
         const userName = await getUserFullName(currentUser.username || 'unknown');
@@ -1326,12 +1648,15 @@ window.submitCsvBulkRequest = async function() {
         const requestData = {
             action: 'bulkCreateRequests',
             data: {
-                items: window.csvReviewData.items.map(item => ({
+                deliveryOrder: savedReviewData.deliveryOrder || null,
+                deliveryNote: savedReviewData.deliveryNote || null,
+                deadlineDate: savedReviewData.deadlineDate || null,
+                items: savedReviewData.items.map(item => ({
                     品番: item.品番,
                     背番号: item.背番号,
                     quantity: item.quantity
                 })),
-                pickupDate: window.csvReviewData.pickupDate
+                pickupDate: pickupDate
             },
             userName: userName
         };
@@ -1348,9 +1673,10 @@ window.submitCsvBulkRequest = async function() {
         
         const result = await response.json();
         
+        hideBulkRequestProcessingModal();
+        
         if (result.success) {
             showToast(`Successfully created bulk request: ${result.bulkRequestNumber}`, 'success');
-            closeCsvReviewModal();
             loadNodaData(); // Refresh the data
         } else {
             showToast('Error creating bulk request: ' + (result.error || 'Unknown error'), 'error');
@@ -1358,6 +1684,7 @@ window.submitCsvBulkRequest = async function() {
         
     } catch (error) {
         console.error('Error submitting CSV bulk request:', error);
+        hideBulkRequestProcessingModal();
         showToast('Error submitting bulk request: ' + error.message, 'error');
     }
 };
@@ -1917,6 +2244,9 @@ window.deleteNodaRequest = async function(requestId) {
         return;
     }
     
+    // Show loading overlay
+    showDeleteLoadingOverlay();
+    
     try {
         // Get current user information
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
@@ -1936,6 +2266,8 @@ window.deleteNodaRequest = async function(requestId) {
         
         const result = await response.json();
         
+        hideDeleteLoadingOverlay();
+        
         if (result.success) {
             alert(t('alertRequestDeletedSuccess'));
             loadNodaData();
@@ -1945,6 +2277,7 @@ window.deleteNodaRequest = async function(requestId) {
         
     } catch (error) {
         console.error('Error deleting request:', error);
+        hideDeleteLoadingOverlay();
         alert(t('alertErrorDeletingRequest') + error.message);
     }
 };
