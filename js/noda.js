@@ -1642,6 +1642,165 @@ window.exportInsufficientItems = function() {
 };
 
 /**
+ * Check for duplicate CSV upload
+ */
+async function checkForDuplicateCsvUpload(deliveryNote, deliveryOrder, deadlineDate) {
+    try {
+        // Only check if we have the required fields
+        if (!deliveryNote || !deliveryOrder || !deadlineDate) {
+            return { isDuplicate: false };
+        }
+        
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'checkDuplicateRequest',
+                deliveryNote: deliveryNote,
+                deliveryOrder: deliveryOrder,
+                deadlineDate: deadlineDate
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.exists) {
+            return {
+                isDuplicate: true,
+                existingRequest: result.request
+            };
+        }
+        
+        return { isDuplicate: false };
+        
+    } catch (error) {
+        console.error('Error checking for duplicate:', error);
+        return { isDuplicate: false };
+    }
+}
+
+/**
+ * Show duplicate warning modal
+ */
+function showDuplicateWarningModal(existingRequest, onOverwrite, onCreateNew, onCancel) {
+    const modalHtml = `
+        <div id="duplicateWarningModal" class="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-50">
+            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4">
+                <div class="px-6 py-4 border-b border-gray-200 bg-yellow-50">
+                    <div class="flex items-center space-x-3">
+                        <i class="ri-alert-line text-3xl text-yellow-600"></i>
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">⚠️ Duplicate CSV Upload Detected</h3>
+                            <p class="text-sm text-gray-600">This CSV has already been uploaded</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="px-6 py-4">
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <h4 class="text-sm font-semibold text-blue-900 mb-2">Existing Request Details:</h4>
+                        <div class="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                                <span class="text-gray-600">Request Number:</span>
+                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.requestNumber}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Status:</span>
+                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.status}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">納品書番号:</span>
+                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.納品書番号 || 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">便:</span>
+                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.便 || 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">納入指示日:</span>
+                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.納入指示日 || 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Total Items:</span>
+                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.totalItems || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <h4 class="text-sm font-semibold text-gray-900 mb-3">What would you like to do?</h4>
+                        <div class="space-y-3">
+                            <button id="duplicateOverwriteBtn" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 text-left flex items-center justify-between group">
+                                <div class="flex items-center space-x-3">
+                                    <i class="ri-refresh-line text-xl"></i>
+                                    <div>
+                                        <div class="font-semibold">Overwrite Existing Request</div>
+                                        <div class="text-xs text-red-100">Replace the existing request with this new data</div>
+                                    </div>
+                                </div>
+                                <i class="ri-arrow-right-line text-xl opacity-0 group-hover:opacity-100 transition-opacity"></i>
+                            </button>
+                            
+                            <button id="duplicateCreateNewBtn" class="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-left flex items-center justify-between group">
+                                <div class="flex items-center space-x-3">
+                                    <i class="ri-file-add-line text-xl"></i>
+                                    <div>
+                                        <div class="font-semibold">Create New Request (with suffix)</div>
+                                        <div class="text-xs text-blue-100">Keep existing and create a new request with suffix (1), (2), etc.</div>
+                                    </div>
+                                </div>
+                                <i class="ri-arrow-right-line text-xl opacity-0 group-hover:opacity-100 transition-opacity"></i>
+                            </button>
+                            
+                            <button id="duplicateCancelBtn" class="w-full px-4 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-left flex items-center justify-between group">
+                                <div class="flex items-center space-x-3">
+                                    <i class="ri-close-line text-xl"></i>
+                                    <div>
+                                        <div class="font-semibold">Cancel Upload</div>
+                                        <div class="text-xs text-gray-600">Don't upload this CSV</div>
+                                    </div>
+                                </div>
+                                <i class="ri-arrow-right-line text-xl opacity-0 group-hover:opacity-100 transition-opacity"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Add event listeners
+    document.getElementById('duplicateOverwriteBtn').addEventListener('click', () => {
+        closeDuplicateWarningModal();
+        onOverwrite();
+    });
+    
+    document.getElementById('duplicateCreateNewBtn').addEventListener('click', () => {
+        closeDuplicateWarningModal();
+        onCreateNew();
+    });
+    
+    document.getElementById('duplicateCancelBtn').addEventListener('click', () => {
+        closeDuplicateWarningModal();
+        onCancel();
+    });
+}
+
+/**
+ * Close duplicate warning modal
+ */
+function closeDuplicateWarningModal() {
+    const modal = document.getElementById('duplicateWarningModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+/**
  * Submit CSV bulk request
  */
 window.submitCsvBulkRequest = async function() {
@@ -1660,9 +1819,50 @@ window.submitCsvBulkRequest = async function() {
         
         const pickupDate = pickupDateInput.value;
         
-        // Save data before closing modal (closeCsvReviewModal sets window.csvReviewData to null)
+        // Save data before closing modal
         const savedReviewData = { ...window.csvReviewData };
         
+        // Check for duplicate upload
+        const duplicateCheck = await checkForDuplicateCsvUpload(
+            savedReviewData.deliveryNote,
+            savedReviewData.deliveryOrder,
+            savedReviewData.deadlineDate
+        );
+        
+        if (duplicateCheck.isDuplicate) {
+            // Show warning modal and wait for user decision
+            showDuplicateWarningModal(
+                duplicateCheck.existingRequest,
+                // Overwrite
+                () => {
+                    performCsvBulkRequest(savedReviewData, pickupDate, 'overwrite', duplicateCheck.existingRequest._id);
+                },
+                // Create New
+                () => {
+                    performCsvBulkRequest(savedReviewData, pickupDate, 'createNew');
+                },
+                // Cancel
+                () => {
+                    showToast('CSV upload cancelled', 'info');
+                }
+            );
+        } else {
+            // No duplicate, proceed normally
+            closeCsvReviewModal();
+            performCsvBulkRequest(savedReviewData, pickupDate, 'create');
+        }
+        
+    } catch (error) {
+        console.error('Error submitting CSV bulk request:', error);
+        showToast('Error submitting bulk request: ' + error.message, 'error');
+    }
+};
+
+/**
+ * Perform the actual CSV bulk request submission
+ */
+async function performCsvBulkRequest(savedReviewData, pickupDate, mode, existingRequestId = null) {
+    try {
         // Close CSV review modal and show processing modal
         closeCsvReviewModal();
         showBulkRequestProcessingModal();
@@ -1671,7 +1871,7 @@ window.submitCsvBulkRequest = async function() {
         const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
         const userName = await getUserFullName(currentUser.username || 'unknown');
         
-        // Prepare bulk request data (same format as cart system)
+        // Prepare bulk request data
         const requestData = {
             action: 'bulkCreateRequests',
             data: {
@@ -1683,7 +1883,9 @@ window.submitCsvBulkRequest = async function() {
                     背番号: item.背番号,
                     quantity: item.quantity
                 })),
-                pickupDate: pickupDate
+                pickupDate: pickupDate,
+                mode: mode, // 'create', 'overwrite', or 'createNew'
+                existingRequestId: existingRequestId
             },
             userName: userName
         };
@@ -1703,18 +1905,26 @@ window.submitCsvBulkRequest = async function() {
         hideBulkRequestProcessingModal();
         
         if (result.success) {
-            showToast(`Successfully created bulk request: ${result.bulkRequestNumber}`, 'success');
+            let message = '';
+            if (mode === 'overwrite') {
+                message = `Successfully overwritten request: ${result.bulkRequestNumber}`;
+            } else if (mode === 'createNew') {
+                message = `Successfully created new request with suffix: ${result.bulkRequestNumber}`;
+            } else {
+                message = `Successfully created bulk request: ${result.bulkRequestNumber}`;
+            }
+            showToast(message, 'success');
             loadNodaData(); // Refresh the data
         } else {
             showToast('Error creating bulk request: ' + (result.error || 'Unknown error'), 'error');
         }
         
     } catch (error) {
-        console.error('Error submitting CSV bulk request:', error);
+        console.error('Error performing CSV bulk request:', error);
         hideBulkRequestProcessingModal();
         showToast('Error submitting bulk request: ' + error.message, 'error');
     }
-};
+}
 
 // ==================== EXPORT FUNCTIONALITY ====================
 
