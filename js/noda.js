@@ -2129,7 +2129,11 @@ function showNodaDetailModal(request, isEditMode = false) {
                     <div class="space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700">Pickup Date</label>
-                            <p class="mt-1 text-gray-900">${pickupDate}</p>
+                            ${isEditMode ? `
+                                <input type="date" id="editPickupDate" value="${request.pickupDate || request.date}" class="mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                            ` : `
+                                <p class="mt-1 text-gray-900">${pickupDate}</p>
+                            `}
                         </div>
                         
                         <div>
@@ -2208,11 +2212,23 @@ function showNodaDetailModal(request, isEditMode = false) {
                                     ${request.lineItems ? request.lineItems.map(lineItem => {
                                         const lineStatusInfo = getNodaStatusInfo(lineItem.status);
                                         return `
-                                            <tr>
+                                            <tr id="lineItem_${lineItem.lineNumber}">
                                                 <td class="px-4 py-2 text-sm font-medium text-gray-900">${lineItem.lineNumber}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.品番}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.背番号}</td>
-                                                <td class="px-4 py-2 text-sm text-gray-900">${lineItem.quantity}</td>
+                                                <td class="px-4 py-2 text-sm text-gray-900">
+                                                    ${isEditMode ? `
+                                                        <input type="number" 
+                                                            id="lineQty_${lineItem.lineNumber}" 
+                                                            value="${lineItem.quantity}" 
+                                                            min="1" 
+                                                            data-original="${lineItem.quantity}"
+                                                            data-seban="${lineItem.背番号}"
+                                                            class="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+                                                            onchange="handleLineQuantityChange('${request._id}', ${lineItem.lineNumber}, this)" />
+                                                        <div id="qtyError_${lineItem.lineNumber}" class="text-xs text-red-600 mt-1 hidden"></div>
+                                                    ` : lineItem.quantity}
+                                                </td>
                                                 <td class="px-4 py-2 text-sm">
                                                     ${isEditMode ? `
                                                         <select id="lineStatus_${lineItem.lineNumber}" class="text-xs px-2 py-1 border border-gray-300 rounded" onchange="updateLineItemStatus('${request._id}', ${lineItem.lineNumber}, this.value)">
@@ -2230,9 +2246,19 @@ function showNodaDetailModal(request, isEditMode = false) {
                                                 </td>
                                                 ${isEditMode ? `
                                                     <td class="px-4 py-2 text-sm">
-                                                        <button onclick="markLineItemCompleted('${request._id}', ${lineItem.lineNumber})" class="text-green-600 hover:text-green-800 text-xs" ${lineItem.status === 'completed' ? 'disabled' : ''}>
-                                                            <i class="ri-check-line"></i> Complete
-                                                        </button>
+                                                        <div class="flex items-center space-x-2">
+                                                            <button onclick="markLineItemCompleted('${request._id}', ${lineItem.lineNumber})" 
+                                                                class="text-green-600 hover:text-green-800 text-xs" 
+                                                                ${lineItem.status === 'completed' ? 'disabled' : ''}
+                                                                title="Mark as complete">
+                                                                <i class="ri-check-line"></i>
+                                                            </button>
+                                                            <button onclick="deleteLineItem('${request._id}', ${lineItem.lineNumber}, '${lineItem.背番号}', ${lineItem.quantity})" 
+                                                                class="text-red-600 hover:text-red-800 text-xs"
+                                                                title="Delete this line item">
+                                                                <i class="ri-delete-bin-line"></i>
+                                                            </button>
+                                                        </div>
                                                     </td>
                                                 ` : ''}
                                             </tr>
@@ -2449,6 +2475,46 @@ function showNodaDetailModal(request, isEditMode = false) {
     
     content.innerHTML = contentHTML;
     modal.classList.remove('hidden');
+    
+    // Setup event listener for pickup date changes (for bulk requests in edit mode)
+    if (isEditMode && isBulkRequest) {
+        const pickupDateInput = document.getElementById('editPickupDate');
+        if (pickupDateInput) {
+            pickupDateInput.addEventListener('change', async function() {
+                const newPickupDate = this.value;
+                if (!newPickupDate) return;
+                
+                try {
+                    const response = await fetch(`${BASE_URL}api/noda-requests`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'updateRequest',
+                            requestId: request._id,
+                            data: { pickupDate: newPickupDate }
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        showToast('Pickup date updated successfully', 'success');
+                        // Reload data to reflect changes
+                        setTimeout(() => {
+                            loadNodaData();
+                        }, 500);
+                    } else {
+                        throw new Error(result.error || 'Failed to update pickup date');
+                    }
+                } catch (error) {
+                    console.error('Error updating pickup date:', error);
+                    showToast('Error updating pickup date: ' + error.message, 'error');
+                    // Revert the input value
+                    this.value = request.pickupDate || request.date;
+                }
+            });
+        }
+    }
 }
 
 /**
@@ -2463,23 +2529,33 @@ window.closeNodaModal = function() {
  * Save NODA request changes
  */
 window.saveNodaRequest = async function(requestId) {
+    // Get pickup date if it exists (for bulk requests)
+    const pickupDateInput = document.getElementById('editPickupDate');
+    
     const updatedData = {
-        status: document.getElementById('editStatus').value,
-        品番: document.getElementById('edit品番').value.trim(),
-        背番号: document.getElementById('edit背番号').value.trim(),
-        date: document.getElementById('editDate').value,
-        quantity: parseInt(document.getElementById('editQuantity').value)
+        status: document.getElementById('editStatus')?.value,
+        品番: document.getElementById('edit品番')?.value?.trim(),
+        背番号: document.getElementById('edit背番号')?.value?.trim(),
+        date: document.getElementById('editDate')?.value,
+        quantity: parseInt(document.getElementById('editQuantity')?.value)
     };
     
-    // Validation
-    if (!updatedData.品番 || !updatedData.背番号 || !updatedData.date || !updatedData.quantity) {
-        alert(t('alertFillAllFields'));
-        return;
+    // Add pickup date for bulk requests
+    if (pickupDateInput) {
+        updatedData.pickupDate = pickupDateInput.value;
     }
     
-    if (updatedData.quantity <= 0) {
-        alert(t('alertQuantityGreaterThanZero'));
-        return;
+    // Validation for single requests
+    if (updatedData.品番 && updatedData.背番号) {
+        if (!updatedData.品番 || !updatedData.背番号 || !updatedData.date || !updatedData.quantity) {
+            alert(t('alertFillAllFields'));
+            return;
+        }
+        
+        if (updatedData.quantity <= 0) {
+            alert(t('alertQuantityGreaterThanZero'));
+            return;
+        }
     }
     
     try {
@@ -3375,6 +3451,163 @@ window.backToAddItems = backToAddItems;
 window.proceedToSubmit = proceedToSubmit;
 window.backToReview = backToReview;
 window.submitBulkRequest = submitBulkRequest;
+
+// ==================== LINE ITEM EDITING FUNCTIONALITY ====================
+
+/**
+ * Handle line item quantity change
+ */
+window.handleLineQuantityChange = async function(requestId, lineNumber, inputElement) {
+    const newQuantity = parseInt(inputElement.value);
+    const originalQuantity = parseInt(inputElement.dataset.original);
+    const seban = inputElement.dataset.seban;
+    const errorDiv = document.getElementById(`qtyError_${lineNumber}`);
+    
+    // Validate input
+    if (isNaN(newQuantity) || newQuantity <= 0) {
+        errorDiv.textContent = 'Quantity must be greater than 0';
+        errorDiv.classList.remove('hidden');
+        inputElement.value = originalQuantity;
+        return;
+    }
+    
+    if (newQuantity === originalQuantity) {
+        errorDiv.classList.add('hidden');
+        return;
+    }
+    
+    try {
+        const quantityDiff = newQuantity - originalQuantity;
+        
+        // If increasing quantity, check inventory availability first
+        if (quantityDiff > 0) {
+            const inventoryCheck = await fetch(`${BASE_URL}api/noda-requests`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'checkInventoryAvailability',
+                    data: { 背番号: seban }
+                })
+            });
+            
+            const inventoryResult = await inventoryCheck.json();
+            
+            if (inventoryResult.success && inventoryResult.availableQuantity < quantityDiff) {
+                errorDiv.textContent = `Insufficient inventory! Available: ${inventoryResult.availableQuantity}, Requested: ${quantityDiff}`;
+                errorDiv.classList.remove('hidden');
+                inputElement.value = originalQuantity;
+                showToast(`Insufficient inventory for ${seban}`, 'error');
+                return;
+            }
+        }
+        
+        // Show confirmation
+        const action = quantityDiff > 0 ? 'increase' : 'decrease';
+        const confirmation = confirm(
+            `Are you sure you want to ${action} the quantity for line ${lineNumber} from ${originalQuantity} to ${newQuantity}?\\n\\n` +
+            `This will ${quantityDiff > 0 ? 'reserve' : 'unreserve'} ${Math.abs(quantityDiff)} units in inventory.`
+        );
+        
+        if (!confirmation) {
+            inputElement.value = originalQuantity;
+            return;
+        }
+        
+        // Update quantity on server
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'updateLineItemQuantity',
+                requestId: requestId,
+                data: {
+                    lineNumber: lineNumber,
+                    newQuantity: newQuantity,
+                    originalQuantity: originalQuantity,
+                    背番号: seban
+                }
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            errorDiv.classList.add('hidden');
+            inputElement.dataset.original = newQuantity;
+            showToast(`Line item ${lineNumber} quantity updated successfully`, 'success');
+            
+            // Reload the modal to show updated data
+            setTimeout(() => {
+                editNodaRequest(requestId);
+            }, 1000);
+        } else {
+            throw new Error(result.error || 'Failed to update quantity');
+        }
+        
+    } catch (error) {
+        console.error('Error updating line item quantity:', error);
+        errorDiv.textContent = error.message || 'Error updating quantity';
+        errorDiv.classList.remove('hidden');
+        inputElement.value = originalQuantity;
+        showToast('Error updating quantity: ' + error.message, 'error');
+    }
+};
+
+/**
+ * Delete line item from request
+ */
+window.deleteLineItem = async function(requestId, lineNumber, seban, quantity) {
+    // Confirm deletion
+    const confirmation = confirm(
+        `Are you sure you want to delete line item ${lineNumber}?\\n\\n` +
+        `背番号: ${seban}\\n` +
+        `Quantity: ${quantity}\\n\\n` +
+        `This will unreserve ${quantity} units back to inventory.`
+    );
+    
+    if (!confirmation) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'deleteLineItem',
+                requestId: requestId,
+                data: {
+                    lineNumber: lineNumber,
+                    背番号: seban,
+                    quantity: quantity
+                }
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast(`Line item ${lineNumber} deleted successfully`, 'success');
+            
+            // Remove the row from display
+            const row = document.getElementById(`lineItem_${lineNumber}`);
+            if (row) {
+                row.remove();
+            }
+            
+            // Reload the modal to show updated data
+            setTimeout(() => {
+                editNodaRequest(requestId);
+            }, 1000);
+        } else {
+            throw new Error(result.error || 'Failed to delete line item');
+        }
+        
+    } catch (error) {
+        console.error('Error deleting line item:', error);
+        showToast('Error deleting line item: ' + error.message, 'error');
+    }
+};
 
 // ==================== LINE ITEM STATUS MANAGEMENT ====================
 
