@@ -1890,6 +1890,30 @@ function showNodaDetailModal(request, isEditMode = false) {
                             <p class="mt-1 text-gray-900">${request.totalItems || (request.lineItems ? request.lineItems.length : 0)}</p>
                         </div>
                         
+                        ${request.便 || request.納品書番号 || request.納入指示日 ? `
+                        <div class="p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-2">
+                            ${request.便 ? `
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600">便 (Delivery Order)</label>
+                                <p class="text-sm font-semibold text-blue-600">${request.便}</p>
+                            </div>
+                            ` : ''}
+                            ${request.納品書番号 ? `
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600">納品書番号 (Delivery Note)</label>
+                                <p class="text-sm font-semibold text-blue-600">${request.納品書番号}</p>
+                            </div>
+                            ` : ''}
+                            ${request.納入指示日 ? `
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600">納入指示日 (Deadline)</label>
+                                <p class="text-sm font-semibold text-red-600">${request.納入指示日}</p>
+                            </div>
+                            ` : ''}
+                        </div>
+                        ` : ''}
+                        </div>
+                        
                         <div>
                             <label class="block text-sm font-medium text-gray-700">Created At</label>
                             <p class="mt-1 text-gray-600">${createdDate}</p>
