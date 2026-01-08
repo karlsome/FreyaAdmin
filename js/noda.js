@@ -1443,36 +1443,36 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
         <div id="csvReviewModal" class="fixed inset-0 z-50 overflow-y-auto">
             <div class="flex min-h-screen items-center justify-center p-4">
                 <div class="fixed inset-0 bg-black bg-opacity-50"></div>
-                <div class="relative bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
-                    <div class="px-6 py-4 border-b border-gray-200">
-                        <h3 class="text-lg font-semibold text-gray-900">CSV Upload Review</h3>
-                        <p class="text-sm text-gray-600">Review the parsed data before creating bulk request</p>
+                <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="csvUploadReview">CSV Upload Review</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-300" data-i18n="csvReviewSubtitle">Review the parsed data before creating bulk request</p>
                     </div>
                     
-                    <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
                         <div class="grid grid-cols-3 gap-4 text-sm mb-4">
-                            <div><strong>Format Detected:</strong> ${formatType} based CSV</div>
-                            <div><strong>Deadline (納入指示日):</strong> <span class="text-red-600 font-semibold">${deadlineDate}</span></div>
-                            <div><strong>Total Items:</strong> ${allItems.length}</div>
+                            <div><strong data-i18n="formatDetected">Format Detected:</strong> ${formatType} <span data-i18n="basedCsv">based CSV</span></div>
+                            <div><strong><span data-i18n="deadline">Deadline</span> (納入指示日):</strong> <span class="text-red-600 font-semibold">${deadlineDate}</span></div>
+                            <div><strong data-i18n="totalItems">Total Items:</strong> ${allItems.length}</div>
                         </div>
                         <div class="grid grid-cols-3 gap-4 text-sm">
-                            ${deliveryOrder ? `<div><strong>便 (Delivery Order):</strong> ${deliveryOrder}</div>` : '<div></div>'}
-                            ${deliveryNote ? `<div><strong>納品書番号 (Delivery Note):</strong> ${deliveryNote}</div>` : '<div></div>'}
+                            ${deliveryOrder ? `<div><strong>便 (<span data-i18n="deliveryOrder">Delivery Order</span>):</strong> ${deliveryOrder}</div>` : '<div></div>'}
+                            ${deliveryNote ? `<div><strong>納品書番号 (<span data-i18n="deliveryNote">Delivery Note</span>):</strong> ${deliveryNote}</div>` : '<div></div>'}
                             <div>
-                                <label class="block font-semibold mb-1">Pickup Date: <span class="text-red-500">*</span></label>
+                                <label class="block font-semibold mb-1"><span data-i18n="pickupDate">Pickup Date:</span> <span class="text-red-500">*</span></label>
                                 <input type="date" id="csvPickupDateInput" value="${today}" 
                                     class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
                                     required />
                             </div>
                         </div>
                         ${insufficientItems.length > 0 ? `
-                        <div class="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
-                            <div class="text-sm text-orange-600 font-medium">
-                                ⚠️ ${insufficientItems.length} items have insufficient inventory
+                        <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 flex items-center justify-between">
+                            <div class="text-sm text-orange-600 dark:text-orange-400 font-medium">
+                                ⚠️ ${insufficientItems.length} <span data-i18n="itemsInsufficientInventory">items have insufficient inventory</span>
                             </div>
                             <button onclick="exportInsufficientItems()" 
                                 class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-medium">
-                                📥 Export 足りない分 (${insufficientItems.length} items)
+                                📥 <span data-i18n="exportInsufficient">Export</span> 足りない分 (${insufficientItems.length} <span data-i18n="items">items</span>)
                             </button>
                         </div>
                         ` : ''}
@@ -1480,15 +1480,15 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
                     
                     <div class="overflow-y-auto max-h-96 px-6 py-4">
                         <table class="w-full text-sm">
-                            <thead class="bg-gray-100 sticky top-0">
+                            <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
                                 <tr>
-                                    <th class="px-3 py-2 text-left">Row</th>
-                                    <th class="px-3 py-2 text-left">品番</th>
-                                    <th class="px-3 py-2 text-left">背番号</th>
-                                    <th class="px-3 py-2 text-left">品名</th>
-                                    <th class="px-3 py-2 text-left">Quantity</th>
-                                    <th class="px-3 py-2 text-left">Available</th>
-                                    <th class="px-3 py-2 text-left">Status</th>
+                                    <th class="px-3 py-2 text-left dark:text-gray-200" data-i18n="row">Row</th>
+                                    <th class="px-3 py-2 text-left dark:text-gray-200">品番</th>
+                                    <th class="px-3 py-2 text-left dark:text-gray-200">背番号</th>
+                                    <th class="px-3 py-2 text-left dark:text-gray-200">品名</th>
+                                    <th class="px-3 py-2 text-left dark:text-gray-200" data-i18n="quantity">Quantity</th>
+                                    <th class="px-3 py-2 text-left dark:text-gray-200" data-i18n="available">Available</th>
+                                    <th class="px-3 py-2 text-left dark:text-gray-200" data-i18n="status">Status</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1509,17 +1509,17 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
                                         <td class="px-3 py-2">${item.品番 || '-'}</td>
                                         <td class="px-3 py-2">${item.背番号 || '-'}</td>
                                         <td class="px-3 py-2 text-xs">${item.品名 || '-'}</td>
-                                        <td class="px-3 py-2">
+                                        <td class="px-3 py-2 dark:text-gray-200">
                                             ${item.requestedQuantity || item.quantity}
-                                            ${item.status === 'Partial' ? `<div class="text-xs text-orange-600 mt-1">→ ${item.quantity} available</div>` : ''}
+                                            ${item.status === 'Partial' ? `<div class="text-xs text-orange-600 dark:text-orange-400 mt-1">→ ${item.quantity} <span data-i18n="available">available</span></div>` : ''}
                                         </td>
-                                        <td class="px-3 py-2">${item.availableQuantity || 0}</td>
+                                        <td class="px-3 py-2 dark:text-gray-200">${item.availableQuantity || 0}</td>
                                         <td class="px-3 py-2">
-                                            <span class="px-2 py-1 text-xs font-medium rounded-full ${statusBg}">
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full ${statusBg}" data-i18n="status${item.status.replace(/\s+/g, '')}">
                                                 ${item.status}
                                             </span>
-                                            ${item.shortfallQuantity > 0 ? `<div class="text-xs text-red-600 mt-1">足りない: ${item.shortfallQuantity}</div>` : ''}
-                                            ${item.error ? `<div class="text-xs text-red-600 mt-1">${item.error}</div>` : ''}
+                                            ${item.shortfallQuantity > 0 ? `<div class="text-xs text-red-600 dark:text-red-400 mt-1">足りない: ${item.shortfallQuantity}</div>` : ''}
+                                            ${item.error ? `<div class="text-xs text-red-600 dark:text-red-400 mt-1">${item.error}</div>` : ''}
                                         </td>
                                     </tr>
                                 `;
@@ -1528,19 +1528,19 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
                         </table>
                     </div>
                     
-                    <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                    <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
                         <div class="flex justify-between items-center">
-                            <div class="text-sm text-gray-600">
-                                ✅ Valid: ${allItems.filter(i => i.status === 'Valid').length} | 
-                                🟠 Partial: ${allItems.filter(i => i.status === 'Partial').length} | 
-                                ❌ No inventory: ${allItems.filter(i => i.status === 'No inventory' || i.status === 'Invalid').length}
+                            <div class="text-sm text-gray-600 dark:text-gray-300">
+                                ✅ <span data-i18n="statusValid">Valid</span>: ${allItems.filter(i => i.status === 'Valid').length} | 
+                                🟠 <span data-i18n="statusPartial">Partial</span>: ${allItems.filter(i => i.status === 'Partial').length} | 
+                                ❌ <span data-i18n="statusNoinventory">No inventory</span>: ${allItems.filter(i => i.status === 'No inventory' || i.status === 'Invalid').length}
                             </div>
                             <div class="flex space-x-3">
-                                <button onclick="closeCsvReviewModal()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                <button onclick="closeCsvReviewModal()" class="px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600" data-i18n="cancel">
                                     Cancel
                                 </button>
                                 <button onclick="submitCsvBulkRequest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${validItems.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}">
-                                    Create Bulk Request (${validItems.length} items)
+                                    <span data-i18n="createBulkRequest">Create Bulk Request</span> (${validItems.length} <span data-i18n="items">items</span>)
                                 </button>
                             </div>
                         </div>
@@ -1552,6 +1552,13 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
     
     // Add modal to page
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Apply language translations
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    } else if (typeof applyLanguage === 'function') {
+        applyLanguage();
+    }
     
     // Store data for submission
     window.csvReviewData = {
