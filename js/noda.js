@@ -214,8 +214,8 @@ function renderNodaTable() {
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('pickupDate')">
                         ${t('pickupDate').replace(':', '')} ${getNodaSortArrow('pickupDate')}
                     </th>
-                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('createdAt')">
-                        ${t('createdAt')} ${getNodaSortArrow('createdAt')}
+                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('納入指示日')">
+                        納入指示日 (Deadline) ${getNodaSortArrow('納入指示日')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700">${t('actions')}</th>
                 </tr>
@@ -223,7 +223,7 @@ function renderNodaTable() {
             <tbody>
                 ${nodaData.map((item, index) => {
                     const statusInfo = getNodaStatusInfo(item.status);
-                    const createdDate = new Date(item.createdAt).toLocaleDateString();
+                    const deadlineDate = item.納入指示日 ? new Date(item.納入指示日).toLocaleDateString() : '-';
                     
                     // Handle both single and bulk requests
                     const isBulkRequest = item.requestType === 'bulk';
@@ -284,7 +284,9 @@ function renderNodaTable() {
                             </td>
                             <td class="px-4 py-3">${itemsDisplay}</td>
                             <td class="px-4 py-3">${pickupDate}</td>
-                            <td class="px-4 py-3">${createdDate}</td>
+                            <td class="px-4 py-3">
+                                ${item.納入指示日 ? `<span class="text-red-600 font-medium">${deadlineDate}</span>` : '<span class="text-gray-400">-</span>'}
+                            </td>
                             <td class="px-4 py-3" onclick="event.stopPropagation()">
                                 <div class="flex items-center space-x-2">
                                     ${canEdit ? `
