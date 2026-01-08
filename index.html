@@ -178,11 +178,12 @@
         usernameDisplay.textContent = `@${username}`;
       }
       
-      // Define BASE_URL if not already defined
-      const baseUrl = window.BASE_URL || 'http://localhost:3000/';
+      // // Define BASE_URL if not already defined
+      // const baseUrl = window.BASE_URL || 'http://localhost:3000/';
+      // console.log('BASE_URL:', BASE_URL);
       
       // Fetch full name from database
-      const response = await fetch(`${baseUrl}queries`, {
+      const response = await fetch(`${BASE_URL}queries`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
