@@ -1030,6 +1030,8 @@ window.handleNodaCsvUpload = function(input) {
     reader.onload = function(e) {
         showCsvLoadingOverlay();
         const csv = e.target.result;
+        // Reset file input to allow re-uploading the same or different file
+        input.value = '';
         // Small delay to ensure loading overlay renders
         setTimeout(() => {
             parseAndShowCsvReview(csv);
@@ -1567,8 +1569,8 @@ window.exportInsufficientItems = function() {
         const dateStr = deadlineDate.replace(/-/g, '');
         const requestNumberPreview = `NODAPO-${dateStr}`;
         
-        // Create CSV header
-        const headers = ['Row', '品番', '背番号', '品名', 'Requested Quantity', 'Available Quantity', 'Shortfall Quantity', 'Status', 'Error'];
+        // Create CSV header (Japanese)
+        const headers = ['行', '品番', '背番号', '品名', '要求数量', '在庫数量', '不足数量', 'ステータス', 'エラー'];
         
         // Create CSV rows
         const rows = insufficientItems.map(item => [
@@ -1586,7 +1588,7 @@ window.exportInsufficientItems = function() {
         // Combine header and rows
         const csvContent = [headers, ...rows]
             .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-            .join('\\r\\n');
+            .join('\r\n');
         
         // Convert to Shift_JIS encoding
         const sjisArray = Encoding.convert(Encoding.stringToCode(csvContent), {
