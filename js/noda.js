@@ -223,13 +223,22 @@ function renderNodaTable() {
             <tbody>
                 ${nodaData.map((item, index) => {
                     const statusInfo = getNodaStatusInfo(item.status);
-                    const deadlineDate = item.納入指示日 ? new Date(item.納入指示日).toLocaleDateString() : '-';
+                    
+                    // Format dates as yyyy/mm/dd
+                    const formatDate = (dateStr) => {
+                        if (!dateStr) return '-';
+                        const date = new Date(dateStr);
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        return `${year}/${month}/${day}`;
+                    };
+                    
+                    const deadlineDate = formatDate(item.納入指示日);
                     
                     // Handle both single and bulk requests
                     const isBulkRequest = item.requestType === 'bulk';
-                    const pickupDate = isBulkRequest ? 
-                        new Date(item.pickupDate).toLocaleDateString() : 
-                        new Date(item.date).toLocaleDateString();
+                    const pickupDate = isBulkRequest ? formatDate(item.pickupDate) : formatDate(item.date);
                     
                     let itemsDisplay = '';
                     if (isBulkRequest && item.lineItems) {
