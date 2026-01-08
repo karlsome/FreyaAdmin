@@ -742,6 +742,18 @@ const translations = {
       csvFileIsEmpty: "CSV file is empty",
       invalidCSVFormat: "Invalid CSV format. Header must contain either 品番 or 背番号",
       errorParsingCSVFile: "Error parsing CSV file",
+      
+      // Duplicate CSV Detection Modal
+      duplicateCsvDetected: "⚠️ Duplicate CSV Upload Detected",
+      duplicateCsvMessage: "This CSV has already been uploaded",
+      existingRequestDetails: "Existing Request Details:",
+      duplicateWhatToDo: "What would you like to do?",
+      overwriteExisting: "Overwrite Existing Request",
+      overwriteExistingDesc: "Replace the existing request with this new data",
+      createNewWithSuffix: "Create New Request (with suffix)",
+      createNewWithSuffixDesc: "Keep existing and create a new request with suffix (1), (2), etc.",
+      cancelUpload: "Cancel Upload",
+      cancelUploadDesc: "Don't upload this CSV",
 
       // Factories & Sensors
       loadingSensorHistory: "Loading sensor history...",
@@ -1862,6 +1874,18 @@ const translations = {
       csvFileIsEmpty: "CSVファイルが空です",
       invalidCSVFormat: "無効なCSV形式です。ヘッダーは品番または背番号のいずれかを含む必要があります",
       errorParsingCSVFile: "CSVファイル解析エラー",
+      
+      // Duplicate CSV Detection Modal
+      duplicateCsvDetected: "⚠️ 重複するCSVアップロードが検出されました",
+      duplicateCsvMessage: "このCSVは既にアップロードされています",
+      existingRequestDetails: "既存のリクエスト詳細：",
+      duplicateWhatToDo: "どうしますか？",
+      overwriteExisting: "既存のリクエストを上書き",
+      overwriteExistingDesc: "既存のリクエストをこの新しいデータで置き換える",
+      createNewWithSuffix: "新しいリクエストを作成（サフィックス付き）",
+      createNewWithSuffixDesc: "既存を保持し、サフィックス (1), (2) などを付けて新しいリクエストを作成",
+      cancelUpload: "アップロードをキャンセル",
+      cancelUploadDesc: "このCSVをアップロードしない",
 
       // Factories & Sensors
       loadingSensorHistory: "センサー履歴を読み込み中...",

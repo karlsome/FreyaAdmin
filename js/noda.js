@@ -1687,57 +1687,57 @@ async function checkForDuplicateCsvUpload(deliveryNote, deliveryOrder, deadlineD
 function showDuplicateWarningModal(existingRequest, onOverwrite, onCreateNew, onCancel) {
     const modalHtml = `
         <div id="duplicateWarningModal" class="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-50">
-            <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4">
-                <div class="px-6 py-4 border-b border-gray-200 bg-yellow-50">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4">
+                <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-yellow-50 dark:bg-yellow-900">
                     <div class="flex items-center space-x-3">
-                        <i class="ri-alert-line text-3xl text-yellow-600"></i>
+                        <i class="ri-alert-line text-3xl text-yellow-600 dark:text-yellow-400"></i>
                         <div>
-                            <h3 class="text-lg font-semibold text-gray-900">⚠️ Duplicate CSV Upload Detected</h3>
-                            <p class="text-sm text-gray-600">This CSV has already been uploaded</p>
+                            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100" data-i18n="duplicateCsvDetected">⚠️ Duplicate CSV Upload Detected</h3>
+                            <p class="text-sm text-gray-600 dark:text-gray-300" data-i18n="duplicateCsvMessage">This CSV has already been uploaded</p>
                         </div>
                     </div>
                 </div>
                 
                 <div class="px-6 py-4">
-                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                        <h4 class="text-sm font-semibold text-blue-900 mb-2">Existing Request Details:</h4>
+                    <div class="bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded-lg p-4 mb-4">
+                        <h4 class="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2" data-i18n="existingRequestDetails">Existing Request Details:</h4>
                         <div class="grid grid-cols-2 gap-3 text-sm">
                             <div>
-                                <span class="text-gray-600">Request Number:</span>
-                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.requestNumber}</span>
+                                <span class="text-gray-600 dark:text-gray-300" data-i18n="requestNumber">Request Number:</span>
+                                <span class="ml-2 font-semibold text-blue-700 dark:text-blue-300">${existingRequest.requestNumber}</span>
                             </div>
                             <div>
-                                <span class="text-gray-600">Status:</span>
-                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.status}</span>
+                                <span class="text-gray-600 dark:text-gray-300" data-i18n="status">Status:</span>
+                                <span class="ml-2 font-semibold text-blue-700 dark:text-blue-300">${existingRequest.status}</span>
                             </div>
                             <div>
-                                <span class="text-gray-600">納品書番号:</span>
-                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.納品書番号 || 'N/A'}</span>
+                                <span class="text-gray-600 dark:text-gray-300">納品書番号:</span>
+                                <span class="ml-2 font-semibold text-blue-700 dark:text-blue-300">${existingRequest.納品書番号 || 'N/A'}</span>
                             </div>
                             <div>
-                                <span class="text-gray-600">便:</span>
-                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.便 || 'N/A'}</span>
+                                <span class="text-gray-600 dark:text-gray-300">便:</span>
+                                <span class="ml-2 font-semibold text-blue-700 dark:text-blue-300">${existingRequest.便 || 'N/A'}</span>
                             </div>
                             <div>
-                                <span class="text-gray-600">納入指示日:</span>
-                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.納入指示日 || 'N/A'}</span>
+                                <span class="text-gray-600 dark:text-gray-300">納入指示日:</span>
+                                <span class="ml-2 font-semibold text-blue-700 dark:text-blue-300">${existingRequest.納入指示日 || 'N/A'}</span>
                             </div>
                             <div>
-                                <span class="text-gray-600">Total Items:</span>
-                                <span class="ml-2 font-semibold text-blue-700">${existingRequest.totalItems || 0}</span>
+                                <span class="text-gray-600 dark:text-gray-300" data-i18n="totalItems">Total Items:</span>
+                                <span class="ml-2 font-semibold text-blue-700 dark:text-blue-300">${existingRequest.totalItems || 0}</span>
                             </div>
                         </div>
                     </div>
                     
-                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                        <h4 class="text-sm font-semibold text-gray-900 mb-3">What would you like to do?</h4>
+                    <div class="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                        <h4 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3" data-i18n="duplicateWhatToDo">What would you like to do?</h4>
                         <div class="space-y-3">
                             <button id="duplicateOverwriteBtn" class="w-full px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 text-left flex items-center justify-between group">
                                 <div class="flex items-center space-x-3">
                                     <i class="ri-refresh-line text-xl"></i>
                                     <div>
-                                        <div class="font-semibold">Overwrite Existing Request</div>
-                                        <div class="text-xs text-red-100">Replace the existing request with this new data</div>
+                                        <div class="font-semibold" data-i18n="overwriteExisting">Overwrite Existing Request</div>
+                                        <div class="text-xs text-red-100" data-i18n="overwriteExistingDesc">Replace the existing request with this new data</div>
                                     </div>
                                 </div>
                                 <i class="ri-arrow-right-line text-xl opacity-0 group-hover:opacity-100 transition-opacity"></i>
@@ -1747,8 +1747,8 @@ function showDuplicateWarningModal(existingRequest, onOverwrite, onCreateNew, on
                                 <div class="flex items-center space-x-3">
                                     <i class="ri-file-add-line text-xl"></i>
                                     <div>
-                                        <div class="font-semibold">Create New Request (with suffix)</div>
-                                        <div class="text-xs text-blue-100">Keep existing and create a new request with suffix (1), (2), etc.</div>
+                                        <div class="font-semibold" data-i18n="createNewWithSuffix">Create New Request (with suffix)</div>
+                                        <div class="text-xs text-blue-100" data-i18n="createNewWithSuffixDesc">Keep existing and create a new request with suffix (1), (2), etc.</div>
                                     </div>
                                 </div>
                                 <i class="ri-arrow-right-line text-xl opacity-0 group-hover:opacity-100 transition-opacity"></i>
@@ -1758,8 +1758,8 @@ function showDuplicateWarningModal(existingRequest, onOverwrite, onCreateNew, on
                                 <div class="flex items-center space-x-3">
                                     <i class="ri-close-line text-xl"></i>
                                     <div>
-                                        <div class="font-semibold">Cancel Upload</div>
-                                        <div class="text-xs text-gray-600">Don't upload this CSV</div>
+                                        <div class="font-semibold" data-i18n="cancelUpload">Cancel Upload</div>
+                                        <div class="text-xs text-gray-600" data-i18n="cancelUploadDesc">Don't upload this CSV</div>
                                     </div>
                                 </div>
                                 <i class="ri-arrow-right-line text-xl opacity-0 group-hover:opacity-100 transition-opacity"></i>
@@ -1772,6 +1772,13 @@ function showDuplicateWarningModal(existingRequest, onOverwrite, onCreateNew, on
     `;
     
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Apply language translations
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    } else if (typeof applyLanguage === 'function') {
+        applyLanguage();
+    }
     
     // Add event listeners
     document.getElementById('duplicateOverwriteBtn').addEventListener('click', () => {
