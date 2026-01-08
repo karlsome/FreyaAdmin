@@ -196,6 +196,12 @@ function renderNodaTable() {
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('requestNumber')">
                         ${t('requestNumber')} ${getNodaSortArrow('requestNumber')}
                     </th>
+                    <th class="px-3 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('便')">
+                        便 ${getNodaSortArrow('便')}
+                    </th>
+                    <th class="px-3 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('納品書番号')">
+                        納品書番号 ${getNodaSortArrow('納品書番号')}
+                    </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('requestType')">
                         ${t('type')} ${getNodaSortArrow('requestType')}
                     </th>
@@ -255,6 +261,12 @@ function renderNodaTable() {
                                 <span class="hover:underline">
                                     ${item.requestNumber}
                                 </span>
+                            </td>
+                            <td class="px-3 py-3 text-xs">
+                                ${item.便 ? `<span class="font-medium text-blue-600">${item.便}</span>` : '<span class="text-gray-400">-</span>'}
+                            </td>
+                            <td class="px-3 py-3 text-xs">
+                                ${item.納品書番号 ? `<span class="font-medium text-blue-600">${item.納品書番号}</span>` : '<span class="text-gray-400">-</span>'}
                             </td>
                             <td class="px-4 py-3">
                                 <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
