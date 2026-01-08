@@ -1054,7 +1054,8 @@ async function parseAndShowCsvReview(csvData) {
             return;
         }
         
-        const headers = lines[0].split(',').map(h => h.trim());
+        // Strip quotes from headers (some CSVs have quoted headers)
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
         console.log('📋 CSV Headers:', headers);
         
         // Detect CSV format based on headers
@@ -1103,7 +1104,8 @@ async function parseAndShowCsvReview(csvData) {
         const deliveryNotes = new Set();   // Track 納品書番号 values
         
         for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(',').map(v => v.trim());
+            // Strip quotes from values (some CSVs have quoted values)
+            const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
             if (values.length < headers.length) continue;
             
             const rowData = {};
