@@ -31,6 +31,9 @@ function initializeNodaSystem() {
     
     // Load initial data
     loadNodaData();
+    
+    // ✅ NEW: Auto-check inventory on page load (silent, in background)
+    autoCheckInventoryBackground();
 }
 
 /**
@@ -45,6 +48,12 @@ function setupNodaEventListeners() {
     document.getElementById('nodaDateFrom').addEventListener('change', applyNodaFilters);
     document.getElementById('nodaDateTo').addEventListener('change', applyNodaFilters);
     document.getElementById('nodaSearchInput').addEventListener('input', applyNodaFilters);
+    
+    // ✅ NEW: Check Inventory button (if it exists in the HTML)
+    const checkInventoryBtn = document.getElementById('checkInventoryBtn');
+    if (checkInventoryBtn) {
+        checkInventoryBtn.addEventListener('click', manualCheckInventory);
+    }
     
     // Pagination listeners
     document.getElementById('nodaItemsPerPage').addEventListener('change', function() {
@@ -224,6 +233,16 @@ function renderNodaTable() {
                 ${nodaData.map((item, index) => {
                     const statusInfo = getNodaStatusInfo(item.status);
                     
+                    // ✅ NEW: Determine inventory status color
+                    let inventoryRowColor = '';
+                    if (item.overallInventoryStatus === 'waiting-for-inventory') {
+                        inventoryRowColor = 'bg-red-50 border-l-4 border-red-500'; // Red for no inventory
+                    } else if (item.overallInventoryStatus === 'partial-inventory') {
+                        inventoryRowColor = 'bg-yellow-50 border-l-4 border-yellow-500'; // Yellow for partial
+                    } else if (item.overallInventoryStatus === 'sufficient') {
+                        inventoryRowColor = ''; // No special color (white/default)
+                    }
+                    
                     // Format dates as yyyy/mm/dd
                     const formatDate = (dateStr) => {
                         if (!dateStr) return '-';
@@ -246,12 +265,22 @@ function renderNodaTable() {
                         const pendingItems = item.lineItems.filter(line => line.status === 'pending').length;
                         const completedItems = item.lineItems.filter(line => line.status === 'completed').length;
                         
+                        // ✅ NEW: Show inventory status in items display
+                        const itemsWithoutInventory = item.lineItems.filter(line => line.inventoryStatus === 'none').length;
+                        const itemsWithPartialInventory = item.lineItems.filter(line => line.inventoryStatus === 'insufficient').length;
+                        
                         itemsDisplay = `
                             <div class="text-xs">
                                 <div class="font-medium">${totalItems} ${t('items')}</div>
                                 <div class="text-gray-500">
                                     ${completedItems} ${t('done')}, ${pendingItems} ${t('statusPending').toLowerCase()}
                                 </div>
+                                ${itemsWithoutInventory > 0 || itemsWithPartialInventory > 0 ? `
+                                    <div class="mt-1 text-xs">
+                                        ${itemsWithoutInventory > 0 ? `<span class="text-red-600">⚠️ ${itemsWithoutInventory} waiting</span>` : ''}
+                                        ${itemsWithPartialInventory > 0 ? `<span class="text-yellow-600">⚠️ ${itemsWithPartialInventory} partial</span>` : ''}
+                                    </div>
+                                ` : ''}
                             </div>
                         `;
                     } else {
@@ -265,7 +294,7 @@ function renderNodaTable() {
                     }
                     
                     return `
-                        <tr class="border-b hover:bg-gray-50 cursor-pointer ${statusInfo.rowClass}" onclick="openNodaDetail('${item._id}')">
+                        <tr class="border-b hover:bg-gray-50 cursor-pointer ${inventoryRowColor} ${statusInfo.rowClass}" onclick="openNodaDetail('${item._id}')">
                             <td class="px-4 py-3 font-medium text-blue-600">
                                 <span class="hover:underline">
                                     ${item.requestNumber}
@@ -327,6 +356,10 @@ function getNodaStatusInfo(status) {
     switch (status) {
         case 'pending':
             return { text: t('statusPending'), icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
+        case 'waiting-for-inventory':
+            return { text: 'Waiting for Inventory', icon: 'ri-alert-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
+        case 'partial-inventory':
+            return { text: 'Partial Inventory', icon: 'ri-alert-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
         case 'in-progress':
             return { text: t('statusInProgress'), icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
         case 'active':
@@ -1226,65 +1259,84 @@ async function parseAndShowCsvReview(csvData) {
                         processedItem.availableQuantity = inventoryResult.availableQuantity;
                         processedItem.requestedQuantity = processedItem.quantity; // Store original requested amount
                         
+                        // ✅ NEW: Calculate what can be reserved now
+                        processedItem.reservedQuantity = Math.min(inventoryResult.availableQuantity, processedItem.quantity);
+                        processedItem.shortfallQuantity = Math.max(0, processedItem.quantity - inventoryResult.availableQuantity);
+                        
                         if (inventoryResult.availableQuantity >= processedItem.quantity) {
                             // Sufficient inventory
                             processedItem.status = 'Valid';
-                            processedItem.shortfallQuantity = 0;
+                            processedItem.inventoryStatus = 'sufficient';
                         } else if (inventoryResult.availableQuantity > 0) {
                             // Partial inventory available
                             processedItem.status = 'Partial';
-                            processedItem.shortfallQuantity = processedItem.quantity - inventoryResult.availableQuantity;
-                            processedItem.quantity = inventoryResult.availableQuantity; // Use only what's available
+                            processedItem.inventoryStatus = 'insufficient';
                         } else {
-                            // No inventory
-                            processedItem.status = 'No inventory';
-                            processedItem.shortfallQuantity = processedItem.quantity;
+                            // No inventory - but still valid for request creation
+                            processedItem.status = 'Valid'; // Changed from 'No inventory' to 'Valid'
+                            processedItem.inventoryStatus = 'none';
                         }
                     } else {
                         processedItem.availableQuantity = 0;
                         processedItem.requestedQuantity = processedItem.quantity;
+                        processedItem.reservedQuantity = 0;
                         processedItem.shortfallQuantity = processedItem.quantity;
-                        processedItem.status = 'No inventory';
-                        processedItem.error = processedItem.error || 'Inventory not found';
+                        processedItem.status = 'Valid'; // Changed from 'No inventory' to 'Valid'
+                        processedItem.inventoryStatus = 'none';
                     }
                 } else {
                     processedItem.availableQuantity = 0;
                     processedItem.requestedQuantity = processedItem.quantity;
+                    processedItem.reservedQuantity = 0;
                     processedItem.shortfallQuantity = processedItem.quantity;
-                    processedItem.status = 'Invalid';
+                    processedItem.status = 'Invalid'; // Keep as Invalid if back number not found
                 }
                 
             } catch (error) {
                 console.error(`Error processing item ${item[formatType]}:`, error);
                 processedItem.error = error.message;
                 processedItem.status = 'Error';
+                // ✅ Even with errors, set inventory fields so item can be included
+                processedItem.availableQuantity = 0;
+                processedItem.requestedQuantity = processedItem.quantity;
+                processedItem.reservedQuantity = 0;
+                processedItem.shortfallQuantity = processedItem.quantity;
+                processedItem.inventoryStatus = 'none';
             }
             
             processedItems.push(processedItem);
         }
         
-        // Separate items into two lists:
-        // 1. Items with some/full inventory (will go into request)
-        // 2. Insufficient items (for export)
+        // ✅ NEW: Include all items except those with truly invalid back numbers
+        // Items with 0 inventory, partial inventory, or errors should all be included
         const validItems = processedItems.filter(item => 
-            item.status === 'Valid' || item.status === 'Partial'
+            item.status !== 'Invalid' // Only exclude if back number lookup failed completely
         );
         
+        console.log('📊 Processed items breakdown:');
+        console.log('   Valid (full inventory):', processedItems.filter(i => i.status === 'Valid' && i.shortfallQuantity === 0).length);
+        console.log('   Partial inventory:', processedItems.filter(i => i.status === 'Partial').length);
+        console.log('   No inventory:', processedItems.filter(i => i.inventoryStatus === 'none' && i.status === 'Valid').length);
+        console.log('   Errors:', processedItems.filter(i => i.status === 'Error').length);
+        console.log('   Invalid:', processedItems.filter(i => i.status === 'Invalid').length);
+        console.log('   → Items to include in request:', validItems.length);
+        
+        // Track items with inventory shortfall for export reference
         const insufficientItems = [];
         processedItems.forEach(item => {
-            if (item.shortfallQuantity > 0) {
+            if (item.shortfallQuantity > 0 && (item.status === 'Valid' || item.status === 'Partial')) {
                 // Create entry for insufficient portion
                 insufficientItems.push({
                     ...item,
                     quantity: item.shortfallQuantity,
                     originalQuantity: item.requestedQuantity,
-                    fulfilledQuantity: item.quantity
+                    fulfilledQuantity: item.reservedQuantity || 0
                 });
             }
         });
         
         console.log(`✅ Valid/Partial items: ${validItems.length}`);
-        console.log(`❌ Insufficient items: ${insufficientItems.length}`);
+        console.log(`⚠️ Items with shortfall: ${insufficientItems.length}`);
         
         // Show review modal with additional request-level data
         hideCsvLoadingOverlay();
@@ -1467,8 +1519,8 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
                         </div>
                         ${insufficientItems.length > 0 ? `
                         <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 flex items-center justify-between">
-                            <div class="text-sm text-orange-600 dark:text-orange-400 font-medium">
-                                ⚠️ ${insufficientItems.length} <span data-i18n="itemsInsufficientInventory">items have insufficient inventory</span>
+                            <div class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">
+                                ℹ️ ${insufficientItems.length} <span data-i18n="itemsInsufficientInventory">items have insufficient inventory</span> - <span class="text-xs">Request will be created and inventory reserved when available</span>
                             </div>
                             <button onclick="exportInsufficientItems()" 
                                 class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-medium">
@@ -1495,28 +1547,37 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
                                 ${allItems.map(item => {
                                     let statusBg = 'bg-green-100 text-green-800';
                                     let rowBg = '';
-                                    if (item.status === 'Partial') {
-                                        statusBg = 'bg-orange-100 text-orange-800';
-                                        rowBg = 'bg-orange-50';
-                                    } else if (item.status === 'No inventory' || item.status === 'Invalid') {
+                                    let statusText = item.status;
+                                    
+                                    // Determine visual status based on inventory
+                                    if (item.inventoryStatus === 'none') {
                                         statusBg = 'bg-red-100 text-red-800';
-                                        rowBg = 'bg-red-50';
+                                        rowBg = 'bg-red-50 dark:bg-red-900/10';
+                                        statusText = 'No inventory';
+                                    } else if (item.inventoryStatus === 'insufficient' || item.status === 'Partial') {
+                                        statusBg = 'bg-yellow-100 text-yellow-800';
+                                        rowBg = 'bg-yellow-50 dark:bg-yellow-900/10';
+                                        statusText = 'Partial';
+                                    } else if (item.status === 'Invalid') {
+                                        statusBg = 'bg-red-100 text-red-800';
+                                        rowBg = 'bg-red-50 dark:bg-red-900/10';
+                                        statusText = 'Invalid';
                                     }
                                     
                                     return `
-                                    <tr class="border-b border-gray-200 ${rowBg}">
-                                        <td class="px-3 py-2">${item.rowIndex}</td>
-                                        <td class="px-3 py-2">${item.品番 || '-'}</td>
-                                        <td class="px-3 py-2">${item.背番号 || '-'}</td>
-                                        <td class="px-3 py-2 text-xs">${item.品名 || '-'}</td>
+                                    <tr class="border-b border-gray-200 dark:border-gray-700 ${rowBg}">
+                                        <td class="px-3 py-2 dark:text-gray-200">${item.rowIndex}</td>
+                                        <td class="px-3 py-2 dark:text-gray-200">${item.品番 || '-'}</td>
+                                        <td class="px-3 py-2 dark:text-gray-200">${item.背番号 || '-'}</td>
+                                        <td class="px-3 py-2 text-xs dark:text-gray-300">${item.品名 || '-'}</td>
                                         <td class="px-3 py-2 dark:text-gray-200">
                                             ${item.requestedQuantity || item.quantity}
-                                            ${item.status === 'Partial' ? `<div class="text-xs text-orange-600 dark:text-orange-400 mt-1">→ ${item.quantity} <span data-i18n="available">available</span></div>` : ''}
+                                            ${item.reservedQuantity > 0 && item.reservedQuantity < item.quantity ? `<div class="text-xs text-blue-600 dark:text-blue-400 mt-1">Reserved: ${item.reservedQuantity}</div>` : ''}
                                         </td>
                                         <td class="px-3 py-2 dark:text-gray-200">${item.availableQuantity || 0}</td>
                                         <td class="px-3 py-2">
-                                            <span class="px-2 py-1 text-xs font-medium rounded-full ${statusBg}" data-i18n="status${item.status.replace(/\s+/g, '')}">
-                                                ${item.status}
+                                            <span class="px-2 py-1 text-xs font-medium rounded-full ${statusBg}">
+                                                ${statusText}
                                             </span>
                                             ${item.shortfallQuantity > 0 ? `<div class="text-xs text-red-600 dark:text-red-400 mt-1">足りない: ${item.shortfallQuantity}</div>` : ''}
                                             ${item.error ? `<div class="text-xs text-red-600 dark:text-red-400 mt-1">${item.error}</div>` : ''}
@@ -1531,15 +1592,15 @@ function showCsvReviewModal(allItems, validItems, insufficientItems, deadlineDat
                     <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
                         <div class="flex justify-between items-center">
                             <div class="text-sm text-gray-600 dark:text-gray-300">
-                                ✅ <span data-i18n="statusValid">Valid</span>: ${allItems.filter(i => i.status === 'Valid').length} | 
-                                🟠 <span data-i18n="statusPartial">Partial</span>: ${allItems.filter(i => i.status === 'Partial').length} | 
-                                ❌ <span data-i18n="statusNoinventory">No inventory</span>: ${allItems.filter(i => i.status === 'No inventory' || i.status === 'Invalid').length}
+                                ✅ <span data-i18n="statusValid">Valid</span>: ${allItems.filter(i => i.status === 'Valid' && !i.shortfallQuantity).length} | 
+                                🟡 <span data-i18n="statusPartial">Partial</span>: ${allItems.filter(i => i.inventoryStatus === 'insufficient').length} | 
+                                🔴 <span data-i18n="statusNoinventory">No inventory</span>: ${allItems.filter(i => i.inventoryStatus === 'none').length}
                             </div>
                             <div class="flex space-x-3">
                                 <button onclick="closeCsvReviewModal()" class="px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600" data-i18n="cancel">
                                     Cancel
                                 </button>
-                                <button onclick="submitCsvBulkRequest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${validItems.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}">
+                                <button onclick="submitCsvBulkRequest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ${validItems.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}" ${validItems.length === 0 ? 'disabled' : ''}>
                                     <span data-i18n="createBulkRequest">Create Bulk Request</span> (${validItems.length} <span data-i18n="items">items</span>)
                                 </button>
                             </div>
@@ -1895,7 +1956,7 @@ async function performCsvBulkRequest(savedReviewData, pickupDate, mode, existing
                 items: savedReviewData.items.map(item => ({
                     品番: item.品番,
                     背番号: item.背番号,
-                    quantity: item.quantity
+                    quantity: item.requestedQuantity || item.quantity // Use original requested quantity
                 })),
                 pickupDate: pickupDate,
                 mode: mode, // 'create', 'overwrite', or 'createNew'
@@ -1905,6 +1966,7 @@ async function performCsvBulkRequest(savedReviewData, pickupDate, mode, existing
         };
         
         console.log('📤 Submitting CSV bulk request:', requestData);
+        console.log('📦 Sending items:', savedReviewData.items.length, 'items');
         
         const response = await fetch(`${BASE_URL}api/noda-requests`, {
             method: 'POST',
@@ -2204,6 +2266,9 @@ function showNodaDetailModal(request, isEditMode = false) {
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">品番</th>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">背番号</th>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reserved</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Shortfall</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Inventory</th>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                                         ${isEditMode ? '<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
                                     </tr>
@@ -2211,6 +2276,19 @@ function showNodaDetailModal(request, isEditMode = false) {
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     ${request.lineItems ? request.lineItems.map(lineItem => {
                                         const lineStatusInfo = getNodaStatusInfo(lineItem.status);
+                                        
+                                        // ✅ NEW: Determine inventory status color for row
+                                        let inventoryBadge = '';
+                                        if (lineItem.inventoryStatus === 'none') {
+                                            inventoryBadge = '<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">⚠️ Waiting</span>';
+                                        } else if (lineItem.inventoryStatus === 'insufficient') {
+                                            inventoryBadge = '<span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">⚠️ Partial</span>';
+                                        } else if (lineItem.inventoryStatus === 'sufficient') {
+                                            inventoryBadge = '<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">✓ OK</span>';
+                                        } else {
+                                            inventoryBadge = '<span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">-</span>';
+                                        }
+                                        
                                         return `
                                             <tr id="lineItem_${lineItem.lineNumber}">
                                                 <td class="px-4 py-2 text-sm font-medium text-gray-900">${lineItem.lineNumber}</td>
@@ -2228,6 +2306,15 @@ function showNodaDetailModal(request, isEditMode = false) {
                                                             onchange="handleLineQuantityChange('${request._id}', ${lineItem.lineNumber}, this)" />
                                                         <div id="qtyError_${lineItem.lineNumber}" class="text-xs text-red-600 mt-1 hidden"></div>
                                                     ` : lineItem.quantity}
+                                                </td>
+                                                <td class="px-3 py-2 text-sm text-blue-600 font-medium">
+                                                    ${lineItem.reservedQuantity !== undefined ? lineItem.reservedQuantity : lineItem.quantity}
+                                                </td>
+                                                <td class="px-3 py-2 text-sm ${lineItem.shortfallQuantity > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}">
+                                                    ${lineItem.shortfallQuantity !== undefined ? lineItem.shortfallQuantity : 0}
+                                                </td>
+                                                <td class="px-3 py-2 text-sm">
+                                                    ${inventoryBadge}
                                                 </td>
                                                 <td class="px-4 py-2 text-sm">
                                                     ${isEditMode ? `
@@ -2263,7 +2350,7 @@ function showNodaDetailModal(request, isEditMode = false) {
                                                 ` : ''}
                                             </tr>
                                         `;
-                                    }).join('') : '<tr><td colspan="6" class="text-center py-4 text-gray-500">No line items found</td></tr>'}
+                                    }).join('') : '<tr><td colspan="9" class="text-center py-4 text-gray-500">No line items found</td></tr>'}
                                 </tbody>
                             </table>
                         </div>
@@ -5610,3 +5697,86 @@ window.createNewRequestFromGen = async function() {
         createBtn.innerHTML = '<i class="ri-add-line mr-2"></i>Create Request';
     }
 };
+
+// ==================== AUTO-CHECK INVENTORY SYSTEM ====================
+
+/**
+ * Auto-check inventory in background (silent, no user notification)
+ */
+async function autoCheckInventoryBackground() {
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'autoCheckInventory',
+                userName: currentUser.username || 'Auto-Check System'
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            if (result.success && result.totalReservations > 0) {
+                console.log(`✅ Auto-check: Reserved ${result.totalReservations} items across ${result.updatedRequests} requests`);
+                // Silently reload data to show updated status
+                loadNodaData();
+            }
+        }
+    } catch (error) {
+        console.error('Auto-check inventory error:', error);
+        // Silent failure - don't show error to user
+    }
+}
+
+/**
+ * Manual check inventory (triggered by button, shows notification)
+ */
+window.manualCheckInventory = async function() {
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        
+        // Show loading state
+        const button = document.getElementById('checkInventoryBtn');
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="ri-loader-4-line animate-spin mr-2"></i>Checking...';
+        }
+        
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'autoCheckInventory',
+                userName: currentUser.username || 'Manual Check'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            if (result.totalReservations > 0) {
+                showToast(`✅ Reserved ${result.totalReservations} items across ${result.updatedRequests} requests`, 'success');
+                // Reload data to show updated status
+                loadNodaData();
+            } else {
+                showToast('ℹ️ No inventory available to reserve', 'info');
+            }
+        } else {
+            throw new Error(result.error || 'Failed to check inventory');
+        }
+        
+    } catch (error) {
+        console.error('Manual check inventory error:', error);
+        showToast('❌ Failed to check inventory: ' + error.message, 'error');
+    } finally {
+        // Restore button state
+        const button = document.getElementById('checkInventoryBtn');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="ri-refresh-line mr-2"></i>Check Inventory';
+        }
+    }
+};
+

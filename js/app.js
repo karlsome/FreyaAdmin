@@ -4975,6 +4975,9 @@ function loadPage(page) {
                             <button onclick="exportNodaData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                                 <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
                             </button>
+                            <button id="checkInventoryBtn" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                                <i class="ri-refresh-line mr-2"></i>Check Inventory
+                            </button>
                             <button id="refreshNodaBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                                 <i class="ri-refresh-line mr-2"></i><span data-i18n="refresh">Refresh</span>
                             </button>
