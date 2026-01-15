@@ -1432,9 +1432,36 @@ window.closeFactorySensorHistoryModal = function() {
  * Open Material Lot Modal - Shows materialRequestDB data for a specific 材料ロット
  * @param {string} materialLot - The 材料ロット value clicked
  * @param {string} hinban - The 品番 from the current item
+ * @param {string} selectedSebanggo - Optional pre-selected 材料背番号
  */
-window.openMaterialLotModal = async function(materialLot, hinban) {
-    console.log('Opening material lot modal:', { materialLot, hinban });
+window.openMaterialLotModal = async function(materialLot, hinban, selectedSebanggo = null) {
+    console.log('Opening material lot modal:', { materialLot, hinban, selectedSebanggo });
+    
+    // If no selectedSebanggo provided, check if we need to show selection first
+    if (!selectedSebanggo) {
+        try {
+            // Check masterDB for multiple 材料背番号 values
+            const checkResponse = await fetch(BASE_URL + 'api/check-material-sebanggo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 品番: hinban })
+            });
+            
+            const checkData = await checkResponse.json();
+            
+            if (checkData.success && checkData.multiple && checkData.材料背番号Array.length > 1) {
+                // Show selection modal instead
+                showMaterialSebanggoSelection(materialLot, hinban, checkData.材料背番号Array);
+                return;
+            } else if (checkData.success && checkData.材料背番号Array.length === 1) {
+                // Single value, use it directly
+                selectedSebanggo = checkData.材料背番号Array[0];
+            }
+        } catch (error) {
+            console.error('Error checking 材料背番号:', error);
+            // Continue with original flow if check fails
+        }
+    }
     
     // Create modal
     const modal = document.createElement('div');
@@ -1447,6 +1474,7 @@ window.openMaterialLotModal = async function(materialLot, hinban) {
                 <div>
                     <h3 class="text-xl font-bold text-gray-900">材料ロット詳細</h3>
                     <p class="text-sm text-gray-600 mt-1">材料ロット: ${materialLot}</p>
+                    ${selectedSebanggo ? `<p class="text-xs text-blue-600 mt-1">材料背番号: ${selectedSebanggo}</p>` : ''}
                 </div>
                 <button onclick="closeMaterialLotModal()" class="text-gray-400 hover:text-gray-600">
                     <i class="ri-close-line text-2xl"></i>
@@ -1471,7 +1499,8 @@ window.openMaterialLotModal = async function(materialLot, hinban) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 品番: hinban,
-                材料ロット: materialLot
+                材料ロット: materialLot,
+                材料背番号: selectedSebanggo // Send the selected value to backend
             })
         });
         
@@ -1655,6 +1684,83 @@ window.closeMaterialLotModal = function() {
         modal.remove();
     }
 };
+
+/**
+ * Show material sebanggo selection modal when multiple values exist
+ * @param {string} materialLot - The 材料ロット value
+ * @param {string} hinban - The 品番 value
+ * @param {Array} sebanggoArray - Array of 材料背番号 values to choose from
+ */
+function showMaterialSebanggoSelection(materialLot, hinban, sebanggoArray) {
+    // Create selection modal
+    const modal = document.createElement('div');
+    modal.id = 'materialSebanggoSelectionModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-bold text-gray-900">材料背番号を選択</h3>
+                <p class="text-sm text-gray-600 mt-1">品番: ${hinban}</p>
+                <p class="text-xs text-gray-500 mt-1">材料ロット: ${materialLot}</p>
+            </div>
+            
+            <div class="p-6">
+                <p class="text-sm text-gray-700 mb-4">
+                    この品番には複数の材料背番号が登録されています。<br>
+                    表示したい材料背番号を選択してください:
+                </p>
+                
+                <div class="space-y-2">
+                    ${sebanggoArray.map((sebanggo, index) => `
+                        <button 
+                            onclick="selectMaterialSebanggo('${materialLot}', '${hinban}', '${sebanggo}')"
+                            class="w-full p-3 text-left border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                        >
+                            <div class="flex items-center justify-between">
+                                <span class="font-semibold text-gray-900">${sebanggo}</span>
+                                <i class="ri-arrow-right-line text-gray-400"></i>
+                            </div>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end">
+                <button 
+                    onclick="closeMaterialSebanggoSelection()"
+                    class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                    キャンセル
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+/**
+ * Handle material sebanggo selection
+ */
+window.selectMaterialSebanggo = function(materialLot, hinban, selectedSebanggo) {
+    // Close selection modal
+    closeMaterialSebanggoSelection();
+    
+    // Open the detail modal with selected sebanggo
+    openMaterialLotModal(materialLot, hinban, selectedSebanggo);
+};
+
+/**
+ * Close material sebanggo selection modal
+ */
+window.closeMaterialSebanggoSelection = function() {
+    const modal = document.getElementById('materialSebanggoSelectionModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
 
 /**
  * Open Press Detail Modal from Kensa 製造ロット
