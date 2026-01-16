@@ -5180,12 +5180,36 @@ function loadPage(page) {
                                 <!-- Step 1: Add Items -->
                                 <div id="addItemStep" class="space-y-6">
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <!-- Shared Pickup Date -->
-                                        <div class="md:col-span-2">
+                                        <!-- Pickup Date -->
+                                        <div>
                                             <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="pickupDateAllItems">
                                                 Pickup Date (All Items) *
                                             </label>
                                             <input type="date" id="bulkPickupDate" class="w-full p-3 border border-gray-300 rounded-md" required>
+                                        </div>
+                                        
+                                        <!-- Deadline Date (納入指示日) -->
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                                <span data-i18n="deadline">Deadline</span> (納入指示日) *
+                                            </label>
+                                            <input type="date" id="bulkDeadlineDate" class="w-full p-3 border border-gray-300 rounded-md" required>
+                                        </div>
+                                        
+                                        <!-- Delivery Order (便) -->
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                                便 (<span data-i18n="deliveryOrder">Delivery Order</span>)
+                                            </label>
+                                            <input type="text" id="bulkDeliveryOrder" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Optional">
+                                        </div>
+                                        
+                                        <!-- Delivery Note Number (納品書番号) -->
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                                納品書番号 (<span data-i18n="deliveryNote">Delivery Note</span>)
+                                            </label>
+                                            <input type="text" id="bulkDeliveryNote" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Optional">
                                         </div>
                                     </div>
                                     

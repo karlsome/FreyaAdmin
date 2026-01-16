@@ -2729,6 +2729,9 @@ let currentStep = 1;
 // Persistent cart storage
 const CART_STORAGE_KEY = 'nodaCart';
 const CART_DATE_STORAGE_KEY = 'nodaCartPickupDate';
+const CART_DEADLINE_STORAGE_KEY = 'nodaCartDeadlineDate';
+const CART_DELIVERY_ORDER_STORAGE_KEY = 'nodaCartDeliveryOrder';
+const CART_DELIVERY_NOTE_STORAGE_KEY = 'nodaCartDeliveryNote';
 
 /**
  * Load cart from localStorage
@@ -2737,6 +2740,9 @@ function loadCartFromStorage() {
     try {
         const savedCart = localStorage.getItem(CART_STORAGE_KEY);
         const savedDate = localStorage.getItem(CART_DATE_STORAGE_KEY);
+        const savedDeadline = localStorage.getItem(CART_DEADLINE_STORAGE_KEY);
+        const savedDeliveryOrder = localStorage.getItem(CART_DELIVERY_ORDER_STORAGE_KEY);
+        const savedDeliveryNote = localStorage.getItem(CART_DELIVERY_NOTE_STORAGE_KEY);
         
         if (savedCart) {
             nodaCart = JSON.parse(savedCart);
@@ -2746,6 +2752,27 @@ function loadCartFromStorage() {
             const bulkPickupDate = document.getElementById('bulkPickupDate');
             if (bulkPickupDate) {
                 bulkPickupDate.value = savedDate;
+            }
+        }
+        
+        if (savedDeadline) {
+            const bulkDeadlineDate = document.getElementById('bulkDeadlineDate');
+            if (bulkDeadlineDate) {
+                bulkDeadlineDate.value = savedDeadline;
+            }
+        }
+        
+        if (savedDeliveryOrder) {
+            const bulkDeliveryOrder = document.getElementById('bulkDeliveryOrder');
+            if (bulkDeliveryOrder) {
+                bulkDeliveryOrder.value = savedDeliveryOrder;
+            }
+        }
+        
+        if (savedDeliveryNote) {
+            const bulkDeliveryNote = document.getElementById('bulkDeliveryNote');
+            if (bulkDeliveryNote) {
+                bulkDeliveryNote.value = savedDeliveryNote;
             }
         }
         
@@ -2767,6 +2794,21 @@ function saveCartToStorage() {
         if (bulkPickupDate && bulkPickupDate.value) {
             localStorage.setItem(CART_DATE_STORAGE_KEY, bulkPickupDate.value);
         }
+        
+        const bulkDeadlineDate = document.getElementById('bulkDeadlineDate');
+        if (bulkDeadlineDate && bulkDeadlineDate.value) {
+            localStorage.setItem(CART_DEADLINE_STORAGE_KEY, bulkDeadlineDate.value);
+        }
+        
+        const bulkDeliveryOrder = document.getElementById('bulkDeliveryOrder');
+        if (bulkDeliveryOrder && bulkDeliveryOrder.value) {
+            localStorage.setItem(CART_DELIVERY_ORDER_STORAGE_KEY, bulkDeliveryOrder.value);
+        }
+        
+        const bulkDeliveryNote = document.getElementById('bulkDeliveryNote');
+        if (bulkDeliveryNote && bulkDeliveryNote.value) {
+            localStorage.setItem(CART_DELIVERY_NOTE_STORAGE_KEY, bulkDeliveryNote.value);
+        }
     } catch (error) {
         console.error('Error saving cart to storage:', error);
     }
@@ -2778,6 +2820,9 @@ function saveCartToStorage() {
 function clearCartStorage() {
     localStorage.removeItem(CART_STORAGE_KEY);
     localStorage.removeItem(CART_DATE_STORAGE_KEY);
+    localStorage.removeItem(CART_DEADLINE_STORAGE_KEY);
+    localStorage.removeItem(CART_DELIVERY_ORDER_STORAGE_KEY);
+    localStorage.removeItem(CART_DELIVERY_NOTE_STORAGE_KEY);
     nodaCart = [];
 }
 
@@ -2905,9 +2950,10 @@ async function addItemToCart() {
     const backNumber = document.getElementById('modalNodaBackNumber').value.trim();
     const quantity = parseInt(document.getElementById('modalNodaQuantity').value);
     const pickupDate = document.getElementById('bulkPickupDate').value;
+    const deadlineDate = document.getElementById('bulkDeadlineDate').value;
     
-    // Validation
-    if (!partNumber || !backNumber || !quantity || !pickupDate) {
+    // Validation - deadline date is required
+    if (!partNumber || !backNumber || !quantity || !pickupDate || !deadlineDate) {
         alert(t('alertFillAllFields'));
         return;
     }
@@ -2948,17 +2994,24 @@ async function addItemToCart() {
             }
             
             const availableQuantity = result.inventory.availableQuantity || 0;
+            
+            // Allow items with insufficient inventory (like CSV upload)
+            // Show warning but still allow adding
             if (availableQuantity < quantity) {
-                alert(`${t('alertInsufficientInventory')} ${t('alertAvailable')}: ${availableQuantity}, ${t('alertRequested')}: ${quantity}`);
-                return;
+                const confirmAdd = confirm(`⚠️ ${t('alertInsufficientInventory')}\n${t('alertAvailable')}: ${availableQuantity}\n${t('alertRequested')}: ${quantity}\n\nThe request will be created and inventory will be reserved when available.\n\nDo you want to add this item anyway?`);
+                if (!confirmAdd) {
+                    return;
+                }
             }
             
-            // Add new item to cart
+            // Add new item to cart (with reserved and shortfall quantities like CSV upload)
             nodaCart.push({
                 品番: partNumber,
                 背番号: backNumber,
                 quantity: quantity,
                 availableQuantity: availableQuantity,
+                reservedQuantity: Math.min(availableQuantity, quantity),
+                shortfallQuantity: Math.max(0, quantity - availableQuantity),
                 addedAt: new Date().toISOString()
             });
         } catch (error) {
@@ -3043,6 +3096,12 @@ function proceedToReview() {
     const pickupDate = document.getElementById('bulkPickupDate').value;
     if (!pickupDate) {
         alert(t('alertSelectPickupDate'));
+        return;
+    }
+    
+    const deadlineDate = document.getElementById('bulkDeadlineDate').value;
+    if (!deadlineDate) {
+        alert('Please select a deadline date (納入指示日)');
         return;
     }
     
@@ -3153,6 +3212,16 @@ async function submitBulkRequest() {
         return;
     }
     
+    const deadlineDate = document.getElementById('bulkDeadlineDate').value;
+    if (!deadlineDate) {
+        alert('Please select a deadline date (納入指示日)');
+        return;
+    }
+    
+    // Get optional fields
+    const deliveryOrder = document.getElementById('bulkDeliveryOrder')?.value.trim() || null;
+    const deliveryNote = document.getElementById('bulkDeliveryNote')?.value.trim() || null;
+    
     // Show progress
     submitProgress.classList.remove('hidden');
     submitBulkRequestBtn.disabled = true;
@@ -3166,10 +3235,15 @@ async function submitBulkRequest() {
             action: 'bulkCreateRequests',
             data: {
                 pickupDate: pickupDate,
+                deadlineDate: deadlineDate,
+                deliveryOrder: deliveryOrder,
+                deliveryNote: deliveryNote,
                 items: nodaCart.map(item => ({
                     品番: item.品番,
                     背番号: item.背番号,
-                    quantity: parseInt(item.quantity)
+                    quantity: parseInt(item.quantity),
+                    reservedQuantity: item.reservedQuantity || 0,
+                    shortfallQuantity: item.shortfallQuantity || 0
                 }))
             },
             userName: userName
