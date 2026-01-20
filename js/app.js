@@ -622,37 +622,37 @@ function loadPage(page) {
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-${role === '班長' ? '6' : '5'} gap-4 mb-6">
-                        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
-                            <h3 class="text-sm font-medium text-yellow-800" data-i18n="pending">Pending</h3>
-                            <p class="text-2xl font-bold text-yellow-900" id="pendingCount">0</p>
+                    <div class="grid grid-cols-2 md:grid-cols-${role === '班長' ? '6' : '5'} gap-3 mb-6">
+                        <div class="bg-yellow-50 px-4 py-3 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
+                            <h3 class="text-xs font-medium text-yellow-800" data-i18n="pending">Pending</h3>
+                            <p class="text-xl font-bold text-yellow-900" id="pendingCount">0</p>
                             <p class="text-xs text-yellow-600" data-i18n="pendingApproval">Pending Hancho Approval</p>
                         </div>
-                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors" onclick="filterByStatus('hancho_approved')">
-                            <h3 class="text-sm font-medium text-blue-800" data-i18n="hanchoApproved">Hancho Approved</h3>
-                            <p class="text-2xl font-bold text-blue-900" id="hanchoApprovedCount">0</p>
+                        <div class="bg-blue-50 px-4 py-3 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors" onclick="filterByStatus('hancho_approved')">
+                            <h3 class="text-xs font-medium text-blue-800" data-i18n="hanchoApproved">Hancho Approved</h3>
+                            <p class="text-xl font-bold text-blue-900" id="hanchoApprovedCount">0</p>
                             <p class="text-xs text-blue-600" data-i18n="waitingKacho">Waiting for Kacho Approval</p>
                         </div>
-                        <div class="bg-green-50 p-4 rounded-lg border border-green-200 cursor-pointer hover:bg-green-100 transition-colors" onclick="filterByStatus('fully_approved')">
-                            <h3 class="text-sm font-medium text-green-800" data-i18n="fullyApproved">Fully Approved</h3>
-                            <p class="text-2xl font-bold text-green-900" id="fullyApprovedCount">0</p>
+                        <div class="bg-green-50 px-4 py-3 rounded-lg border border-green-200 cursor-pointer hover:bg-green-100 transition-colors" onclick="filterByStatus('fully_approved')">
+                            <h3 class="text-xs font-medium text-green-800" data-i18n="fullyApproved">Fully Approved</h3>
+                            <p class="text-xl font-bold text-green-900" id="fullyApprovedCount">0</p>
                             <p class="text-xs text-green-600" data-i18n="kachoApprovalComplete">Kacho Approval Complete</p>
                         </div>
-                        <div class="bg-red-50 p-4 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors" onclick="filterByStatus('correction_needed')">
-                            <h3 class="text-sm font-medium text-red-800" data-i18n="correctionNeeded">Correction Needed</h3>
-                            <p class="text-2xl font-bold text-red-900" id="correctionCount">0</p>
+                        <div class="bg-red-50 px-4 py-3 rounded-lg border border-red-200 cursor-pointer hover:bg-red-100 transition-colors" onclick="filterByStatus('correction_needed')">
+                            <h3 class="text-xs font-medium text-red-800" data-i18n="correctionNeeded">Correction Needed</h3>
+                            <p class="text-xl font-bold text-red-900" id="correctionCount">0</p>
                             <p class="text-xs text-red-600" data-i18n="needsCorrection">Needs Correction & Resubmission</p>
                         </div>
                         ${role === '班長' ? `
-                        <div class="bg-orange-50 p-4 rounded-lg border border-orange-200 cursor-pointer hover:bg-orange-100 transition-colors" onclick="filterByStatus('correction_needed_from_kacho')">
-                            <h3 class="text-sm font-medium text-orange-800" data-i18n="kachoRequest">Kacho Correction Request</h3>
-                            <p class="text-2xl font-bold text-orange-900" id="kachoRequestCount">0</p>
+                        <div class="bg-orange-50 px-4 py-3 rounded-lg border border-orange-200 cursor-pointer hover:bg-orange-100 transition-colors" onclick="filterByStatus('correction_needed_from_kacho')">
+                            <h3 class="text-xs font-medium text-orange-800" data-i18n="kachoRequest">Kacho Correction Request</h3>
+                            <p class="text-xl font-bold text-orange-900" id="kachoRequestCount">0</p>
                             <p class="text-xs text-orange-600" data-i18n="hanchoAction">Hancho Action Required</p>
                         </div>
                         ` : ''}
-                        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors" onclick="filterByStatus('today')">
-                            <h3 class="text-sm font-medium text-gray-800" data-i18n="todayTotal">Today's Total</h3>
-                            <p class="text-2xl font-bold text-gray-900" id="totalCount">0</p>
+                        <div class="bg-gray-50 px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors" onclick="filterByStatus('today')">
+                            <h3 class="text-xs font-medium text-gray-800" data-i18n="todayTotal">Today's Total</h3>
+                            <p class="text-xl font-bold text-gray-900" id="totalCount">0</p>
                             <p class="text-xs text-gray-600" data-i18n="submittedToday">Submitted Today</p>
                         </div>
                     </div>
@@ -2299,48 +2299,48 @@ function loadPage(page) {
             </div>
 
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
                 <div class="flex items-center">
                   <div class="p-2 bg-blue-100 rounded-lg">
-                    <i class="ri-database-line text-blue-600 text-lg"></i>
+                    <i class="ri-database-line text-blue-600 text-xl"></i>
                   </div>
                   <div class="ml-3">
-                    <p class="text-xs font-medium text-gray-600">総件数</p>
-                    <p class="text-2xl font-bold text-gray-900" id="totalMasterCount">0</p>
+                    <p class="text-xs text-gray-500">総件数</p>
+                    <p class="text-xl font-bold text-gray-900" id="totalMasterCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
                 <div class="flex items-center">
                   <div class="p-2 bg-green-100 rounded-lg">
-                    <i class="ri-image-line text-green-600 text-lg"></i>
+                    <i class="ri-image-line text-green-600 text-xl"></i>
                   </div>
                   <div class="ml-3">
-                    <p class="text-xs font-medium text-gray-600">画像あり</p>
-                    <p class="text-2xl font-bold text-gray-900" id="withImageCount">0</p>
+                    <p class="text-xs text-gray-500">画像あり</p>
+                    <p class="text-xl font-bold text-gray-900" id="withImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
                 <div class="flex items-center">
                   <div class="p-2 bg-yellow-100 rounded-lg">
-                    <i class="ri-image-off-line text-yellow-600 text-lg"></i>
+                    <i class="ri-image-off-line text-yellow-600 text-xl"></i>
                   </div>
                   <div class="ml-3">
-                    <p class="text-xs font-medium text-gray-600">画像なし</p>
-                    <p class="text-2xl font-bold text-gray-900" id="withoutImageCount">0</p>
+                    <p class="text-xs text-gray-500">画像なし</p>
+                    <p class="text-xl font-bold text-gray-900" id="withoutImageCount">0</p>
                   </div>
                 </div>
               </div>
-              <div class="bg-white p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+              <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
                 <div class="flex items-center">
                   <div class="p-2 bg-purple-100 rounded-lg">
-                    <i class="ri-filter-line text-purple-600 text-lg"></i>
+                    <i class="ri-filter-line text-purple-600 text-xl"></i>
                   </div>
                   <div class="ml-3">
-                    <p class="text-xs font-medium text-gray-600">表示中</p>
-                    <p class="text-2xl font-bold text-gray-900" id="filteredCount">0</p>
+                    <p class="text-xs text-gray-500">表示中</p>
+                    <p class="text-xl font-bold text-gray-900" id="filteredCount">0</p>
                   </div>
                 </div>
               </div>
@@ -5430,48 +5430,48 @@ function loadPage(page) {
                     </div>
 
                     <!-- Summary Cards -->
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-blue-100 rounded-lg">
+                                <div class="p-2 bg-blue-100 rounded-lg">
                                     <i class="ri-archive-line text-blue-600 text-xl"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="totalItems">Total Items</p>
-                                    <p id="inventoryTotalItems" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500" data-i18n="totalItems">Total Items</p>
+                                    <p id="inventoryTotalItems" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-green-100 rounded-lg">
+                                <div class="p-2 bg-green-100 rounded-lg">
                                     <i class="ri-checkbox-circle-line text-green-600 text-xl"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="physicalStock">Physical Stock</p>
-                                    <p id="inventoryPhysicalStock" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500" data-i18n="physicalStock">Physical Stock</p>
+                                    <p id="inventoryPhysicalStock" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-yellow-100 rounded-lg">
+                                <div class="p-2 bg-yellow-100 rounded-lg">
                                     <i class="ri-time-line text-yellow-600 text-xl"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="reservedStock">Reserved Stock</p>
-                                    <p id="inventoryReservedStock" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500" data-i18n="reservedStock">Reserved Stock</p>
+                                    <p id="inventoryReservedStock" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-purple-100 rounded-lg">
+                                <div class="p-2 bg-purple-100 rounded-lg">
                                     <i class="ri-check-line text-purple-600 text-xl"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="availableStock">Available Stock</p>
-                                    <p id="inventoryAvailableStock" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500" data-i18n="availableStock">Available Stock</p>
+                                    <p id="inventoryAvailableStock" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
@@ -5669,48 +5669,48 @@ window.switchSCNATab = function(tabName) {
                     </div>
 
                     <!-- Statistics Cards -->
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-blue-100 rounded-lg">
-                                    <i class="ri-file-list-line text-2xl text-blue-600"></i>
+                                <div class="p-2 bg-blue-100 rounded-lg">
+                                    <i class="ri-file-list-line text-xl text-blue-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Total Records</p>
-                                    <p id="freyaTabletTotalRecords" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">Total Records</p>
+                                    <p id="freyaTabletTotalRecords" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-green-100 rounded-lg">
-                                    <i class="ri-checkbox-circle-line text-2xl text-green-600"></i>
+                                <div class="p-2 bg-green-100 rounded-lg">
+                                    <i class="ri-checkbox-circle-line text-xl text-green-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Total Quantity</p>
-                                    <p id="freyaTabletTotalQuantity" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">Total Quantity</p>
+                                    <p id="freyaTabletTotalQuantity" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-yellow-100 rounded-lg">
-                                    <i class="ri-error-warning-line text-2xl text-yellow-600"></i>
+                                <div class="p-2 bg-yellow-100 rounded-lg">
+                                    <i class="ri-error-warning-line text-xl text-yellow-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Total NG</p>
-                                    <p id="freyaTabletTotalNG" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">Total NG</p>
+                                    <p id="freyaTabletTotalNG" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200">
                             <div class="flex items-center">
-                                <div class="p-3 bg-purple-100 rounded-lg">
-                                    <i class="ri-time-line text-2xl text-purple-600"></i>
+                                <div class="p-2 bg-purple-100 rounded-lg">
+                                    <i class="ri-time-line text-xl text-purple-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600">Avg Cycle Time</p>
-                                    <p id="freyaTabletAvgCycleTime" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">Avg Cycle Time</p>
+                                    <p id="freyaTabletAvgCycleTime" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>

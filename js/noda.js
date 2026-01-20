@@ -33,8 +33,8 @@ function initializeNodaSystem() {
     // Load initial data
     loadNodaData();
     
-    // ✅ NEW: Auto-check inventory on page load (silent, in background)
-    autoCheckInventoryBackground();
+    // ✅ OPTIMIZED: Removed auto-check on page load - it can be triggered manually via button
+    // This reduces initial page load time significantly
 }
 
 /**
@@ -5860,6 +5860,7 @@ window.createNewRequestFromGen = async function() {
 
 /**
  * Auto-check inventory in background (silent, no user notification)
+ * NOTE: This no longer reloads data to avoid double-loading on page init
  */
 async function autoCheckInventoryBackground() {
     try {
@@ -5878,8 +5879,8 @@ async function autoCheckInventoryBackground() {
             const result = await response.json();
             if (result.success && result.totalReservations > 0) {
                 console.log(`✅ Auto-check: Reserved ${result.totalReservations} items across ${result.updatedRequests} requests`);
-                // Silently reload data to show updated status
-                loadNodaData();
+                // ✅ OPTIMIZED: Don't reload data automatically - user can refresh if needed
+                // This prevents double-loading on page init
             }
         }
     } catch (error) {
