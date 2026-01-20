@@ -4575,31 +4575,52 @@ async function renderFactoryCards() {
     const today = new Date().toISOString().split("T")[0];
   
     try {
-      const cards = await Promise.all(factoryNames.map(async factory => {
-        // Fetch production data
-        const res = await fetch(BASE_URL + "queries", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            dbName: "submittedDB",
-            collectionName: "kensaDB",
-            query: { 工場: factory, Date: today }
-          })
-        });
-  
-        const data = await res.json();
+      // ==================== OPTIMIZED: Batch API calls ====================
+      // Fetch ALL factory data in 2 API calls instead of 32 (8 factories × 4 queries each)
+      
+      const [factoryStatsRes, sensorDataRes, envDataArray] = await Promise.all([
+        // 1. Batch production stats for ALL factories (replaces 8 kensaDB queries)
+        fetch(BASE_URL + "api/factory-overview/stats?date=" + today),
+        // 2. Batch sensor data for ALL factories (replaces 8+8 tempHumidityDB queries)
+        fetch(BASE_URL + "api/factory-overview/sensors?date=" + today),
+        // 3. Environmental data (weather) - still per factory but cached
+        Promise.all(factoryNames.map(factory => getEnvironmentalData(factory)))
+      ]);
+      
+      const factoryStats = await factoryStatsRes.json();
+      const sensorDataBatch = await sensorDataRes.json();
+      
+      console.log('📊 Factory stats loaded:', Object.keys(factoryStats.data || {}).length, 'factories');
+      console.log('🌡️ Sensor data loaded:', Object.keys(sensorDataBatch.data || {}).length, 'factories');
+      
+      // Map env data to factory names
+      const envDataMap = {};
+      factoryNames.forEach((factory, idx) => {
+        envDataMap[factory] = envDataArray[idx];
+      });
+      
+      const cards = factoryNames.map((factory, idx) => {
+        // Get production data from batch result
+        const stats = factoryStats.data?.[factory] || { total: 0, totalNG: 0, defectRate: 0 };
+        const total = stats.total || 0;
+        const totalNG = stats.totalNG || 0;
+        const defectRate = stats.defectRate?.toFixed(2) || "0.00";
         
-        // Fetch environmental data and sensor data
-        const [envData, sensorData, hasHistoricalData] = await Promise.all([
-          getEnvironmentalData(factory),
-          getSensorData(factory),
-          hasHistoricalSensorData(factory)
-        ]);
-  
-        const total = data.reduce((sum, item) => sum + (item.Process_Quantity ?? 0), 0);
-        const totalNG = data.reduce((sum, item) => sum + (item.Total_NG ?? 0), 0);
-        const defectRate = total > 0 ? ((totalNG / total) * 100).toFixed(2) : "0.00";
-  
+        // Get environmental data
+        const envData = envDataMap[factory];
+        
+        // Get sensor data from batch result
+        const batchSensor = sensorDataBatch.data?.[factory] || {};
+        const sensorData = {
+          highestTemp: batchSensor.highestTemp ?? null,
+          averageHumidity: batchSensor.avgHumidity ?? null,
+          wbgt: batchSensor.wbgt ?? null,
+          sensorCount: batchSensor.sensorCount || 0,
+          hasCurrentDateData: batchSensor.hasData || false,
+          timestamp: Date.now()
+        };
+        const hasHistoricalData = sensorDataBatch.factoriesWithHistory?.includes(factory) || false;
+
         // Determine production status
         let statusColor = "green";
         let statusText = window.t ? window.t("normal") : "Normal";
@@ -4783,7 +4804,7 @@ async function renderFactoryCards() {
             </div>
           </div>
         `;
-      }));
+      });
   
       container.innerHTML = cards.join("");
       
