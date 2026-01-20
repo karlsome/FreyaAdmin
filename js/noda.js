@@ -233,15 +233,24 @@ function renderNodaTable() {
                 ${nodaData.map((item, index) => {
                     const statusInfo = getNodaStatusInfo(item.status);
                     
-                    // ✅ NEW: Determine inventory status color
+                    // ✅ FIX: Skip FIFO inventory status for completed/cancelled requests
+                    // They don't need inventory anymore - they're done!
+                    const isCompleted = item.status === 'completed' || item.status === 'cancelled';
+                    const dynamicStatus = isCompleted ? 'completed' : (item.dynamicInventoryStatus || item.overallInventoryStatus);
+                    const fifoData = isCompleted ? {} : (item.fifoAllocation || {});
+                    
                     let inventoryRowColor = '';
-                    if (item.overallInventoryStatus === 'waiting-for-inventory') {
-                        inventoryRowColor = 'bg-red-50 border-l-4 border-red-500'; // Red for no inventory
-                    } else if (item.overallInventoryStatus === 'partial-inventory') {
-                        inventoryRowColor = 'bg-yellow-50 border-l-4 border-yellow-500'; // Yellow for partial
-                    } else if (item.overallInventoryStatus === 'sufficient') {
-                        inventoryRowColor = ''; // No special color (white/default)
+                    // Only show inventory colors for non-completed requests
+                    if (!isCompleted) {
+                        if (dynamicStatus === 'waiting-for-inventory') {
+                            inventoryRowColor = 'bg-red-50 border-l-4 border-red-500'; // Red for no inventory (can't pick anything)
+                        } else if (dynamicStatus === 'partial-inventory') {
+                            inventoryRowColor = 'bg-yellow-50 border-l-4 border-yellow-500'; // Yellow for partial (can pick some)
+                        } else if (dynamicStatus === 'sufficient') {
+                            inventoryRowColor = ''; // No special color - full inventory available for this request
+                        }
                     }
+                    // Completed requests get no special color (white background)
                     
                     // Format dates as yyyy/mm/dd
                     const formatDate = (dateStr) => {
@@ -265,9 +274,23 @@ function renderNodaTable() {
                         const pendingItems = item.lineItems.filter(line => line.status === 'pending').length;
                         const completedItems = item.lineItems.filter(line => line.status === 'completed').length;
                         
-                        // ✅ NEW: Show inventory status in items display
-                        const itemsWithoutInventory = item.lineItems.filter(line => line.inventoryStatus === 'none').length;
-                        const itemsWithPartialInventory = item.lineItems.filter(line => line.inventoryStatus === 'insufficient').length;
+                        // ✅ FIFO-based inventory status from server calculation
+                        // This uses PHYSICAL inventory allocated in FIFO order (oldest requests first)
+                        // BUT: Don't show warnings for completed requests - they don't need inventory anymore!
+                        let fifoWaiting = 0;
+                        let fifoPartial = 0;
+                        
+                        if (!isCompleted) {
+                            if (fifoData.lineItemStatuses && fifoData.lineItemStatuses.length > 0) {
+                                fifoWaiting = fifoData.lineItemStatuses.filter(ls => ls.fifoStatus === 'waiting').length;
+                                fifoPartial = fifoData.lineItemStatuses.filter(ls => ls.fifoStatus === 'partial').length;
+                            } else {
+                                // Fallback to old method if fifoData not available
+                                fifoWaiting = item.lineItems.filter(line => line.inventoryStatus === 'none').length;
+                                fifoPartial = item.lineItems.filter(line => line.inventoryStatus === 'insufficient').length;
+                            }
+                        }
+                        // For completed requests, fifoWaiting and fifoPartial stay at 0 (no warnings shown)
                         
                         itemsDisplay = `
                             <div class="text-xs">
@@ -275,10 +298,10 @@ function renderNodaTable() {
                                 <div class="text-gray-500">
                                     ${completedItems} ${t('done')}, ${pendingItems} ${t('statusPending').toLowerCase()}
                                 </div>
-                                ${itemsWithoutInventory > 0 || itemsWithPartialInventory > 0 ? `
+                                ${fifoWaiting > 0 || fifoPartial > 0 ? `
                                     <div class="mt-1 text-xs">
-                                        ${itemsWithoutInventory > 0 ? `<span class="text-red-600">⚠️ ${itemsWithoutInventory} waiting</span>` : ''}
-                                        ${itemsWithPartialInventory > 0 ? `<span class="text-yellow-600">⚠️ ${itemsWithPartialInventory} partial</span>` : ''}
+                                        ${fifoWaiting > 0 ? `<span class="text-red-600">⚠️ ${fifoWaiting} waiting</span>` : ''}
+                                        ${fifoPartial > 0 ? `<span class="text-yellow-600">⚠️ ${fifoPartial} partial</span>` : ''}
                                     </div>
                                 ` : ''}
                             </div>
