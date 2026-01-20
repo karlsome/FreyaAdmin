@@ -5,6 +5,7 @@ let nodaItemsPerPage = 10;
 let nodaData = [];
 let nodaStatistics = {};
 let nodaSortState = { column: null, direction: 1 };
+let activeNodaStatusFilter = 'all'; // Track which status card is active
 
 /**
  * Initialize NODA system
@@ -124,10 +125,14 @@ async function loadNodaData() {
 function buildNodaQueryFilters() {
     const filters = {};
     
-    // Status filter
-    const statusFilter = document.getElementById('nodaStatusFilter').value;
-    if (statusFilter) {
-        filters.status = statusFilter;
+    // Status filter - prioritize card filter over dropdown
+    if (activeNodaStatusFilter && activeNodaStatusFilter !== 'all') {
+        filters.status = activeNodaStatusFilter;
+    } else {
+        const statusFilter = document.getElementById('nodaStatusFilter').value;
+        if (statusFilter) {
+            filters.status = statusFilter;
+        }
     }
     
     // Part number filter
@@ -173,10 +178,66 @@ function applyNodaFilters() {
  * Update statistics display
  */
 function updateNodaStatistics() {
+    document.getElementById('nodaAllCount').textContent = nodaStatistics.all || 0;
     document.getElementById('nodaPendingCount').textContent = nodaStatistics.pending || 0;
-    document.getElementById('nodaActiveCount').textContent = nodaStatistics.active || 0;
-    document.getElementById('nodaCompleteCount').textContent = nodaStatistics.complete || 0;
-    document.getElementById('nodaFailedCount').textContent = nodaStatistics.failed || 0;
+    document.getElementById('nodaInProgressCount').textContent = nodaStatistics['in-progress'] || 0;
+    document.getElementById('nodaCompletedCount').textContent = nodaStatistics.completed || 0;
+    document.getElementById('nodaPartialInventoryCount').textContent = nodaStatistics['partial-inventory'] || 0;
+    document.getElementById('nodaCancelledCount').textContent = nodaStatistics.cancelled || 0;
+}
+
+/**
+ * Filter NODA requests by clicking on status cards
+ */
+function filterNodaByStatus(status) {
+    activeNodaStatusFilter = status;
+    
+    // Update active card styling
+    document.querySelectorAll('.noda-status-card').forEach(card => {
+        card.classList.remove('active', 'border-2', 'border-gray-300');
+        card.classList.add('border', 'border-gray-200');
+    });
+    
+    const activeCard = document.querySelector(`.noda-status-card[data-status="${status}"]`);
+    if (activeCard) {
+        activeCard.classList.remove('border', 'border-gray-200');
+        activeCard.classList.add('active', 'border-2', 'border-gray-300');
+    }
+    
+    // Update dropdown to match (for consistency)
+    const dropdown = document.getElementById('nodaStatusFilter');
+    if (dropdown) {
+        dropdown.value = status === 'all' ? '' : status;
+    }
+    
+    // Reset to first page and reload
+    currentNodaPage = 1;
+    loadNodaData();
+}
+
+/**
+ * Sync status card selection when dropdown changes
+ */
+function syncStatusFilterWithCards() {
+    const dropdown = document.getElementById('nodaStatusFilter');
+    const selectedStatus = dropdown.value || 'all';
+    
+    activeNodaStatusFilter = selectedStatus;
+    
+    // Update active card styling
+    document.querySelectorAll('.noda-status-card').forEach(card => {
+        card.classList.remove('active', 'border-2', 'border-gray-300');
+        card.classList.add('border', 'border-gray-200');
+    });
+    
+    const activeCard = document.querySelector(`.noda-status-card[data-status="${selectedStatus}"]`);
+    if (activeCard) {
+        activeCard.classList.remove('border', 'border-gray-200');
+        activeCard.classList.add('active', 'border-2', 'border-gray-300');
+    }
+    
+    // Apply filters
+    applyNodaFilters();
 }
 
 /**

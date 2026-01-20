@@ -4992,12 +4992,13 @@ function loadPage(page) {
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="status">Status</label>
-                                <select id="nodaStatusFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                <select id="nodaStatusFilter" class="w-full p-2 border border-gray-300 rounded-md" onchange="syncStatusFilterWithCards()">
                                     <option value="" data-i18n="allStatuses">All Statuses</option>
                                     <option value="pending" data-i18n="statusPending">Pending</option>
-                                    <option value="active" data-i18n="statusActive">Active</option>
-                                    <option value="complete" data-i18n="statusComplete">Complete</option>
-                                    <option value="failed" data-i18n="statusFailed">Failed</option>
+                                    <option value="in-progress">In Progress</option>
+                                    <option value="completed">Completed</option>
+                                    <option value="partial-inventory">Partial Inventory</option>
+                                    <option value="cancelled">Cancelled</option>
                                 </select>
                             </div>
                             <div>
@@ -5031,49 +5032,71 @@ function loadPage(page) {
                         </div>
                     </div>
 
-                    <!-- Statistics Cards -->
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <!-- Statistics Cards - Compact & Clickable -->
+                    <div class="grid grid-cols-2 md:grid-cols-6 gap-3" id="nodaStatusCards">
+                        <div class="bg-white px-4 py-3 rounded-lg border-2 border-gray-300 cursor-pointer hover:shadow-md transition-all noda-status-card active" data-status="all" onclick="filterNodaByStatus('all')">
                             <div class="flex items-center">
-                                <div class="p-3 bg-yellow-100 rounded-lg">
-                                    <i class="ri-time-line text-2xl text-yellow-600"></i>
+                                <div class="p-2 bg-gray-100 rounded-lg">
+                                    <i class="ri-list-check text-xl text-gray-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="statusPending">Pending</p>
-                                    <p id="nodaPendingCount" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">All</p>
+                                    <p id="nodaAllCount" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="pending" onclick="filterNodaByStatus('pending')">
                             <div class="flex items-center">
-                                <div class="p-3 bg-blue-100 rounded-lg">
-                                    <i class="ri-play-line text-2xl text-blue-600"></i>
+                                <div class="p-2 bg-yellow-100 rounded-lg">
+                                    <i class="ri-time-line text-xl text-yellow-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="statusActive">Active</p>
-                                    <p id="nodaActiveCount" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500" data-i18n="statusPending">Pending</p>
+                                    <p id="nodaPendingCount" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="in-progress" onclick="filterNodaByStatus('in-progress')">
                             <div class="flex items-center">
-                                <div class="p-3 bg-green-100 rounded-lg">
-                                    <i class="ri-checkbox-circle-line text-2xl text-green-600"></i>
+                                <div class="p-2 bg-blue-100 rounded-lg">
+                                    <i class="ri-play-line text-xl text-blue-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="statusComplete">Complete</p>
-                                    <p id="nodaCompleteCount" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">In Progress</p>
+                                    <p id="nodaInProgressCount" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="completed" onclick="filterNodaByStatus('completed')">
                             <div class="flex items-center">
-                                <div class="p-3 bg-red-100 rounded-lg">
-                                    <i class="ri-close-circle-line text-2xl text-red-600"></i>
+                                <div class="p-2 bg-green-100 rounded-lg">
+                                    <i class="ri-checkbox-circle-line text-xl text-green-600"></i>
                                 </div>
-                                <div class="ml-4">
-                                    <p class="text-sm text-gray-600" data-i18n="statusFailed">Failed</p>
-                                    <p id="nodaFailedCount" class="text-2xl font-bold text-gray-900">0</p>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500" data-i18n="statusComplete">Completed</p>
+                                    <p id="nodaCompletedCount" class="text-xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="partial-inventory" onclick="filterNodaByStatus('partial-inventory')">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-orange-100 rounded-lg">
+                                    <i class="ri-alert-line text-xl text-orange-600"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">Partial Inventory</p>
+                                    <p id="nodaPartialInventoryCount" class="text-xl font-bold text-gray-900">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="cancelled" onclick="filterNodaByStatus('cancelled')">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-red-100 rounded-lg">
+                                    <i class="ri-close-circle-line text-xl text-red-600"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-xs text-gray-500">Cancelled</p>
+                                    <p id="nodaCancelledCount" class="text-xl font-bold text-gray-900">0</p>
                                 </div>
                             </div>
                         </div>

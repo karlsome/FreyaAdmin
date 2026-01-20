@@ -1272,3 +1272,20 @@
     opacity: 0;
   }
 }
+
+/* NODA Status Cards - Active state styling */
+.noda-status-card.active {
+    border-width: 2px !important;
+    border-color: #4f46e5 !important;
+    background-color: #f5f3ff !important;
+    box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.1), 0 2px 4px -1px rgba(79, 70, 229, 0.06) !important;
+}
+
+.dark .noda-status-card.active {
+    border-color: #6366f1 !important;
+    background-color: #1e1b4b !important;
+}
+
+.noda-status-card:hover:not(.active) {
+    border-color: #9ca3af !important;
+}
