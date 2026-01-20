@@ -68,44 +68,25 @@ function getBusinessDayRange(daysCount = 7) {
 // Load equipment data from pressDB
 async function loadEquipmentData() {
   try {
-    // First, load basic equipment structure to set up filters
-    const response = await fetch(`${BASE_URL}queries`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        dbName: 'submittedDB',
-        collectionName: 'pressDB',
-        query: {},
-        projection: { 設備: 1, 工場: 1 } // Only get equipment and factory info
-      })
-    });
+    // ✅ OPTIMIZED: Use dedicated endpoint that returns only unique equipment/factory
+    // Instead of fetching ALL records just to extract unique names
+    const response = await fetch(`${BASE_URL}api/equipment/list`);
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch equipment structure: ${response.status}`);
+      throw new Error(`Failed to fetch equipment list: ${response.status}`);
     }
     
-    const data = await response.json();
+    const result = await response.json();
     
-    // Extract unique equipment and group by factory
-    availableEquipment = [...new Set(data.map(item => item.設備).filter(Boolean))];
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to fetch equipment list');
+    }
     
-    // Group equipment by factory
-    equipmentByFactory = data.reduce((acc, item) => {
-      if (item.設備 && item.工場) {
-        if (!acc[item.工場]) {
-          acc[item.工場] = new Set();
-        }
-        acc[item.工場].add(item.設備);
-      }
-      return acc;
-    }, {});
+    // Use pre-grouped data from server
+    availableEquipment = result.allEquipment || [];
+    equipmentByFactory = result.equipmentByFactory || {};
     
-    // Convert Sets to Arrays for easier handling
-    Object.keys(equipmentByFactory).forEach(factory => {
-      equipmentByFactory[factory] = [...equipmentByFactory[factory]];
-    });
+    console.log(`✅ Loaded ${availableEquipment.length} equipment across ${result.factoryCount} factories`);
     
     // Setup filters
     setupEquipmentFilters();
@@ -234,31 +215,16 @@ async function applyEquipmentFilters() {
     const selectedEquipment = Array.from(document.querySelectorAll('.equipment-checkbox:checked'))
       .map(cb => cb.value);
     
-    // Build MongoDB query
-    let query = {};
-    
-    // Date filter
-    if (startDate || endDate) {
-      query.Date = {};
-      if (startDate) query.Date.$gte = startDate;
-      if (endDate) query.Date.$lte = endDate;
-    }
-    
-    // Equipment filter
-    if (selectedEquipment.length > 0) {
-      query.設備 = { $in: selectedEquipment };
-    }
-    
-    // Use the existing /queries route with filters
-    const response = await fetch(`${BASE_URL}queries`, {
+    // ✅ OPTIMIZED: Use dedicated endpoint with server-side projection
+    const response = await fetch(`${BASE_URL}api/equipment/data`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        dbName: 'submittedDB',
-        collectionName: 'pressDB',
-        query: query
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        equipment: selectedEquipment.length > 0 ? selectedEquipment : undefined
       })
     });
     
@@ -266,13 +232,21 @@ async function applyEquipmentFilters() {
       throw new Error(`Failed to fetch filtered data: ${response.status}`);
     }
     
-    filteredEquipmentData = await response.json();
+    const result = await response.json();
+    
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to fetch equipment data');
+    }
+    
+    filteredEquipmentData = result.data || [];
+    console.log(`✅ Loaded ${filteredEquipmentData.length} filtered records`);
+    
     renderEquipmentAnalytics();
   
-  // Apply translations immediately after rendering
-  if (typeof translateDynamicContent === 'function') {
-    translateDynamicContent();
-  }
+    // Apply translations immediately after rendering
+    if (typeof translateDynamicContent === 'function') {
+      translateDynamicContent();
+    }
     
   } catch (error) {
     console.error('Error applying filters:', error);
