@@ -60,7 +60,7 @@ function setupNodaEventListeners() {
     document.getElementById('nodaItemsPerPage').addEventListener('change', function() {
         nodaItemsPerPage = parseInt(this.value);
         currentNodaPage = 1;
-        renderNodaTable();
+        loadNodaData();
     });
     
     document.getElementById('nodaPrevPage').addEventListener('click', () => changeNodaPage(-1));
