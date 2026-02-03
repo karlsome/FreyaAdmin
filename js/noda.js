@@ -292,17 +292,31 @@ function renderNodaTable() {
             </thead>
             <tbody>
                 ${nodaData.map((item, index) => {
-                    const statusInfo = getNodaStatusInfo(item.status);
-                    
-                    // ✅ FIX: Skip FIFO inventory status for completed/cancelled requests
-                    // They don't need inventory anymore - they're done!
+                    // ✅ FIX: Use dynamic inventory status for display instead of stored status
+                    // The stored status might be outdated (e.g., "partial-inventory" when inventory has since improved)
                     const isCompleted = item.status === 'completed' || item.status === 'cancelled';
+                    const isPastDeadline = item.isPastDeadline || item.dynamicInventoryStatus === 'past-deadline';
                     const dynamicStatus = isCompleted ? 'completed' : (item.dynamicInventoryStatus || item.overallInventoryStatus);
+                    
+                    // Determine which status to show in the badge
+                    let displayStatus = item.status;
+                    if (!isCompleted && !isPastDeadline) {
+                        // For active requests, show dynamic inventory status if it differs from stored
+                        if (dynamicStatus === 'sufficient') {
+                            displayStatus = 'pending'; // Show as pending if inventory is now OK
+                        } else if (dynamicStatus === 'waiting-for-inventory' || dynamicStatus === 'partial-inventory') {
+                            displayStatus = dynamicStatus; // Show inventory status
+                        }
+                    } else if (isPastDeadline) {
+                        displayStatus = 'past-deadline';
+                    }
+                    
+                    const statusInfo = getNodaStatusInfo(displayStatus);
                     const fifoData = isCompleted ? {} : (item.fifoAllocation || {});
                     
                     let inventoryRowColor = '';
-                    // Only show inventory colors for non-completed requests
-                    if (!isCompleted) {
+                    // Only show inventory colors for non-completed, non-past-deadline requests
+                    if (!isCompleted && !isPastDeadline) {
                         if (dynamicStatus === 'waiting-for-inventory') {
                             inventoryRowColor = 'bg-red-50 border-l-4 border-red-500'; // Red for no inventory (can't pick anything)
                         } else if (dynamicStatus === 'partial-inventory') {
@@ -310,6 +324,9 @@ function renderNodaTable() {
                         } else if (dynamicStatus === 'sufficient') {
                             inventoryRowColor = ''; // No special color - full inventory available for this request
                         }
+                    } else if (isPastDeadline) {
+                        // Past deadline gets a gray/muted style
+                        inventoryRowColor = 'bg-gray-100 border-l-4 border-gray-400 opacity-75';
                     }
                     // Completed requests get no special color (white background)
                     
@@ -337,11 +354,11 @@ function renderNodaTable() {
                         
                         // ✅ FIFO-based inventory status from server calculation
                         // This uses PHYSICAL inventory allocated in FIFO order (oldest requests first)
-                        // BUT: Don't show warnings for completed requests - they don't need inventory anymore!
+                        // BUT: Don't show warnings for completed requests or past deadline - they don't need inventory anymore!
                         let fifoWaiting = 0;
                         let fifoPartial = 0;
                         
-                        if (!isCompleted) {
+                        if (!isCompleted && !isPastDeadline) {
                             if (fifoData.lineItemStatuses && fifoData.lineItemStatuses.length > 0) {
                                 fifoWaiting = fifoData.lineItemStatuses.filter(ls => ls.fifoStatus === 'waiting').length;
                                 fifoPartial = fifoData.lineItemStatuses.filter(ls => ls.fifoStatus === 'partial').length;
@@ -351,7 +368,7 @@ function renderNodaTable() {
                                 fifoPartial = item.lineItems.filter(line => line.inventoryStatus === 'insufficient').length;
                             }
                         }
-                        // For completed requests, fifoWaiting and fifoPartial stay at 0 (no warnings shown)
+                        // For completed/past-deadline requests, fifoWaiting and fifoPartial stay at 0 (no warnings shown)
                         
                         itemsDisplay = `
                             <div class="text-xs">
@@ -359,12 +376,16 @@ function renderNodaTable() {
                                 <div class="text-gray-500">
                                     ${completedItems} ${t('done')}, ${pendingItems} ${t('statusPending').toLowerCase()}
                                 </div>
-                                ${fifoWaiting > 0 || fifoPartial > 0 ? `
+                                ${isPastDeadline ? `
+                                    <div class="mt-1 text-xs">
+                                        <span class="text-gray-600">⏰ Deadline passed</span>
+                                    </div>
+                                ` : (fifoWaiting > 0 || fifoPartial > 0 ? `
                                     <div class="mt-1 text-xs">
                                         ${fifoWaiting > 0 ? `<span class="text-red-600">⚠️ ${fifoWaiting} waiting</span>` : ''}
                                         ${fifoPartial > 0 ? `<span class="text-yellow-600">⚠️ ${fifoPartial} partial</span>` : ''}
                                     </div>
-                                ` : ''}
+                                ` : '')}
                             </div>
                         `;
                     } else {
@@ -444,6 +465,8 @@ function getNodaStatusInfo(status) {
             return { text: 'Waiting for Inventory', icon: 'ri-alert-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
         case 'partial-inventory':
             return { text: 'Partial Inventory', icon: 'ri-alert-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
+        case 'past-deadline':
+            return { text: 'Deadline Passed', icon: 'ri-calendar-close-line', badgeClass: 'bg-gray-200 text-gray-600', rowClass: '' };
         case 'in-progress':
             return { text: t('statusInProgress'), icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
         case 'active':
