@@ -4209,7 +4209,7 @@ async function savePlanToDatabase() {
             const planId = existingPlans[0]._id;
             console.log('Updating existing plan:', planId);
             
-            const updateResponse = await fetch('http://localhost:3000/api/production-plans/update', {
+            const updateResponse = await fetch(BASE_URL + 'api/production-plans/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -4232,7 +4232,7 @@ async function savePlanToDatabase() {
             // Create new plan
             console.log('Creating new plan');
             
-            const insertResponse = await fetch('http://localhost:3000/api/production-plans', {
+            const insertResponse = await fetch(BASE_URL + 'api/production-plans', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(planData)
@@ -4279,7 +4279,7 @@ async function deletePlanFromDatabase() {
             const planId = existingPlans[0]._id;
             console.log('Deleting plan:', planId);
             
-            const deleteResponse = await fetch(`http://localhost:3000/api/production-plans/${planId}`, {
+            const deleteResponse = await fetch(`${BASE_URL}api/production-plans/${planId}`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' }
             });
