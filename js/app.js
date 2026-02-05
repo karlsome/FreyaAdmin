@@ -6820,6 +6820,10 @@ function buildApprovalDatabaseQuery() {
 function buildStatisticsQueryFilters() {
     const filters = {};
     
+    // Get user's timezone offset
+    const timezoneOffset = new Date().getTimezoneOffset();
+    filters.timezoneOffset = timezoneOffset;
+    
     // Factory filter
     const factoryFilter = document.getElementById('factoryFilter')?.value;
     if (factoryFilter) {
@@ -6886,6 +6890,10 @@ function buildApprovalQueryFilters() {
     }
     
     // Date filter - enhanced with data range mode logic
+    // Get user's timezone offset for accurate date filtering
+    const timezoneOffset = new Date().getTimezoneOffset(); // minutes from UTC (e.g., PST=-480, JST=-540)
+    filters.timezoneOffset = timezoneOffset;
+    
     const dateFilter = document.getElementById('dateFilter')?.value;
     if (dateFilter) {
         filters.Date = dateFilter;
@@ -7130,6 +7138,74 @@ function applyApprovalFilters() {
 }
 
 /**
+ * Extract date and time from MongoDB ObjectId (User's local timezone)
+ */
+function getDateTimeFromObjectId(objectId) {
+    try {
+        // ObjectId first 8 hex chars = timestamp in seconds
+        const timestamp = parseInt(objectId.substring(0, 8), 16) * 1000;
+        const date = new Date(timestamp);
+        
+        // Use user's local timezone (browser automatically converts)
+        const localDate = new Date(date.getTime());
+        
+        // Format in user's local timezone
+        const year = localDate.getFullYear();
+        const month = String(localDate.getMonth() + 1).padStart(2, '0');
+        const day = String(localDate.getDate()).padStart(2, '0');
+        const hours = String(localDate.getHours()).padStart(2, '0');
+        const minutes = String(localDate.getMinutes()).padStart(2, '0');
+        
+        return {
+            date: `${year}-${month}-${day}`, // YYYY-MM-DD
+            time: `${hours}:${minutes}`, // HH:MM
+            fullDateTime: localDate
+        };
+    } catch (error) {
+        console.error('Error extracting date from ObjectId:', error);
+        return null;
+    }
+}
+
+/**
+ * Check if user-entered date/time matches ObjectId timestamp
+ */
+function checkDateTimeMismatch(item) {
+    const objectId = item._id?.$oid || item._id;
+    if (!objectId) return { dateMismatch: false, timeMismatch: false };
+    
+    const objectIdDateTime = getDateTimeFromObjectId(objectId);
+    if (!objectIdDateTime) return { dateMismatch: false, timeMismatch: false };
+    
+    // Check date mismatch
+    const dateMismatch = item.Date !== objectIdDateTime.date;
+    
+    // Check time mismatch (if Time_end is very different from ObjectId time)
+    let timeMismatch = false;
+    if (item.Time_end) {
+        const endTime = item.Time_end; // HH:MM format
+        const objectIdTime = objectIdDateTime.time;
+        
+        // Convert to minutes for comparison
+        const [endHour, endMin] = endTime.split(':').map(Number);
+        const [objHour, objMin] = objectIdTime.split(':').map(Number);
+        const endMinutes = endHour * 60 + endMin;
+        const objMinutes = objHour * 60 + objMin;
+        
+        // If difference is more than 30 minutes, flag as mismatch
+        const diffMinutes = Math.abs(endMinutes - objMinutes);
+        timeMismatch = diffMinutes > 30;
+    }
+    
+    return { 
+        dateMismatch, 
+        timeMismatch, 
+        objectIdDate: objectIdDateTime.date,
+        objectIdTime: objectIdDateTime.time
+    };
+}
+
+/**
  * Update statistics cards (OPTIMIZED - Now handled by loadApprovalStatistics)
  */
 function updateStats() {
@@ -7245,8 +7321,14 @@ function renderApprovalTable(data = null, paginationInfo = null) {
                     const ngCount = item[ngField] || 0;
                     const defectRate = quantity > 0 ? ((ngCount / quantity) * 100).toFixed(2) : '0.00';
                     
+                    // Check for date/time mismatch
+                    const mismatch = checkDateTimeMismatch(item);
+                    const rowWarningClass = mismatch.dateMismatch ? 'bg-red-50 border-l-4 border-red-400' : '';
+                    const dateWarningClass = mismatch.dateMismatch ? 'text-red-600 font-bold' : '';
+                    const timeWarningClass = mismatch.timeMismatch ? 'text-orange-600 font-semibold' : 'text-gray-500';
+                    
                     return `
-                        <tr class="border-b hover:bg-gray-50 cursor-pointer ${statusInfo.rowClass}" onclick="openApprovalDetail('${item._id}')">
+                        <tr class="border-b hover:bg-gray-50 cursor-pointer ${statusInfo.rowClass} ${rowWarningClass}" onclick="openApprovalDetail('${item._id}')">
                             <td class="px-4 py-3">
                                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.badgeClass}">
                                     <i class="${statusInfo.icon} mr-1"></i>
@@ -7254,8 +7336,14 @@ function renderApprovalTable(data = null, paginationInfo = null) {
                                 </span>
                             </td>
                             <td class="px-4 py-3">
-                                <div class="text-sm font-medium">${item.Date}</div>
-                                <div class="text-xs text-gray-500">${item.Time_start} - ${item.Time_end}</div>
+                                <div class="text-sm font-medium ${dateWarningClass}">
+                                    ${item.Date}
+                                    ${mismatch.dateMismatch ? `<i class="ri-alert-line text-red-600 ml-1" title="入力日付が正しくありません (実際: ${mismatch.objectIdDate})"></i>` : ''}
+                                </div>
+                                <div class="text-xs ${timeWarningClass}">
+                                    ${item.Time_start} - ${item.Time_end}
+                                    ${mismatch.timeMismatch ? `<i class="ri-time-line text-orange-600 ml-1" title="終了時刻がずれています (実際の送信: ${mismatch.objectIdTime})"></i>` : ''}
+                                </div>
                             </td>
                             <td class="px-4 py-3">${item.工場 || '-'}</td>
                             <td class="px-4 py-3 font-medium">${item.品番 || '-'}</td>
@@ -7830,6 +7918,13 @@ window.openApprovalDetail = async function(itemId) {
     // Get images for this process type
     const processImages = getProcessImages(item, currentApprovalTab);
     
+    // Check for date/time mismatch
+    const mismatch = checkDateTimeMismatch(item);
+    const dateWarningClass = mismatch.dateMismatch ? 'text-red-600 font-bold' : 'font-medium';
+    const timeWarningClass = mismatch.timeMismatch ? 'text-orange-600 font-semibold' : 'font-medium';
+    const dateWarningIcon = mismatch.dateMismatch ? `<i class="ri-alert-fill text-red-600 ml-1" title="入力日付が正しくありません"></i>` : '';
+    const timeWarningIcon = mismatch.timeMismatch ? `<i class="ri-time-line text-orange-600 ml-1" title="終了時刻がずれています"></i>` : '';
+    
     // Get all fields from the item, excluding system fields
     const excludeFields = ['_id', 'approvalStatus', 'approvedBy', 'approvedAt', 'approvalComment', 'correctionBy', 'correctionAt', 'correctionComment', 'approvalHistory'];
     const allFields = Object.entries(item)
@@ -7850,15 +7945,37 @@ window.openApprovalDetail = async function(itemId) {
             <div class="lg:col-span-2 space-y-4">
                 <div class="bg-gray-50 p-4 rounded-lg">
                     <h4 class="font-semibold text-gray-900 mb-3">基本情報</h4>
+                    ${mismatch.dateMismatch ? `
+                        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 mb-3 text-xs rounded">
+                            <div class="flex items-center">
+                                <i class="ri-error-warning-line text-lg mr-2"></i>
+                                <div>
+                                    <p class="font-semibold">日付エラー検出</p>
+                                    <p>入力日付: <strong>${item.Date}</strong> → 実際の送信: <strong>${mismatch.objectIdDate}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${mismatch.timeMismatch ? `
+                        <div class="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-3 mb-3 text-xs rounded">
+                            <div class="flex items-center">
+                                <i class="ri-time-line text-lg mr-2"></i>
+                                <div>
+                                    <p class="font-semibold">時刻のずれ検出</p>
+                                    <p>終了時刻: <strong>${item.Time_end}</strong> → 実際の送信: <strong>${mismatch.objectIdTime}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
                     <div class="grid grid-cols-2 gap-2 text-sm">
                         <div><span class="text-gray-600">品番:</span> <span class="font-medium">${item.品番 || '-'}</span></div>
                         <div><span class="text-gray-600">背番号:</span> <span class="font-medium">${item.背番号 || '-'}</span></div>
                         <div><span class="text-gray-600">工場:</span> <span class="font-medium">${item.工場 || '-'}</span></div>
                         <div><span class="text-gray-600">設備:</span> <span class="font-medium">${item.設備 || '-'}</span></div>
                         <div><span class="text-gray-600">作業者:</span> <span class="font-medium">${item.Worker_Name || '-'}</span></div>
-                        <div><span class="text-gray-600">日付:</span> <span class="font-medium">${item.Date || '-'}</span></div>
+                        <div><span class="text-gray-600">日付:</span> <span class="${dateWarningClass}">${item.Date || '-'} ${dateWarningIcon}</span></div>
                         <div><span class="text-gray-600">開始:</span> <span class="font-medium">${item.Time_start || '-'}</span></div>
-                        <div><span class="text-gray-600">終了:</span> <span class="font-medium">${item.Time_end || '-'}</span></div>
+                        <div><span class="text-gray-600">終了:</span> <span class="${timeWarningClass}">${item.Time_end || '-'} ${timeWarningIcon}</span></div>
                     </div>
                 </div>
                 
