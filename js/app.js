@@ -5393,6 +5393,11 @@ function loadPage(page) {
                                     <i class="ri-add-line mr-2"></i><span data-i18n="addInventory">Add Inventory</span>
                                 </button>
                             </div>
+                            <div id="inventoryResetAllSection" style="display: none;">
+                                <button onclick="openBatchResetModal()" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                                    <i class="ri-refresh-line mr-2"></i><span data-i18n="resetAll">Reset All</span>
+                                </button>
+                            </div>
                             <button onclick="exportInventoryData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                                 <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
                             </button>

@@ -23,6 +23,12 @@ function initializeInventorySystem() {
         addInventorySection.style.display = 'flex';
     }
     
+    // Show reset all button for admin only
+    const resetAllSection = document.getElementById('inventoryResetAllSection');
+    if (currentUser.role === 'admin' && resetAllSection) {
+        resetAllSection.style.display = 'flex';
+    }
+    
     // Event listeners
     setupInventoryEventListeners();
     
@@ -1126,6 +1132,381 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+// ==================== BATCH RESET FUNCTIONALITY ====================
+
+let batchResetFilters = [];
+let batchResetFilteredItems = [];
+let batchResetSelectedItems = [];
+
+/**
+ * Open batch reset modal
+ */
+window.openBatchResetModal = function() {
+    // Create modal HTML
+    const modalHTML = `
+        <div id="batchResetModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+                <!-- Header -->
+                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h2 class="text-2xl font-bold text-gray-900">一括在庫リセット (Batch Inventory Reset)</h2>
+                    <button onclick="closeBatchResetModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="ri-close-line text-2xl"></i>
+                    </button>
+                </div>
+
+                <!-- Filters Section -->
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold text-gray-900">
+                            <i class="ri-filter-3-line mr-2"></i>Advanced Filters
+                        </h3>
+                        <button onclick="addBatchResetFilter()" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                            <i class="ri-add-line mr-1"></i>Add Filter
+                        </button>
+                    </div>
+                    <div id="batchResetFiltersContainer" class="space-y-3"></div>
+                    <div class="mt-4 flex justify-end">
+                        <button onclick="applyBatchResetFilters()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            <i class="ri-search-line mr-2"></i>Apply Filters
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div id="batchResetResultsSection" class="flex-1 overflow-y-auto px-6 py-4">
+                    <div class="text-center text-gray-500 py-12">
+                        <i class="ri-filter-line text-4xl mb-2"></i>
+                        <p>Apply filters to see items</p>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+                    <div class="text-sm text-gray-600">
+                        <span id="batchResetSelectedCount">0</span> items selected
+                    </div>
+                    <div class="flex space-x-3">
+                        <button onclick="closeBatchResetModal()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                            Cancel
+                        </button>
+                        <button id="batchResetBtn" onclick="confirmBatchReset()" disabled class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="ri-refresh-line mr-2"></i>Reset Selected
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Initialize with one filter
+    addBatchResetFilter();
+};
+
+/**
+ * Close batch reset modal
+ */
+window.closeBatchResetModal = function() {
+    const modal = document.getElementById('batchResetModal');
+    if (modal) {
+        modal.remove();
+    }
+    batchResetFilters = [];
+    batchResetFilteredItems = [];
+    batchResetSelectedItems = [];
+};
+
+/**
+ * Add filter row
+ */
+window.addBatchResetFilter = function() {
+    const container = document.getElementById('batchResetFiltersContainer');
+    const filterId = Date.now();
+    
+    const filterHTML = `
+        <div class="flex items-center space-x-3" data-filter-id="${filterId}">
+            <select class="px-3 py-2 border border-gray-300 rounded-lg flex-1" onchange="updateBatchResetFilterOperator(${filterId})">
+                <option value="">Select Field...</option>
+                <option value="品番">品番 (Part Number)</option>
+                <option value="背番号">背番号 (Serial Number)</option>
+                <option value="工場">工場 (Factory)</option>
+                <option value="モデル">モデル (Model)</option>
+            </select>
+            <select class="px-3 py-2 border border-gray-300 rounded-lg" data-operator="${filterId}">
+                <option value="equals">Equals</option>
+                <option value="contains">Contains</option>
+            </select>
+            <input type="text" class="px-3 py-2 border border-gray-300 rounded-lg flex-1" data-value="${filterId}" placeholder="Enter value...">
+            <button onclick="removeBatchResetFilter(${filterId})" class="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                <i class="ri-delete-bin-line text-xl"></i>
+            </button>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', filterHTML);
+};
+
+/**
+ * Remove filter row
+ */
+window.removeBatchResetFilter = function(filterId) {
+    const filterRow = document.querySelector(`[data-filter-id="${filterId}"]`);
+    if (filterRow) {
+        filterRow.remove();
+    }
+};
+
+/**
+ * Update filter operator based on field type
+ */
+window.updateBatchResetFilterOperator = function(filterId) {
+    // Placeholder for future logic if needed
+};
+
+/**
+ * Apply filters and show results
+ */
+window.applyBatchResetFilters = async function() {
+    const filterRows = document.querySelectorAll('#batchResetFiltersContainer [data-filter-id]');
+    const filters = [];
+    
+    filterRows.forEach(row => {
+        const field = row.querySelector('select').value;
+        const operator = row.querySelector('[data-operator]').value;
+        const value = row.querySelector('[data-value]').value.trim();
+        
+        if (field && value) {
+            filters.push({ field, operator, value });
+        }
+    });
+    
+    if (filters.length === 0) {
+        alert('Please add at least one filter');
+        return;
+    }
+    
+    // Show loading
+    const resultsSection = document.getElementById('batchResetResultsSection');
+    resultsSection.innerHTML = '<div class="text-center py-12"><i class="ri-loader-4-line animate-spin text-4xl text-blue-600"></i><p class="mt-2 text-gray-600">Loading...</p></div>';
+    
+    try {
+        // Fetch filtered inventory data
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'getBatchResetItems',
+                filters: filters
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            batchResetFilteredItems = result.data;
+            renderBatchResetResults(result.data);
+        } else {
+            throw new Error(result.error || 'Failed to fetch items');
+        }
+    } catch (error) {
+        console.error('Error applying filters:', error);
+        resultsSection.innerHTML = `<div class="text-center text-red-500 py-12"><i class="ri-error-warning-line text-4xl mb-2"></i><p>Error: ${error.message}</p></div>`;
+    }
+};
+
+/**
+ * Render filtered results with checkboxes
+ */
+function renderBatchResetResults(items) {
+    const resultsSection = document.getElementById('batchResetResultsSection');
+    
+    if (items.length === 0) {
+        resultsSection.innerHTML = '<div class="text-center text-gray-500 py-12"><i class="ri-inbox-line text-4xl mb-2"></i><p>No items match your filters</p></div>';
+        return;
+    }
+    
+    const resultsHTML = `
+        <div class="space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-semibold text-gray-900">${items.length} items found</h3>
+                <label class="flex items-center space-x-2 cursor-pointer">
+                    <input type="checkbox" id="selectAllBatchReset" onchange="toggleSelectAllBatchReset()" class="w-4 h-4 text-blue-600 rounded">
+                    <span class="text-sm text-gray-700">Select All</span>
+                </label>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm border-collapse">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="px-4 py-2 text-left"></th>
+                            <th class="px-4 py-2 text-left">品番</th>
+                            <th class="px-4 py-2 text-left">背番号</th>
+                            <th class="px-4 py-2 text-left">工場</th>
+                            <th class="px-4 py-2 text-right">Physical</th>
+                            <th class="px-4 py-2 text-right">Reserved</th>
+                            <th class="px-4 py-2 text-right">Available</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map((item, index) => {
+                            const isAllZero = item.physicalQuantity === 0 && item.reservedQuantity === 0 && item.availableQuantity === 0;
+                            const rowClass = isAllZero ? 'bg-gray-50 text-gray-400' : '';
+                            return `
+                                <tr class="border-b ${rowClass}">
+                                    <td class="px-4 py-2">
+                                        <input type="checkbox" 
+                                            class="batch-reset-item-checkbox w-4 h-4 text-blue-600 rounded" 
+                                            data-item-index="${index}"
+                                            ${isAllZero ? 'disabled' : ''}
+                                            onchange="updateBatchResetSelection()">
+                                    </td>
+                                    <td class="px-4 py-2 font-medium">${item.品番}</td>
+                                    <td class="px-4 py-2">${item.背番号}</td>
+                                    <td class="px-4 py-2">${item.工場 || '-'}</td>
+                                    <td class="px-4 py-2 text-right ${item.physicalQuantity > 0 ? 'text-green-600 font-medium' : ''}">${item.physicalQuantity}</td>
+                                    <td class="px-4 py-2 text-right ${item.reservedQuantity > 0 ? 'text-yellow-600 font-medium' : ''}">${item.reservedQuantity}</td>
+                                    <td class="px-4 py-2 text-right ${item.availableQuantity > 0 ? 'text-purple-600 font-medium' : ''}">${item.availableQuantity}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+    
+    resultsSection.innerHTML = resultsHTML;
+}
+
+/**
+ * Toggle select all
+ */
+window.toggleSelectAllBatchReset = function() {
+    const selectAll = document.getElementById('selectAllBatchReset').checked;
+    const checkboxes = document.querySelectorAll('.batch-reset-item-checkbox:not([disabled])');
+    checkboxes.forEach(cb => cb.checked = selectAll);
+    updateBatchResetSelection();
+};
+
+/**
+ * Update selection count and button state
+ */
+window.updateBatchResetSelection = function() {
+    const checkboxes = document.querySelectorAll('.batch-reset-item-checkbox:checked');
+    const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.dataset.itemIndex));
+    batchResetSelectedItems = selectedIndices.map(i => batchResetFilteredItems[i]);
+    
+    document.getElementById('batchResetSelectedCount').textContent = batchResetSelectedItems.length;
+    document.getElementById('batchResetBtn').disabled = batchResetSelectedItems.length === 0;
+};
+
+/**
+ * Confirm batch reset (first confirmation)
+ */
+window.confirmBatchReset = function() {
+    if (batchResetSelectedItems.length === 0) return;
+    
+    const summaryItems = batchResetSelectedItems.slice(0, 5).map(item => 
+        `${item.背番号} (${item.品番}): Physical=${item.physicalQuantity}, Reserved=${item.reservedQuantity}, Available=${item.availableQuantity}`
+    ).join('\n');
+    
+    const more = batchResetSelectedItems.length > 5 ? `\n...and ${batchResetSelectedItems.length - 5} more items` : '';
+    
+    const message = `Reset ${batchResetSelectedItems.length} items to zero?\n\n${summaryItems}${more}\n\nContinue?`;
+    
+    if (confirm(message)) {
+        showFinalBatchResetConfirmation();
+    }
+};
+
+/**
+ * Show final scary confirmation
+ */
+function showFinalBatchResetConfirmation() {
+    const message = `⚠️ この操作は全ての選択された在庫をゼロにリセットします。履歴から元に戻すことも可能ですが、慎重に確認してください。\n\n本当に実行しますか？`;
+    
+    if (confirm(message)) {
+        executeBatchReset();
+    }
+}
+
+/**
+ * Execute batch reset
+ */
+async function executeBatchReset() {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    const fullNameElement = document.getElementById('userFullName');
+    const fullName = fullNameElement ? fullNameElement.textContent.trim() : (currentUser.username || 'admin');
+    
+    // Show progress modal
+    const progressModal = createProgressModal();
+    document.body.appendChild(progressModal);
+    
+    try {
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'batchResetInventory',
+                items: batchResetSelectedItems,
+                submittedBy: currentUser.username || 'admin',
+                fullName: fullName
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showBatchResetResults(result);
+        } else {
+            throw new Error(result.error || 'Batch reset failed');
+        }
+    } catch (error) {
+        console.error('Batch reset error:', error);
+        alert('❌ バッチリセットに失敗しました: ' + error.message);
+        progressModal.remove();
+    }
+}
+
+/**
+ * Create progress modal
+ */
+function createProgressModal() {
+    const modal = document.createElement('div');
+    modal.id = 'batchResetProgressModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg p-8 max-w-md w-full text-center">
+            <i class="ri-loader-4-line animate-spin text-6xl text-blue-600 mb-4"></i>
+            <h3 class="text-xl font-semibold mb-2">Processing Reset...</h3>
+            <p class="text-gray-600">Please wait while we reset the inventory items.</p>
+        </div>
+    `;
+    return modal;
+}
+
+/**
+ * Show batch reset results
+ */
+function showBatchResetResults(result) {
+    // Remove progress modal
+    const progressModal = document.getElementById('batchResetProgressModal');
+    if (progressModal) progressModal.remove();
+    
+    // Close batch reset modal
+    closeBatchResetModal();
+    
+    // Show results
+    const message = `✅ Batch Reset Completed!\n\nSuccessfully reset: ${result.successCount} items\nBatch ID: ${result.batchResetId}\n\nInventory has been updated.`;
+    alert(message);
+    
+    // Reload inventory data
+    loadInventoryData();
 }
 
 // Make functions globally available
