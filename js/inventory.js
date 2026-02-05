@@ -1167,11 +1167,6 @@ window.openBatchResetModal = async function() {
                         </button>
                     </div>
                     <div id="batchResetFiltersContainer" class="space-y-2"></div>
-                    <div class="mt-3 flex justify-end">
-                        <button onclick="applyBatchResetFilters()" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
-                            <i class="ri-search-line mr-1"></i>Apply Filters
-                        </button>
-                    </div>
                 </div>
 
                 <!-- Results Section -->
@@ -1229,19 +1224,19 @@ window.addBatchResetFilter = async function() {
     
     const filterHTML = `
         <div class="flex items-center space-x-2" data-filter-id="${filterId}">
-            <select class="px-2 py-1.5 border border-gray-300 rounded text-sm flex-1" onchange="updateBatchResetFilterInput(${filterId})">
+            <select class="px-2 py-1.5 border border-gray-300 rounded text-sm flex-1" onchange="updateBatchResetFilterInput(${filterId}); applyBatchResetFilters();">
                 <option value="">Select Field...</option>
                 <option value="品番">品番</option>
                 <option value="背番号">背番号</option>
                 <option value="工場">工場</option>
                 <option value="モデル">モデル</option>
             </select>
-            <select class="px-2 py-1.5 border border-gray-300 rounded text-sm" data-operator="${filterId}">
+            <select class="px-2 py-1.5 border border-gray-300 rounded text-sm" data-operator="${filterId}" onchange="applyBatchResetFilters();">
                 <option value="equals">Equals</option>
                 <option value="contains">Contains</option>
             </select>
             <div data-value-container="${filterId}" class="flex-1">
-                <input type="text" class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" placeholder="Enter value...">
+                <input type="text" class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" placeholder="Enter value..." onblur="applyBatchResetFilters();">
             </div>
             <button onclick="removeBatchResetFilter(${filterId})" class="p-1.5 text-red-600 hover:bg-red-50 rounded">
                 <i class="ri-delete-bin-line text-lg"></i>
@@ -1294,7 +1289,7 @@ window.updateBatchResetFilterInput = async function(filterId) {
                 
                 // Create dropdown
                 valueContainer.innerHTML = `
-                    <select class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}">
+                    <select class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" onchange="applyBatchResetFilters();">
                         <option value="">Select Model...</option>
                         ${models.map(model => `<option value="${model}">${model}</option>`).join('')}
                     </select>
@@ -1325,7 +1320,7 @@ window.updateBatchResetFilterInput = async function(filterId) {
                 
                 // Create dropdown
                 valueContainer.innerHTML = `
-                    <select class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}">
+                    <select class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" onchange="applyBatchResetFilters();">
                         <option value="">Select Factory...</option>
                         ${factories.map(factory => `<option value="${factory}">${factory}</option>`).join('')}
                     </select>
@@ -1337,7 +1332,7 @@ window.updateBatchResetFilterInput = async function(filterId) {
     } else {
         // Default to text input for other fields
         valueContainer.innerHTML = `
-            <input type="text" class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" placeholder="Enter value...">
+            <input type="text" class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" placeholder="Enter value..." onblur="applyBatchResetFilters();">
         `;
     }
 };
@@ -1435,23 +1430,21 @@ function renderBatchResetResults(items) {
         <div class="space-y-3">
             <div class="flex items-center justify-between">
                 <h3 class="text-sm font-semibold text-gray-900">${items.length} items found</h3>
-                <label class="flex items-center space-x-2 cursor-pointer">
-                    <input type="checkbox" id="selectAllBatchReset" onchange="toggleSelectAllBatchReset()" class="w-3.5 h-3.5 text-blue-600 rounded">
-                    <span class="text-xs text-gray-700">Select All</span>
-                </label>
             </div>
             
             <div class="overflow-x-auto">
                 <table class="w-full text-xs border-collapse">
                     <thead class="bg-gray-100">
                         <tr>
-                            <th class="px-2 py-1.5 text-left"></th>
+                            <th class="px-2 py-1.5 text-left">
+                                <input type="checkbox" id="selectAllBatchReset" onchange="toggleSelectAllBatchReset()" class="w-3.5 h-3.5 text-blue-600 rounded" title="Select All">
+                            </th>
                             <th class="px-2 py-1.5 text-left">品番</th>
                             <th class="px-2 py-1.5 text-left">背番号</th>
-                            <th class="px-2 py-1.5 text-left">工場</th>
                             <th class="px-2 py-1.5 text-right">Physical</th>
                             <th class="px-2 py-1.5 text-right">Reserved</th>
                             <th class="px-2 py-1.5 text-right">Available</th>
+                            <th class="px-2 py-1.5 text-left">工場</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1469,10 +1462,10 @@ function renderBatchResetResults(items) {
                                     </td>
                                     <td class="px-2 py-1.5 font-medium">${item.品番}</td>
                                     <td class="px-2 py-1.5">${item.背番号}</td>
-                                    <td class="px-2 py-1.5">${item.工場 || '-'}</td>
                                     <td class="px-2 py-1.5 text-right ${item.physicalQuantity > 0 ? 'text-green-600 font-medium' : ''}">${item.physicalQuantity}</td>
                                     <td class="px-2 py-1.5 text-right ${item.reservedQuantity > 0 ? 'text-yellow-600 font-medium' : ''}">${item.reservedQuantity}</td>
                                     <td class="px-2 py-1.5 text-right ${item.availableQuantity > 0 ? 'text-purple-600 font-medium' : ''}">${item.availableQuantity}</td>
+                                    <td class="px-2 py-1.5">${item.工場 || '-'}</td>
                                 </tr>
                             `;
                         }).join('')}
