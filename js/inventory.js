@@ -1143,56 +1143,56 @@ let batchResetSelectedItems = [];
 /**
  * Open batch reset modal
  */
-window.openBatchResetModal = function() {
+window.openBatchResetModal = async function() {
     // Create modal HTML
     const modalHTML = `
         <div id="batchResetModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div class="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
                 <!-- Header -->
-                <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                    <h2 class="text-2xl font-bold text-gray-900">一括在庫リセット (Batch Inventory Reset)</h2>
+                <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+                    <h2 class="text-lg font-bold text-gray-900">一括在庫リセット</h2>
                     <button onclick="closeBatchResetModal()" class="text-gray-400 hover:text-gray-600">
-                        <i class="ri-close-line text-2xl"></i>
+                        <i class="ri-close-line text-xl"></i>
                     </button>
                 </div>
 
                 <!-- Filters Section -->
-                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-semibold text-gray-900">
-                            <i class="ri-filter-3-line mr-2"></i>Advanced Filters
+                <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-semibold text-gray-700">
+                            <i class="ri-filter-3-line mr-1"></i>Advanced Filters
                         </h3>
-                        <button onclick="addBatchResetFilter()" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                        <button onclick="addBatchResetFilter()" class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
                             <i class="ri-add-line mr-1"></i>Add Filter
                         </button>
                     </div>
-                    <div id="batchResetFiltersContainer" class="space-y-3"></div>
-                    <div class="mt-4 flex justify-end">
-                        <button onclick="applyBatchResetFilters()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                            <i class="ri-search-line mr-2"></i>Apply Filters
+                    <div id="batchResetFiltersContainer" class="space-y-2"></div>
+                    <div class="mt-3 flex justify-end">
+                        <button onclick="applyBatchResetFilters()" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                            <i class="ri-search-line mr-1"></i>Apply Filters
                         </button>
                     </div>
                 </div>
 
                 <!-- Results Section -->
-                <div id="batchResetResultsSection" class="flex-1 overflow-y-auto px-6 py-4">
-                    <div class="text-center text-gray-500 py-12">
-                        <i class="ri-filter-line text-4xl mb-2"></i>
-                        <p>Apply filters to see items</p>
+                <div id="batchResetResultsSection" class="flex-1 overflow-y-auto px-4 py-3">
+                    <div class="text-center text-gray-500 py-8">
+                        <i class="ri-loader-4-line animate-spin text-3xl text-blue-600"></i>
+                        <p class="mt-2 text-sm">Loading all items...</p>
                     </div>
                 </div>
 
                 <!-- Footer -->
-                <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
-                    <div class="text-sm text-gray-600">
+                <div class="px-4 py-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+                    <div class="text-xs text-gray-600">
                         <span id="batchResetSelectedCount">0</span> items selected
                     </div>
-                    <div class="flex space-x-3">
-                        <button onclick="closeBatchResetModal()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                    <div class="flex space-x-2">
+                        <button onclick="closeBatchResetModal()" class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50">
                             Cancel
                         </button>
-                        <button id="batchResetBtn" onclick="confirmBatchReset()" disabled class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                            <i class="ri-refresh-line mr-2"></i>Reset Selected
+                        <button id="batchResetBtn" onclick="confirmBatchReset()" disabled class="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="ri-refresh-line mr-1"></i>Reset Selected
                         </button>
                     </div>
                 </div>
@@ -1203,8 +1203,8 @@ window.openBatchResetModal = function() {
     // Add modal to body
     document.body.insertAdjacentHTML('beforeend', modalHTML);
     
-    // Initialize with one filter
-    addBatchResetFilter();
+    // Load all items by default (no filters)
+    await loadAllBatchResetItems();
 };
 
 /**
@@ -1223,26 +1223,28 @@ window.closeBatchResetModal = function() {
 /**
  * Add filter row
  */
-window.addBatchResetFilter = function() {
+window.addBatchResetFilter = async function() {
     const container = document.getElementById('batchResetFiltersContainer');
     const filterId = Date.now();
     
     const filterHTML = `
-        <div class="flex items-center space-x-3" data-filter-id="${filterId}">
-            <select class="px-3 py-2 border border-gray-300 rounded-lg flex-1" onchange="updateBatchResetFilterOperator(${filterId})">
+        <div class="flex items-center space-x-2" data-filter-id="${filterId}">
+            <select class="px-2 py-1.5 border border-gray-300 rounded text-sm flex-1" onchange="updateBatchResetFilterInput(${filterId})">
                 <option value="">Select Field...</option>
-                <option value="品番">品番 (Part Number)</option>
-                <option value="背番号">背番号 (Serial Number)</option>
-                <option value="工場">工場 (Factory)</option>
-                <option value="モデル">モデル (Model)</option>
+                <option value="品番">品番</option>
+                <option value="背番号">背番号</option>
+                <option value="工場">工場</option>
+                <option value="モデル">モデル</option>
             </select>
-            <select class="px-3 py-2 border border-gray-300 rounded-lg" data-operator="${filterId}">
+            <select class="px-2 py-1.5 border border-gray-300 rounded text-sm" data-operator="${filterId}">
                 <option value="equals">Equals</option>
                 <option value="contains">Contains</option>
             </select>
-            <input type="text" class="px-3 py-2 border border-gray-300 rounded-lg flex-1" data-value="${filterId}" placeholder="Enter value...">
-            <button onclick="removeBatchResetFilter(${filterId})" class="p-2 text-red-600 hover:bg-red-50 rounded-lg">
-                <i class="ri-delete-bin-line text-xl"></i>
+            <div data-value-container="${filterId}" class="flex-1">
+                <input type="text" class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" placeholder="Enter value...">
+            </div>
+            <button onclick="removeBatchResetFilter(${filterId})" class="p-1.5 text-red-600 hover:bg-red-50 rounded">
+                <i class="ri-delete-bin-line text-lg"></i>
             </button>
         </div>
     `;
@@ -1261,10 +1263,114 @@ window.removeBatchResetFilter = function(filterId) {
 };
 
 /**
- * Update filter operator based on field type
+ * Update filter input based on field type
  */
-window.updateBatchResetFilterOperator = function(filterId) {
-    // Placeholder for future logic if needed
+window.updateBatchResetFilterInput = async function(filterId) {
+    const filterRow = document.querySelector(`[data-filter-id="${filterId}"]`);
+    if (!filterRow) return;
+    
+    const fieldSelect = filterRow.querySelector('select');
+    const valueContainer = filterRow.querySelector(`[data-value-container="${filterId}"]`);
+    const selectedField = fieldSelect.value;
+    
+    // If モデル is selected, fetch dropdown options
+    if (selectedField === 'モデル') {
+        try {
+            // Fetch distinct モデル values from masterDB
+            const response = await fetch(`${BASE_URL}queries`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dbName: 'Sasaki_Coating_MasterDB',
+                    collectionName: 'masterDB',
+                    query: {},
+                    projection: { 'モデル': 1 }
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                const models = [...new Set(data.map(item => item.モデル).filter(Boolean))].sort();
+                
+                // Create dropdown
+                valueContainer.innerHTML = `
+                    <select class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}">
+                        <option value="">Select Model...</option>
+                        ${models.map(model => `<option value="${model}">${model}</option>`).join('')}
+                    </select>
+                `;
+            } else {
+                console.error('Failed to fetch models');
+            }
+        } catch (error) {
+            console.error('Error fetching models:', error);
+        }
+    } else if (selectedField === '工場') {
+        try {
+            // Fetch distinct factory values
+            const response = await fetch(`${BASE_URL}queries`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dbName: 'Sasaki_Coating_MasterDB',
+                    collectionName: 'masterDB',
+                    query: {},
+                    projection: { '工場': 1 }
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                const factories = [...new Set(data.map(item => item.工場).filter(Boolean))].sort();
+                
+                // Create dropdown
+                valueContainer.innerHTML = `
+                    <select class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}">
+                        <option value="">Select Factory...</option>
+                        ${factories.map(factory => `<option value="${factory}">${factory}</option>`).join('')}
+                    </select>
+                `;
+            }
+        } catch (error) {
+            console.error('Error fetching factories:', error);
+        }
+    } else {
+        // Default to text input for other fields
+        valueContainer.innerHTML = `
+            <input type="text" class="px-2 py-1.5 border border-gray-300 rounded text-sm w-full" data-value="${filterId}" placeholder="Enter value...">
+        `;
+    }
+};
+
+/**
+ * Load all items without filters (default behavior)
+ */
+window.loadAllBatchResetItems = async function() {
+    const resultsSection = document.getElementById('batchResetResultsSection');
+    
+    try {
+        // Fetch ALL inventory data without filters
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'getBatchResetItems',
+                filters: [] // Empty filters = get all
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            batchResetFilteredItems = result.data;
+            renderBatchResetResults(result.data);
+        } else {
+            throw new Error(result.error || 'Failed to fetch items');
+        }
+    } catch (error) {
+        console.error('Error loading items:', error);
+        resultsSection.innerHTML = `<div class="text-center text-red-500 py-8"><i class="ri-error-warning-line text-3xl mb-2"></i><p class="text-sm">Error: ${error.message}</p></div>`;
+    }
 };
 
 /**
@@ -1277,21 +1383,17 @@ window.applyBatchResetFilters = async function() {
     filterRows.forEach(row => {
         const field = row.querySelector('select').value;
         const operator = row.querySelector('[data-operator]').value;
-        const value = row.querySelector('[data-value]').value.trim();
+        const valueElement = row.querySelector('[data-value]');
+        const value = valueElement ? (valueElement.value || valueElement.textContent || '').trim() : '';
         
         if (field && value) {
             filters.push({ field, operator, value });
         }
     });
     
-    if (filters.length === 0) {
-        alert('Please add at least one filter');
-        return;
-    }
-    
     // Show loading
     const resultsSection = document.getElementById('batchResetResultsSection');
-    resultsSection.innerHTML = '<div class="text-center py-12"><i class="ri-loader-4-line animate-spin text-4xl text-blue-600"></i><p class="mt-2 text-gray-600">Loading...</p></div>';
+    resultsSection.innerHTML = '<div class="text-center py-8"><i class="ri-loader-4-line animate-spin text-3xl text-blue-600"></i><p class="mt-2 text-sm text-gray-600">Loading...</p></div>';
     
     try {
         // Fetch filtered inventory data
@@ -1314,7 +1416,7 @@ window.applyBatchResetFilters = async function() {
         }
     } catch (error) {
         console.error('Error applying filters:', error);
-        resultsSection.innerHTML = `<div class="text-center text-red-500 py-12"><i class="ri-error-warning-line text-4xl mb-2"></i><p>Error: ${error.message}</p></div>`;
+        resultsSection.innerHTML = `<div class="text-center text-red-500 py-8"><i class="ri-error-warning-line text-3xl mb-2"></i><p class="text-sm">Error: ${error.message}</p></div>`;
     }
 };
 
@@ -1325,31 +1427,31 @@ function renderBatchResetResults(items) {
     const resultsSection = document.getElementById('batchResetResultsSection');
     
     if (items.length === 0) {
-        resultsSection.innerHTML = '<div class="text-center text-gray-500 py-12"><i class="ri-inbox-line text-4xl mb-2"></i><p>No items match your filters</p></div>';
+        resultsSection.innerHTML = '<div class="text-center text-gray-500 py-8"><i class="ri-inbox-line text-3xl mb-2"></i><p class="text-sm">No items found</p></div>';
         return;
     }
     
     const resultsHTML = `
-        <div class="space-y-4">
+        <div class="space-y-3">
             <div class="flex items-center justify-between">
-                <h3 class="text-lg font-semibold text-gray-900">${items.length} items found</h3>
+                <h3 class="text-sm font-semibold text-gray-900">${items.length} items found</h3>
                 <label class="flex items-center space-x-2 cursor-pointer">
-                    <input type="checkbox" id="selectAllBatchReset" onchange="toggleSelectAllBatchReset()" class="w-4 h-4 text-blue-600 rounded">
-                    <span class="text-sm text-gray-700">Select All</span>
+                    <input type="checkbox" id="selectAllBatchReset" onchange="toggleSelectAllBatchReset()" class="w-3.5 h-3.5 text-blue-600 rounded">
+                    <span class="text-xs text-gray-700">Select All</span>
                 </label>
             </div>
             
             <div class="overflow-x-auto">
-                <table class="w-full text-sm border-collapse">
+                <table class="w-full text-xs border-collapse">
                     <thead class="bg-gray-100">
                         <tr>
-                            <th class="px-4 py-2 text-left"></th>
-                            <th class="px-4 py-2 text-left">品番</th>
-                            <th class="px-4 py-2 text-left">背番号</th>
-                            <th class="px-4 py-2 text-left">工場</th>
-                            <th class="px-4 py-2 text-right">Physical</th>
-                            <th class="px-4 py-2 text-right">Reserved</th>
-                            <th class="px-4 py-2 text-right">Available</th>
+                            <th class="px-2 py-1.5 text-left"></th>
+                            <th class="px-2 py-1.5 text-left">品番</th>
+                            <th class="px-2 py-1.5 text-left">背番号</th>
+                            <th class="px-2 py-1.5 text-left">工場</th>
+                            <th class="px-2 py-1.5 text-right">Physical</th>
+                            <th class="px-2 py-1.5 text-right">Reserved</th>
+                            <th class="px-2 py-1.5 text-right">Available</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1358,19 +1460,19 @@ function renderBatchResetResults(items) {
                             const rowClass = isAllZero ? 'bg-gray-50 text-gray-400' : '';
                             return `
                                 <tr class="border-b ${rowClass}">
-                                    <td class="px-4 py-2">
+                                    <td class="px-2 py-1.5">
                                         <input type="checkbox" 
-                                            class="batch-reset-item-checkbox w-4 h-4 text-blue-600 rounded" 
+                                            class="batch-reset-item-checkbox w-3.5 h-3.5 text-blue-600 rounded" 
                                             data-item-index="${index}"
                                             ${isAllZero ? 'disabled' : ''}
                                             onchange="updateBatchResetSelection()">
                                     </td>
-                                    <td class="px-4 py-2 font-medium">${item.品番}</td>
-                                    <td class="px-4 py-2">${item.背番号}</td>
-                                    <td class="px-4 py-2">${item.工場 || '-'}</td>
-                                    <td class="px-4 py-2 text-right ${item.physicalQuantity > 0 ? 'text-green-600 font-medium' : ''}">${item.physicalQuantity}</td>
-                                    <td class="px-4 py-2 text-right ${item.reservedQuantity > 0 ? 'text-yellow-600 font-medium' : ''}">${item.reservedQuantity}</td>
-                                    <td class="px-4 py-2 text-right ${item.availableQuantity > 0 ? 'text-purple-600 font-medium' : ''}">${item.availableQuantity}</td>
+                                    <td class="px-2 py-1.5 font-medium">${item.品番}</td>
+                                    <td class="px-2 py-1.5">${item.背番号}</td>
+                                    <td class="px-2 py-1.5">${item.工場 || '-'}</td>
+                                    <td class="px-2 py-1.5 text-right ${item.physicalQuantity > 0 ? 'text-green-600 font-medium' : ''}">${item.physicalQuantity}</td>
+                                    <td class="px-2 py-1.5 text-right ${item.reservedQuantity > 0 ? 'text-yellow-600 font-medium' : ''}">${item.reservedQuantity}</td>
+                                    <td class="px-2 py-1.5 text-right ${item.availableQuantity > 0 ? 'text-purple-600 font-medium' : ''}">${item.availableQuantity}</td>
                                 </tr>
                             `;
                         }).join('')}
