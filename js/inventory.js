@@ -523,6 +523,42 @@ function renderInventoryTransactions(transactions, backNumber) {
                 </div>
             </div>
 
+            <!-- Admin Reset Toggle Button -->
+            <div class="flex justify-end">
+                <button 
+                    onclick="toggleAdminReset()"
+                    class="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition-colors flex items-center">
+                    <i class="ri-refresh-line mr-2"></i>
+                    在庫リセット
+                </button>
+            </div>
+
+            <!-- Admin Reset Controls (Hidden by default) -->
+            <div id="adminResetSection" class="bg-red-50 p-4 rounded-lg border border-red-200 hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h4 class="text-lg font-semibold text-red-900">管理者リセット</h4>
+                        <p class="text-sm text-red-600">在庫をゼロにリセットします（監査証跡が作成されます）</p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="resetPhysical" class="w-4 h-4 text-red-600 rounded focus:ring-red-500" checked>
+                        <span class="text-sm text-gray-700">物理在庫をリセット（利用可能も自動リセット）</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="resetReserved" class="w-4 h-4 text-red-600 rounded focus:ring-red-500">
+                        <span class="text-sm text-gray-700">引当在庫をリセット</span>
+                    </label>
+                </div>
+                <button 
+                    onclick="confirmInventoryReset('${backNumber}', '${currentItem.品番}', ${currentItem.physicalQuantity || 0}, ${currentItem.reservedQuantity || 0}, ${currentItem.availableQuantity || currentItem.runningQuantity || 0}, '${currentItem.工場 || ''}')"
+                    class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center">
+                    <i class="ri-refresh-line mr-2"></i>
+                    在庫をリセット
+                </button>
+            </div>
+
             <!-- Transaction History -->
             <div>
                 <h4 class="text-lg font-semibold text-gray-900 mb-4">${t('transactionHistory')}</h4>
@@ -596,6 +632,103 @@ function getTransactionActionInfo(action) {
 window.closeInventoryTransactionsModal = function() {
     const modal = document.getElementById('inventoryTransactionsModal');
     modal.classList.add('hidden');
+    // Reset admin section visibility when closing modal
+    const adminSection = document.getElementById('adminResetSection');
+    if (adminSection) {
+        adminSection.classList.add('hidden');
+    }
+};
+
+/**
+ * Toggle admin reset section visibility
+ */
+window.toggleAdminReset = function() {
+    const adminSection = document.getElementById('adminResetSection');
+    if (adminSection) {
+        adminSection.classList.toggle('hidden');
+    }
+};
+
+/**
+ * Confirm inventory reset
+ */
+window.confirmInventoryReset = async function(backNumber, partNumber, currentPhysical, currentReserved, currentAvailable, factory) {
+    const resetPhysical = document.getElementById('resetPhysical').checked;
+    const resetReserved = document.getElementById('resetReserved').checked;
+    // Available is automatically reset when physical is reset
+    const resetAvailable = resetPhysical;
+    
+    if (!resetPhysical && !resetReserved) {
+        alert('少なくとも1つの項目を選択してください');
+        return;
+    }
+    
+    // Check if there's actually anything to reset
+    const hasPhysicalToReset = resetPhysical && (currentPhysical !== 0 || currentAvailable !== 0);
+    const hasReservedToReset = resetReserved && currentReserved !== 0;
+    
+    if (!hasPhysicalToReset && !hasReservedToReset) {
+        alert('リセットする必要はありません。\n\n選択した在庫はすでにゼロです。');
+        return;
+    }
+    
+    const resetItems = [];
+    if (resetPhysical) {
+        resetItems.push(`物理在庫: ${currentPhysical} → 0`);
+        resetItems.push(`利用可能: ${currentAvailable} → 0`);
+    }
+    if (resetReserved) resetItems.push(`引当在庫: ${currentReserved} → 0`);
+    
+    const confirmMessage = `在庫をリセットしますか？\n\n背番号: ${backNumber}\n品番: ${partNumber}\n\n${resetItems.join('\n')}\n\n⚠️ この操作は取り消せません。監査証跡が作成されます。`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const fullNameElement = document.getElementById('userFullName');
+        const fullName = fullNameElement ? fullNameElement.textContent.trim() : (currentUser.username || 'admin');
+        
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'resetInventory',
+                backNumber: backNumber,
+                partNumber: partNumber,
+                currentPhysical: currentPhysical,
+                currentReserved: currentReserved,
+                currentAvailable: currentAvailable,
+                resetPhysical: resetPhysical,
+                resetReserved: resetReserved,
+                resetAvailable: resetAvailable,
+                factory: factory,
+                submittedBy: currentUser.username || 'admin',
+                fullName: fullName
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to reset inventory');
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('✅ 在庫がリセットされました');
+            closeInventoryTransactionsModal();
+            loadInventoryData(); // Reload inventory table
+        } else {
+            throw new Error(result.error || 'Reset failed');
+        }
+        
+    } catch (error) {
+        console.error('Error resetting inventory:', error);
+        alert('❌ 在庫のリセットに失敗しました: ' + error.message);
+    }
 };
 
 // ==================== ADD INVENTORY FUNCTIONALITY ====================
