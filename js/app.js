@@ -8957,15 +8957,11 @@ async function renderApprovalList() {
         // Update global variable for current page operations and apply any active sort
         filteredApprovalData = applySortToData(listData);
 
-        // Sort by Time_start for list view (default) only if no other sort is active
+        // Use backend sorting (which already has priority: date errors → time warnings → FIFO)
+        // Only apply additional client-side sort if user explicitly clicked a column
         let sortedData = [...filteredApprovalData];
-        if (!approvalSortState.column) {
-            sortedData.sort((a, b) => {
-                const timeA = a.Time_start || '00:00';
-                const timeB = b.Time_start || '00:00';
-                return timeA.localeCompare(timeB);
-            });
-        }
+        // DO NOT sort by Time_start by default - respect backend's priority sorting
+        // Backend already sorted by: _hasDateMismatch DESC, _hasTimeMismatch DESC, _id ASC (FIFO)
 
         console.log(`📋 Rendering list view with ${sortedData.length} items (Page ${paginationInfo.currentPage}/${paginationInfo.totalPages})`);
 
@@ -9396,11 +9392,19 @@ function getAllFieldsForTab(tabName, data) {
 function createListRow(item, index, allFields) {
     const statusInfo = getStatusInfo(item);
     
+    // Check for date/time mismatch
+    const mismatchInfo = checkDateTimeMismatch(item);
+    const hasDateMismatch = mismatchInfo.dateMismatch;
+    const hasTimeMismatch = mismatchInfo.timeMismatch;
+    
     // Check for obvious wrong data
     const hasWrongData = detectWrongData(item);
     const wrongDataClass = hasWrongData ? 'bg-red-100 border-red-300' : '';
     
-    const rowClass = 'hover:bg-gray-50 ' + statusInfo.rowClass + ' ' + wrongDataClass + ' ' + (index % 2 === 0 ? 'bg-gray-25' : '');
+    // Add date mismatch highlighting (red border for critical errors)
+    const dateMismatchClass = hasDateMismatch ? 'bg-red-50 border-l-4 border-red-400' : '';
+    
+    const rowClass = 'hover:bg-gray-50 ' + statusInfo.rowClass + ' ' + wrongDataClass + ' ' + dateMismatchClass + ' ' + (index % 2 === 0 ? 'bg-gray-25' : '');
     
     let rowHtml = '<tr class="' + rowClass + '" onclick="openApprovalDetail(\'' + item._id + '\')" style="cursor: pointer;">';
     
@@ -9420,7 +9424,11 @@ function createListRow(item, index, allFields) {
     rowHtml += '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ' + statusInfo.badgeClass + '">';
     rowHtml += '<i class="' + statusInfo.icon + ' mr-1"></i>';
     rowHtml += statusInfo.text;
-    if (hasWrongData) {
+    if (hasDateMismatch) {
+        rowHtml += ' <i class="ri-alert-fill text-red-600" title="入力日付が正しくありません"></i>';
+    } else if (hasTimeMismatch) {
+        rowHtml += ' <i class="ri-time-line text-orange-500" title="入力時刻が30分以上ずれています"></i>';
+    } else if (hasWrongData) {
         rowHtml += ' ⚠️';
     }
     rowHtml += '</span>';
@@ -9439,16 +9447,33 @@ function createListRow(item, index, allFields) {
             value = item[field.name] !== undefined ? item[field.name] : '';
         }
 
+        // Store original value for display
+        let displayValue = value;
+        let iconHtml = '';
+
+        // Add date/time mismatch highlighting for Date field
+        if (field.name === 'Date' && hasDateMismatch) {
+            cellClass += ' text-red-600 font-semibold';
+            iconHtml = '<i class="ri-alert-fill ml-1" title="ObjectId日付: ' + mismatchInfo.objectIdDate + '"></i>';
+        }
+        
+        // Add time mismatch highlighting for Time_end field
+        // Show orange even if there's also a date mismatch
+        if (field.name === 'Time_end' && hasTimeMismatch) {
+            cellClass += ' text-orange-600';
+            iconHtml = '<i class="ri-time-line ml-1" title="ObjectId時刻: ' + mismatchInfo.objectIdTime + '"></i>';
+        }
+
         // Special formatting
         if (field.isImage && value) {
-            value = '✅ OK';
+            displayValue = '✅ OK';
             cellClass += ' text-green-600 font-medium text-center';
         } else if (field.name.includes('不良') && value > 0) {
             cellClass += ' text-red-600 font-medium';
         } else if (field.name.includes('NG') && value > 0) {
             cellClass += ' text-red-600 font-medium';
         } else if (typeof value === 'number' && value > 0) {
-            value = value.toLocaleString();
+            displayValue = value.toLocaleString();
         } else if (typeof value === 'number' && value < 0) {
             // Highlight negative numbers
             cellClass += ' text-red-600 font-medium bg-red-50';
@@ -9459,7 +9484,7 @@ function createListRow(item, index, allFields) {
             cellClass += ' bg-blue-25';
         }
 
-        rowHtml += '<td class="' + cellClass + '" title="' + field.displayName + ': ' + value + '">' + (value || '-') + '</td>';
+        rowHtml += '<td class="' + cellClass + '" title="' + field.displayName + ': ' + value + '">' + (displayValue || '-') + iconHtml + '</td>';
     });
     
     rowHtml += '</tr>';
