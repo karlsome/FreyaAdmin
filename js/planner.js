@@ -7476,28 +7476,59 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
     const endMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
     const totalMinutes = endMinutes - startMinutes;
     
-    // Calculate total scheduled quantity
+    // Fetch goals and actual production to calculate progress
     let totalScheduledQty = 0;
-    plannerState.selectedProducts.forEach(p => {
-        totalScheduledQty += p.quantity || 0;
-    });
-    
-    // Fetch goals for this date to calculate progress
     let totalGoalQty = 0;
     let progressPercent = 0;
+    
     try {
-        const goalsResponse = await fetch(`${BASE_URL}api/production-goals/date/${date}?factory=${factory}`);
+        // Fetch goals for target quantity
+        const goalsResponse = await fetch(`${BASE_URL}api/production-goals?date=${date}&factory=${encodeURIComponent(factory)}`);
         if (goalsResponse.ok) {
-            const goals = await goalsResponse.json();
+            const result = await goalsResponse.json();
+            const goals = result.data || result;
+            
             goals.forEach(goal => {
                 totalGoalQty += goal.targetQuantity || 0;
             });
-            if (totalGoalQty > 0) {
-                progressPercent = Math.round((totalScheduledQty / totalGoalQty) * 100);
+        }
+        
+        // Fetch actual production from pressDB (same as factory status)
+        const productionResponse = await fetch(`${BASE_URL}queries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'pressDB',
+                aggregation: [
+                    {
+                        $match: {
+                            Date: date,
+                            工場: factory
+                        }
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalQuantity: { $sum: '$Process_Quantity' }
+                        }
+                    }
+                ]
+            })
+        });
+        
+        if (productionResponse.ok) {
+            const productionData = await productionResponse.json();
+            if (productionData && productionData.length > 0) {
+                totalScheduledQty = productionData[0].totalQuantity || 0;
             }
         }
+        
+        if (totalGoalQty > 0) {
+            progressPercent = Math.round((totalScheduledQty / totalGoalQty) * 100);
+        }
     } catch (error) {
-        console.warn('Could not fetch goals:', error);
+        console.warn('Could not fetch production data:', error);
     }
     
     // Collect all unique products with their colors for legend
