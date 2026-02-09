@@ -2450,17 +2450,7 @@ function updateSelectedProductsSummary(searchTerm = '') {
         </div>
     ` : '';
     
-    const clearAllButton = `
-        <div class="mb-1 flex justify-end">
-            <button onclick="clearAllSelectedProducts()" 
-                    class="px-2 py-0.5 text-[10px] bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center gap-1">
-                <i class="ri-delete-bin-line text-xs"></i>
-                <span>Clear All</span>
-            </button>
-        </div>
-    `;
-    
-    container.innerHTML = searchResultInfo + clearAllButton + Object.entries(byEquipment).map(([equipment, data]) => {
+    const equipmentCards = Object.entries(byEquipment).map(([equipment, data]) => {
         // Filter items if search term is provided
         const searchLower = searchTerm.toLowerCase();
         const filteredItems = searchTerm ? data.items.filter(item => 
@@ -2482,7 +2472,7 @@ function updateSelectedProductsSummary(searchTerm = '') {
         const latestEnd = Math.max(...data.items.map((item, idx) => {
             const start = startTimes[idx];
             const duration = item.estimatedTime.totalSeconds / 60;
-            return start + duration;
+            return Math.round(start + duration); // Round to nearest minute
         }));
         
         const timeRange = `${minutesToTime(earliestStart)} - ${minutesToTime(latestEnd)}`;
@@ -2531,7 +2521,7 @@ function updateSelectedProductsSummary(searchTerm = '') {
                         const startTime = item.startTime;
                         const startMinutes = timeToMinutes(startTime);
                         const durationMinutes = item.estimatedTime.totalSeconds / 60;
-                        const endMinutes = startMinutes + durationMinutes;
+                        const endMinutes = Math.round(startMinutes + durationMinutes); // Round to nearest minute
                         
                         // Find breaks during this product's time
                         const affectingBreaks = plannerState.breaks.filter(brk => {
@@ -2552,14 +2542,14 @@ function updateSelectedProductsSummary(searchTerm = '') {
                             affectingBreaks.forEach(brk => {
                                 const breakStart = timeToMinutes(brk.start);
                                 if (currentTime < breakStart) {
-                                    ranges.push(`${minutesToTime(currentTime)} - ${minutesToTime(breakStart)}`);
+                                    ranges.push(`${minutesToTime(Math.round(currentTime))} - ${minutesToTime(Math.round(breakStart))}`);
                                 }
                                 currentTime = timeToMinutes(brk.end);
                             });
                             
                             // Add final range after last break
                             if (currentTime < endMinutes) {
-                                ranges.push(`${minutesToTime(currentTime)} - ${minutesToTime(endMinutes)}`);
+                                ranges.push(`${minutesToTime(Math.round(currentTime))} - ${minutesToTime(endMinutes)}`);
                             }
                             
                             timeRanges = ranges.join(', ');
@@ -2598,6 +2588,18 @@ function updateSelectedProductsSummary(searchTerm = '') {
             </div>
         `;
     }).join('');
+    
+    const clearAllButton = `
+        <div class="mt-2 flex justify-end">
+            <button onclick="clearAllSelectedProducts()" 
+                    class="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors flex items-center gap-1.5">
+                <i class="ri-delete-bin-line"></i>
+                <span>Clear All</span>
+            </button>
+        </div>
+    `;
+    
+    container.innerHTML = searchResultInfo + equipmentCards + clearAllButton;
 }
 
 async function removeSelectedProduct(productId) {
@@ -6932,4 +6934,426 @@ window.addNewGoalFromTable = addNewGoalFromTable;
 window.handleGoalBackNumberBlur = handleGoalBackNumberBlur;
 window.handleGoalPartNumberBlur = handleGoalPartNumberBlur;
 window.toggleEquipmentCard = toggleEquipmentCard;
+
+// ============================================
+// PRINT FUNCTIONALITY
+// ============================================
+
+// Show print modal with equipment selection
+window.showPrintModal = function() {
+    if (plannerState.selectedProducts.length === 0) {
+        showPlannerNotification('No products selected to print', 'error');
+        return;
+    }
+    
+    // Get unique equipment list from selected products, sorted
+    const equipmentSet = new Set(plannerState.selectedProducts.map(p => p.equipment));
+    const equipmentList = Array.from(equipmentSet).sort();
+    
+    const modalHTML = `
+        <div id="printModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Select Equipment to Print</h3>
+                    <button onclick="closePrintModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+                
+                <div class="p-4">
+                    <div class="mb-4">
+                        <label class="flex items-center gap-2 mb-3 cursor-pointer">
+                            <input type="checkbox" id="selectAllEquipment" onchange="toggleAllEquipment(this.checked)" checked class="rounded">
+                            <span class="font-medium text-gray-900 dark:text-white">Select All</span>
+                        </label>
+                    </div>
+                    
+                    <div class="space-y-2 max-h-96 overflow-y-auto">
+                        ${equipmentList.map(equipment => `
+                            <label class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded">
+                                <input type="checkbox" class="equipment-checkbox rounded" value="${equipment}" checked>
+                                <span class="text-gray-900 dark:text-white">${equipment}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="flex items-center justify-end gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
+                    <button onclick="closePrintModal()" 
+                            class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600">
+                        Cancel
+                    </button>
+                    <button onclick="printSelectedEquipment()" 
+                            class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2">
+                        <i class="ri-printer-line"></i>
+                        <span>Print</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+window.closePrintModal = function() {
+    const modal = document.getElementById('printModal');
+    if (modal) modal.remove();
+};
+
+window.toggleAllEquipment = function(checked) {
+    document.querySelectorAll('.equipment-checkbox').forEach(checkbox => {
+        checkbox.checked = checked;
+    });
+};
+
+window.printSelectedEquipment = async function() {
+    // Get selected equipment
+    const selectedEquipment = Array.from(document.querySelectorAll('.equipment-checkbox:checked'))
+        .map(checkbox => checkbox.value);
+    
+    if (selectedEquipment.length === 0) {
+        showPlannerNotification('Please select at least one equipment', 'error');
+        return;
+    }
+    
+    closePrintModal();
+    
+    // Show loading
+    showPlannerNotification('Generating print preview...', 'info');
+    
+    try {
+        await generatePrintTable(selectedEquipment);
+    } catch (error) {
+        console.error('Print error:', error);
+        showPlannerNotification('Failed to generate print table', 'error');
+    }
+};
+
+async function generatePrintTable(selectedEquipment) {
+    // Filter products by selected equipment
+    const productsToPrint = plannerState.selectedProducts
+        .filter(p => selectedEquipment.includes(p.equipment))
+        .sort((a, b) => {
+            // Sort by equipment name first
+            if (a.equipment !== b.equipment) {
+                return a.equipment.localeCompare(b.equipment);
+            }
+            // Then by start time
+            return timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+        });
+    
+    // Fetch master data for all products
+    const printRows = [];
+    
+    // Track equipment sequence numbers
+    const equipmentSequence = {};
+    
+    for (const product of productsToPrint) {
+        try {
+            // Get master data from database
+            const masterData = await fetchMasterDataForPrint(product.背番号);
+            
+            if (!masterData) {
+                console.warn(`Master data not found for ${product.背番号}`);
+                continue;
+            }
+            
+            // Get machine-specific config
+            let 送りピッチValue = parseFloat(masterData['送りピッチ']) || 0;
+            let pcPerCycleValue = parseInt(masterData.pcPerCycle) || 1;
+            
+            // Check if machineConfig exists for this equipment
+            if (masterData.machineConfig) {
+                // Parse equipment names (handle comma-separated like "OZNC03,OZNC05")
+                const equipmentNames = product.equipment
+                    .split(',')
+                    .map(name => name.trim())
+                    .filter(name => name);
+                
+                if (equipmentNames.length === 1) {
+                    // Single equipment - direct lookup
+                    const machineConfig = masterData.machineConfig[equipmentNames[0]];
+                    if (machineConfig) {
+                        送りピッチValue = parseFloat(machineConfig['送りピッチ']) || 送りピッチValue;
+                        pcPerCycleValue = parseInt(machineConfig.pcPerCycle) || pcPerCycleValue;
+                    }
+                } else if (equipmentNames.length > 1) {
+                    // Multiple equipment - check if they have same config
+                    const configs = equipmentNames
+                        .map(name => masterData.machineConfig[name])
+                        .filter(config => config);
+                    
+                    if (configs.length > 0) {
+                        // Check if all configs have the same values
+                        const first送りピッチ = parseFloat(configs[0]['送りピッチ']);
+                        const firstPcPerCycle = parseInt(configs[0].pcPerCycle);
+                        
+                        const allSame = configs.every(config => 
+                            parseFloat(config['送りピッチ']) === first送りピッチ &&
+                            parseInt(config.pcPerCycle) === firstPcPerCycle
+                        );
+                        
+                        if (allSame) {
+                            // All machines have same config, use it
+                            送りピッチValue = first送りピッチ || 送りピッチValue;
+                            pcPerCycleValue = firstPcPerCycle || pcPerCycleValue;
+                        }
+                    }
+                }
+            }
+            
+            // Calculate material length in meters
+            const cyclesNeeded = Math.ceil(product.quantity / pcPerCycleValue);
+            const materialLengthMM = cyclesNeeded * 送りピッチValue;
+            const materialLengthM = (materialLengthMM / 1000).toFixed(2); // Convert to meters
+            
+            // Calculate boxes needed
+            const 収容数 = parseInt(masterData['収容数']) || 1;
+            const boxesNeeded = Math.ceil(product.quantity / 収容数);
+            
+            // Calculate actual working time (excluding breaks)
+            const actualTime = calculateActualWorkingTime(product);
+            
+            // Calculate sequence number for this equipment
+            if (!equipmentSequence[product.equipment]) {
+                equipmentSequence[product.equipment] = 1;
+            } else {
+                equipmentSequence[product.equipment]++;
+            }
+            
+            printRows.push({
+                順番: equipmentSequence[product.equipment],
+                設備名: product.equipment,
+                時間: actualTime,
+                背番号: product.背番号,
+                材料名: masterData['材料'] || '',
+                材料背番号: masterData['材料背番号'] || '',
+                材料長さ: `${materialLengthM}m`,
+                通い箱pcs: boxesNeeded
+            });
+        } catch (error) {
+            console.error(`Error processing product ${product.背番号}:`, error);
+        }
+    }
+    
+    // Generate HTML for print
+    const printHTML = generatePrintHTML(printRows);
+    
+    // Open print window
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(printHTML);
+    printWindow.document.close();
+    
+    // Wait for content to load, then print
+    printWindow.onload = function() {
+        printWindow.print();
+    };
+}
+
+async function fetchMasterDataForPrint(背番号) {
+    try {
+        const response = await fetch(`${BASE_URL}api/masterdb/product?seiban=${encodeURIComponent(背番号)}`);
+        if (!response.ok) return null;
+        const result = await response.json();
+        return result.data;
+    } catch (error) {
+        console.error('Error fetching master data:', error);
+        return null;
+    }
+}
+
+function calculateActualWorkingTime(product) {
+    const startMinutes = timeToMinutes(product.startTime);
+    const durationMinutes = product.estimatedTime.totalSeconds / 60;
+    const endMinutes = Math.round(startMinutes + durationMinutes); // Round to nearest minute
+    
+    // Find breaks during this product's time
+    const affectingBreaks = plannerState.breaks.filter(brk => {
+        const breakStart = timeToMinutes(brk.start);
+        const breakEnd = timeToMinutes(brk.end);
+        const isForThisEquipment = !brk.equipment || brk.equipment === product.equipment;
+        return breakStart >= startMinutes && breakStart < endMinutes && isForThisEquipment;
+    });
+    
+    if (affectingBreaks.length === 0) {
+        return `${product.startTime} - ${minutesToTime(endMinutes)}`;
+    }
+    
+    // Build time ranges excluding breaks
+    let currentTime = startMinutes;
+    const ranges = [];
+    
+    affectingBreaks.sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+    
+    affectingBreaks.forEach(brk => {
+        const breakStart = timeToMinutes(brk.start);
+        if (currentTime < breakStart) {
+            ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(breakStart))}`);
+        }
+        currentTime = timeToMinutes(brk.end);
+    });
+    
+    // Add final range after last break
+    if (currentTime < endMinutes) {
+        ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(endMinutes))}`);
+    }
+    
+    return ranges.join(', ');
+}
+
+function generatePrintHTML(rows) {
+    const date = plannerState.currentDate;
+    
+    // Group rows by equipment and assign alternating colors
+    let currentEquipment = null;
+    let groupIndex = 0;
+    const rowsWithGrouping = rows.map(row => {
+        if (row.設備名 !== currentEquipment) {
+            currentEquipment = row.設備名;
+            groupIndex++;
+        }
+        return {
+            ...row,
+            isHighlighted: groupIndex % 2 === 1 // Odd groups get grey background
+        };
+    });
+    
+    return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Production Schedule - ${date}</title>
+            <style>
+                @page {
+                    size: A4;
+                    margin: 15mm;
+                }
+                
+                body {
+                    font-family: 'MS Gothic', 'Yu Gothic', sans-serif;
+                    font-size: 11pt;
+                    line-height: 1.4;
+                    color: #000;
+                    margin: 0;
+                    padding: 0;
+                }
+                
+                .header {
+                    text-align: center;
+                    margin-bottom: 15px;
+                    padding-bottom: 10px;
+                    border-bottom: 2px solid #000;
+                }
+                
+                .header h1 {
+                    font-size: 18pt;
+                    font-weight: bold;
+                    margin: 0 0 5px 0;
+                }
+                
+                .header .date {
+                    font-size: 14pt;
+                    font-weight: bold;
+                    color: #333;
+                }
+                
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 10px;
+                }
+                
+                th {
+                    background-color: #f0f0f0;
+                    border: 1px solid #000;
+                    padding: 8px 6px;
+                    text-align: center;
+                    font-weight: bold;
+                    font-size: 11pt;
+                }
+                
+                td {
+                    border: 1px solid #000;
+                    padding: 6px;
+                    text-align: center;
+                    font-size: 10pt;
+                }
+                
+                tr.highlighted td {
+                    background-color: #e8e8e8;
+                }
+                
+                td.equipment {
+                    font-weight: bold;
+                }
+                
+                td.sequence {
+                    text-align: center;
+                    font-weight: bold;
+                    font-size: 10pt;
+                }
+                
+                td.time {
+                    white-space: nowrap;
+                    font-size: 9pt;
+                }
+                
+                td.material-name {
+                    text-align: left;
+                    font-size: 9pt;
+                }
+                
+                @media print {
+                    body {
+                        -webkit-print-color-adjust: exact;
+                        print-color-adjust: exact;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>生産スケジュール (Production Schedule)</h1>
+                <div class="date">日付: ${date}</div>
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 6%;">順番</th>
+                        <th style="width: 11%;">設備名</th>
+                        <th style="width: 16%;">時間</th>
+                        <th style="width: 10%;">背番号</th>
+                        <th style="width: 24%;">材料名</th>
+                        <th style="width: 11%;">材料背番号</th>
+                        <th style="width: 12%;">材料長さ</th>
+                        <th style="width: 10%;">通い箱pcs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsWithGrouping.map(row => `
+                        <tr${row.isHighlighted ? ' class="highlighted"' : ''}>
+                            <td class="sequence">${row.順番}</td>
+                            <td class="equipment">${row.設備名}</td>
+                            <td class="time">${row.時間}</td>
+                            <td>${row.背番号}</td>
+                            <td class="material-name">${row.材料名}</td>
+                            <td>${row.材料背番号}</td>
+                            <td>${row.材料長さ}</td>
+                            <td>${row.通い箱pcs}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </body>
+        </html>
+    `;
+}
+
+window.showPrintModal = showPrintModal;
+window.closePrintModal = closePrintModal;
+window.toggleAllEquipment = toggleAllEquipment;
+window.printSelectedEquipment = printSelectedEquipment;
 
