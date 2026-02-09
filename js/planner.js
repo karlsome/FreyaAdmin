@@ -7172,6 +7172,20 @@ function calculateActualWorkingTime(product) {
 function generatePrintHTML(rows) {
     const date = plannerState.currentDate;
     
+    // Group rows by equipment and assign alternating colors
+    let currentEquipment = null;
+    let groupIndex = 0;
+    const rowsWithGrouping = rows.map(row => {
+        if (row.設備名 !== currentEquipment) {
+            currentEquipment = row.設備名;
+            groupIndex++;
+        }
+        return {
+            ...row,
+            isHighlighted: groupIndex % 2 === 1 // Odd groups get grey background
+        };
+    });
+    
     return `
         <!DOCTYPE html>
         <html>
@@ -7234,9 +7248,12 @@ function generatePrintHTML(rows) {
                     font-size: 10pt;
                 }
                 
+                tr.highlighted td {
+                    background-color: #e8e8e8;
+                }
+                
                 td.equipment {
                     font-weight: bold;
-                    background-color: #fafafa;
                 }
                 
                 td.sequence {
@@ -7283,8 +7300,8 @@ function generatePrintHTML(rows) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${rows.map(row => `
-                        <tr>
+                    ${rowsWithGrouping.map(row => `
+                        <tr${row.isHighlighted ? ' class="highlighted"' : ''}>
                             <td class="sequence">${row.順番}</td>
                             <td class="equipment">${row.設備名}</td>
                             <td class="time">${row.時間}</td>
