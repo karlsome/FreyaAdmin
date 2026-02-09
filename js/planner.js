@@ -7429,9 +7429,18 @@ window.printSelectedEquipment = printSelectedEquipment;
  * Shows clean Gantt chart with equipment on Y-axis and time on X-axis
  */
 window.openCalendarView = async function() {
+    // Check if data is loaded, if not load it first
     if (plannerState.selectedProducts.length === 0) {
-        showPlannerNotification('No products selected to display', 'error');
-        return;
+        // Try to load plan for current date
+        if (plannerState.currentDate && plannerState.currentFactory) {
+            await loadPlanForDate(plannerState.currentDate);
+        }
+        
+        // If still no products after loading, show error
+        if (plannerState.selectedProducts.length === 0) {
+            showPlannerNotification('No products scheduled for this date', 'warning');
+            return;
+        }
     }
     
     // Group products by equipment and sort
@@ -7737,6 +7746,10 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     font-size: 14px;
                     color: #333;
                     border-right: 2px solid #e0e0e0;
+                    background: white;
+                    position: sticky;
+                    left: 0;
+                    z-index: 2;
                 }
                 
                 .timeline-bar {
@@ -8007,6 +8020,41 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     const newWidth = baseWidth * zoomLevel;
                     calendarContent.style.width = newWidth + '%';
                 }
+                
+                // Update text position on scroll to keep visible
+                function updateTextPositions() {
+                    const scrollLeft = calendarWrapper.scrollLeft;
+                    const equipmentLabelWidth = 120; // Width of sticky column
+                    
+                    document.querySelectorAll('.product-bar').forEach(bar => {
+                        const barRect = bar.getBoundingClientRect();
+                        const wrapperRect = calendarWrapper.getBoundingClientRect();
+                        
+                        // Calculate how much of the bar is hidden behind equipment label
+                        const barLeftInViewport = barRect.left;
+                        const equipmentColumnRight = wrapperRect.left + equipmentLabelWidth;
+                        
+                        // If bar starts before equipment column ends, shift text right
+                        if (barLeftInViewport < equipmentColumnRight) {
+                            const overlap = equipmentColumnRight - barLeftInViewport;
+                            const barWidth = barRect.width;
+                            
+                            // Don't shift more than bar width - 50px (keep some padding)
+                            const maxShift = Math.max(0, barWidth - 50);
+                            const shift = Math.min(overlap + 10, maxShift);
+                            
+                            bar.style.paddingLeft = shift + 'px';
+                        } else {
+                            bar.style.paddingLeft = '8px';
+                        }
+                    });
+                }
+                
+                // Update text positions on scroll
+                calendarWrapper.addEventListener('scroll', updateTextPositions);
+                
+                // Initial text position update
+                setTimeout(updateTextPositions, 100);
                 
                 // Update time markers based on zoom level
                 function updateTimeMarkers() {
