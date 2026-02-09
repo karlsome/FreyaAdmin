@@ -7168,6 +7168,29 @@ async function fetchMasterDataForPrint(背番号) {
     }
 }
 
+// Helper function to simplify time ranges: "10:30-12:00, 12:45-15:00" -> "10:30-15:45"
+function simplifyTimeRanges(timeString) {
+    if (!timeString || !timeString.includes('-')) return timeString;
+    
+    // Split by comma to get individual ranges
+    const ranges = timeString.split(',').map(r => r.trim());
+    if (ranges.length === 0) return timeString;
+    
+    // Extract all times
+    const times = [];
+    ranges.forEach(range => {
+        const parts = range.split('-').map(t => t.trim());
+        if (parts.length === 2) {
+            times.push(parts[0], parts[1]);
+        }
+    });
+    
+    if (times.length === 0) return timeString;
+    
+    // Return first start and last end
+    return `${times[0]}-${times[times.length - 1]}`;
+}
+
 function calculateActualWorkingTime(product) {
     const startMinutes = timeToMinutes(product.startTime);
     const durationMinutes = product.estimatedTime.totalSeconds / 60;
@@ -7204,7 +7227,8 @@ function calculateActualWorkingTime(product) {
         ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(endMinutes))}`);
     }
     
-    return ranges.join(', ');
+    const fullTimeString = ranges.join(', ');
+    return simplifyTimeRanges(fullTimeString);
 }
 
 function generatePrintHTML(rows) {
@@ -7470,7 +7494,13 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                          品番: product.品番 || '',
                          品名: product.品名 || '',
                          startTime: product.startTime,
-                         endTime: minutesToTime(productEndMinutes)
+                         endTime: minutesToTime(productEndMinutes),
+                         材料: masterData?.材料 || '',
+                         材料背番号: masterData?.材料背番号 || '',
+                         収容数: masterData?.収容数 || '',
+                         備考: masterData?.備考 || '',
+                         imageURL: masterData?.imageURL || '',
+                         設備名: equipmentName
                      }).replace(/'/g, "&#39;")}'>
                     <span class="product-label">${product.背番号}</span>
                     <span class="product-details">${product.quantity}pcs | ${boxesNeeded}箱</span>
@@ -7995,10 +8025,28 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     const data = JSON.parse(bar.getAttribute('data-product'));
                     
                     document.getElementById('modalTitle').textContent = data.背番号;
+                    
+                    let imageHTML = '';
+                    if (data.imageURL) {
+                        imageHTML = \`
+                            <div style="text-align: center; margin-bottom: 15px;">
+                                <img src="\${data.imageURL}" 
+                                     alt="\${data.背番号}" 
+                                     style="max-width: 100%; max-height: 250px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                                     onerror="this.style.display='none'">
+                            </div>
+                        \`;
+                    }
+                    
                     document.getElementById('modalBody').innerHTML = \`
+                        \${imageHTML}
                         <div class="detail-row">
                             <div class="detail-label">背番号</div>
                             <div class="detail-value">\${data.背番号}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">設備名</div>
+                            <div class="detail-value">\${data.設備名 || '-'}</div>
                         </div>
                         <div class="detail-row">
                             <div class="detail-label">品番</div>
@@ -8007,6 +8055,18 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                         <div class="detail-row">
                             <div class="detail-label">品名</div>
                             <div class="detail-value">\${data.品名 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">材料名</div>
+                            <div class="detail-value">\${data.材料 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">材料背番号</div>
+                            <div class="detail-value">\${data.材料背番号 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">収容数</div>
+                            <div class="detail-value">\${data.収容数 || '-'}</div>
                         </div>
                         <div class="detail-row">
                             <div class="detail-label">時間</div>
@@ -8019,6 +8079,10 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                         <div class="detail-row">
                             <div class="detail-label">通い箱</div>
                             <div class="detail-value">\${data.通い箱} 箱</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">備考</div>
+                            <div class="detail-value">\${data.備考 || '-'}</div>
                         </div>
                     \`;
                     
