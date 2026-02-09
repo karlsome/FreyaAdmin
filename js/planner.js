@@ -2472,7 +2472,7 @@ function updateSelectedProductsSummary(searchTerm = '') {
         const latestEnd = Math.max(...data.items.map((item, idx) => {
             const start = startTimes[idx];
             const duration = item.estimatedTime.totalSeconds / 60;
-            return start + duration;
+            return Math.round(start + duration); // Round to nearest minute
         }));
         
         const timeRange = `${minutesToTime(earliestStart)} - ${minutesToTime(latestEnd)}`;
@@ -2521,7 +2521,7 @@ function updateSelectedProductsSummary(searchTerm = '') {
                         const startTime = item.startTime;
                         const startMinutes = timeToMinutes(startTime);
                         const durationMinutes = item.estimatedTime.totalSeconds / 60;
-                        const endMinutes = startMinutes + durationMinutes;
+                        const endMinutes = Math.round(startMinutes + durationMinutes); // Round to nearest minute
                         
                         // Find breaks during this product's time
                         const affectingBreaks = plannerState.breaks.filter(brk => {
@@ -2542,14 +2542,14 @@ function updateSelectedProductsSummary(searchTerm = '') {
                             affectingBreaks.forEach(brk => {
                                 const breakStart = timeToMinutes(brk.start);
                                 if (currentTime < breakStart) {
-                                    ranges.push(`${minutesToTime(currentTime)} - ${minutesToTime(breakStart)}`);
+                                    ranges.push(`${minutesToTime(Math.round(currentTime))} - ${minutesToTime(Math.round(breakStart))}`);
                                 }
                                 currentTime = timeToMinutes(brk.end);
                             });
                             
                             // Add final range after last break
                             if (currentTime < endMinutes) {
-                                ranges.push(`${minutesToTime(currentTime)} - ${minutesToTime(endMinutes)}`);
+                                ranges.push(`${minutesToTime(Math.round(currentTime))} - ${minutesToTime(endMinutes)}`);
                             }
                             
                             timeRanges = ranges.join(', ');
@@ -7064,10 +7064,43 @@ async function generatePrintTable(selectedEquipment) {
             let pcPerCycleValue = parseInt(masterData.pcPerCycle) || 1;
             
             // Check if machineConfig exists for this equipment
-            if (masterData.machineConfig && masterData.machineConfig[product.equipment]) {
-                const machineConfig = masterData.machineConfig[product.equipment];
-                送りピッチValue = parseFloat(machineConfig['送りピッチ']) || 送りピッチValue;
-                pcPerCycleValue = parseInt(machineConfig.pcPerCycle) || pcPerCycleValue;
+            if (masterData.machineConfig) {
+                // Parse equipment names (handle comma-separated like "OZNC03,OZNC05")
+                const equipmentNames = product.equipment
+                    .split(',')
+                    .map(name => name.trim())
+                    .filter(name => name);
+                
+                if (equipmentNames.length === 1) {
+                    // Single equipment - direct lookup
+                    const machineConfig = masterData.machineConfig[equipmentNames[0]];
+                    if (machineConfig) {
+                        送りピッチValue = parseFloat(machineConfig['送りピッチ']) || 送りピッチValue;
+                        pcPerCycleValue = parseInt(machineConfig.pcPerCycle) || pcPerCycleValue;
+                    }
+                } else if (equipmentNames.length > 1) {
+                    // Multiple equipment - check if they have same config
+                    const configs = equipmentNames
+                        .map(name => masterData.machineConfig[name])
+                        .filter(config => config);
+                    
+                    if (configs.length > 0) {
+                        // Check if all configs have the same values
+                        const first送りピッチ = parseFloat(configs[0]['送りピッチ']);
+                        const firstPcPerCycle = parseInt(configs[0].pcPerCycle);
+                        
+                        const allSame = configs.every(config => 
+                            parseFloat(config['送りピッチ']) === first送りピッチ &&
+                            parseInt(config.pcPerCycle) === firstPcPerCycle
+                        );
+                        
+                        if (allSame) {
+                            // All machines have same config, use it
+                            送りピッチValue = first送りピッチ || 送りピッチValue;
+                            pcPerCycleValue = firstPcPerCycle || pcPerCycleValue;
+                        }
+                    }
+                }
             }
             
             // Calculate material length in meters
