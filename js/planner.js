@@ -7705,7 +7705,7 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                 
                 .product-label {
                     font-weight: bold;
-                    font-size: 12px;
+                    font-size: 13px;
                     color: white;
                     text-shadow: 0 1px 2px rgba(0,0,0,0.3);
                     white-space: nowrap;
@@ -7714,7 +7714,7 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                 }
                 
                 .product-details {
-                    font-size: 10px;
+                    font-size: 11px;
                     color: rgba(255,255,255,0.9);
                     text-shadow: 0 1px 2px rgba(0,0,0,0.3);
                     white-space: nowrap;
@@ -7876,8 +7876,6 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     e.preventDefault();
                     e.stopPropagation();
                     
-                    console.log('🔍 Wheel event fired! deltaY:', e.deltaY, 'current zoom:', zoomLevel);
-                    
                     const delta = e.deltaY;
                     const zoomSpeed = 0.15;
                     
@@ -7943,7 +7941,6 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                 function applyZoom() {
                     const baseWidth = 100; // Base width percentage
                     const newWidth = baseWidth * zoomLevel;
-                    console.log('📐 Applying zoom:', zoomLevel, '-> width:', newWidth + '%');
                     calendarContent.style.width = newWidth + '%';
                 }
                 
@@ -8045,10 +8042,6 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                         closeModal();
                     }
                 });
-                
-                console.log('✅ Calendar script fully loaded. Zoom, pan, and modal ready.');
-                console.log('calendarWrapper:', calendarWrapper);
-                console.log('calendarContent:', calendarContent);
             </script>
         </body>
         </html>
