@@ -7133,7 +7133,7 @@ async function fetchMasterDataForPrint(背番号) {
 function calculateActualWorkingTime(product) {
     const startMinutes = timeToMinutes(product.startTime);
     const durationMinutes = product.estimatedTime.totalSeconds / 60;
-    const endMinutes = startMinutes + durationMinutes;
+    const endMinutes = Math.round(startMinutes + durationMinutes); // Round to nearest minute
     
     // Find breaks during this product's time
     const affectingBreaks = plannerState.breaks.filter(brk => {
@@ -7156,14 +7156,14 @@ function calculateActualWorkingTime(product) {
     affectingBreaks.forEach(brk => {
         const breakStart = timeToMinutes(brk.start);
         if (currentTime < breakStart) {
-            ranges.push(`${minutesToTime(currentTime)}-${minutesToTime(breakStart)}`);
+            ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(breakStart))}`);
         }
         currentTime = timeToMinutes(brk.end);
     });
     
     // Add final range after last break
     if (currentTime < endMinutes) {
-        ranges.push(`${minutesToTime(currentTime)}-${minutesToTime(endMinutes)}`);
+        ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(endMinutes))}`);
     }
     
     return ranges.join(', ');
