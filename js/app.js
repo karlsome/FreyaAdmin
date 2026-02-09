@@ -1936,13 +1936,20 @@ function loadPage(page) {
                     <div class="mb-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600 p-3">
                       <div class="flex items-center justify-between gap-2 mb-2">
                         <h3 class="font-medium text-sm text-gray-900 dark:text-white" data-i18n="selectedProducts">Selected Products</h3>
-                        <div class="relative flex-1 max-w-xs">
-                          <input type="text" 
-                                 id="selectedProductsSearch" 
-                                 placeholder="Search by 背番号 or 品番..." 
-                                 class="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                 oninput="filterSelectedProducts(this.value)">
-                          <i class="ri-search-line absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                        <div class="flex items-center gap-2 flex-1 justify-end">
+                          <button onclick="showPrintModal()" 
+                                  class="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1.5">
+                            <i class="ri-printer-line"></i>
+                            <span>Print</span>
+                          </button>
+                          <div class="relative flex-1 max-w-xs">
+                            <input type="text" 
+                                   id="selectedProductsSearch" 
+                                   placeholder="Search by 背番号 or 品番..." 
+                                   class="w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   oninput="filterSelectedProducts(this.value)">
+                            <i class="ri-search-line absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                          </div>
                         </div>
                       </div>
                       <div id="selectedProductsSummary">
