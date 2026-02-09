@@ -57,6 +57,32 @@ function getRandomColor() {
     return color;
 }
 
+// Get color for specific model/背番号 combination
+function getColorForProduct(product) {
+    // Special color logic for モデル = "992W(310D)"
+    if (product.モデル === "992W(310D)" && product.背番号) {
+        const firstChar = product.背番号.charAt(0);
+        
+        switch(firstChar) {
+            case '1':
+            case '5':
+                return '#10B981'; // Green
+            case '2':
+            case '6':
+                return '#6B7280'; // Grey
+            case '3':
+            case '7':
+                return '#1E40AF'; // Dark Blue
+            case '4':
+            case '8':
+                return '#0EA5E9'; // Sky Blue
+        }
+    }
+    
+    // Default: assign from color palette
+    return getRandomColor();
+}
+
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -349,8 +375,7 @@ async function loadProductsForFactory(factory) {
         // Assign colors to products
         data.forEach(product => {
             if (!plannerState.productColors[product.背番号]) {
-                plannerState.productColors[product.背番号] = PRODUCT_COLORS[plannerState.colorIndex % PRODUCT_COLORS.length];
-                plannerState.colorIndex++;
+                plannerState.productColors[product.背番号] = getColorForProduct(product);
             }
         });
         
@@ -392,7 +417,7 @@ async function loadExistingPlans(factory, date) {
             plannerState.selectedProducts = plan.products.map(item => {
                 // Ensure color is assigned
                 if (!plannerState.productColors[item.背番号]) {
-                    plannerState.productColors[item.背番号] = getRandomColor();
+                    plannerState.productColors[item.背番号] = getColorForProduct(item);
                 }
                 
                 // Recalculate boxes using current capacity from masterDB
@@ -1877,8 +1902,7 @@ async function loadGoals() {
             // Assign colors to goals
             plannerState.goals.forEach(goal => {
                 if (!plannerState.productColors[goal.背番号]) {
-                    plannerState.productColors[goal.背番号] = PRODUCT_COLORS[plannerState.colorIndex % PRODUCT_COLORS.length];
-                    plannerState.colorIndex++;
+                    plannerState.productColors[goal.背番号] = getColorForProduct(goal);
                 }
             });
         }
