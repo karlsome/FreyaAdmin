@@ -7476,6 +7476,30 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
     const endMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
     const totalMinutes = endMinutes - startMinutes;
     
+    // Calculate total scheduled quantity
+    let totalScheduledQty = 0;
+    plannerState.selectedProducts.forEach(p => {
+        totalScheduledQty += p.quantity || 0;
+    });
+    
+    // Fetch goals for this date to calculate progress
+    let totalGoalQty = 0;
+    let progressPercent = 0;
+    try {
+        const goalsResponse = await fetch(`${BASE_URL}api/production-goals/date/${date}?factory=${factory}`);
+        if (goalsResponse.ok) {
+            const goals = await goalsResponse.json();
+            goals.forEach(goal => {
+                totalGoalQty += goal.targetQuantity || 0;
+            });
+            if (totalGoalQty > 0) {
+                progressPercent = Math.round((totalScheduledQty / totalGoalQty) * 100);
+            }
+        }
+    } catch (error) {
+        console.warn('Could not fetch goals:', error);
+    }
+    
     // Collect all unique products with their colors for legend
     const productLegend = new Map();
     plannerState.selectedProducts.forEach(item => {
@@ -7613,6 +7637,64 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                 .header .info {
                     font-size: 14px;
                     color: #666;
+                    margin-bottom: 12px;
+                }
+                
+                .header .stats {
+                    display: flex;
+                    gap: 20px;
+                    align-items: center;
+                    margin-top: 12px;
+                    padding-top: 12px;
+                    border-top: 1px solid #e0e0e0;
+                }
+                
+                .header .stat-item {
+                    font-size: 13px;
+                    color: #333;
+                }
+                
+                .header .stat-item strong {
+                    color: #666;
+                    font-weight: 500;
+                }
+                
+                .header .progress-bar {
+                    flex: 1;
+                    height: 8px;
+                    background: #e0e0e0;
+                    border-radius: 4px;
+                    overflow: hidden;
+                }
+                
+                .header .progress-fill {
+                    height: 100%;
+                    background: linear-gradient(to right, #3b82f6, #2563eb);
+                    transition: width 0.3s ease;
+                }
+                
+                .search-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                
+                .search-input {
+                    padding: 6px 12px;
+                    border: 1px solid #d0d0d0;
+                    border-radius: 4px;
+                    font-size: 13px;
+                    width: 200px;
+                }
+                
+                .search-input:focus {
+                    outline: none;
+                    border-color: #3b82f6;
+                }
+                
+                .product-bar.greyed-out {
+                    opacity: 0.2;
+                    filter: grayscale(80%);
                 }
                 
                 .legend {
@@ -7893,6 +7975,30 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     <strong>日付:</strong> ${date} | 
                     <strong>工場:</strong> ${factory}
                 </div>
+                <div class="stats">
+                    <div class="stat-item">
+                        <strong>Current:</strong> ${totalScheduledQty.toLocaleString()} pcs
+                    </div>
+                    ${totalGoalQty > 0 ? `
+                        <div class="stat-item">
+                            <strong>Goal:</strong> ${totalGoalQty.toLocaleString()} pcs
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <div class="stat-item">
+                            <strong>${progressPercent}%</strong>
+                        </div>
+                    ` : ''}
+                    <div class="search-container">
+                        <i class="ri-search-line" style="color: #666;"></i>
+                        <input type="text" 
+                               class="search-input" 
+                               id="searchInput" 
+                               placeholder="Search 背番号..." 
+                               onkeyup="filterProducts(this.value)">
+                    </div>
+                </div>
             </div>
             
             <div class="calendar-container">
@@ -8055,6 +8161,26 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                 
                 // Initial text position update
                 setTimeout(updateTextPositions, 100);
+                
+                // Filter products by search term
+                function filterProducts(searchTerm) {
+                    const term = searchTerm.trim().toLowerCase();
+                    const productBars = document.querySelectorAll('.product-bar');
+                    
+                    productBars.forEach(bar => {
+                        const data = JSON.parse(bar.getAttribute('data-product'));
+                        const seiban = (data.背番号 || '').toLowerCase();
+                        
+                        if (term === '' || seiban.includes(term)) {
+                            bar.classList.remove('greyed-out');
+                        } else {
+                            bar.classList.add('greyed-out');
+                        }
+                    });
+                }
+                
+                // Make filterProducts available globally
+                window.filterProducts = filterProducts;
                 
                 // Update time markers based on zoom level
                 function updateTimeMarkers() {
