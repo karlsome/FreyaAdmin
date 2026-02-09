@@ -7152,7 +7152,7 @@ async function generatePrintTable(selectedEquipment) {
             }
             
             const モデル = masterData['モデル'] || '';
-            console.log(`Print row for ${product.背番号}: モデル="${モデル}", color=${product.color}`);
+            // console.log(`Print row for ${product.背番号}: モデル="${モデル}", color=${product.color}`);
             
             printRows.push({
                 順番: equipmentSequence[product.equipment],
@@ -7271,7 +7271,7 @@ function generatePrintHTML(rows) {
             currentEquipment = row.設備名;
             groupIndex++;
         }
-        console.log(`Grouping row: ${row.背番号}, モデル="${row.モデル}", will apply color: ${row.モデル === '992W(310D)'}`);
+        // console.log(`Grouping row: ${row.背番号}, モデル="${row.モデル}", will apply color: ${row.モデル === '992W(310D)'}`);
         return {
             ...row,
             isHighlighted: groupIndex % 2 === 1 // Odd groups get grey background
@@ -7381,15 +7381,16 @@ function generatePrintHTML(rows) {
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 5%;">順番</th>
-                        <th style="width: 10%;">設備名</th>
-                        <th style="width: 15%;">時間</th>
-                        <th style="width: 9%;">背番号</th>
-                        <th style="width: 23%;">材料名</th>
-                        <th style="width: 10%;">材料背番号</th>
-                        <th style="width: 11%;">材料長さ</th>
-                        <th style="width: 9%;">通い箱pcs</th>
-                        <th style="width: 8%;">箱色</th>
+                        <th style="width: 6%;">順番</th>
+                        <th style="width: 11%;">設備名</th>
+                        <th style="width: 16%;">時間</th>
+                        <th style="width: 10%;">背番号</th>
+                        <th style="width: 24%;">材料名</th>
+                        <th style="width: 11%;">材料背番号</th>
+                        <th style="width: 12%;">材料長さ</th>
+                        <th style="width: 10%;">通い箱pcs</th>
+                        <!-- Future: 箱色 column for 992W(310D) products -->
+                        <!-- <th style="width: 8%;">箱色</th> -->
                     </tr>
                 </thead>
                 <tbody>
@@ -7403,7 +7404,8 @@ function generatePrintHTML(rows) {
                             <td>${row.材料背番号}</td>
                             <td>${row.材料長さ}</td>
                             <td>${row.通い箱pcs}</td>
-                            <td style="${row.モデル === '992W(310D)' ? `background-color: ${row.色};` : ''} padding: 6px;"></td>
+                            <!-- Future: Color cell for 992W(310D) -->
+                            <!-- <td style="${row.モデル === '992W(310D)' ? `background-color: ${row.色};` : ''} padding: 6px;"></td> -->
                         </tr>
                     `).join('')}
                 </tbody>
