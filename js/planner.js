@@ -7433,7 +7433,7 @@ window.openCalendarView = async function() {
     if (plannerState.selectedProducts.length === 0) {
         // Try to load plan for current date
         if (plannerState.currentDate && plannerState.currentFactory) {
-            await loadPlanForDate(plannerState.currentDate);
+            await loadExistingPlans(plannerState.currentFactory, plannerState.currentDate);
         }
         
         // If still no products after loading, show error
