@@ -390,7 +390,8 @@ async function loadProductsForFactory(factory) {
 
 async function loadExistingPlans(factory, date) {
     try {
-        console.log(`📋 Loading plans for factory: ${factory}, date: ${date}`);
+        console.log(`📋 === LOADING PLANS FROM DATABASE ===`);
+        console.log(`📋 Factory: ${factory}, Date: ${date}`);
         
         const response = await fetch(BASE_URL + 'queries', {
             method: 'POST',
@@ -406,15 +407,18 @@ async function loadExistingPlans(factory, date) {
         });
         
         const plans = await response.json();
-        console.log(`📋 Found ${plans.length} plans`, plans);
+        console.log(`📋 Found ${plans.length} plans`);
         
         if (plans.length > 0) {
             const plan = plans[0];
+            console.log(`📋 Plan ID: ${plan._id}`);
+            console.log(`📋 Plan has ${plan.products?.length || 0} products`);
+            console.log(`📋 First product structure:`, plan.products?.[0]);
             plannerState.currentPlan = plan;
             plannerState.breaks = plan.breaks || [];
             
             // Restore selected products from plan and recalculate boxes
-            plannerState.selectedProducts = plan.products.map(item => {
+            plannerState.selectedProducts = plan.products.map((item, index) => {
                 // Ensure color is assigned
                 if (!plannerState.productColors[item.背番号]) {
                     plannerState.productColors[item.背番号] = getColorForProduct(item);
@@ -423,15 +427,23 @@ async function loadExistingPlans(factory, date) {
                 // Recalculate boxes using current capacity from masterDB
                 const boxes = calculateBoxesNeeded(item, item.quantity);
                 
-                return {
+                const restoredProduct = {
                     ...item,
-                    _id: item.goalId || item._id,
+                    _id: item.goalId || item._id, // Use goalId as _id to match with goals
+                    goalId: item.goalId || item._id, // Preserve goalId
                     color: plannerState.productColors[item.背番号],
                     boxes: boxes  // Use recalculated boxes
                 };
+                
+                if (index === 0) {
+                    console.log(`📋 Sample restored product:`, restoredProduct);
+                }
+                
+                return restoredProduct;
             });
             
             console.log(`✅ Restored ${plannerState.selectedProducts.length} products from plan`);
+            console.log(`✅ Product IDs:`, plannerState.selectedProducts.map(p => ({ 背番号: p.背番号, _id: p._id, goalId: p.goalId })));
         } else {
             plannerState.selectedProducts = [];
             console.log('ℹ️ No existing plan found for this date');
@@ -2852,8 +2864,6 @@ function renderTimelineView() {
         const greyOutPlanned = shouldGreyOutEquipment(equipment, plannerState.selectedProducts);
         const greyOutActual = shouldGreyOutEquipment(equipment, plannerState.actualProduction);
         
-        console.log(`🔧 ${equipment}: ${assignedProducts.length} planned (grey: ${greyOutPlanned}), ${actualProduction.length} actual (grey: ${greyOutActual})`);
-        
         // Planned row
         const plannedRowClasses = greyOutPlanned ? 'opacity-40 pointer-events-none' : '';
         const hidePlannedRow = plannerState.hideUnavailableEquipment && greyOutPlanned;
@@ -4169,29 +4179,55 @@ async function confirmMultiPickerSelection() {
         showPlannerNotification('Warning: Some goal quantities may not have been updated', 'warning');
     }
     
+    console.log('✅ About to close modal and save...');
+    console.log('✅ Products in selectedProducts before close:', plannerState.selectedProducts.length);
+    console.log('✅ Products in orderedProducts before close:', multiPickerState.orderedProducts.length);
+    
+    // Store count before closing modal (which resets multiPickerState)
+    const addedCount = multiPickerState.orderedProducts.length;
+    
     closeMultiColumnPicker();
+    
+    console.log('✅ Modal closed, products in selectedProducts now:', plannerState.selectedProducts.length);
+    
     renderGoalList();
     updateSelectedProductsSummary();
     renderAllViews();
     
     // Auto-save the plan after adding products
-    console.log('💾 Auto-saving plan to database...');
+    console.log('💾 === STARTING AUTO-SAVE TO DATABASE ===');
+    console.log('💾 Factory:', plannerState.currentFactory);
+    console.log('💾 Date:', plannerState.currentDate);
+    console.log('💾 Products to save:', plannerState.selectedProducts.length);
+    
     await savePlanToDatabase();
     
-    showPlannerNotification(`Added ${multiPickerState.orderedProducts.length} products to timeline`, 'success');
+    console.log('✅ === AUTO-SAVE COMPLETED ===');
+    
+    showPlannerNotification(`Added ${addedCount} products to timeline`, 'success');
 }
 
 // Save current plan to database
 async function savePlanToDatabase() {
+    console.log('💾 savePlanToDatabase() called');
+    
     if (!plannerState.currentFactory) {
+        console.log('❌ No factory selected, cannot save');
         return;
     }
     
     // If no products, delete the plan instead of saving empty state
     if (plannerState.selectedProducts.length === 0) {
+        console.log('⚠️ No products to save, deleting plan instead');
         await deletePlanFromDatabase();
         return;
     }
+    
+    console.log('💾 Preparing to save:', {
+        factory: plannerState.currentFactory,
+        date: plannerState.currentDate,
+        productsCount: plannerState.selectedProducts.length
+    });
     
     const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
     const fullName = currentUser.firstName && currentUser.lastName 
@@ -4255,13 +4291,15 @@ async function savePlanToDatabase() {
             
             if (!updateResponse.ok) {
                 const error = await updateResponse.json();
+                console.error('❌ Update response not OK:', error);
                 throw new Error(error.error || 'Failed to update plan');
             }
             
-            console.log('✅ Plan updated successfully');
+            const updateResult = await updateResponse.json();
+            console.log('✅ Plan updated successfully:', updateResult);
         } else {
             // Create new plan
-            console.log('Creating new plan');
+            console.log('📝 Creating new plan (no existing plan found)');
             
             const insertResponse = await fetch(BASE_URL + 'api/production-plans', {
                 method: 'POST',
@@ -4271,10 +4309,12 @@ async function savePlanToDatabase() {
             
             if (!insertResponse.ok) {
                 const error = await insertResponse.json();
+                console.error('❌ Insert response not OK:', error);
                 throw new Error(error.error || 'Failed to create plan');
             }
             
-            console.log('✅ Plan created successfully');
+            const insertResult = await insertResponse.json();
+            console.log('✅ Plan created successfully:', insertResult);
         }
         
     } catch (error) {
@@ -4579,8 +4619,16 @@ window.closeSmartSchedulingModal = function() {
 };
 
 window.confirmSmartScheduling = async function() {
+    console.log('🚀 === CONFIRM SMART SCHEDULING START ===');
     const assignments = window._smartSchedulingAssignments;
-    if (!assignments) return;
+    if (!assignments) {
+        console.log('❌ No assignments found, exiting');
+        return;
+    }
+    console.log('📋 Assignments:', assignments);
+    console.log('🏭 Current Factory:', plannerState.currentFactory);
+    console.log('📅 Current Date:', plannerState.currentDate);
+    console.log('📦 Existing products in timeline:', plannerState.selectedProducts.length);
     
     // Get time limit from input field
     const timeLimitInput = document.getElementById('smartSchedulingTimeLimit');
@@ -4603,6 +4651,8 @@ window.confirmSmartScheduling = async function() {
         
         // Sort by confidence (highest first)
         equipmentQueue.sort((a, b) => b.confidence - a.confidence);
+        
+        console.log('🎯 Starting to schedule', equipmentQueue.length, 'products');
         
         // Try to schedule each product
         for (const item of equipmentQueue) {
@@ -4684,6 +4734,13 @@ window.confirmSmartScheduling = async function() {
         async function scheduleProduct(product, equipment, startTime, timeInfo) {
             const boxes = calculateBoxesNeeded(product, product.quantity);
             
+            console.log('➕ Adding product to timeline:', {
+                背番号: product.背番号,
+                equipment: equipment,
+                quantity: product.quantity,
+                startTime: minutesToTime(startTime)
+            });
+            
             plannerState.selectedProducts.push({
                 ...product,
                 equipment: equipment,
@@ -4709,22 +4766,49 @@ window.confirmSmartScheduling = async function() {
             }
         }
         
+        console.log('✅ All products scheduled, total in timeline now:', plannerState.selectedProducts.length);
+        
         // Reload goals
+        console.log('🔄 Reloading goals...');
         await loadGoals();
+        console.log('✅ Goals reloaded');
         
         closeSmartSchedulingModal();
+        console.log('❌ Modal closed');
+        console.log('🎨 Rendering views...');
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        console.log('✅ Views rendered');
         
         // Auto-save plan after smart scheduling
-        console.log('💾 Auto-saving plan after Smart Scheduling...');
+        console.log('💾 === STARTING AUTO-SAVE TO DATABASE ===');
+        console.log('💾 Factory:', plannerState.currentFactory);
+        console.log('💾 Date:', plannerState.currentDate);
+        console.log('💾 Products to save:', plannerState.selectedProducts.length);
+        console.log('💾 Products data:', JSON.stringify(plannerState.selectedProducts.map(p => ({
+            背番号: p.背番号,
+            equipment: p.equipment,
+            quantity: p.quantity,
+            startTime: p.startTime
+        })), null, 2));
+        
         await savePlanToDatabase();
+        
+        console.log('✅ === AUTO-SAVE COMPLETED ===');
+        console.log('🎉 === CONFIRM SMART SCHEDULING END ===');
         
         showPlannerNotification('Smart scheduling applied successfully!', 'success');
         
     } catch (error) {
+        console.error('❌ === ERROR IN SMART SCHEDULING ===');
         console.error('Error applying smart scheduling:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Current state:', {
+            factory: plannerState.currentFactory,
+            date: plannerState.currentDate,
+            productsCount: plannerState.selectedProducts.length
+        });
         showPlannerNotification('Error: ' + error.message, 'error');
     }
 };
