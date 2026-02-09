@@ -1849,7 +1849,7 @@ function loadPage(page) {
                   <button onclick="showBreakTimeModal()" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
                     <i class="ri-time-line mr-2"></i><span data-i18n="breakTimes">Break Times</span>
                   </button>
-                  <button onclick="showPlannerCalendar()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                  <button onclick="openCalendarView()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
                     <i class="ri-calendar-line mr-2"></i><span data-i18n="viewCalendar">View Calendar</span>
                   </button>
                 </div>

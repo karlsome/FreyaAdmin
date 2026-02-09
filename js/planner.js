@@ -57,6 +57,32 @@ function getRandomColor() {
     return color;
 }
 
+// Get color for specific model/背番号 combination
+function getColorForProduct(product) {
+    // Special color logic for モデル = "992W(310D)"
+    if (product.モデル === "992W(310D)" && product.背番号) {
+        const firstChar = product.背番号.charAt(0);
+        
+        switch(firstChar) {
+            case '1':
+            case '5':
+                return '#10B981'; // Green
+            case '2':
+            case '6':
+                return '#6B7280'; // Grey
+            case '3':
+            case '7':
+                return '#1E40AF'; // Dark Blue
+            case '4':
+            case '8':
+                return '#0EA5E9'; // Sky Blue
+        }
+    }
+    
+    // Default: assign from color palette
+    return getRandomColor();
+}
+
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -349,8 +375,7 @@ async function loadProductsForFactory(factory) {
         // Assign colors to products
         data.forEach(product => {
             if (!plannerState.productColors[product.背番号]) {
-                plannerState.productColors[product.背番号] = PRODUCT_COLORS[plannerState.colorIndex % PRODUCT_COLORS.length];
-                plannerState.colorIndex++;
+                plannerState.productColors[product.背番号] = getColorForProduct(product);
             }
         });
         
@@ -392,7 +417,7 @@ async function loadExistingPlans(factory, date) {
             plannerState.selectedProducts = plan.products.map(item => {
                 // Ensure color is assigned
                 if (!plannerState.productColors[item.背番号]) {
-                    plannerState.productColors[item.背番号] = getRandomColor();
+                    plannerState.productColors[item.背番号] = getColorForProduct(item);
                 }
                 
                 // Recalculate boxes using current capacity from masterDB
@@ -1877,8 +1902,7 @@ async function loadGoals() {
             // Assign colors to goals
             plannerState.goals.forEach(goal => {
                 if (!plannerState.productColors[goal.背番号]) {
-                    plannerState.productColors[goal.背番号] = PRODUCT_COLORS[plannerState.colorIndex % PRODUCT_COLORS.length];
-                    plannerState.colorIndex++;
+                    plannerState.productColors[goal.背番号] = getColorForProduct(goal);
                 }
             });
         }
@@ -2867,8 +2891,13 @@ function renderTimelineView() {
     });
     
     container.innerHTML = `
-        <!-- Toggle Button -->
-        <div class="mb-3 flex items-center justify-end">
+        <!-- Toggle Buttons -->
+        <div class="mb-3 flex items-center justify-end gap-2">
+            <button onclick="openCalendarView()" 
+                    class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                <i class="ri-calendar-line"></i>
+                <span>Calendar View</span>
+            </button>
             <button onclick="toggleHideUnavailableEquipment()" 
                     class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                         plannerState.hideUnavailableEquipment 
@@ -7122,6 +7151,9 @@ async function generatePrintTable(selectedEquipment) {
                 equipmentSequence[product.equipment]++;
             }
             
+            const モデル = masterData['モデル'] || '';
+            // console.log(`Print row for ${product.背番号}: モデル="${モデル}", color=${product.color}`);
+            
             printRows.push({
                 順番: equipmentSequence[product.equipment],
                 設備名: product.equipment,
@@ -7130,7 +7162,9 @@ async function generatePrintTable(selectedEquipment) {
                 材料名: masterData['材料'] || '',
                 材料背番号: masterData['材料背番号'] || '',
                 材料長さ: `${materialLengthM}m`,
-                通い箱pcs: boxesNeeded
+                通い箱pcs: boxesNeeded,
+                色: product.color || '#6B7280',
+                モデル: モデル
             });
         } catch (error) {
             console.error(`Error processing product ${product.背番号}:`, error);
@@ -7161,6 +7195,29 @@ async function fetchMasterDataForPrint(背番号) {
         console.error('Error fetching master data:', error);
         return null;
     }
+}
+
+// Helper function to simplify time ranges: "10:30-12:00, 12:45-15:00" -> "10:30-15:45"
+function simplifyTimeRanges(timeString) {
+    if (!timeString || !timeString.includes('-')) return timeString;
+    
+    // Split by comma to get individual ranges
+    const ranges = timeString.split(',').map(r => r.trim());
+    if (ranges.length === 0) return timeString;
+    
+    // Extract all times
+    const times = [];
+    ranges.forEach(range => {
+        const parts = range.split('-').map(t => t.trim());
+        if (parts.length === 2) {
+            times.push(parts[0], parts[1]);
+        }
+    });
+    
+    if (times.length === 0) return timeString;
+    
+    // Return first start and last end
+    return `${times[0]}-${times[times.length - 1]}`;
 }
 
 function calculateActualWorkingTime(product) {
@@ -7199,7 +7256,8 @@ function calculateActualWorkingTime(product) {
         ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(endMinutes))}`);
     }
     
-    return ranges.join(', ');
+    const fullTimeString = ranges.join(', ');
+    return simplifyTimeRanges(fullTimeString);
 }
 
 function generatePrintHTML(rows) {
@@ -7213,6 +7271,7 @@ function generatePrintHTML(rows) {
             currentEquipment = row.設備名;
             groupIndex++;
         }
+        // console.log(`Grouping row: ${row.背番号}, モデル="${row.モデル}", will apply color: ${row.モデル === '992W(310D)'}`);
         return {
             ...row,
             isHighlighted: groupIndex % 2 === 1 // Odd groups get grey background
@@ -7330,6 +7389,8 @@ function generatePrintHTML(rows) {
                         <th style="width: 11%;">材料背番号</th>
                         <th style="width: 12%;">材料長さ</th>
                         <th style="width: 10%;">通い箱pcs</th>
+                        <!-- Future: 箱色 column for 992W(310D) products -->
+                        <!-- <th style="width: 8%;">箱色</th> -->
                     </tr>
                 </thead>
                 <tbody>
@@ -7343,6 +7404,8 @@ function generatePrintHTML(rows) {
                             <td>${row.材料背番号}</td>
                             <td>${row.材料長さ}</td>
                             <td>${row.通い箱pcs}</td>
+                            <!-- Future: Color cell for 992W(310D) -->
+                            <!-- <td style="${row.モデル === '992W(310D)' ? `background-color: ${row.色};` : ''} padding: 6px;"></td> -->
                         </tr>
                     `).join('')}
                 </tbody>
@@ -7356,4 +7419,937 @@ window.showPrintModal = showPrintModal;
 window.closePrintModal = closePrintModal;
 window.toggleAllEquipment = toggleAllEquipment;
 window.printSelectedEquipment = printSelectedEquipment;
+
+// ============================================
+// CALENDAR VIEW (GANTT CHART)
+// ============================================
+
+/**
+ * Open calendar view in new tab
+ * Shows clean Gantt chart with equipment on Y-axis and time on X-axis
+ */
+window.openCalendarView = async function() {
+    // Check if data is loaded, if not load it first
+    if (plannerState.selectedProducts.length === 0) {
+        // Try to load plan for current date
+        if (plannerState.currentDate && plannerState.currentFactory) {
+            await loadExistingPlans(plannerState.currentFactory, plannerState.currentDate);
+        }
+        
+        // If still no products after loading, show error
+        if (plannerState.selectedProducts.length === 0) {
+            showPlannerNotification('No products scheduled for this date', 'warning');
+            return;
+        }
+    }
+    
+    // Group products by equipment and sort
+    const byEquipment = {};
+    plannerState.selectedProducts.forEach(item => {
+        if (!byEquipment[item.equipment]) {
+            byEquipment[item.equipment] = [];
+        }
+        byEquipment[item.equipment].push(item);
+    });
+    
+    // Sort equipment names
+    const sortedEquipment = Object.keys(byEquipment).sort();
+    
+    // Generate calendar HTML
+    const calendarHTML = await generateCalendarHTML(sortedEquipment, byEquipment);
+    
+    // Open in new window
+    const calendarWindow = window.open('', '_blank');
+    calendarWindow.document.write(calendarHTML);
+    calendarWindow.document.close();
+};
+
+/**
+ * Generate HTML for calendar view
+ */
+async function generateCalendarHTML(equipment, productsByEquipment) {
+    const date = plannerState.currentDate;
+    const factory = plannerState.currentFactory;
+    
+    // Calculate time range
+    const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
+    const endMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
+    const totalMinutes = endMinutes - startMinutes;
+    
+    // Fetch goals and actual production to calculate progress
+    let totalScheduledQty = 0;
+    let totalGoalQty = 0;
+    let progressPercent = 0;
+    
+    try {
+        // Fetch goals for target quantity
+        const goalsResponse = await fetch(`${BASE_URL}api/production-goals?date=${date}&factory=${encodeURIComponent(factory)}`);
+        if (goalsResponse.ok) {
+            const result = await goalsResponse.json();
+            const goals = result.data || result;
+            
+            goals.forEach(goal => {
+                totalGoalQty += goal.targetQuantity || 0;
+            });
+        }
+        
+        // Fetch actual production from pressDB (same as factory status)
+        const productionResponse = await fetch(`${BASE_URL}queries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'pressDB',
+                aggregation: [
+                    {
+                        $match: {
+                            Date: date,
+                            工場: factory
+                        }
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalQuantity: { $sum: '$Process_Quantity' }
+                        }
+                    }
+                ]
+            })
+        });
+        
+        if (productionResponse.ok) {
+            const productionData = await productionResponse.json();
+            if (productionData && productionData.length > 0) {
+                totalScheduledQty = productionData[0].totalQuantity || 0;
+            }
+        }
+        
+        if (totalGoalQty > 0) {
+            progressPercent = Math.round((totalScheduledQty / totalGoalQty) * 100);
+        }
+    } catch (error) {
+        console.warn('Could not fetch production data:', error);
+    }
+    
+    // Collect all unique products with their colors for legend
+    const productLegend = new Map();
+    plannerState.selectedProducts.forEach(item => {
+        if (!productLegend.has(item.背番号)) {
+            productLegend.set(item.背番号, {
+                背番号: item.背番号,
+                color: item.color,
+                品名: item.品名 || ''
+            });
+        }
+    });
+    
+    // Generate color legend
+    let legendHTML = '';
+    Array.from(productLegend.values()).forEach(item => {
+        legendHTML += `
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: ${item.color};"></div>
+                <span class="legend-label">${item.背番号}</span>
+            </div>
+        `;
+    });
+    
+    // Generate rows for each equipment
+    let rowsHTML = '';
+    
+    for (const equipmentName of equipment) {
+        const products = productsByEquipment[equipmentName];
+        
+        // Generate product bars for this equipment
+        let barsHTML = '';
+        
+        for (const product of products) {
+            const productStartMinutes = timeToMinutes(product.startTime);
+            const productDurationMinutes = product.estimatedTime.totalSeconds / 60;
+            const productEndMinutes = Math.round(productStartMinutes + productDurationMinutes);
+            
+            // Calculate position and width as percentage
+            const leftPercent = ((productStartMinutes - startMinutes) / totalMinutes) * 100;
+            const widthPercent = ((productEndMinutes - productStartMinutes) / totalMinutes) * 100;
+            
+            // Get boxes needed
+            const masterData = plannerState.products.find(p => p.背番号 === product.背番号);
+            const 収容数 = masterData ? (parseInt(masterData['収容数']) || 1) : 1;
+            const boxesNeeded = Math.ceil(product.quantity / 収容数);
+            
+            // Calculate actual working time
+            const actualTime = calculateActualWorkingTime(product);
+            
+            barsHTML += `
+                <div class="product-bar" 
+                     style="left: ${leftPercent}%; width: ${widthPercent}%; background-color: ${product.color};"
+                     onclick="showCalendarProductDetail('${product._id}')"
+                     data-product='${JSON.stringify({
+                         背番号: product.背番号,
+                         時間: actualTime,
+                         数量: product.quantity,
+                         通い箱: boxesNeeded,
+                         品番: product.品番 || '',
+                         品名: product.品名 || '',
+                         startTime: product.startTime,
+                         endTime: minutesToTime(productEndMinutes),
+                         材料: masterData?.材料 || '',
+                         材料背番号: masterData?.材料背番号 || '',
+                         収容数: masterData?.収容数 || '',
+                         備考: masterData?.備考 || '',
+                         imageURL: masterData?.imageURL || '',
+                         設備名: equipmentName
+                     }).replace(/'/g, "&#39;")}'>
+                    <span class="product-label">${product.背番号}</span>
+                    <span class="product-details">${product.quantity}pcs | ${boxesNeeded}箱</span>
+                </div>
+            `;
+        }
+        
+        rowsHTML += `
+            <div class="equipment-row">
+                <div class="equipment-label">${equipmentName}</div>
+                <div class="timeline-bar">
+                    ${barsHTML}
+                </div>
+            </div>
+        `;
+    }
+    
+    // Generate initial time markers (30 min intervals)
+    let timeMarkersHTML = '';
+    for (let minutes = startMinutes; minutes <= endMinutes; minutes += 30) {
+        const position = ((minutes - startMinutes) / totalMinutes) * 100;
+        const time = minutesToTime(minutes);
+        const isHour = minutes % 60 === 0;
+        timeMarkersHTML += `
+            <div class="time-marker ${isHour ? 'major' : ''}" style="left: ${position}%;">
+                <div class="time-label">${time}</div>
+            </div>
+        `;
+    }
+    
+    return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Production Schedule - ${date}</title>
+            <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                
+                body {
+                    font-family: 'MS Gothic', 'Yu Gothic', sans-serif;
+                    background: #f5f5f5;
+                    padding: 20px;
+                    overflow: hidden;
+                }
+                
+                .header {
+                    background: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                
+                .header h1 {
+                    font-size: 24px;
+                    font-weight: bold;
+                    color: #333;
+                    margin-bottom: 8px;
+                }
+                
+                .header .info {
+                    font-size: 14px;
+                    color: #666;
+                    margin-bottom: 12px;
+                }
+                
+                .header .stats {
+                    display: flex;
+                    gap: 20px;
+                    align-items: center;
+                    margin-top: 12px;
+                    padding-top: 12px;
+                    border-top: 1px solid #e0e0e0;
+                }
+                
+                .header .stat-item {
+                    font-size: 13px;
+                    color: #333;
+                }
+                
+                .header .stat-item strong {
+                    color: #666;
+                    font-weight: 500;
+                }
+                
+                .header .progress-bar {
+                    flex: 1;
+                    height: 8px;
+                    background: #e0e0e0;
+                    border-radius: 4px;
+                    overflow: hidden;
+                }
+                
+                .header .progress-fill {
+                    height: 100%;
+                    background: linear-gradient(to right, #3b82f6, #2563eb);
+                    transition: width 0.3s ease;
+                }
+                
+                .search-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                
+                .search-input {
+                    padding: 6px 12px;
+                    border: 1px solid #d0d0d0;
+                    border-radius: 4px;
+                    font-size: 13px;
+                    width: 200px;
+                }
+                
+                .search-input:focus {
+                    outline: none;
+                    border-color: #3b82f6;
+                }
+                
+                .product-bar.greyed-out {
+                    opacity: 0.2;
+                    filter: grayscale(80%);
+                }
+                
+                .legend {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                    padding: 12px;
+                    background: #f9f9f9;
+                    border-radius: 6px;
+                    margin-bottom: 16px;
+                }
+                
+                .legend-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                }
+                
+                .legend-color {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 3px;
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+                }
+                
+                .legend-label {
+                    font-size: 13px;
+                    font-weight: 500;
+                    color: #333;
+                }
+                
+                .calendar-container {
+                    background: white;
+                    border-radius: 8px;
+                    padding: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    cursor: default;
+                    overflow: hidden;
+                    position: relative;
+                }
+                
+                .calendar-wrapper {
+                    overflow: auto;
+                    max-height: calc(100vh - 300px);
+                    position: relative;
+                }
+                
+                .calendar-content {
+                    min-width: 100%;
+                    transition: width 0.15s ease-out;
+                    position: relative;
+                }
+                
+                .equipment-rows {
+                    position: relative;
+                }
+                
+                .time-axis {
+                    position: relative;
+                    height: 40px;
+                    border-bottom: 2px solid #e0e0e0;
+                    margin-bottom: 10px;
+                    margin-left: 120px;
+                    pointer-events: none;
+                }
+                
+                .time-markers-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 120px;
+                    right: 0;
+                    bottom: 0;
+                    pointer-events: none;
+                    z-index: 1;
+                }
+                
+                .time-markers-overlay .time-marker {
+                    border-left: 1px solid #e8e8e8;
+                }
+                
+                .time-markers-overlay .time-marker.major {
+                    border-left: 2px solid #d0d0d0;
+                }
+                
+                .time-markers-overlay .time-label {
+                    display: none; /* Hide labels in overlay, only show vertical lines */
+                }
+                
+                .time-marker {
+                    position: absolute;
+                    top: 0;
+                    bottom: 0;
+                    height: 100%;
+                    border-left: 1px solid #e8e8e8;
+                    pointer-events: none;
+                }
+                
+                .time-marker.major {
+                    border-left: 2px solid #d0d0d0;
+                }
+                
+                .time-label {
+                    position: absolute;
+                    top: 50%;
+                    left: 0;
+                    transform: translate(-50%, -50%);
+                    font-size: 12px;
+                    color: #666;
+                    background: white;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                }
+                
+                .equipment-row {
+                    display: flex;
+                    align-items: center;
+                    min-height: 60px;
+                    border-bottom: 1px solid #e0e0e0;
+                    position: relative;
+                }
+                
+                .equipment-row:hover {
+                    background: #f9f9f9;
+                }
+                
+                .equipment-label {
+                    width: 120px;
+                    flex-shrink: 0;
+                    padding: 10px;
+                    font-weight: bold;
+                    font-size: 14px;
+                    color: #333;
+                    border-right: 2px solid #e0e0e0;
+                    background: white;
+                    position: sticky;
+                    left: 0;
+                    z-index: 2;
+                }
+                
+                .timeline-bar {
+                    flex: 1;
+                    position: relative;
+                    height: 60px;
+                }
+                
+                .product-bar {
+                    position: absolute;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    height: 45px;
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    overflow: hidden;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                }
+                
+                .product-bar:hover {
+                    transform: translateY(-50%) scale(1.05);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    z-index: 10;
+                }
+                
+                .product-label {
+                    font-weight: bold;
+                    font-size: 13px;
+                    color: white;
+                    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                .product-details {
+                    font-size: 11px;
+                    color: rgba(255,255,255,0.9);
+                    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                /* Modal styles */
+                .modal {
+                    display: none;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.5);
+                    z-index: 1000;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .modal.active {
+                    display: flex;
+                }
+                
+                .modal-content {
+                    background: white;
+                    border-radius: 8px;
+                    padding: 24px;
+                    max-width: 500px;
+                    width: 90%;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+                }
+                
+                .modal-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 20px;
+                    padding-bottom: 16px;
+                    border-bottom: 2px solid #e0e0e0;
+                }
+                
+                .modal-header h2 {
+                    font-size: 20px;
+                    font-weight: bold;
+                    color: #333;
+                }
+                
+                .close-btn {
+                    cursor: pointer;
+                    font-size: 24px;
+                    color: #999;
+                    background: none;
+                    border: none;
+                    padding: 0;
+                    line-height: 1;
+                }
+                
+                .close-btn:hover {
+                    color: #333;
+                }
+                
+                .detail-row {
+                    display: flex;
+                    padding: 12px 0;
+                    border-bottom: 1px solid #f0f0f0;
+                }
+                
+                .detail-label {
+                    width: 120px;
+                    font-weight: bold;
+                    color: #666;
+                }
+                
+                .detail-value {
+                    flex: 1;
+                    color: #333;
+                }
+                
+                @media print {
+                    body {
+                        background: white;
+                        padding: 0;
+                    }
+                    
+                    .header, .calendar-container {
+                        box-shadow: none;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>生産スケジュール (Production Schedule)</h1>
+                <div class="info">
+                    <strong>日付:</strong> ${date} | 
+                    <strong>工場:</strong> ${factory}
+                </div>
+                <div class="stats">
+                    <div class="stat-item">
+                        <strong>Current:</strong> ${totalScheduledQty.toLocaleString()} pcs
+                    </div>
+                    ${totalGoalQty > 0 ? `
+                        <div class="stat-item">
+                            <strong>Goal:</strong> ${totalGoalQty.toLocaleString()} pcs
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <div class="stat-item">
+                            <strong>${progressPercent}%</strong>
+                        </div>
+                    ` : ''}
+                    <div class="search-container">
+                        <i class="ri-search-line" style="color: #666;"></i>
+                        <input type="text" 
+                               class="search-input" 
+                               id="searchInput" 
+                               placeholder="Search 背番号..." 
+                               onkeyup="filterProducts(this.value)">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="calendar-container">
+                <!-- Color Legend -->
+                <div class="legend">
+                    ${legendHTML}
+                </div>
+                
+                <div class="calendar-wrapper">
+                    <div class="calendar-content" id="calendarContent">
+                        <div class="time-axis">
+                            ${timeMarkersHTML}
+                        </div>
+                        <div class="equipment-rows" id="equipmentRows">
+                            <!-- Time marker overlay that extends through all rows -->
+                            <div class="time-markers-overlay" id="timeMarkersOverlay">
+                                ${timeMarkersHTML}
+                            </div>
+                            ${rowsHTML}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Product Detail Modal -->
+            <div id="productModal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 id="modalTitle">Product Details</h2>
+                        <button class="close-btn" onclick="closeModal()">
+                            <i class="ri-close-line"></i>
+                        </button>
+                    </div>
+                    <div id="modalBody"></div>
+                </div>
+            </div>
+            
+            <script>
+                // Zoom and pan state
+                let zoomLevel = 1;
+                let isPanning = false;
+                let startPanX = 0;
+                let startPanY = 0;
+                
+                const calendarWrapper = document.querySelector('.calendar-wrapper');
+                const calendarContent = document.getElementById('calendarContent');
+                
+                // Get time range from the schedule
+                const startMinutes = ${startMinutes};
+                const endMinutes = ${endMinutes};
+                const totalMinutes = endMinutes - startMinutes;
+                
+                // Zoom with mouse wheel (AutoCAD style - scroll to zoom, no Ctrl needed)
+                // { passive: false } is REQUIRED so preventDefault() actually works in modern browsers
+                calendarWrapper.addEventListener('wheel', function(e) {
+                    if (e.target.closest('.modal')) return;
+                    
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const delta = e.deltaY;
+                    const zoomSpeed = 0.15;
+                    
+                    // Get scroll position before zoom
+                    const scrollLeftBefore = calendarWrapper.scrollLeft;
+                    
+                    // Get mouse position relative to wrapper
+                    const rect = calendarWrapper.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left + scrollLeftBefore;
+                    
+                    // Calculate zoom
+                    const oldZoom = zoomLevel;
+                    if (delta < 0) {
+                        zoomLevel = Math.min(zoomLevel + zoomSpeed, 5);
+                    } else {
+                        zoomLevel = Math.max(zoomLevel - zoomSpeed, 0.5);
+                    }
+                    
+                    // Apply new width based on zoom
+                    applyZoom();
+                    
+                    // Adjust scroll to zoom towards mouse position
+                    const zoomRatio = zoomLevel / oldZoom;
+                    calendarWrapper.scrollLeft = mouseX * zoomRatio - (e.clientX - rect.left);
+                    
+                    updateTimeMarkers();
+                }, { passive: false });
+                
+                // Also block wheel scroll at window level when over calendar
+                window.addEventListener('wheel', function(e) {
+                    if (calendarWrapper && calendarWrapper.contains(e.target)) {
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+                
+                // Pan with middle mouse button
+                calendarWrapper.addEventListener('mousedown', function(e) {
+                    if (e.button === 1) { // Middle button
+                        e.preventDefault();
+                        isPanning = true;
+                        startPanX = e.clientX + calendarWrapper.scrollLeft;
+                        startPanY = e.clientY + calendarWrapper.scrollTop;
+                        calendarWrapper.style.cursor = 'grabbing';
+                    }
+                });
+                
+                document.addEventListener('mousemove', function(e) {
+                    if (isPanning) {
+                        e.preventDefault();
+                        calendarWrapper.scrollLeft = startPanX - e.clientX;
+                        calendarWrapper.scrollTop = startPanY - e.clientY;
+                    }
+                });
+                
+                document.addEventListener('mouseup', function(e) {
+                    if (e.button === 1) {
+                        isPanning = false;
+                        calendarWrapper.style.cursor = 'default';
+                    }
+                });
+                
+                // Apply zoom by changing content width
+                function applyZoom() {
+                    const baseWidth = 100; // Base width percentage
+                    const newWidth = baseWidth * zoomLevel;
+                    calendarContent.style.width = newWidth + '%';
+                }
+                
+                // Update text position on scroll to keep visible
+                function updateTextPositions() {
+                    const scrollLeft = calendarWrapper.scrollLeft;
+                    const equipmentLabelWidth = 120; // Width of sticky column
+                    
+                    document.querySelectorAll('.product-bar').forEach(bar => {
+                        const barRect = bar.getBoundingClientRect();
+                        const wrapperRect = calendarWrapper.getBoundingClientRect();
+                        
+                        // Calculate how much of the bar is hidden behind equipment label
+                        const barLeftInViewport = barRect.left;
+                        const equipmentColumnRight = wrapperRect.left + equipmentLabelWidth;
+                        
+                        // If bar starts before equipment column ends, shift text right
+                        if (barLeftInViewport < equipmentColumnRight) {
+                            const overlap = equipmentColumnRight - barLeftInViewport;
+                            const barWidth = barRect.width;
+                            
+                            // Don't shift more than bar width - 50px (keep some padding)
+                            const maxShift = Math.max(0, barWidth - 50);
+                            const shift = Math.min(overlap + 10, maxShift);
+                            
+                            bar.style.paddingLeft = shift + 'px';
+                        } else {
+                            bar.style.paddingLeft = '8px';
+                        }
+                    });
+                }
+                
+                // Update text positions on scroll
+                calendarWrapper.addEventListener('scroll', updateTextPositions);
+                
+                // Initial text position update
+                setTimeout(updateTextPositions, 100);
+                
+                // Filter products by search term
+                function filterProducts(searchTerm) {
+                    const term = searchTerm.trim().toLowerCase();
+                    const productBars = document.querySelectorAll('.product-bar');
+                    
+                    productBars.forEach(bar => {
+                        const data = JSON.parse(bar.getAttribute('data-product'));
+                        const seiban = (data.背番号 || '').toLowerCase();
+                        
+                        if (term === '' || seiban.includes(term)) {
+                            bar.classList.remove('greyed-out');
+                        } else {
+                            bar.classList.add('greyed-out');
+                        }
+                    });
+                }
+                
+                // Make filterProducts available globally
+                window.filterProducts = filterProducts;
+                
+                // Update time markers based on zoom level
+                function updateTimeMarkers() {
+                    const timeAxis = document.querySelector('.time-axis');
+                    const timeMarkersOverlay = document.getElementById('timeMarkersOverlay');
+                    
+                    // Determine interval based on zoom level
+                    let interval;
+                    if (zoomLevel >= 3) {
+                        interval = 1; // 1 minute intervals
+                    } else if (zoomLevel >= 1.5) {
+                        interval = 15; // 15 minute intervals
+                    } else {
+                        interval = 30; // 30 minute intervals (default)
+                    }
+                    
+                    // Generate time markers
+                    let markersHTML = '';
+                    for (let minutes = startMinutes; minutes <= endMinutes; minutes += interval) {
+                        const position = ((minutes - startMinutes) / totalMinutes) * 100;
+                        const time = minutesToTime(minutes);
+                        
+                        // Determine if this is a major marker
+                        const isHour = minutes % 60 === 0;
+                        const isMajor = isHour || (interval === 30 && minutes % 30 === 0);
+                        
+                        markersHTML += \`
+                            <div class="time-marker \${isMajor ? 'major' : ''}" style="left: \${position}%;">
+                                <div class="time-label">\${time}</div>
+                            </div>
+                        \`;
+                    }
+                    
+                    timeAxis.innerHTML = markersHTML;
+                    if (timeMarkersOverlay) {
+                        timeMarkersOverlay.innerHTML = markersHTML;
+                    }
+                }
+                
+                // Helper to format time
+                function minutesToTime(minutes) {
+                    const hours = Math.floor(minutes / 60);
+                    const mins = minutes % 60;
+                    return \`\${hours.toString().padStart(2, '0')}:\${mins.toString().padStart(2, '0')}\`;
+                }
+                
+                // Product detail modal
+                function showCalendarProductDetail(productId) {
+                    const bar = event.target.closest('.product-bar');
+                    const data = JSON.parse(bar.getAttribute('data-product'));
+                    
+                    document.getElementById('modalTitle').textContent = data.背番号;
+                    
+                    let imageHTML = '';
+                    if (data.imageURL) {
+                        imageHTML = \`
+                            <div style="text-align: center; margin-bottom: 15px;">
+                                <img src="\${data.imageURL}" 
+                                     alt="\${data.背番号}" 
+                                     style="max-width: 100%; max-height: 250px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                                     onerror="this.style.display='none'">
+                            </div>
+                        \`;
+                    }
+                    
+                    document.getElementById('modalBody').innerHTML = \`
+                        \${imageHTML}
+                        <div class="detail-row">
+                            <div class="detail-label">背番号</div>
+                            <div class="detail-value">\${data.背番号}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">設備名</div>
+                            <div class="detail-value">\${data.設備名 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">品番</div>
+                            <div class="detail-value">\${data.品番 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">品名</div>
+                            <div class="detail-value">\${data.品名 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">材料名</div>
+                            <div class="detail-value">\${data.材料 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">材料背番号</div>
+                            <div class="detail-value">\${data.材料背番号 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">収容数</div>
+                            <div class="detail-value">\${data.収容数 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">時間</div>
+                            <div class="detail-value">\${data.時間}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">数量</div>
+                            <div class="detail-value">\${data.数量} pcs</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">通い箱</div>
+                            <div class="detail-value">\${data.通い箱} 箱</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">備考</div>
+                            <div class="detail-value">\${data.備考 || '-'}</div>
+                        </div>
+                    \`;
+                    
+                    document.getElementById('productModal').classList.add('active');
+                }
+                
+                function closeModal() {
+                    document.getElementById('productModal').classList.remove('active');
+                }
+                
+                // Close modal when clicking outside
+                document.getElementById('productModal').addEventListener('click', function(e) {
+                    if (e.target === this) {
+                        closeModal();
+                    }
+                });
+                
+                // Close modal with Escape key
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') {
+                        closeModal();
+                    }
+                });
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+window.openCalendarView = openCalendarView;
 
