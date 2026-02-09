@@ -2867,8 +2867,13 @@ function renderTimelineView() {
     });
     
     container.innerHTML = `
-        <!-- Toggle Button -->
-        <div class="mb-3 flex items-center justify-end">
+        <!-- Toggle Buttons -->
+        <div class="mb-3 flex items-center justify-end gap-2">
+            <button onclick="openCalendarView()" 
+                    class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                <i class="ri-calendar-line"></i>
+                <span>Calendar View</span>
+            </button>
             <button onclick="toggleHideUnavailableEquipment()" 
                     class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
                         plannerState.hideUnavailableEquipment 
@@ -7356,4 +7361,439 @@ window.showPrintModal = showPrintModal;
 window.closePrintModal = closePrintModal;
 window.toggleAllEquipment = toggleAllEquipment;
 window.printSelectedEquipment = printSelectedEquipment;
+
+// ============================================
+// CALENDAR VIEW (GANTT CHART)
+// ============================================
+
+/**
+ * Open calendar view in new tab
+ * Shows clean Gantt chart with equipment on Y-axis and time on X-axis
+ */
+window.openCalendarView = async function() {
+    if (plannerState.selectedProducts.length === 0) {
+        showPlannerNotification('No products selected to display', 'error');
+        return;
+    }
+    
+    // Group products by equipment and sort
+    const byEquipment = {};
+    plannerState.selectedProducts.forEach(item => {
+        if (!byEquipment[item.equipment]) {
+            byEquipment[item.equipment] = [];
+        }
+        byEquipment[item.equipment].push(item);
+    });
+    
+    // Sort equipment names
+    const sortedEquipment = Object.keys(byEquipment).sort();
+    
+    // Generate calendar HTML
+    const calendarHTML = await generateCalendarHTML(sortedEquipment, byEquipment);
+    
+    // Open in new window
+    const calendarWindow = window.open('', '_blank');
+    calendarWindow.document.write(calendarHTML);
+    calendarWindow.document.close();
+};
+
+/**
+ * Generate HTML for calendar view
+ */
+async function generateCalendarHTML(equipment, productsByEquipment) {
+    const date = plannerState.currentDate;
+    const factory = plannerState.currentFactory;
+    
+    // Calculate time range
+    const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
+    const endMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
+    const totalMinutes = endMinutes - startMinutes;
+    
+    // Generate rows for each equipment
+    let rowsHTML = '';
+    
+    for (const equipmentName of equipment) {
+        const products = productsByEquipment[equipmentName];
+        
+        // Generate product bars for this equipment
+        let barsHTML = '';
+        
+        for (const product of products) {
+            const productStartMinutes = timeToMinutes(product.startTime);
+            const productDurationMinutes = product.estimatedTime.totalSeconds / 60;
+            const productEndMinutes = Math.round(productStartMinutes + productDurationMinutes);
+            
+            // Calculate position and width as percentage
+            const leftPercent = ((productStartMinutes - startMinutes) / totalMinutes) * 100;
+            const widthPercent = ((productEndMinutes - productStartMinutes) / totalMinutes) * 100;
+            
+            // Get boxes needed
+            const masterData = plannerState.products.find(p => p.背番号 === product.背番号);
+            const 収容数 = masterData ? (parseInt(masterData['収容数']) || 1) : 1;
+            const boxesNeeded = Math.ceil(product.quantity / 収容数);
+            
+            // Calculate actual working time
+            const actualTime = calculateActualWorkingTime(product);
+            
+            barsHTML += `
+                <div class="product-bar" 
+                     style="left: ${leftPercent}%; width: ${widthPercent}%; background-color: ${product.color};"
+                     onclick="showCalendarProductDetail('${product._id}')"
+                     data-product='${JSON.stringify({
+                         背番号: product.背番号,
+                         時間: actualTime,
+                         数量: product.quantity,
+                         通い箱: boxesNeeded,
+                         品番: product.品番 || '',
+                         品名: product.品名 || '',
+                         startTime: product.startTime,
+                         endTime: minutesToTime(productEndMinutes)
+                     }).replace(/'/g, "&#39;")}'>
+                    <span class="product-label">${product.背番号}</span>
+                    <span class="product-details">${product.quantity}pcs | ${boxesNeeded}箱</span>
+                </div>
+            `;
+        }
+        
+        rowsHTML += `
+            <div class="equipment-row">
+                <div class="equipment-label">${equipmentName}</div>
+                <div class="timeline-bar">
+                    ${barsHTML}
+                </div>
+            </div>
+        `;
+    }
+    
+    // Generate time markers (hourly)
+    let timeMarkersHTML = '';
+    for (let minutes = startMinutes; minutes <= endMinutes; minutes += 60) {
+        const position = ((minutes - startMinutes) / totalMinutes) * 100;
+        const time = minutesToTime(minutes);
+        timeMarkersHTML += `
+            <div class="time-marker" style="left: ${position}%;">
+                <div class="time-label">${time}</div>
+            </div>
+        `;
+    }
+    
+    return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Production Schedule - ${date}</title>
+            <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                
+                body {
+                    font-family: 'MS Gothic', 'Yu Gothic', sans-serif;
+                    background: #f5f5f5;
+                    padding: 20px;
+                }
+                
+                .header {
+                    background: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                
+                .header h1 {
+                    font-size: 24px;
+                    font-weight: bold;
+                    color: #333;
+                    margin-bottom: 8px;
+                }
+                
+                .header .info {
+                    font-size: 14px;
+                    color: #666;
+                }
+                
+                .calendar-container {
+                    background: white;
+                    border-radius: 8px;
+                    padding: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                
+                .time-axis {
+                    position: relative;
+                    height: 40px;
+                    border-bottom: 2px solid #e0e0e0;
+                    margin-bottom: 10px;
+                    margin-left: 120px;
+                }
+                
+                .time-marker {
+                    position: absolute;
+                    top: 0;
+                    bottom: 0;
+                    border-left: 1px solid #e0e0e0;
+                }
+                
+                .time-label {
+                    position: absolute;
+                    top: 50%;
+                    left: 0;
+                    transform: translate(-50%, -50%);
+                    font-size: 12px;
+                    color: #666;
+                    background: white;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                }
+                
+                .equipment-row {
+                    display: flex;
+                    align-items: center;
+                    min-height: 60px;
+                    border-bottom: 1px solid #e0e0e0;
+                    position: relative;
+                }
+                
+                .equipment-row:hover {
+                    background: #f9f9f9;
+                }
+                
+                .equipment-label {
+                    width: 120px;
+                    flex-shrink: 0;
+                    padding: 10px;
+                    font-weight: bold;
+                    font-size: 14px;
+                    color: #333;
+                    border-right: 2px solid #e0e0e0;
+                }
+                
+                .timeline-bar {
+                    flex: 1;
+                    position: relative;
+                    height: 60px;
+                }
+                
+                .product-bar {
+                    position: absolute;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    height: 45px;
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    overflow: hidden;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                }
+                
+                .product-bar:hover {
+                    transform: translateY(-50%) scale(1.05);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    z-index: 10;
+                }
+                
+                .product-label {
+                    font-weight: bold;
+                    font-size: 12px;
+                    color: white;
+                    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                .product-details {
+                    font-size: 10px;
+                    color: rgba(255,255,255,0.9);
+                    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                /* Modal styles */
+                .modal {
+                    display: none;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.5);
+                    z-index: 1000;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .modal.active {
+                    display: flex;
+                }
+                
+                .modal-content {
+                    background: white;
+                    border-radius: 8px;
+                    padding: 24px;
+                    max-width: 500px;
+                    width: 90%;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+                }
+                
+                .modal-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 20px;
+                    padding-bottom: 16px;
+                    border-bottom: 2px solid #e0e0e0;
+                }
+                
+                .modal-header h2 {
+                    font-size: 20px;
+                    font-weight: bold;
+                    color: #333;
+                }
+                
+                .close-btn {
+                    cursor: pointer;
+                    font-size: 24px;
+                    color: #999;
+                    background: none;
+                    border: none;
+                    padding: 0;
+                    line-height: 1;
+                }
+                
+                .close-btn:hover {
+                    color: #333;
+                }
+                
+                .detail-row {
+                    display: flex;
+                    padding: 12px 0;
+                    border-bottom: 1px solid #f0f0f0;
+                }
+                
+                .detail-label {
+                    width: 120px;
+                    font-weight: bold;
+                    color: #666;
+                }
+                
+                .detail-value {
+                    flex: 1;
+                    color: #333;
+                }
+                
+                @media print {
+                    body {
+                        background: white;
+                        padding: 0;
+                    }
+                    
+                    .header, .calendar-container {
+                        box-shadow: none;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>生産スケジュール (Production Schedule)</h1>
+                <div class="info">
+                    <strong>日付:</strong> ${date} | 
+                    <strong>工場:</strong> ${factory}
+                </div>
+            </div>
+            
+            <div class="calendar-container">
+                <div class="time-axis">
+                    ${timeMarkersHTML}
+                </div>
+                ${rowsHTML}
+            </div>
+            
+            <!-- Product Detail Modal -->
+            <div id="productModal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 id="modalTitle">Product Details</h2>
+                        <button class="close-btn" onclick="closeModal()">
+                            <i class="ri-close-line"></i>
+                        </button>
+                    </div>
+                    <div id="modalBody"></div>
+                </div>
+            </div>
+            
+            <script>
+                function showCalendarProductDetail(productId) {
+                    const bar = event.target.closest('.product-bar');
+                    const data = JSON.parse(bar.getAttribute('data-product'));
+                    
+                    document.getElementById('modalTitle').textContent = data.背番号;
+                    document.getElementById('modalBody').innerHTML = \`
+                        <div class="detail-row">
+                            <div class="detail-label">背番号</div>
+                            <div class="detail-value">\${data.背番号}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">品番</div>
+                            <div class="detail-value">\${data.品番 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">品名</div>
+                            <div class="detail-value">\${data.品名 || '-'}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">時間</div>
+                            <div class="detail-value">\${data.時間}</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">数量</div>
+                            <div class="detail-value">\${data.数量} pcs</div>
+                        </div>
+                        <div class="detail-row">
+                            <div class="detail-label">通い箱</div>
+                            <div class="detail-value">\${data.通い箱} 箱</div>
+                        </div>
+                    \`;
+                    
+                    document.getElementById('productModal').classList.add('active');
+                }
+                
+                function closeModal() {
+                    document.getElementById('productModal').classList.remove('active');
+                }
+                
+                // Close modal when clicking outside
+                document.getElementById('productModal').addEventListener('click', function(e) {
+                    if (e.target === this) {
+                        closeModal();
+                    }
+                });
+                
+                // Close modal with Escape key
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') {
+                        closeModal();
+                    }
+                });
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+window.openCalendarView = openCalendarView;
 
