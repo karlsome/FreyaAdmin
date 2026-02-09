@@ -7151,6 +7151,9 @@ async function generatePrintTable(selectedEquipment) {
                 equipmentSequence[product.equipment]++;
             }
             
+            const モデル = masterData['モデル'] || '';
+            console.log(`Print row for ${product.背番号}: モデル="${モデル}", color=${product.color}`);
+            
             printRows.push({
                 順番: equipmentSequence[product.equipment],
                 設備名: product.equipment,
@@ -7159,7 +7162,9 @@ async function generatePrintTable(selectedEquipment) {
                 材料名: masterData['材料'] || '',
                 材料背番号: masterData['材料背番号'] || '',
                 材料長さ: `${materialLengthM}m`,
-                通い箱pcs: boxesNeeded
+                通い箱pcs: boxesNeeded,
+                色: product.color || '#6B7280',
+                モデル: モデル
             });
         } catch (error) {
             console.error(`Error processing product ${product.背番号}:`, error);
@@ -7266,6 +7271,7 @@ function generatePrintHTML(rows) {
             currentEquipment = row.設備名;
             groupIndex++;
         }
+        console.log(`Grouping row: ${row.背番号}, モデル="${row.モデル}", will apply color: ${row.モデル === '992W(310D)'}`);
         return {
             ...row,
             isHighlighted: groupIndex % 2 === 1 // Odd groups get grey background
@@ -7375,14 +7381,15 @@ function generatePrintHTML(rows) {
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 6%;">順番</th>
-                        <th style="width: 11%;">設備名</th>
-                        <th style="width: 16%;">時間</th>
-                        <th style="width: 10%;">背番号</th>
-                        <th style="width: 24%;">材料名</th>
-                        <th style="width: 11%;">材料背番号</th>
-                        <th style="width: 12%;">材料長さ</th>
-                        <th style="width: 10%;">通い箱pcs</th>
+                        <th style="width: 5%;">順番</th>
+                        <th style="width: 10%;">設備名</th>
+                        <th style="width: 15%;">時間</th>
+                        <th style="width: 9%;">背番号</th>
+                        <th style="width: 23%;">材料名</th>
+                        <th style="width: 10%;">材料背番号</th>
+                        <th style="width: 11%;">材料長さ</th>
+                        <th style="width: 9%;">通い箱pcs</th>
+                        <th style="width: 8%;">箱色</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -7396,6 +7403,7 @@ function generatePrintHTML(rows) {
                             <td>${row.材料背番号}</td>
                             <td>${row.材料長さ}</td>
                             <td>${row.通い箱pcs}</td>
+                            <td style="${row.モデル === '992W(310D)' ? `background-color: ${row.色};` : ''} padding: 6px;"></td>
                         </tr>
                     `).join('')}
                 </tbody>
