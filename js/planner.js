@@ -7046,6 +7046,9 @@ async function generatePrintTable(selectedEquipment) {
     // Fetch master data for all products
     const printRows = [];
     
+    // Track equipment sequence numbers
+    const equipmentSequence = {};
+    
     for (const product of productsToPrint) {
         try {
             // Get master data from database
@@ -7079,11 +7082,20 @@ async function generatePrintTable(selectedEquipment) {
             // Calculate actual working time (excluding breaks)
             const actualTime = calculateActualWorkingTime(product);
             
+            // Calculate sequence number for this equipment
+            if (!equipmentSequence[product.equipment]) {
+                equipmentSequence[product.equipment] = 1;
+            } else {
+                equipmentSequence[product.equipment]++;
+            }
+            
             printRows.push({
+                順番: equipmentSequence[product.equipment],
                 設備名: product.equipment,
                 時間: actualTime,
                 背番号: product.背番号,
                 材料名: masterData['材料'] || '',
+                材料背番号: masterData['材料背番号'] || '',
                 材料長さ: `${materialLengthM}m`,
                 通い箱pcs: boxesNeeded
             });
@@ -7227,6 +7239,12 @@ function generatePrintHTML(rows) {
                     background-color: #fafafa;
                 }
                 
+                td.sequence {
+                    text-align: center;
+                    font-weight: bold;
+                    font-size: 10pt;
+                }
+                
                 td.time {
                     white-space: nowrap;
                     font-size: 9pt;
@@ -7254,21 +7272,25 @@ function generatePrintHTML(rows) {
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 12%;">設備名</th>
-                        <th style="width: 18%;">時間</th>
-                        <th style="width: 12%;">背番号</th>
-                        <th style="width: 30%;">材料名</th>
-                        <th style="width: 15%;">材料長さ</th>
-                        <th style="width: 13%;">通い箱pcs</th>
+                        <th style="width: 6%;">順番</th>
+                        <th style="width: 11%;">設備名</th>
+                        <th style="width: 16%;">時間</th>
+                        <th style="width: 10%;">背番号</th>
+                        <th style="width: 24%;">材料名</th>
+                        <th style="width: 11%;">材料背番号</th>
+                        <th style="width: 12%;">材料長さ</th>
+                        <th style="width: 10%;">通い箱pcs</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${rows.map(row => `
                         <tr>
+                            <td class="sequence">${row.順番}</td>
                             <td class="equipment">${row.設備名}</td>
                             <td class="time">${row.時間}</td>
                             <td>${row.背番号}</td>
                             <td class="material-name">${row.材料名}</td>
+                            <td>${row.材料背番号}</td>
                             <td>${row.材料長さ}</td>
                             <td>${row.通い箱pcs}</td>
                         </tr>
