@@ -7409,6 +7409,29 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
     const endMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
     const totalMinutes = endMinutes - startMinutes;
     
+    // Collect all unique products with their colors for legend
+    const productLegend = new Map();
+    plannerState.selectedProducts.forEach(item => {
+        if (!productLegend.has(item.背番号)) {
+            productLegend.set(item.背番号, {
+                背番号: item.背番号,
+                color: item.color,
+                品名: item.品名 || ''
+            });
+        }
+    });
+    
+    // Generate color legend
+    let legendHTML = '';
+    Array.from(productLegend.values()).forEach(item => {
+        legendHTML += `
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: ${item.color};"></div>
+                <span class="legend-label">${item.背番号}</span>
+            </div>
+        `;
+    });
+    
     // Generate rows for each equipment
     let rowsHTML = '';
     
@@ -7465,13 +7488,14 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
         `;
     }
     
-    // Generate time markers (hourly)
+    // Generate initial time markers (30 min intervals)
     let timeMarkersHTML = '';
-    for (let minutes = startMinutes; minutes <= endMinutes; minutes += 60) {
+    for (let minutes = startMinutes; minutes <= endMinutes; minutes += 30) {
         const position = ((minutes - startMinutes) / totalMinutes) * 100;
         const time = minutesToTime(minutes);
+        const isHour = minutes % 60 === 0;
         timeMarkersHTML += `
-            <div class="time-marker" style="left: ${position}%;">
+            <div class="time-marker ${isHour ? 'major' : ''}" style="left: ${position}%;">
                 <div class="time-label">${time}</div>
             </div>
         `;
@@ -7495,6 +7519,7 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     font-family: 'MS Gothic', 'Yu Gothic', sans-serif;
                     background: #f5f5f5;
                     padding: 20px;
+                    overflow: hidden;
                 }
                 
                 .header {
@@ -7517,11 +7542,59 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     color: #666;
                 }
                 
+                .legend {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                    padding: 12px;
+                    background: #f9f9f9;
+                    border-radius: 6px;
+                    margin-bottom: 16px;
+                }
+                
+                .legend-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                }
+                
+                .legend-color {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 3px;
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+                }
+                
+                .legend-label {
+                    font-size: 13px;
+                    font-weight: 500;
+                    color: #333;
+                }
+                
                 .calendar-container {
                     background: white;
                     border-radius: 8px;
                     padding: 20px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    cursor: default;
+                    overflow: hidden;
+                    position: relative;
+                }
+                
+                .calendar-wrapper {
+                    overflow: auto;
+                    max-height: calc(100vh - 300px);
+                    position: relative;
+                }
+                
+                .calendar-content {
+                    min-width: 100%;
+                    transition: width 0.15s ease-out;
+                    position: relative;
+                }
+                
+                .equipment-rows {
+                    position: relative;
                 }
                 
                 .time-axis {
@@ -7530,13 +7603,42 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                     border-bottom: 2px solid #e0e0e0;
                     margin-bottom: 10px;
                     margin-left: 120px;
+                    pointer-events: none;
+                }
+                
+                .time-markers-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 120px;
+                    right: 0;
+                    bottom: 0;
+                    pointer-events: none;
+                    z-index: 1;
+                }
+                
+                .time-markers-overlay .time-marker {
+                    border-left: 1px solid #e8e8e8;
+                }
+                
+                .time-markers-overlay .time-marker.major {
+                    border-left: 2px solid #d0d0d0;
+                }
+                
+                .time-markers-overlay .time-label {
+                    display: none; /* Hide labels in overlay, only show vertical lines */
                 }
                 
                 .time-marker {
                     position: absolute;
                     top: 0;
                     bottom: 0;
-                    border-left: 1px solid #e0e0e0;
+                    height: 100%;
+                    border-left: 1px solid #e8e8e8;
+                    pointer-events: none;
+                }
+                
+                .time-marker.major {
+                    border-left: 2px solid #d0d0d0;
                 }
                 
                 .time-label {
@@ -7717,10 +7819,25 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
             </div>
             
             <div class="calendar-container">
-                <div class="time-axis">
-                    ${timeMarkersHTML}
+                <!-- Color Legend -->
+                <div class="legend">
+                    ${legendHTML}
                 </div>
-                ${rowsHTML}
+                
+                <div class="calendar-wrapper">
+                    <div class="calendar-content" id="calendarContent">
+                        <div class="time-axis">
+                            ${timeMarkersHTML}
+                        </div>
+                        <div class="equipment-rows" id="equipmentRows">
+                            <!-- Time marker overlay that extends through all rows -->
+                            <div class="time-markers-overlay" id="timeMarkersOverlay">
+                                ${timeMarkersHTML}
+                            </div>
+                            ${rowsHTML}
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <!-- Product Detail Modal -->
@@ -7737,6 +7854,145 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
             </div>
             
             <script>
+                // Zoom and pan state
+                let zoomLevel = 1;
+                let isPanning = false;
+                let startPanX = 0;
+                let startPanY = 0;
+                
+                const calendarWrapper = document.querySelector('.calendar-wrapper');
+                const calendarContent = document.getElementById('calendarContent');
+                
+                // Get time range from the schedule
+                const startMinutes = ${startMinutes};
+                const endMinutes = ${endMinutes};
+                const totalMinutes = endMinutes - startMinutes;
+                
+                // Zoom with mouse wheel (AutoCAD style - scroll to zoom, no Ctrl needed)
+                // { passive: false } is REQUIRED so preventDefault() actually works in modern browsers
+                calendarWrapper.addEventListener('wheel', function(e) {
+                    if (e.target.closest('.modal')) return;
+                    
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    console.log('🔍 Wheel event fired! deltaY:', e.deltaY, 'current zoom:', zoomLevel);
+                    
+                    const delta = e.deltaY;
+                    const zoomSpeed = 0.15;
+                    
+                    // Get scroll position before zoom
+                    const scrollLeftBefore = calendarWrapper.scrollLeft;
+                    
+                    // Get mouse position relative to wrapper
+                    const rect = calendarWrapper.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left + scrollLeftBefore;
+                    
+                    // Calculate zoom
+                    const oldZoom = zoomLevel;
+                    if (delta < 0) {
+                        zoomLevel = Math.min(zoomLevel + zoomSpeed, 5);
+                    } else {
+                        zoomLevel = Math.max(zoomLevel - zoomSpeed, 0.5);
+                    }
+                    
+                    // Apply new width based on zoom
+                    applyZoom();
+                    
+                    // Adjust scroll to zoom towards mouse position
+                    const zoomRatio = zoomLevel / oldZoom;
+                    calendarWrapper.scrollLeft = mouseX * zoomRatio - (e.clientX - rect.left);
+                    
+                    updateTimeMarkers();
+                }, { passive: false });
+                
+                // Also block wheel scroll at window level when over calendar
+                window.addEventListener('wheel', function(e) {
+                    if (calendarWrapper && calendarWrapper.contains(e.target)) {
+                        e.preventDefault();
+                    }
+                }, { passive: false });
+                
+                // Pan with middle mouse button
+                calendarWrapper.addEventListener('mousedown', function(e) {
+                    if (e.button === 1) { // Middle button
+                        e.preventDefault();
+                        isPanning = true;
+                        startPanX = e.clientX + calendarWrapper.scrollLeft;
+                        startPanY = e.clientY + calendarWrapper.scrollTop;
+                        calendarWrapper.style.cursor = 'grabbing';
+                    }
+                });
+                
+                document.addEventListener('mousemove', function(e) {
+                    if (isPanning) {
+                        e.preventDefault();
+                        calendarWrapper.scrollLeft = startPanX - e.clientX;
+                        calendarWrapper.scrollTop = startPanY - e.clientY;
+                    }
+                });
+                
+                document.addEventListener('mouseup', function(e) {
+                    if (e.button === 1) {
+                        isPanning = false;
+                        calendarWrapper.style.cursor = 'default';
+                    }
+                });
+                
+                // Apply zoom by changing content width
+                function applyZoom() {
+                    const baseWidth = 100; // Base width percentage
+                    const newWidth = baseWidth * zoomLevel;
+                    console.log('📐 Applying zoom:', zoomLevel, '-> width:', newWidth + '%');
+                    calendarContent.style.width = newWidth + '%';
+                }
+                
+                // Update time markers based on zoom level
+                function updateTimeMarkers() {
+                    const timeAxis = document.querySelector('.time-axis');
+                    const timeMarkersOverlay = document.getElementById('timeMarkersOverlay');
+                    
+                    // Determine interval based on zoom level
+                    let interval;
+                    if (zoomLevel >= 3) {
+                        interval = 1; // 1 minute intervals
+                    } else if (zoomLevel >= 1.5) {
+                        interval = 15; // 15 minute intervals
+                    } else {
+                        interval = 30; // 30 minute intervals (default)
+                    }
+                    
+                    // Generate time markers
+                    let markersHTML = '';
+                    for (let minutes = startMinutes; minutes <= endMinutes; minutes += interval) {
+                        const position = ((minutes - startMinutes) / totalMinutes) * 100;
+                        const time = minutesToTime(minutes);
+                        
+                        // Determine if this is a major marker
+                        const isHour = minutes % 60 === 0;
+                        const isMajor = isHour || (interval === 30 && minutes % 30 === 0);
+                        
+                        markersHTML += \`
+                            <div class="time-marker \${isMajor ? 'major' : ''}" style="left: \${position}%;">
+                                <div class="time-label">\${time}</div>
+                            </div>
+                        \`;
+                    }
+                    
+                    timeAxis.innerHTML = markersHTML;
+                    if (timeMarkersOverlay) {
+                        timeMarkersOverlay.innerHTML = markersHTML;
+                    }
+                }
+                
+                // Helper to format time
+                function minutesToTime(minutes) {
+                    const hours = Math.floor(minutes / 60);
+                    const mins = minutes % 60;
+                    return \`\${hours.toString().padStart(2, '0')}:\${mins.toString().padStart(2, '0')}\`;
+                }
+                
+                // Product detail modal
                 function showCalendarProductDetail(productId) {
                     const bar = event.target.closest('.product-bar');
                     const data = JSON.parse(bar.getAttribute('data-product'));
@@ -7789,6 +8045,10 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
                         closeModal();
                     }
                 });
+                
+                console.log('✅ Calendar script fully loaded. Zoom, pan, and modal ready.');
+                console.log('calendarWrapper:', calendarWrapper);
+                console.log('calendarContent:', calendarContent);
             </script>
         </body>
         </html>
