@@ -415,6 +415,16 @@ async function loadProductsForFactory(factory) {
 
 async function loadExistingPlans(factory, date) {
     try {
+        // Safety: use plannerState if arguments not provided
+        factory = factory || plannerState.currentFactory;
+        date = date || plannerState.currentDate;
+        
+        if (!factory || !date) {
+            console.warn('⚠️ loadExistingPlans called without factory or date! Skipping.');
+            plannerState.selectedProducts = [];
+            return [];
+        }
+        
         console.log(`📋 Loading plans for factory: ${factory}, date: ${date}`);
         
         const response = await fetch(BASE_URL + 'queries', {
@@ -4658,12 +4668,67 @@ window.showSmartSchedulingModal = async function() {
         console.log('Trends received:', trends);
         console.log('Number of trends:', Object.keys(trends).length);
         
-        // Auto-assign products to equipment based on trends
+        // Helper function to get material suffix from 背番号
+        function getMaterialSuffix(背番号) {
+            if (!背番号 || 背番号.length < 2) return '';
+            return 背番号.substring(1); // Everything after first character
+        }
+        
+        // Helper function to check if product is 992W(310D)
+        function is992WProduct(goal) {
+            // Look up full product data to check モデル
+            const fullProduct = plannerState.products.find(p => p.背番号 === goal.背番号);
+            return fullProduct && fullProduct.モデル && fullProduct.モデル.trim() === '992W(310D)';
+        }
+        
+        // Helper function to determine if equipment is group or single
+        function isGroupEquipment(equipment) {
+            return equipment && equipment.includes(',');
+        }
+        
+        // Sort goals by smart scheduling rules for 992W(310D) products
+        const sortedGoals = [...goalsToSchedule].sort((a, b) => {
+            const aIs992W = is992WProduct(a);
+            const bIs992W = is992WProduct(b);
+            
+            // Non-992W products go last
+            if (aIs992W && !bIs992W) return -1;
+            if (!aIs992W && bIs992W) return 1;
+            if (!aIs992W && !bIs992W) return 0; // Keep original order for non-992W
+            
+            // Both are 992W products - apply material priority
+            const aMaterial = getMaterialSuffix(a.背番号);
+            const bMaterial = getMaterialSuffix(b.背番号);
+            
+            // TD products always first
+            const aIsTD = aMaterial === 'TD';
+            const bIsTD = bMaterial === 'TD';
+            if (aIsTD && !bIsTD) return -1;
+            if (!aIsTD && bIsTD) return 1;
+            
+            // Within same priority level, sort by material to group together
+            if (aMaterial !== bMaterial) {
+                return aMaterial.localeCompare(bMaterial);
+            }
+            
+            // Same material, sort by number
+            return a.背番号.localeCompare(b.背番号);
+        });
+        
+        console.log('Goals sorted by smart scheduling rules:', sortedGoals.map(g => g.背番号).join(', '));
+        
+        // Auto-assign products to equipment based on trends and 992W rules
         const assignments = {};
         let totalAssigned = 0;
         let totalUnassigned = 0;
         
-        goalsToSchedule.forEach(goal => {
+        // Track locked equipment for TD material by type (group vs single)
+        const tdLockedEquipment = {
+            group: null,  // For digits 1-4
+            single: null  // For digits 5-8
+        };
+        
+        sortedGoals.forEach(goal => {
             const identifier = goal.背番号 || goal.品番;
             console.log(`Processing goal: ${identifier}`);
             console.log('  Full goal object:', goal);
@@ -4671,17 +4736,81 @@ window.showSmartSchedulingModal = async function() {
             const trend = trends[identifier];
             console.log(`  Trend for ${identifier}:`, trend);
             
-            if (trend && trend.mostFrequentEquipment) {
-                const equipment = trend.mostFrequentEquipment;
-                console.log(`  ✓ ASSIGNED to ${equipment} (confidence: ${trend.frequency}/${trend.totalRecords})`);
+            // Apply 992W(310D) smart rules
+            const is992W = is992WProduct(goal);
+            let bestEquipment = null;
+            let bestScore = -1;
+            
+            if (is992W && goal.背番号) {
+                const firstDigit = parseInt(goal.背番号.charAt(0));
+                const material = getMaterialSuffix(goal.背番号);
                 
-                if (!assignments[equipment]) {
-                    assignments[equipment] = [];
+                console.log(`  992W Product: digit=${firstDigit}, material=${material}`);
+                
+                // Determine equipment type based on first digit
+                const needsGroup = firstDigit >= 1 && firstDigit <= 4;
+                const needsSingle = firstDigit >= 5 && firstDigit <= 8;
+                const equipmentType = needsGroup ? 'group' : 'single';
+                
+                // For TD material - lock to same equipment
+                if (material === 'TD' && tdLockedEquipment[equipmentType]) {
+                    bestEquipment = tdLockedEquipment[equipmentType];
+                    console.log(`  🔒 TD LOCKED to ${bestEquipment} (${equipmentType.toUpperCase()})`);
+                } else if (trend && trend.equipmentDistribution) {
+                    // First TD or non-TD material - evaluate equipment options
+                    const equipmentOptions = Object.entries(trend.equipmentDistribution)
+                        .filter(([eq]) => {
+                            const isGroup = isGroupEquipment(eq);
+                            return (needsGroup && isGroup) || (needsSingle && !isGroup);
+                        })
+                        .map(([eq, freq]) => {
+                            // Calculate bonus for same material products already assigned
+                            let materialBonus = 0;
+                            if (assignments[eq]) {
+                                const sameMaterialCount = assignments[eq].filter(p => 
+                                    is992WProduct(p) && getMaterialSuffix(p.背番号) === material
+                                ).length;
+                                materialBonus = sameMaterialCount * 1000; // Very high bonus for material grouping
+                            }
+                            const finalScore = freq + materialBonus;
+                            return { equipment: eq, freq, materialBonus, score: finalScore };
+                        })
+                        .sort((a, b) => b.score - a.score);
+                    
+                    if (equipmentOptions.length > 0) {
+                        // Log scoring details
+                        console.log(`  Equipment scoring for ${material}:`);
+                        equipmentOptions.forEach(opt => {
+                            console.log(`    ${opt.equipment}: freq=${opt.freq}, bonus=${opt.materialBonus}, total=${opt.score}`);
+                        });
+                        
+                        bestEquipment = equipmentOptions[0].equipment;
+                        bestScore = equipmentOptions[0].score;
+                        console.log(`  ✓ 992W Smart Assignment to ${bestEquipment} (${equipmentType.toUpperCase()}, score=${bestScore})`);
+                        
+                        // Lock equipment for first TD product
+                        if (material === 'TD' && !tdLockedEquipment[equipmentType]) {
+                            tdLockedEquipment[equipmentType] = bestEquipment;
+                            console.log(`  🔒 LOCKING all ${equipmentType.toUpperCase()} TD products to ${bestEquipment}`);
+                        }
+                    }
                 }
-                assignments[equipment].push({
+            } else if (trend && trend.mostFrequentEquipment) {
+                // Non-992W or no special rules - use historical trend
+                bestEquipment = trend.mostFrequentEquipment;
+                console.log(`  ✓ Historical Assignment to ${bestEquipment}`);
+            }
+            
+            if (bestEquipment) {
+                console.log(`  ✓ ASSIGNED to ${bestEquipment}`);
+                
+                if (!assignments[bestEquipment]) {
+                    assignments[bestEquipment] = [];
+                }
+                assignments[bestEquipment].push({
                     ...goal,
                     quantity: goal.remainingQuantity,
-                    confidence: trend.frequency / trend.totalRecords
+                    confidence: trend ? (trend.frequency / trend.totalRecords) : 0
                 });
                 totalAssigned++;
             } else {
@@ -4798,8 +4927,9 @@ window.confirmSmartScheduling = async function() {
     // STEP 1: Refresh timeline from MongoDB
     // ========================================
     console.log('🔄 Loading latest timeline from database...');
+    console.log(`📋 Using factory: ${plannerState.currentFactory}, date: ${plannerState.currentDate}`);
     try {
-        await loadExistingPlans(); // Refresh from MongoDB
+        await loadExistingPlans(plannerState.currentFactory, plannerState.currentDate); // Refresh from MongoDB with correct factory/date
         console.log('✅ Timeline refreshed');
     } catch (error) {
         console.error('❌ Failed to refresh timeline:', error);
@@ -5507,7 +5637,7 @@ async function refreshTimelineFromDatabase() {
     const currentFactory = plannerState.currentFactory;
     const currentDate = plannerState.currentDate;
     
-    await loadExistingPlans();
+    await loadExistingPlans(currentFactory, currentDate);
     
     // Restore selections
     plannerState.currentFactory = currentFactory;
