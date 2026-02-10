@@ -2710,6 +2710,9 @@ async function clearAllSelectedProducts() {
         return;
     }
     
+    // Show loading modal
+    showLoadingModal('Clearing all products...');
+    
     console.log('🗑️ Clearing all products from timeline...');
     
     // Group products by goalId to handle duplicates
@@ -2766,6 +2769,9 @@ async function clearAllSelectedProducts() {
     renderProductList();
     updateSelectedProductsSummary();
     renderAllViews();
+    
+    // Hide loading modal
+    hideLoadingModal();
     
     showPlannerNotification('All products cleared from timeline', 'success');
 }
@@ -4535,6 +4541,9 @@ window.showSmartSchedulingModal = async function() {
         return;
     }
     
+    // Show loading modal
+    showLoadingModal('Analyzing production trends...');
+    
     showPlannerNotification('Analyzing production trends...', 'info');
     
     try {
@@ -4620,11 +4629,15 @@ window.showSmartSchedulingModal = async function() {
         // Store trends for use in confirmation
         window._smartSchedulingTrends = trends;
         
+        // Hide loading modal
+        hideLoadingModal();
+        
         // Show confirmation modal
         showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassigned);
         
     } catch (error) {
         console.error('Error in smart scheduling:', error);
+        hideLoadingModal();
         showPlannerNotification('Error: ' + error.message, 'error');
     }
 };
@@ -4700,6 +4713,12 @@ window.closeSmartSchedulingModal = function() {
 window.confirmSmartScheduling = async function() {
     const assignments = window._smartSchedulingAssignments;
     if (!assignments) return;
+    
+    // Close the confirmation modal
+    closeSmartSchedulingModal();
+    
+    // Show loading modal
+    showLoadingModal('Applying smart schedule...');
     
     // Get time limit from input field
     const timeLimitInput = document.getElementById('smartSchedulingTimeLimit');
@@ -4881,7 +4900,6 @@ window.confirmSmartScheduling = async function() {
         // Reload goals
         await loadGoals();
         
-        closeSmartSchedulingModal();
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
@@ -4889,6 +4907,9 @@ window.confirmSmartScheduling = async function() {
         // Auto-save plan after smart scheduling
         console.log('💾 Auto-saving plan after Smart Scheduling...');
         await savePlanToDatabase();
+        
+        // Hide loading modal
+        hideLoadingModal();
         
         if (scheduledCount > 0) {
             showPlannerNotification(`✅ Scheduled ${scheduledCount} product(s) in complete boxes. ${skippedCount > 0 ? skippedCount + ' skipped (no space or no history).' : ''}`, 'success');
@@ -4898,6 +4919,7 @@ window.confirmSmartScheduling = async function() {
         
     } catch (error) {
         console.error('Error applying smart scheduling:', error);
+        hideLoadingModal();
         showPlannerNotification('Error: ' + error.message, 'error');
     }
 };
@@ -5231,6 +5253,33 @@ function showPlannerNotification(message, type = 'info') {
         toast.classList.add('opacity-0', 'translate-y-2');
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// ============================================
+// LOADING MODAL
+// ============================================
+function showLoadingModal(message = 'Processing...') {
+    // Remove existing loading modal if any
+    hideLoadingModal();
+    
+    const modal = document.createElement('div');
+    modal.id = 'plannerLoadingModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center';
+    modal.innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-8 flex flex-col items-center gap-4 shadow-2xl">
+            <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-600"></div>
+            <p class="text-lg font-medium text-gray-900 dark:text-white">${message}</p>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+function hideLoadingModal() {
+    const modal = document.getElementById('plannerLoadingModal');
+    if (modal) {
+        modal.remove();
+    }
 }
 
 // ============================================
