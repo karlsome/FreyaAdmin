@@ -4096,11 +4096,23 @@ async function confirmMultiPickerSelection() {
     const equipment = multiPickerState.equipment;
     
     console.log(`🕒 Starting products at clicked time: ${multiPickerState.startTime} (${currentTime} minutes)`);
+    console.log(`📦 Products to add: ${multiPickerState.orderedProducts.length}`);
     
-    // Add all ordered products to the selected products state and update goal quantities
-    const updatePromises = [];
-    
+    // ========================================
+    // STEP 1: Validate all products first
+    // ========================================
+    const productsToAdd = [];
     for (const product of multiPickerState.orderedProducts) {
+        // Find the current goal to check remaining quantity
+        const currentGoal = plannerState.goals.find(g => g._id === product._id);
+        console.log(`   Validating ${product.背番号}: remaining=${currentGoal?.remainingQuantity}, requesting=${product.quantity}`);
+        
+        if (currentGoal && product.quantity > currentGoal.remainingQuantity) {
+            console.error(`⚠️ Cannot schedule ${product.quantity} pcs - only ${currentGoal.remainingQuantity} pcs remaining!`);
+            showPlannerNotification(`Cannot schedule ${product.quantity} pcs for ${product.背番号} - only ${currentGoal.remainingQuantity} pcs remaining`, 'error');
+            continue; // Skip this product
+        }
+        
         const timeInfo = calculateProductionTime(product, product.quantity);
         const boxes = calculateBoxesNeeded(product, product.quantity);
         const productDurationMinutes = timeInfo.totalSeconds / 60;
@@ -4108,7 +4120,7 @@ async function confirmMultiPickerSelection() {
         // Find actual start time, skipping any breaks
         const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
         
-        plannerState.selectedProducts.push({
+        productsToAdd.push({
             ...product,
             equipment: equipment,
             boxes: boxes,
@@ -4118,79 +4130,130 @@ async function confirmMultiPickerSelection() {
             goalId: product._id // Store goal ID for tracking
         });
         
-        // Update goal quantity in database
-        if (product._id) {
-            console.log(`📦 Scheduling ${product.quantity} pcs for goal ${product._id} (${product.背番号})`);
-            
-            // Find the current goal to check remaining quantity
-            const currentGoal = plannerState.goals.find(g => g._id === product._id);
-            console.log(`   Current goal state: remaining=${currentGoal?.remainingQuantity}, scheduled=${currentGoal?.scheduledQuantity}, target=${currentGoal?.targetQuantity}`);
-            
-            if (currentGoal && product.quantity > currentGoal.remainingQuantity) {
-                console.error(`⚠️ Cannot schedule ${product.quantity} pcs - only ${currentGoal.remainingQuantity} pcs remaining!`);
-                showPlannerNotification(`Cannot schedule ${product.quantity} pcs for ${product.背番号} - only ${currentGoal.remainingQuantity} pcs remaining`, 'error');
-                continue; // Skip this product
-            }
-            
-            updatePromises.push(
-                fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ quantityToSchedule: product.quantity })
-                }).then(async response => {
-                    if (!response.ok) {
-                        const error = await response.json();
-                        console.error(`❌ Failed to update goal ${product._id}: ${error.error || 'Unknown error'}`);
-                        showPlannerNotification(`Error: ${error.error || 'Failed to update goal'}`, 'error');
-                    } else {
-                        const result = await response.json();
-                        console.log(`✅ Goal ${product._id} updated successfully - remaining: ${result.remainingQuantity}`);
-                    }
-                    return response;
-                })
-            );
-        }
-        
         // Update current time for next product
         currentTime = actualStartTime + productDurationMinutes;
     }
     
-    // Wait for all goal updates to complete
+    if (productsToAdd.length === 0) {
+        showPlannerNotification('No valid products to add to timeline', 'error');
+        return;
+    }
+    
+    console.log(`✅ Validation passed. ${productsToAdd.length} products ready to add.`);
+    
+    // ========================================
+    // STEP 2: Add to plannerState and save to database FIRST
+    // ========================================
+    const previousSelectedProducts = [...plannerState.selectedProducts]; // Backup for rollback
+    
     try {
+        // Add to local state
+        plannerState.selectedProducts.push(...productsToAdd);
+        
+        console.log('💾 Saving plan to database...');
+        
+        // Save to database - THIS MUST SUCCEED
+        const saveResult = await savePlanToDatabaseWithValidation();
+        
+        if (!saveResult.success) {
+            throw new Error(saveResult.error || 'Failed to save plan to database');
+        }
+        
+        console.log('✅ Plan saved to database successfully');
+        
+        // ========================================
+        // STEP 3: Update goal quantities ONLY after database save succeeds
+        // ========================================
+        console.log('📦 Updating goal quantities...');
+        const updatePromises = [];
+        
+        for (const product of productsToAdd) {
+            if (product._id) {
+                console.log(`   Scheduling ${product.quantity} pcs for goal ${product._id} (${product.背番号})`);
+                
+                updatePromises.push(
+                    fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ quantityToSchedule: product.quantity })
+                    }).then(async response => {
+                        if (!response.ok) {
+                            const error = await response.json();
+                            console.error(`❌ Failed to update goal ${product._id}: ${error.error || 'Unknown error'}`);
+                            throw new Error(`Goal update failed: ${error.error || 'Unknown error'}`);
+                        } else {
+                            const result = await response.json();
+                            console.log(`✅ Goal ${product._id} updated - remaining: ${result.remainingQuantity}`);
+                            return result;
+                        }
+                    })
+                );
+            }
+        }
+        
+        // Wait for all goal updates to complete
         await Promise.all(updatePromises);
+        
+        console.log('✅ All goal quantities updated successfully');
         
         // Reload goals to reflect new quantities
         await loadGoals();
         
-        console.log('✅ Goal quantities updated successfully');
+        // Update UI
+        closeMultiColumnPicker();
+        renderGoalList();
+        updateSelectedProductsSummary();
+        renderAllViews();
+        
+        showPlannerNotification(`✅ Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline`, 'success');
         
     } catch (error) {
-        console.error('Error updating goal quantities:', error);
-        showPlannerNotification('Warning: Some goal quantities may not have been updated', 'warning');
+        // ========================================
+        // ROLLBACK on any error
+        // ========================================
+        console.error('❌ ERROR during timeline add:', error);
+        console.error('❌ Rolling back changes...');
+        
+        // Restore previous state
+        plannerState.selectedProducts = previousSelectedProducts;
+        
+        // Try to save the rolled-back state
+        try {
+            await savePlanToDatabase();
+            console.log('✅ Rollback complete - previous state restored');
+        } catch (rollbackError) {
+            console.error('❌ Rollback save failed:', rollbackError);
+        }
+        
+        // Update UI to show rollback
+        renderGoalList();
+        updateSelectedProductsSummary();
+        renderAllViews();
+        
+        // Show error to user
+        showPlannerNotification(`❌ Failed to add products: ${error.message}. Changes have been rolled back.`, 'error');
     }
-    
-    closeMultiColumnPicker();
-    renderGoalList();
-    updateSelectedProductsSummary();
-    renderAllViews();
-    
-    // Auto-save the plan after adding products
-    console.log('💾 Auto-saving plan to database...');
-    await savePlanToDatabase();
-    
-    showPlannerNotification(`Added ${multiPickerState.orderedProducts.length} products to timeline`, 'success');
 }
 
-// Save current plan to database
+// Save current plan to database (legacy - for backward compatibility)
 async function savePlanToDatabase() {
+    const result = await savePlanToDatabaseWithValidation();
+    if (!result.success) {
+        console.error('❌ Error saving plan:', result.error);
+        showPlannerNotification('Warning: Plan may not have been saved', 'warning');
+    }
+}
+
+// Save current plan to database with validation and return result
+async function savePlanToDatabaseWithValidation() {
     if (!plannerState.currentFactory) {
-        return;
+        return { success: false, error: 'No factory selected' };
     }
     
     // If no products, delete the plan instead of saving empty state
     if (plannerState.selectedProducts.length === 0) {
         await deletePlanFromDatabase();
-        return;
+        return { success: true };
     }
     
     const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
@@ -4233,6 +4296,10 @@ async function savePlanToDatabase() {
             })
         });
         
+        if (!existingResponse.ok) {
+            throw new Error(`Failed to check existing plans: ${existingResponse.statusText}`);
+        }
+        
         const existingPlans = await existingResponse.json();
         
         if (existingPlans.length > 0) {
@@ -4258,7 +4325,13 @@ async function savePlanToDatabase() {
                 throw new Error(error.error || 'Failed to update plan');
             }
             
+            const updateResult = await updateResponse.json();
+            if (!updateResult.success) {
+                throw new Error(updateResult.error || 'Update plan returned unsuccessful');
+            }
+            
             console.log('✅ Plan updated successfully');
+            return { success: true, action: 'updated', planId: planId };
         } else {
             // Create new plan
             console.log('Creating new plan');
@@ -4274,12 +4347,18 @@ async function savePlanToDatabase() {
                 throw new Error(error.error || 'Failed to create plan');
             }
             
+            const insertResult = await insertResponse.json();
+            if (!insertResult.success) {
+                throw new Error(insertResult.error || 'Insert plan returned unsuccessful');
+            }
+            
             console.log('✅ Plan created successfully');
+            return { success: true, action: 'created', planId: insertResult.data._id };
         }
         
     } catch (error) {
         console.error('❌ Error saving plan:', error);
-        showPlannerNotification('Warning: Plan may not have been saved', 'warning');
+        return { success: false, error: error.message || 'Unknown error saving plan' };
     }
 }
 
