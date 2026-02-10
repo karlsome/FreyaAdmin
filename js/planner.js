@@ -95,11 +95,12 @@ async function initializePlanner() {
         dateInput.value = plannerState.currentDate;
     }
     
-    // Load factories
-    await loadPlannerFactories();
-    
-    // Setup event listeners
+    // Setup event listeners FIRST (before loading factories)
+    // This ensures the change event listener is ready when we restore saved factory
     setupPlannerEventListeners();
+    
+    // Load factories (this may trigger factory change event for saved factory)
+    await loadPlannerFactories();
     
     // Apply translations
     if (typeof applyLanguageEnhanced === 'function') {
@@ -200,20 +201,27 @@ function switchPlannerMainTab(tab) {
             // Check if we need to load data
             const needsGoals = plannerState.goals.length === 0;
             const needsProducts = !plannerState.products || plannerState.products.length === 0;
+            const needsPlans = plannerState.selectedProducts.length === 0 && !plannerState.currentPlan;
             
-            if (needsGoals || needsProducts) {
+            if (needsGoals || needsProducts || needsPlans) {
                 console.log('⚠️ Loading missing data for goals...');
                 console.log('   Needs goals:', needsGoals);
                 console.log('   Needs products:', needsProducts);
+                console.log('   Needs plans (for Assigned to):', needsPlans);
                 
-                // Load products first if needed, then goals
+                // Load products first if needed, then goals and plans
                 (async () => {
                     if (needsProducts) {
                         await loadProductsForFactory(plannerState.currentFactory);
                     }
+                    const loadPromises = [];
                     if (needsGoals) {
-                        await loadGoals();
+                        loadPromises.push(loadGoals());
                     }
+                    if (needsPlans) {
+                        loadPromises.push(loadExistingPlans(plannerState.currentFactory, plannerState.currentDate));
+                    }
+                    await Promise.all(loadPromises);
                     renderGoalList();
                 })();
             } else {
@@ -2180,8 +2188,8 @@ function renderGoalList() {
 function renderGoalCard(goal) {
     const color = plannerState.productColors[goal.背番号] || '#6B7280';
     const percentage = goal.targetQuantity > 0 ? Math.round((goal.scheduledQuantity / goal.targetQuantity) * 100) : 0;
-    const isCompleted = goal.remainingQuantity === 0;
-    const isInProgress = goal.scheduledQuantity > 0 && goal.remainingQuantity > 0;
+    const isCompleted = goal.remainingQuantity === 0 || goal.scheduledQuantity >= goal.targetQuantity;
+    const isInProgress = !isCompleted && goal.scheduledQuantity > 0 && goal.remainingQuantity > 0;
     
     // Calculate box quantities with proper capacity lookup
     let capacity = parseInt(goal['収容数']) || 0;
@@ -2253,9 +2261,9 @@ function renderGoalCard(goal) {
                     <div>
                         <p class="text-xs text-gray-600 dark:text-gray-400 truncate">${goal.品名 || '-'}</p>
                     </div>
-                    <div>
+                    <div class="overflow-hidden">
                         <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-                            <div class="h-2 rounded-full transition-all ${progressBarColor}" style="width: ${percentage}%"></div>
+                            <div class="h-2 rounded-full transition-all ${progressBarColor}" style="width: ${Math.min(percentage, 100)}%"></div>
                         </div>
                     </div>
                     <div>
