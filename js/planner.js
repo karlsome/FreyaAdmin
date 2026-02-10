@@ -59,9 +59,19 @@ function getRandomColor() {
 
 // Get color for specific model/背番号 combination
 function getColorForProduct(product) {
-    // Special color logic for モデル = "992W(310D)"
-    if (product.モデル === "992W(310D)" && product.背番号) {
-        const firstChar = product.背番号.charAt(0);
+    // Look up full product data from masterDB if product doesn't have モデル field
+    let productData = product;
+    if (!product.モデル && product.背番号) {
+        const fullProduct = plannerState.products.find(p => p.背番号 === product.背番号);
+        if (fullProduct) {
+            productData = fullProduct;
+        }
+    }
+    
+    // Special color logic for モデル = "992W(310D)" (check with trim to handle spaces)
+    const model = productData.モデル ? productData.モデル.trim() : '';
+    if (model === "992W(310D)" && productData.背番号) {
+        const firstChar = productData.背番号.charAt(0);
         
         switch(firstChar) {
             case '1':
@@ -380,10 +390,17 @@ async function loadProductsForFactory(factory) {
         const data = await response.json();
         plannerState.products = data;
         
-        // Assign colors to products
+        // Assign colors to products (force recalculate to ensure correct colors based on モデル)
         data.forEach(product => {
-            if (!plannerState.productColors[product.背番号]) {
+            if (product.背番号) {
                 plannerState.productColors[product.背番号] = getColorForProduct(product);
+            }
+        });
+        
+        // Update colors for already selected products (from loaded plan)
+        plannerState.selectedProducts.forEach(item => {
+            if (item.背番号 && plannerState.productColors[item.背番号]) {
+                item.color = plannerState.productColors[item.背番号];
             }
         });
         
@@ -423,9 +440,14 @@ async function loadExistingPlans(factory, date) {
             
             // Restore selected products from plan and recalculate boxes
             plannerState.selectedProducts = plan.products.map(item => {
-                // Ensure color is assigned
-                if (!plannerState.productColors[item.背番号]) {
-                    plannerState.productColors[item.背番号] = getColorForProduct(item);
+                // Don't assign colors here - will be done after products load from masterDB
+                
+                // Fix any decimal times in startTime (legacy data cleanup)
+                let cleanStartTime = item.startTime;
+                if (cleanStartTime && cleanStartTime.includes('.')) {
+                    // Convert to minutes and back to clean format
+                    const minutes = timeToMinutes(cleanStartTime);
+                    cleanStartTime = minutesToTime(minutes);
                 }
                 
                 // Recalculate boxes using current capacity from masterDB
@@ -433,6 +455,7 @@ async function loadExistingPlans(factory, date) {
                 
                 return {
                     ...item,
+                    startTime: cleanStartTime,
                     _id: item.goalId || item._id,
                     color: plannerState.productColors[item.背番号],
                     boxes: boxes  // Use recalculated boxes
@@ -885,12 +908,15 @@ function calculateBoxesNeeded(product, quantity) {
 
 function timeToMinutes(timeStr) {
     const [hours, minutes] = timeStr.split(':').map(Number);
-    return hours * 60 + minutes;
+    // Round minutes to handle any decimal values
+    return Math.round(hours * 60 + minutes);
 }
 
 function minutesToTime(minutes) {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
+    // Ensure we're working with whole minutes
+    const wholeMinutes = Math.round(minutes);
+    const hours = Math.floor(wholeMinutes / 60);
+    const mins = wholeMinutes % 60;
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 }
 
@@ -1907,9 +1933,9 @@ async function loadGoals() {
             plannerState.goals = result.data;
             console.log(`📋 Loaded ${plannerState.goals.length} goals`);
             
-            // Assign colors to goals
+            // Assign colors to goals (force recalculate if products are already loaded)
             plannerState.goals.forEach(goal => {
-                if (!plannerState.productColors[goal.背番号]) {
+                if (goal.背番号) {
                     plannerState.productColors[goal.背番号] = getColorForProduct(goal);
                 }
             });
@@ -2505,7 +2531,7 @@ function updateSelectedProductsSummary(searchTerm = '') {
         // Calculate actual end times accounting for breaks
         const endTimes = data.items.map(item => {
             const startMin = timeToMinutes(item.startTime);
-            const durationMin = item.estimatedTime.totalSeconds / 60;
+            const durationMin = Math.ceil(item.estimatedTime.totalSeconds / 60);
             
             // Calculate end time by stepping through minutes and skipping breaks
             let workMinutesRemaining = durationMin;
@@ -2533,8 +2559,9 @@ function updateSelectedProductsSummary(searchTerm = '') {
         const timeRange = `${minutesToTime(earliestStart)} - ${minutesToTime(latestEnd)}`;
         const totalQuantity = data.items.reduce((sum, item) => sum + item.quantity, 0);
         const itemCount = data.items.length;
-        const hours = Math.floor(data.totalMinutes / 60);
-        const mins = Math.round(data.totalMinutes % 60);
+        const totalMinutesRounded = Math.round(data.totalMinutes);
+        const hours = Math.floor(totalMinutesRounded / 60);
+        const mins = totalMinutesRounded % 60;
         const timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
         const effectiveWork = getEffectiveWorkMinutes();
         const utilization = Math.round((data.totalMinutes / effectiveWork) * 100);
@@ -2575,7 +2602,7 @@ function updateSelectedProductsSummary(searchTerm = '') {
                     ${filteredItems.map(item => {
                         const startTime = item.startTime;
                         const startMinutes = timeToMinutes(startTime);
-                        const durationMinutes = item.estimatedTime.totalSeconds / 60;
+                        const durationMinutes = Math.ceil(item.estimatedTime.totalSeconds / 60);
                         
                         // Calculate end time by stepping through minutes and skipping breaks
                         let workMinutesRemaining = durationMinutes;
@@ -3072,9 +3099,21 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
             }
             
             if (productForSlot) {
-                // Check if this is the first slot for this specific product
+                // Check if this is the first VISIBLE slot for this specific product
                 const productStartMinutes = productForSlot.startTime ? timeToMinutes(productForSlot.startTime) : 0;
-                const isFirstSlotForProduct = slotMinutes === productStartMinutes;
+                
+                // Find the first non-break slot for this product
+                let firstVisibleSlot = productStartMinutes;
+                while (plannerState.breaks.some(brk => {
+                    const breakStart = timeToMinutes(brk.start);
+                    const breakEnd = timeToMinutes(brk.end);
+                    const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+                    return firstVisibleSlot >= breakStart && firstVisibleSlot < breakEnd && isForThisEquipment;
+                })) {
+                    firstVisibleSlot += PLANNER_CONFIG.intervalMinutes;
+                }
+                
+                const isFirstSlotForProduct = slotMinutes === firstVisibleSlot;
                 
                 html += `
                     <div class="flex-shrink-0 border-r dark:border-gray-500 relative group ${isFirstSlotForProduct ? 'cursor-move' : ''}" 
@@ -4178,7 +4217,36 @@ async function confirmMultiPickerSelection() {
     console.log(`✅ Validation passed. ${productsToAdd.length} products ready to add.`);
     
     // ========================================
-    // STEP 2: Add to plannerState and save to database FIRST
+    // STEP 2: Check for conflicts with MongoDB
+    // ========================================
+    console.log('🔍 Checking for scheduling conflicts...');
+    
+    for (const product of productsToAdd) {
+        const productStartMin = timeToMinutes(product.startTime);
+        const productDurationMin = product.estimatedTime.totalSeconds / 60;
+        const productTiming = findNextAvailableTime(productStartMin, productDurationMin, product.equipment);
+        
+        const conflict = await checkSchedulingConflict(
+            product.equipment,
+            product.startTime,
+            minutesToTime(productTiming.endTime)
+        );
+        
+        if (conflict.hasConflict) {
+            showPlannerNotification(
+                `Time slot already taken! ${conflict.conflictingProduct} is scheduled on ${product.equipment} at ${conflict.conflictingTime}. Refreshing timeline...`,
+                'error'
+            );
+            closeMultiPicker();
+            await refreshTimelineFromDatabase();
+            return;
+        }
+    }
+    
+    console.log('✅ No conflicts detected');
+    
+    // ========================================
+    // STEP 3: Add to plannerState and save to database FIRST
     // ========================================
     const previousSelectedProducts = [...plannerState.selectedProducts]; // Backup for rollback
     
@@ -4445,7 +4513,8 @@ async function deletePlanFromDatabase() {
 }
 
 function findNextAvailableTime(startMinutes, durationMinutes, equipment) {
-    let currentMinutes = startMinutes;
+    let currentMinutes = Math.round(startMinutes);
+    let roundedDuration = Math.ceil(durationMinutes); // Always round up to ensure enough time
     
     // First, check if start time is within a break and skip to break end
     const startInBreak = plannerState.breaks.find(brk => {
@@ -4460,7 +4529,7 @@ function findNextAvailableTime(startMinutes, durationMinutes, equipment) {
     }
     
     // Calculate actual end time by stepping through minute-by-minute and skipping breaks
-    let productionMinutesRemaining = durationMinutes;
+    let productionMinutesRemaining = roundedDuration;
     let scanMinute = currentMinutes;
     
     while (productionMinutesRemaining > 0) {
@@ -4714,16 +4783,30 @@ window.confirmSmartScheduling = async function() {
     const assignments = window._smartSchedulingAssignments;
     if (!assignments) return;
     
+    // Get time limit from input field BEFORE closing the modal
+    const timeLimitInput = document.getElementById('smartSchedulingTimeLimit');
+    const timeLimitValue = timeLimitInput ? timeLimitInput.value : '17:30';
+    const MAX_END_TIME = timeToMinutes(timeLimitValue);
+    
     // Close the confirmation modal
     closeSmartSchedulingModal();
     
     // Show loading modal
     showLoadingModal('Applying smart schedule...');
     
-    // Get time limit from input field
-    const timeLimitInput = document.getElementById('smartSchedulingTimeLimit');
-    const timeLimitValue = timeLimitInput ? timeLimitInput.value : '17:30';
-    const MAX_END_TIME = timeToMinutes(timeLimitValue);
+    // ========================================
+    // STEP 1: Refresh timeline from MongoDB
+    // ========================================
+    console.log('🔄 Loading latest timeline from database...');
+    try {
+        await loadExistingPlans(); // Refresh from MongoDB
+        console.log('✅ Timeline refreshed');
+    } catch (error) {
+        console.error('❌ Failed to refresh timeline:', error);
+        hideLoadingModal();
+        showPlannerNotification('Failed to load latest schedule. Please try again.', 'error');
+        return;
+    }
     const GRACE_PERIOD_MINUTES = 30; // Allow 30 minutes past limit for complete boxes
     
     console.log('\n🤖 === SMART SCHEDULING START ===');
@@ -4733,6 +4816,17 @@ window.confirmSmartScheduling = async function() {
     try {
         let scheduledCount = 0;
         let skippedCount = 0;
+        
+        // Build a map of individual equipment parts that are unavailable due to groups
+        const unavailableIndividualParts = new Set();
+        for (const product of plannerState.selectedProducts) {
+            if (product.equipment && product.equipment.includes(',')) {
+                // This is a group - mark all parts as unavailable
+                product.equipment.split(',').forEach(part => unavailableIndividualParts.add(part.trim()));
+            }
+        }
+        
+        console.log('🚫 Equipment parts unavailable due to groups:', Array.from(unavailableIndividualParts).join(', ') || 'None');
         
         // Process each goal with its ranked equipment list
         for (const [primaryEquipment, products] of Object.entries(assignments)) {
@@ -4758,6 +4852,37 @@ window.confirmSmartScheduling = async function() {
                 
                 console.log('Ranked equipment:', rankedEquipment.map(e => `${e.equipment} (${e.confidence})`).join(' → '));
                 
+                // Filter out equipment that conflicts with existing groups or is in use as part of a group
+                const availableEquipment = rankedEquipment.filter(({ equipment }) => {
+                    // Check if this equipment is an individual part that's blocked by a group
+                    if (!equipment.includes(',') && unavailableIndividualParts.has(equipment)) {
+                        console.log(`  🚫 Skipping ${equipment} - part of scheduled group`);
+                        return false;
+                    }
+                    
+                    // Check if this equipment is a group that conflicts with scheduled individuals
+                    if (equipment.includes(',')) {
+                        const parts = equipment.split(',').map(p => p.trim());
+                        for (const part of parts) {
+                            const hasConflict = plannerState.selectedProducts.some(p => p.equipment === part);
+                            if (hasConflict) {
+                                console.log(`  🚫 Skipping ${equipment} - part ${part} already scheduled individually`);
+                                return false;
+                            }
+                        }
+                    }
+                    
+                    return true;
+                });
+                
+                if (availableEquipment.length === 0) {
+                    console.log('❌ No available equipment after filtering - SKIPPING');
+                    skippedCount++;
+                    continue;
+                }
+                
+                console.log('Available equipment after filtering:', availableEquipment.map(e => e.equipment).join(' → '));
+                
                 // Get product capacity per box
                 let capacity = parseInt(product['収容数']) || 0;
                 if (!capacity) {
@@ -4771,9 +4896,9 @@ window.confirmSmartScheduling = async function() {
                 
                 console.log(`Box capacity: ${capacity} pcs/box`);
                 
-                // Try each equipment in order of confidence
+                // Try each equipment in order of confidence (using filtered list)
                 let scheduled = false;
-                for (const { equipment } of rankedEquipment) {
+                for (const { equipment } of availableEquipment) {
                     console.log(`\n  Trying: ${equipment}...`);
                     
                     // Calculate current end time for this equipment
@@ -4848,6 +4973,17 @@ window.confirmSmartScheduling = async function() {
                     
                     const timeInfo = calculateProductionTime(product, actualQuantity);
                     const timing = findNextAvailableTime(currentTime, timeInfo.totalSeconds / 60, equipment);
+                    
+                    // Check for conflicts with MongoDB before scheduling
+                    const startTimeStr = minutesToTime(timing.startTime);
+                    const endTimeStr = minutesToTime(timing.endTime);
+                    const conflict = await checkSchedulingConflict(equipment, startTimeStr, endTimeStr);
+                    
+                    if (conflict.hasConflict) {
+                        console.log(`  ⚠️ CONFLICT detected: ${conflict.conflictingProduct} on ${equipment} at ${conflict.conflictingTime}`);
+                        console.log(`  ⏭️  Trying next equipment...`);
+                        continue; // Try next equipment
+                    }
                     
                     console.log(`  ✅ Scheduling ${actualQuantity} pcs (${boxesThatFit} boxes) on ${equipment}`);
                     console.log(`     Start: ${minutesToTime(timing.startTime)}, End: ${minutesToTime(timing.endTime)} (${timing.actualDuration}min total with breaks)`);
@@ -5253,6 +5389,137 @@ function showPlannerNotification(message, type = 'info') {
         toast.classList.add('opacity-0', 'translate-y-2');
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// ============================================
+// CONFLICT DETECTION HELPERS
+// ============================================
+
+// Check if two equipment strings conflict (considering groups)
+function equipmentConflicts(equipment1, equipment2) {
+    if (equipment1 === equipment2) return true;
+    
+    // Check if either is a group containing the other
+    const eq1Parts = equipment1.split(',');
+    const eq2Parts = equipment2.split(',');
+    
+    // If equipment1 is a group and contains equipment2
+    if (eq1Parts.length > 1 && eq1Parts.includes(equipment2)) return true;
+    
+    // If equipment2 is a group and contains equipment1
+    if (eq2Parts.length > 1 && eq2Parts.includes(equipment1)) return true;
+    
+    // Check if they share any common equipment
+    for (const part1 of eq1Parts) {
+        if (eq2Parts.includes(part1)) return true;
+    }
+    
+    return false;
+}
+
+// Check if two time ranges overlap (excluding breaks)
+function timeRangesOverlap(start1, end1, start2, end2, equipment) {
+    // Convert to minutes if strings
+    const s1 = typeof start1 === 'string' ? timeToMinutes(start1) : start1;
+    const e1 = typeof end1 === 'string' ? timeToMinutes(end1) : end1;
+    const s2 = typeof start2 === 'string' ? timeToMinutes(start2) : start2;
+    const e2 = typeof end2 === 'string' ? timeToMinutes(end2) : end2;
+    
+    // Build minute-by-minute work periods (excluding breaks)
+    const getWorkMinutes = (startMin, endMin, equip) => {
+        const workMinutes = [];
+        for (let min = startMin; min < endMin; min++) {
+            const isInBreak = plannerState.breaks.some(brk => {
+                const breakStart = timeToMinutes(brk.start);
+                const breakEnd = timeToMinutes(brk.end);
+                const isForThisEquipment = !brk.equipment || brk.equipment === equip;
+                return min >= breakStart && min < breakEnd && isForThisEquipment;
+            });
+            if (!isInBreak) {
+                workMinutes.push(min);
+            }
+        }
+        return workMinutes;
+    };
+    
+    const work1 = getWorkMinutes(s1, e1, equipment);
+    const work2 = getWorkMinutes(s2, e2, equipment);
+    
+    // Check if any work minute overlaps
+    return work1.some(min => work2.includes(min));
+}
+
+// Check if a product conflicts with existing products in MongoDB
+async function checkSchedulingConflict(equipment, startTime, endTime) {
+    try {
+        // Fetch latest plan from MongoDB using the same endpoint as loadExistingPlans
+        const response = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: 'productionPlansDB',
+                query: { 
+                    factory: plannerState.currentFactory,
+                    date: plannerState.currentDate
+                }
+            })
+        });
+        
+        if (!response.ok) return { hasConflict: false };
+        
+        const plans = await response.json();
+        if (!plans || plans.length === 0) return { hasConflict: false };
+        
+        const latestPlan = plans[0];
+        if (!latestPlan || !latestPlan.products || latestPlan.products.length === 0) return { hasConflict: false };
+        
+        // Check each existing product for conflicts
+        for (const existingProduct of latestPlan.products) {
+            // Check equipment conflict
+            if (!equipmentConflicts(equipment, existingProduct.equipment)) continue;
+            
+            // Calculate existing product's actual end time (including breaks)
+            const existingStartMin = timeToMinutes(existingProduct.startTime);
+            const existingDurationMin = existingProduct.estimatedTime.totalSeconds / 60;
+            const existingTiming = findNextAvailableTime(existingStartMin, existingDurationMin, existingProduct.equipment);
+            
+            // Check time overlap
+            if (timeRangesOverlap(startTime, endTime, existingProduct.startTime, minutesToTime(existingTiming.endTime), equipment)) {
+                return {
+                    hasConflict: true,
+                    conflictingProduct: existingProduct.背番号,
+                    conflictingTime: `${existingProduct.startTime} - ${minutesToTime(existingTiming.endTime)}`
+                };
+            }
+        }
+        
+        return { hasConflict: false };
+    } catch (error) {
+        console.error('Error checking scheduling conflict:', error);
+        return { hasConflict: false }; // On error, allow scheduling
+    }
+}
+
+// Refresh timeline from MongoDB while keeping factory/date selection
+async function refreshTimelineFromDatabase() {
+    console.log('🔄 Refreshing timeline from database...');
+    const currentFactory = plannerState.currentFactory;
+    const currentDate = plannerState.currentDate;
+    
+    await loadExistingPlans();
+    
+    // Restore selections
+    plannerState.currentFactory = currentFactory;
+    plannerState.currentDate = currentDate;
+    
+    // Re-render all views
+    renderGoalList();
+    renderProductList();
+    updateSelectedProductsSummary();
+    renderAllViews();
+    
+    console.log('✅ Timeline refreshed');
 }
 
 // ============================================
@@ -7444,8 +7711,28 @@ function simplifyTimeRanges(timeString) {
 
 function calculateActualWorkingTime(product) {
     const startMinutes = timeToMinutes(product.startTime);
-    const durationMinutes = product.estimatedTime.totalSeconds / 60;
-    const endMinutes = Math.round(startMinutes + durationMinutes); // Round to nearest minute
+    const durationMinutes = Math.ceil(product.estimatedTime.totalSeconds / 60); // Round up to whole minutes
+    
+    // Calculate end time by stepping through minutes and skipping breaks
+    let workMinutesRemaining = durationMinutes;
+    let currentMin = startMinutes;
+    
+    while (workMinutesRemaining > 0) {
+        // Check if current minute is in a break
+        const isInBreak = plannerState.breaks.some(brk => {
+            const breakStart = timeToMinutes(brk.start);
+            const breakEnd = timeToMinutes(brk.end);
+            const isForThisEquipment = !brk.equipment || brk.equipment === product.equipment;
+            return currentMin >= breakStart && currentMin < breakEnd && isForThisEquipment;
+        });
+        
+        if (!isInBreak) {
+            workMinutesRemaining--;
+        }
+        currentMin++;
+    }
+    
+    const endMinutes = currentMin; // Actual end time including breaks
     
     // Find breaks during this product's time
     const affectingBreaks = plannerState.breaks.filter(brk => {
@@ -7468,14 +7755,14 @@ function calculateActualWorkingTime(product) {
     affectingBreaks.forEach(brk => {
         const breakStart = timeToMinutes(brk.start);
         if (currentTime < breakStart) {
-            ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(breakStart))}`);
+            ranges.push(`${minutesToTime(currentTime)}-${minutesToTime(breakStart)}`);
         }
         currentTime = timeToMinutes(brk.end);
     });
     
     // Add final range after last break
     if (currentTime < endMinutes) {
-        ranges.push(`${minutesToTime(Math.round(currentTime))}-${minutesToTime(Math.round(endMinutes))}`);
+        ranges.push(`${minutesToTime(currentTime)}-${minutesToTime(endMinutes)}`);
     }
     
     const fullTimeString = ranges.join(', ');
