@@ -2498,14 +2498,37 @@ function updateSelectedProductsSummary(searchTerm = '') {
             return '';
         }
         
-        // Calculate time range
+        // Calculate time range - account for breaks properly
         const startTimes = data.items.map(item => timeToMinutes(item.startTime));
         const earliestStart = Math.min(...startTimes);
-        const latestEnd = Math.max(...data.items.map((item, idx) => {
-            const start = startTimes[idx];
-            const duration = item.estimatedTime.totalSeconds / 60;
-            return Math.round(start + duration); // Round to nearest minute
-        }));
+        
+        // Calculate actual end times accounting for breaks
+        const endTimes = data.items.map(item => {
+            const startMin = timeToMinutes(item.startTime);
+            const durationMin = item.estimatedTime.totalSeconds / 60;
+            
+            // Calculate end time by stepping through minutes and skipping breaks
+            let workMinutesRemaining = durationMin;
+            let currentMin = startMin;
+            
+            while (workMinutesRemaining > 0) {
+                // Check if current minute is in a break
+                const isInBreak = plannerState.breaks.some(brk => {
+                    const breakStart = timeToMinutes(brk.start);
+                    const breakEnd = timeToMinutes(brk.end);
+                    const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+                    return currentMin >= breakStart && currentMin < breakEnd && isForThisEquipment;
+                });
+                
+                if (!isInBreak) {
+                    workMinutesRemaining--;
+                }
+                currentMin++;
+            }
+            
+            return currentMin; // This is the actual end time including breaks
+        });
+        const latestEnd = Math.max(...endTimes);
         
         const timeRange = `${minutesToTime(earliestStart)} - ${minutesToTime(latestEnd)}`;
         const totalQuantity = data.items.reduce((sum, item) => sum + item.quantity, 0);
@@ -2553,7 +2576,27 @@ function updateSelectedProductsSummary(searchTerm = '') {
                         const startTime = item.startTime;
                         const startMinutes = timeToMinutes(startTime);
                         const durationMinutes = item.estimatedTime.totalSeconds / 60;
-                        const endMinutes = Math.round(startMinutes + durationMinutes); // Round to nearest minute
+                        
+                        // Calculate end time by stepping through minutes and skipping breaks
+                        let workMinutesRemaining = durationMinutes;
+                        let currentMin = startMinutes;
+                        
+                        while (workMinutesRemaining > 0) {
+                            // Check if current minute is in a break
+                            const isInBreak = plannerState.breaks.some(brk => {
+                                const breakStart = timeToMinutes(brk.start);
+                                const breakEnd = timeToMinutes(brk.end);
+                                const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+                                return currentMin >= breakStart && currentMin < breakEnd && isForThisEquipment;
+                            });
+                            
+                            if (!isInBreak) {
+                                workMinutesRemaining--;
+                            }
+                            currentMin++;
+                        }
+                        
+                        const endMinutes = currentMin; // Actual end time including breaks
                         
                         // Find breaks during this product's time
                         const affectingBreaks = plannerState.breaks.filter(brk => {
@@ -2563,29 +2606,8 @@ function updateSelectedProductsSummary(searchTerm = '') {
                             return breakStart >= startMinutes && breakStart < endMinutes && isForThisEquipment;
                         }).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
                         
-                        // Build time ranges string
-                        let timeRanges = '';
-                        if (affectingBreaks.length === 0) {
-                            timeRanges = `${startTime} - ${minutesToTime(endMinutes)}`;
-                        } else {
-                            let currentTime = startMinutes;
-                            const ranges = [];
-                            
-                            affectingBreaks.forEach(brk => {
-                                const breakStart = timeToMinutes(brk.start);
-                                if (currentTime < breakStart) {
-                                    ranges.push(`${minutesToTime(Math.round(currentTime))} - ${minutesToTime(Math.round(breakStart))}`);
-                                }
-                                currentTime = timeToMinutes(brk.end);
-                            });
-                            
-                            // Add final range after last break
-                            if (currentTime < endMinutes) {
-                                ranges.push(`${minutesToTime(Math.round(currentTime))} - ${minutesToTime(endMinutes)}`);
-                            }
-                            
-                            timeRanges = ranges.join(', ');
-                        }
+                        // Build time range string (overall start to end)
+                        const timeRanges = `${startTime} - ${minutesToTime(endMinutes)}`;
                         
                         // Highlight matched text
                         const highlightText = (text) => {
@@ -4125,8 +4147,8 @@ async function confirmMultiPickerSelection() {
         const boxes = calculateBoxesNeeded(product, product.quantity);
         const productDurationMinutes = timeInfo.totalSeconds / 60;
         
-        // Find actual start time, skipping any breaks
-        const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
+        // Find actual start time and end time, accounting for breaks
+        const timing = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
         
         productsToAdd.push({
             ...product,
@@ -4134,12 +4156,12 @@ async function confirmMultiPickerSelection() {
             boxes: boxes,
             estimatedTime: timeInfo,
             color: plannerState.productColors[product.背番号],
-            startTime: minutesToTime(actualStartTime),
+            startTime: minutesToTime(timing.startTime),
             goalId: product._id // Store goal ID for tracking
         });
         
-        // Update current time for next product
-        currentTime = actualStartTime + productDurationMinutes;
+        // Update current time for next product (use endTime that includes breaks)
+        currentTime = timing.endTime;
     }
     
     if (productsToAdd.length === 0) {
@@ -4431,26 +4453,33 @@ function findNextAvailableTime(startMinutes, durationMinutes, equipment) {
         currentMinutes = timeToMinutes(startInBreak.end);
     }
     
-    // Now check if the product duration will overlap with any breaks
-    // If so, we need to account for the break time
-    let adjustedEndTime = currentMinutes + durationMinutes;
+    // Calculate actual end time by stepping through minute-by-minute and skipping breaks
+    let productionMinutesRemaining = durationMinutes;
+    let scanMinute = currentMinutes;
     
-    // Find all breaks that fall within the product's time range
-    const overlappingBreaks = plannerState.breaks.filter(brk => {
-        const breakStart = timeToMinutes(brk.start);
-        const breakEnd = timeToMinutes(brk.end);
-        const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
-        // Break overlaps if it starts during product time
-        return breakStart >= currentMinutes && breakStart < adjustedEndTime && isForThisEquipment;
-    }).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+    while (productionMinutesRemaining > 0) {
+        // Check if current minute is in a break
+        const isInBreak = plannerState.breaks.some(brk => {
+            const breakStart = timeToMinutes(brk.start);
+            const breakEnd = timeToMinutes(brk.end);
+            const isForThisEquipment = !brk.equipment || brk.equipment === equipment;
+            return scanMinute >= breakStart && scanMinute < breakEnd && isForThisEquipment;
+        });
+        
+        if (!isInBreak) {
+            // This minute counts toward production
+            productionMinutesRemaining--;
+        }
+        
+        scanMinute++; // Move to next minute
+    }
     
-    // Add break durations to the end time
-    overlappingBreaks.forEach(brk => {
-        const breakDuration = timeToMinutes(brk.end) - timeToMinutes(brk.start);
-        adjustedEndTime += breakDuration;
-    });
-    
-    return currentMinutes;
+    // Return both start time and actual end time
+    return {
+        startTime: currentMinutes,
+        endTime: scanMinute,
+        actualDuration: scanMinute - currentMinutes // includes breaks
+    };
 }
 
 function removeBreakTime(breakId, equipment) {
@@ -4588,6 +4617,9 @@ window.showSmartSchedulingModal = async function() {
         console.log('Total Unassigned:', totalUnassigned);
         console.log('=== SMART SCHEDULING DEBUG END ===');
         
+        // Store trends for use in confirmation
+        window._smartSchedulingTrends = trends;
+        
         // Show confirmation modal
         showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassigned);
         
@@ -4673,106 +4705,152 @@ window.confirmSmartScheduling = async function() {
     const timeLimitInput = document.getElementById('smartSchedulingTimeLimit');
     const timeLimitValue = timeLimitInput ? timeLimitInput.value : '17:30';
     const MAX_END_TIME = timeToMinutes(timeLimitValue);
+    const GRACE_PERIOD_MINUTES = 30; // Allow 30 minutes past limit for complete boxes
+    
+    console.log('\n🤖 === SMART SCHEDULING START ===');
+    console.log('Time limit:', timeLimitValue, '(+30 min grace)');
+    console.log('Goals to process:', Object.values(assignments).flat().length);
     
     try {
-        // Sort equipment by confidence level and prepare scheduling queue
-        const equipmentQueue = [];
+        let scheduledCount = 0;
+        let skippedCount = 0;
         
-        for (const [equipment, products] of Object.entries(assignments)) {
+        // Process each goal with its ranked equipment list
+        for (const [primaryEquipment, products] of Object.entries(assignments)) {
             for (const product of products) {
-                equipmentQueue.push({
-                    equipment,
-                    product,
-                    confidence: product.confidence || 0
-                });
-            }
-        }
-        
-        // Sort by confidence (highest first)
-        equipmentQueue.sort((a, b) => b.confidence - a.confidence);
-        
-        // Try to schedule each product
-        for (const item of equipmentQueue) {
-            const { equipment, product } = item;
-            
-            // Find the last scheduled time for this equipment
-            const existingProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
-            let currentTime = timeToMinutes(PLANNER_CONFIG.workStartTime);
-            
-            // If there are existing products, start after the last one
-            if (existingProducts.length > 0) {
-                existingProducts.sort((a, b) => {
-                    const timeA = a.startTime ? timeToMinutes(a.startTime) : 0;
-                    const timeB = b.startTime ? timeToMinutes(b.startTime) : 0;
-                    return timeA - timeB;
-                });
+                console.log(`\n--- Processing: ${product.背番号} (${product.remainingQuantity} pcs remaining) ---`);
                 
-                const lastProduct = existingProducts[existingProducts.length - 1];
-                if (lastProduct.startTime) {
-                    currentTime = timeToMinutes(lastProduct.startTime) + (lastProduct.estimatedTime.totalSeconds / 60);
+                // Build ranked equipment list from trend data
+                const trend = window._smartSchedulingTrends[product.背番号 || product.品番];
+                if (!trend || !trend.equipmentDistribution) {
+                    console.log('❌ No equipment distribution data - SKIPPING');
+                    skippedCount++;
+                    continue;
                 }
-            }
-            
-            const timeInfo = calculateProductionTime(product, product.quantity);
-            const productDurationMinutes = timeInfo.totalSeconds / 60;
-            const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
-            const actualEndTime = actualStartTime + productDurationMinutes;
-            
-            console.log(`\n🤖 Smart Scheduling: ${product.背番号} on ${equipment}`);
-            console.log(`   Start: ${minutesToTime(actualStartTime)}, End: ${minutesToTime(actualEndTime)}, Limit: ${timeLimitValue}`);
-            
-            // Check if product would end after time limit
-            if (actualEndTime > MAX_END_TIME) {
-                console.log(`   ⚠️ Would exceed ${timeLimitValue} limit - trying alternative equipment`);
                 
-                // Try to find alternative equipment with available capacity
+                // Sort equipment by frequency (confidence)
+                const rankedEquipment = Object.entries(trend.equipmentDistribution)
+                    .sort((a, b) => b[1] - a[1]) // Sort by frequency descending
+                    .map(([eq, freq]) => ({
+                        equipment: eq,
+                        frequency: freq,
+                        confidence: (freq / trend.totalRecords * 100).toFixed(0) + '%'
+                    }));
+                
+                console.log('Ranked equipment:', rankedEquipment.map(e => `${e.equipment} (${e.confidence})`).join(' → '));
+                
+                // Get product capacity per box
+                let capacity = parseInt(product['収容数']) || 0;
+                if (!capacity) {
+                    const fullProduct = plannerState.products.find(p => 
+                        (product.品番 && p.品番 === product.品番) || 
+                        (product.背番号 && p.背番号 === product.背番号)
+                    );
+                    if (fullProduct) capacity = parseInt(fullProduct['収容数']) || 1;
+                }
+                if (!capacity || capacity <= 0) capacity = 1;
+                
+                console.log(`Box capacity: ${capacity} pcs/box`);
+                
+                // Try each equipment in order of confidence
                 let scheduled = false;
-                const alternativeEquipment = Object.keys(assignments).filter(eq => eq !== equipment);
-                
-                for (const altEq of alternativeEquipment) {
-                    const altExisting = plannerState.selectedProducts.filter(p => p.equipment === altEq);
-                    let altCurrentTime = timeToMinutes(PLANNER_CONFIG.workStartTime);
+                for (const { equipment } of rankedEquipment) {
+                    console.log(`\n  Trying: ${equipment}...`);
                     
-                    if (altExisting.length > 0) {
-                        altExisting.sort((a, b) => {
+                    // Calculate current end time for this equipment
+                    const existingProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
+                    let currentTime = timeToMinutes(PLANNER_CONFIG.workStartTime);
+                    
+                    if (existingProducts.length > 0) {
+                        existingProducts.sort((a, b) => {
                             const timeA = a.startTime ? timeToMinutes(a.startTime) : 0;
                             const timeB = b.startTime ? timeToMinutes(b.startTime) : 0;
                             return timeA - timeB;
                         });
-                        const lastProd = altExisting[altExisting.length - 1];
-                        if (lastProd.startTime) {
-                            altCurrentTime = timeToMinutes(lastProd.startTime) + (lastProd.estimatedTime.totalSeconds / 60);
+                        
+                        const lastProduct = existingProducts[existingProducts.length - 1];
+                        if (lastProduct.startTime) {
+                            const startMin = timeToMinutes(lastProduct.startTime);
+                            const durationMin = lastProduct.estimatedTime.totalSeconds / 60;
+                            // Calculate actual end time accounting for breaks
+                            const timing = findNextAvailableTime(startMin, durationMin, equipment);
+                            currentTime = timing.endTime;
                         }
                     }
                     
-                    const altStart = findNextAvailableTime(altCurrentTime, productDurationMinutes, altEq);
-                    const altEnd = altStart + productDurationMinutes;
+                    console.log(`  Current end time: ${minutesToTime(currentTime)}`);
                     
-                    if (altEnd <= MAX_END_TIME) {
-                        console.log(`   ✅ Reassigning to ${altEq} (ends at ${minutesToTime(altEnd)})`);
-                        await scheduleProduct(product, altEq, altStart, timeInfo);
-                        scheduled = true;
-                        break;
+                    // Calculate how many COMPLETE BOXES can fit before limit + grace period
+                    const availableMinutes = (MAX_END_TIME + GRACE_PERIOD_MINUTES) - currentTime;
+                    console.log(`  Available time: ${availableMinutes.toFixed(0)} minutes (until ${minutesToTime(MAX_END_TIME + GRACE_PERIOD_MINUTES)})`);
+                    
+                    if (availableMinutes <= 0) {
+                        console.log(`  ❌ No time available - equipment FULL`);
+                        continue; // Try next equipment
                     }
+                    
+                    // Calculate boxes that can fit
+                    const remainingQuantity = product.remainingQuantity;
+                    const totalBoxesNeeded = Math.ceil(remainingQuantity / capacity);
+                    
+                    // Try to fit boxes one by one, accounting for breaks
+                    let boxesThatFit = 0;
+                    let scanTime = currentTime;
+                    
+                    for (let box = 1; box <= totalBoxesNeeded; box++) {
+                        const boxQuantity = Math.min(capacity, remainingQuantity - ((box - 1) * capacity));
+                        const boxTimeInfo = calculateProductionTime(product, boxQuantity);
+                        const boxDurationMinutes = boxTimeInfo.totalSeconds / 60;
+                        
+                        // Calculate where this box would end, accounting for breaks
+                        const timing = findNextAvailableTime(scanTime, boxDurationMinutes, equipment);
+                        
+                        console.log(`    Box ${box}: ${boxQuantity} pcs, duration ${boxDurationMinutes}min, would end at ${minutesToTime(timing.endTime)} (actual ${timing.actualDuration}min with breaks)`);
+                        
+                        if (timing.endTime <= (MAX_END_TIME + GRACE_PERIOD_MINUTES)) {
+                            boxesThatFit = box;
+                            scanTime = timing.endTime; // Next box starts where this one ends
+                        } else {
+                            console.log(`    ❌ Box ${box} would exceed limit`);
+                            break;
+                        }
+                    }
+                    
+                    console.log(`  Can fit: ${boxesThatFit} / ${totalBoxesNeeded} boxes (${boxesThatFit * capacity} pcs)`);
+                    
+                    if (boxesThatFit === 0) {
+                        console.log(`  ❌ Cannot fit even 1 box - trying next equipment`);
+                        continue; // Try next equipment
+                    }
+                    
+                    // Schedule the boxes that fit
+                    const quantityToSchedule = boxesThatFit * capacity;
+                    const actualQuantity = Math.min(quantityToSchedule, remainingQuantity);
+                    
+                    const timeInfo = calculateProductionTime(product, actualQuantity);
+                    const timing = findNextAvailableTime(currentTime, timeInfo.totalSeconds / 60, equipment);
+                    
+                    console.log(`  ✅ Scheduling ${actualQuantity} pcs (${boxesThatFit} boxes) on ${equipment}`);
+                    console.log(`     Start: ${minutesToTime(timing.startTime)}, End: ${minutesToTime(timing.endTime)} (${timing.actualDuration}min total with breaks)`);
+                    
+                    await scheduleProduct(product, equipment, timing.startTime, timeInfo, actualQuantity, boxesThatFit);
+                    scheduled = true;
+                    scheduledCount++;
+                    break; // Move to next product
                 }
                 
                 if (!scheduled) {
-                    console.log(`   ❌ Could not fit before ${timeLimitValue} on any equipment - skipping`);
-                    showPlannerNotification(`${product.背番号} could not fit before ${timeLimitValue}`, 'warning');
+                    console.log(`  ❌ Could not schedule on any equipment - SKIPPED`);
+                    skippedCount++;
                 }
-                continue;
             }
-            
-            // Schedule on primary equipment
-            await scheduleProduct(product, equipment, actualStartTime, timeInfo);
         }
         
         // Helper function to schedule a product
-        async function scheduleProduct(product, equipment, startTime, timeInfo) {
-            const boxes = calculateBoxesNeeded(product, product.quantity);
-            
+        async function scheduleProduct(product, equipment, startTime, timeInfo, quantity, boxes) {
             plannerState.selectedProducts.push({
                 ...product,
+                quantity: quantity,
                 equipment: equipment,
                 boxes: boxes,
                 estimatedTime: timeInfo,
@@ -4782,11 +4860,11 @@ window.confirmSmartScheduling = async function() {
             });
             
             // Update goal quantity
-            console.log(`📦 Updating goal ${product._id}: scheduling ${product.quantity} pcs on ${equipment}`);
+            console.log(`📦 Updating goal ${product._id}: scheduling ${quantity} pcs on ${equipment}`);
             const response = await fetch(BASE_URL + `api/production-goals/${product._id}/schedule`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ quantityToSchedule: product.quantity })
+                body: JSON.stringify({ quantityToSchedule: quantity })
             });
             
             if (response.ok) {
@@ -4795,6 +4873,10 @@ window.confirmSmartScheduling = async function() {
                 console.error(`❌ Failed to update goal ${product._id}`);
             }
         }
+        
+        console.log('\n🤖 === SMART SCHEDULING COMPLETE ===');
+        console.log(`✅ Scheduled: ${scheduledCount}`);
+        console.log(`⏭️  Skipped: ${skippedCount}`);
         
         // Reload goals
         await loadGoals();
@@ -4808,7 +4890,11 @@ window.confirmSmartScheduling = async function() {
         console.log('💾 Auto-saving plan after Smart Scheduling...');
         await savePlanToDatabase();
         
-        showPlannerNotification('Smart scheduling applied successfully!', 'success');
+        if (scheduledCount > 0) {
+            showPlannerNotification(`✅ Scheduled ${scheduledCount} product(s) in complete boxes. ${skippedCount > 0 ? skippedCount + ' skipped (no space or no history).' : ''}`, 'success');
+        } else {
+            showPlannerNotification('No products could be scheduled. Try increasing time limit or check equipment availability.', 'warning');
+        }
         
     } catch (error) {
         console.error('Error applying smart scheduling:', error);
@@ -5211,10 +5297,10 @@ async function handleTimelineDrop(event, targetEquipment, targetTime) {
     // Calculate new start time accounting for breaks
     const targetMinutes = timeToMinutes(targetTime);
     const durationMinutes = product.estimatedTime.totalSeconds / 60;
-    const newStartTime = findNextAvailableTime(targetMinutes, durationMinutes, targetEquipment);
+    const timing = findNextAvailableTime(targetMinutes, durationMinutes, targetEquipment);
     
     // Update product
-    product.startTime = minutesToTime(newStartTime);
+    product.startTime = minutesToTime(timing.startTime);
     product.equipment = targetEquipment;
     
     console.log(`✏️ Rescheduled ${product.背番号}: ${oldEquipment} ${oldStartTime} → ${targetEquipment} ${product.startTime}`);
@@ -6564,8 +6650,8 @@ async function confirmTimelineScannedItems() {
             const boxes = calculateBoxesNeeded(product, quantity);
             const productDurationMinutes = timeInfo.totalSeconds / 60;
             
-            // Find actual start time, skipping any breaks
-            const actualStartTime = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
+            // Find actual start time and end time, skipping any breaks
+            const timing = findNextAvailableTime(currentTime, productDurationMinutes, equipment);
             
             // Find the matching goal
             const matchingGoal = plannerState.goals.find(g => 
@@ -6588,7 +6674,7 @@ async function confirmTimelineScannedItems() {
                 boxes: boxes,
                 estimatedTime: timeInfo,
                 color: plannerState.productColors[product['背番号']],
-                startTime: minutesToTime(actualStartTime),
+                startTime: minutesToTime(timing.startTime),
                 goalId: matchingGoal._id
             });
             
@@ -6610,8 +6696,8 @@ async function confirmTimelineScannedItems() {
                 console.error(`❌ Error scheduling goal:`, error);
             }
             
-            // Move to next time slot
-            currentTime = actualStartTime + productDurationMinutes;
+            // Move to next time slot (use endTime that includes breaks)
+            currentTime = timing.endTime;
         }
         
         console.log('🎯 Step 4: Reload goals and render views');
