@@ -2077,6 +2077,9 @@ function loadPage(page) {
                   <button id="materialDBTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('materialDB')">
                     材料 DB
                   </button>
+                  <button id="productPDFsTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('productPDFs')">
+                    梱包 / 検査基準 / 3点総合
+                  </button>
                 </nav>
               </div>
             </div>
@@ -2495,6 +2498,17 @@ function loadPage(page) {
 
           // Tab switching function
           window.switchMasterTab = function(tabName) {
+            // If switching to Product PDFs tab, load that page instead
+            if (tabName === 'productPDFs') {
+              if (typeof initProductPDFsPage === 'function') {
+                initProductPDFsPage();
+              } else {
+                console.error('❌ initProductPDFsPage function not found');
+              }
+              updateMasterTabStyles();
+              return;
+            }
+            
             currentMasterTab = tabName;
             window.currentMasterTab = currentMasterTab; // Update global variable
             updateMasterTabStyles();
