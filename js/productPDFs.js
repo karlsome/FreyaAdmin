@@ -27,14 +27,20 @@ async function initProductPDFsPage() {
             検査基準 (Inspection Standards)
           </button>
           <button onclick="switchPDFType('3点総合')" id="tab-3点総合" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
-            3点総合 (3-Point Comprehensive)
+            3点照合 (3-Point Comprehensive)
           </button>
         </nav>
       </div>
 
       <!-- Upload Section -->
       <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-        <h3 class="text-base font-semibold mb-2 text-gray-900 dark:text-white">アップロード / Upload PDF</h3>
+        <button onclick="toggleUploadForm()" id="uploadToggleBtn" class="w-full flex items-center justify-between p-2 border dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition text-gray-700 dark:text-gray-300">
+          <span class="text-sm font-medium">PDF アップロード</span>
+          <i id="uploadToggleIcon" class="ri-arrow-down-s-line text-xl"></i>
+        </button>
+        
+        <!-- Upload Form (hidden by default) -->
+        <div id="uploadFormContainer" class="hidden mt-4">
         
         <!-- Advanced Filters -->
         <div class="space-y-3 mb-3">
@@ -102,6 +108,7 @@ async function initProductPDFsPage() {
             </div>
             <p id="uploadStatus" class="text-sm text-gray-600 dark:text-gray-400 mt-2"></p>
           </div>
+        </div>
         </div>
       </div>
 
@@ -175,6 +182,22 @@ function switchPDFType(type) {
   
   // Reload PDFs list
   loadPDFsList();
+}
+
+// Toggle upload form visibility
+function toggleUploadForm() {
+  const container = document.getElementById('uploadFormContainer');
+  const icon = document.getElementById('uploadToggleIcon');
+  
+  if (container.classList.contains('hidden')) {
+    container.classList.remove('hidden');
+    icon.classList.remove('ri-arrow-down-s-line');
+    icon.classList.add('ri-arrow-up-s-line');
+  } else {
+    container.classList.add('hidden');
+    icon.classList.remove('ri-arrow-up-s-line');
+    icon.classList.add('ri-arrow-down-s-line');
+  }
 }
 
 // Load all products from masterDB
@@ -911,6 +934,7 @@ function previewPDFImage(imageURL, sebanggoList, fileName) {
 // Export functions to global scope
 window.initProductPDFsPage = initProductPDFsPage;
 window.switchPDFType = switchPDFType;
+window.toggleUploadForm = toggleUploadForm;
 window.handleFilterTypeChange = handleFilterTypeChange;
 window.handleModelFilter = handleModelFilter;
 window.openSebanggoSelector = openSebanggoSelector;

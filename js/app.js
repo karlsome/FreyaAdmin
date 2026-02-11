@@ -2078,7 +2078,7 @@ function loadPage(page) {
                     材料 DB
                   </button>
                   <button id="productPDFsTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('productPDFs')">
-                    梱包 / 検査基準 / 3点総合
+                    梱包 / 検査基準 / 3点照合
                   </button>
                 </nav>
               </div>
