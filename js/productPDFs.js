@@ -671,30 +671,32 @@ async function loadPDFsList() {
     }
     
     container.innerHTML = pdfs.map(pdf => `
-      <div class="border dark:border-gray-700 rounded-lg p-4 hover:shadow-lg transition">
-        <div class="flex items-start gap-4">
+      <div class="border dark:border-gray-700 rounded-lg p-2 hover:shadow-lg transition cursor-pointer" onclick="${pdf.imageURL ? `previewPDFImage('${pdf.imageURL}', '${pdf.背番号Array.join(', ')}', '${pdf.fileName}')` : ''}">
+        <div class="flex items-start gap-3">
           <!-- Thumbnail -->
-          <div class="w-32 h-20 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
-            ${pdf.imageURL ? `<img src="${pdf.imageURL}" alt="${pdf.fileName}" class="w-full h-full object-contain rounded" />` : '<i class="ri-file-pdf-line text-4xl text-gray-400"></i>'}
+          <div class="w-24 h-16 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
+            ${pdf.imageURL ? `<img src="${pdf.imageURL}" alt="${pdf.fileName}" class="w-full h-full object-contain rounded" />` : '<i class="ri-file-pdf-line text-3xl text-gray-400"></i>'}
           </div>
           
           <!-- Info -->
           <div class="flex-1">
-            <h4 class="font-semibold text-gray-900 dark:text-white">${pdf.fileName}</h4>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              ${pdf.背番号Array.length} products: ${pdf.背番号Array.slice(0, 5).join(', ')}${pdf.背番号Array.length > 5 ? '...' : ''}
+            <h4 class="text-sm font-bold text-gray-900 dark:text-white">
+              ${pdf.背番号Array.slice(0, 8).join(', ')}${pdf.背番号Array.length > 8 ? ` +${pdf.背番号Array.length - 8} more` : ''}
+            </h4>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              ${pdf.fileName}
             </p>
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
-              Uploaded by ${pdf.uploadedBy} on ${new Date(pdf.uploadedAt).toLocaleString('ja-JP')}
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+              ${pdf.uploadedBy} • ${new Date(pdf.uploadedAt).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
             </p>
           </div>
           
           <!-- Actions -->
-          <div class="flex gap-2">
+          <div class="flex gap-2" onclick="event.stopPropagation()">
             <a href="${pdf.pdfURL}" target="_blank" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="View Original PDF">
               <i class="ri-file-pdf-line text-xl"></i>
             </a>
-            ${pdf.imageURL ? `<a href="${pdf.imageURL}" target="_blank" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="View Image"><i class="ri-image-line text-xl"></i></a>` : ''}
+            ${pdf.imageURL ? `<a href="${pdf.imageURL}" target="_blank" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="Open in New Tab"><i class="ri-external-link-line text-xl"></i></a>` : ''}
             <button onclick="deletePDF('${pdf._id}')" class="p-2 hover:bg-red-100 dark:hover:bg-red-900 rounded text-red-600 dark:text-red-400" title="Delete">
               <i class="ri-delete-bin-line text-xl"></i>
             </button>
@@ -877,6 +879,35 @@ async function permanentlyDeletePDF(documentId, fileName) {
   }
 }
 
+// Preview PDF Image
+function previewPDFImage(imageURL, sebanggoList, fileName) {
+  const modal = document.createElement('div');
+  modal.id = 'imagePreviewModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center';
+  modal.onclick = () => modal.remove();
+  
+  modal.innerHTML = `
+    <div class="relative max-w-7xl max-h-[95vh] w-full h-full flex flex-col items-center justify-center p-4">
+      <button onclick="document.getElementById('imagePreviewModal').remove()" class="absolute top-4 right-4 text-white hover:text-gray-300 bg-black bg-opacity-50 rounded-full p-2" title="Close">
+        <i class="ri-close-line text-3xl"></i>
+      </button>
+      <div class="text-center mb-4">
+        <h3 class="text-lg font-bold text-white">${sebanggoList}</h3>
+        <p class="text-sm text-gray-300 mt-1">${fileName}</p>
+      </div>
+      <img src="${imageURL}" alt="${fileName}" class="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl" onclick="event.stopPropagation()" />
+      <div class="mt-4 flex gap-3">
+        <a href="${imageURL}" target="_blank" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center gap-2">
+          <i class="ri-external-link-line"></i>
+          Open in New Tab
+        </a>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+}
+
 // Export functions to global scope
 window.initProductPDFsPage = initProductPDFsPage;
 window.switchPDFType = switchPDFType;
@@ -899,3 +930,4 @@ window.openTrash = openTrash;
 window.closeTrash = closeTrash;
 window.recoverPDF = recoverPDF;
 window.permanentlyDeletePDF = permanentlyDeletePDF;
+window.previewPDFImage = previewPDFImage;
