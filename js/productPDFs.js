@@ -8,7 +8,7 @@ async function initProductPDFsPage() {
   console.log('📄 Initializing Product PDFs page...');
   
   const content = `
-    <div class="space-y-6">
+    <div class="space-y-4">
       <div class="flex items-center justify-between">
         <h2 class="text-2xl font-semibold text-gray-900 dark:text-white">製品資料管理 / Product PDFs</h2>
         <button onclick="openTrash()" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg flex items-center gap-2">
@@ -33,16 +33,16 @@ async function initProductPDFsPage() {
       </div>
 
       <!-- Upload Section -->
-      <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-        <h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">アップロード / Upload PDF</h3>
+      <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+        <h3 class="text-base font-semibold mb-2 text-gray-900 dark:text-white">アップロード / Upload PDF</h3>
         
         <!-- Advanced Filters -->
-        <div class="space-y-4 mb-6">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="space-y-3 mb-3">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <!-- Filter Type Selection -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Filter Type</label>
-              <select id="filterType" onchange="handleFilterTypeChange()" class="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Filter Type</label>
+              <select id="filterType" onchange="handleFilterTypeChange()" class="w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white">
                 <option value="model">モデル (Model)</option>
                 <option value="sebanggo">背番号 (Serial Number)</option>
               </select>
@@ -50,43 +50,48 @@ async function initProductPDFsPage() {
 
             <!-- Model Filter (shown by default) -->
             <div id="modelFilterContainer">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">モデル / Model</label>
-              <select id="modelFilter" onchange="handleModelFilter()" class="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">モデル / Model</label>
+              <select id="modelFilter" onchange="handleModelFilter()" class="w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white">
                 <option value="">Select Model...</option>
               </select>
             </div>
 
             <!-- Sebanggo Multi-select (hidden by default) -->
             <div id="sebanggoFilterContainer" style="display: none;">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">背番号 / Serial Numbers</label>
-              <button onclick="openSebanggoSelector()" class="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white text-left">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">背番号 / Serial Numbers</label>
+              <button onclick="openSebanggoSelector()" class="w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white text-left">
                 <span id="selectedCount">Select products...</span>
               </button>
             </div>
 
             <!-- Selected Products Display -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Selected Products</label>
-              <div id="selectedProductsDisplay" class="p-2 border dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-300 h-10 overflow-y-auto">
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Selected Products</label>
+                <button onclick="openSebanggoSelector()" class="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+                  Show all
+                </button>
+              </div>
+              <div id="selectedProductsDisplay" class="p-1.5 border dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm text-gray-700 dark:text-gray-300 h-8 overflow-y-auto">
                 None selected
               </div>
             </div>
           </div>
 
           <!-- Selected Products Tags -->
-          <div id="selectedProductsTags" class="flex flex-wrap gap-2 min-h-[2rem]"></div>
+          <div id="selectedProductsTags" class="flex flex-wrap gap-2 min-h-[1.5rem]"></div>
         </div>
 
         <!-- PDF Upload -->
-        <div class="space-y-4">
+        <div class="space-y-2">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               PDF File (will be converted to 1920x1080 image)
             </label>
-            <input type="file" id="pdfFileInput" accept=".pdf" class="w-full p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white" />
+            <input type="file" id="pdfFileInput" accept=".pdf" class="w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white" />
           </div>
 
-          <button onclick="uploadProductPDF()" id="uploadBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:bg-gray-400 disabled:cursor-not-allowed">
+          <button onclick="uploadProductPDF()" id="uploadBtn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:bg-gray-400 disabled:cursor-not-allowed">
             Upload PDF
           </button>
 
@@ -112,25 +117,35 @@ async function initProductPDFsPage() {
     <!-- Sebanggo Selector Modal -->
     <div id="sebanggoSelectorModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
-        <div class="p-6 border-b dark:border-gray-700">
+        <div class="p-4 border-b dark:border-gray-700">
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Select Products (背番号)</h3>
+            <h3 class="text-base font-semibold text-gray-900 dark:text-white">Select Products (背番号)</h3>
             <button onclick="closeSebanggoSelector()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
               <i class="ri-close-line text-2xl"></i>
             </button>
           </div>
-          <input type="text" id="sebanggoSearch" oninput="filterSebanggoList()" placeholder="Search..." class="w-full mt-4 p-2 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white" />
+          <input type="text" id="sebanggoSearch" oninput="filterSebanggoList()" placeholder="Search..." class="w-full mt-3 p-1.5 text-sm border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white" />
         </div>
-        <div class="p-6 overflow-y-auto max-h-[50vh]" id="sebanggoListContainer">
+        <div class="p-3 overflow-y-auto max-h-[55vh]" id="sebanggoListContainer">
           <p class="text-gray-500">Loading products...</p>
         </div>
-        <div class="p-6 border-t dark:border-gray-700 flex justify-end gap-2">
-          <button onclick="closeSebanggoSelector()" class="px-4 py-2 border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-            Cancel
-          </button>
-          <button onclick="confirmSebanggoSelection()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
-            Confirm Selection
-          </button>
+        <div class="p-4 border-t dark:border-gray-700 flex items-center justify-between gap-2">
+          <div class="flex gap-2">
+            <button onclick="checkAllSebanggo()" class="px-3 py-1.5 text-sm border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
+              Check all
+            </button>
+            <button onclick="uncheckAllSebanggo()" class="px-3 py-1.5 text-sm border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
+              Uncheck all
+            </button>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="closeSebanggoSelector()" class="px-3 py-1.5 text-sm border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
+              Cancel
+            </button>
+            <button onclick="confirmSebanggoSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded">
+              Confirm Selection
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -253,21 +268,26 @@ function confirmSebanggoSelection() {
 function renderSebanggoList() {
   const container = document.getElementById('sebanggoListContainer');
   const searchTerm = document.getElementById('sebanggoSearch').value.toLowerCase();
+  const filterType = document.getElementById('filterType')?.value;
+  const selectedModel = document.getElementById('modelFilter')?.value;
   
-  const filteredProducts = allProducts.filter(p => 
-    p.背番号?.toLowerCase().includes(searchTerm) ||
-    p.品番?.toLowerCase().includes(searchTerm) ||
-    p.モデル?.toLowerCase().includes(searchTerm)
-  );
+  const filteredProducts = allProducts.filter(p => {
+    const matchesModel = !selectedModel || filterType !== 'model' || p.モデル === selectedModel;
+    const matchesSearch =
+      p.背番号?.toLowerCase().includes(searchTerm) ||
+      p.品番?.toLowerCase().includes(searchTerm) ||
+      p.モデル?.toLowerCase().includes(searchTerm);
+    return matchesModel && matchesSearch;
+  });
   
   container.innerHTML = filteredProducts.map(product => {
     const isSelected = tempSelectedSebanggo.includes(product.背番号);
     return `
-      <label class="flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
-        <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSebanggoSelection('${product.背番号}')" class="w-4 h-4" />
+      <label class="flex items-center gap-2 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+        <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSebanggoSelection('${product.背番号}')" class="w-3.5 h-3.5" />
         <div class="flex-1">
-          <div class="font-medium text-gray-900 dark:text-white">${product.背番号}</div>
-          <div class="text-sm text-gray-500 dark:text-gray-400">${product.品番 || ''} • ${product.モデル || ''}</div>
+          <div class="text-sm font-medium text-gray-900 dark:text-white">${product.背番号}</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">${product.品番 || ''} • ${product.モデル || ''}</div>
         </div>
       </label>
     `;
@@ -285,6 +305,34 @@ function toggleSebanggoSelection(sebanggo) {
   } else {
     tempSelectedSebanggo.push(sebanggo);
   }
+}
+
+function checkAllSebanggo() {
+  tempSelectedSebanggo = getVisibleSebanggoList();
+  renderSebanggoList();
+}
+
+function uncheckAllSebanggo() {
+  tempSelectedSebanggo = [];
+  renderSebanggoList();
+}
+
+function getVisibleSebanggoList() {
+  const searchTerm = document.getElementById('sebanggoSearch').value.toLowerCase();
+  const filterType = document.getElementById('filterType')?.value;
+  const selectedModel = document.getElementById('modelFilter')?.value;
+
+  return allProducts
+    .filter(p => {
+      const matchesModel = !selectedModel || filterType !== 'model' || p.モデル === selectedModel;
+      const matchesSearch =
+        p.背番号?.toLowerCase().includes(searchTerm) ||
+        p.品番?.toLowerCase().includes(searchTerm) ||
+        p.モデル?.toLowerCase().includes(searchTerm);
+      return matchesModel && matchesSearch;
+    })
+    .map(p => p.背番号)
+    .filter(Boolean);
 }
 
 function updateSelectedProductsDisplay() {
@@ -310,7 +358,11 @@ function updateSelectedProductsDisplay() {
         <i class="ri-close-line"></i>
       </button>
     </span>
-  `).join('') + (selectedSebanggoArray.length > 10 ? `<span class="text-gray-500 text-sm">+${selectedSebanggoArray.length - 10} more</span>` : '');
+  `).join('') + (selectedSebanggoArray.length > 10 ? `
+    <button onclick="openSebanggoSelector()" class="text-gray-500 text-sm hover:text-gray-700 dark:hover:text-gray-300">
+      +${selectedSebanggoArray.length - 10} more (Show all)
+    </button>
+  ` : '');
 }
 
 function removeSebanggoFromSelection(sebanggo) {
@@ -700,6 +752,8 @@ window.closeSebanggoSelector = closeSebanggoSelector;
 window.confirmSebanggoSelection = confirmSebanggoSelection;
 window.filterSebanggoList = filterSebanggoList;
 window.toggleSebanggoSelection = toggleSebanggoSelection;
+window.checkAllSebanggo = checkAllSebanggo;
+window.uncheckAllSebanggo = uncheckAllSebanggo;
 window.removeSebanggoFromSelection = removeSebanggoFromSelection;
 window.uploadProductPDF = uploadProductPDF;
 window.deletePDF = deletePDF;
