@@ -91,7 +91,7 @@ async function initProductPDFsPage() {
             <input type="file" id="pdfFileInput" accept=".pdf" class="w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white" />
           </div>
 
-          <button onclick="uploadProductPDF()" id="uploadBtn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:bg-gray-400 disabled:cursor-not-allowed">
+          <button onclick="checkAndUploadPDF()" id="uploadBtn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:bg-gray-400 disabled:cursor-not-allowed">
             Upload PDF
           </button>
 
@@ -278,7 +278,7 @@ function renderSebanggoList() {
       p.品番?.toLowerCase().includes(searchTerm) ||
       p.モデル?.toLowerCase().includes(searchTerm);
     return matchesModel && matchesSearch;
-  });
+  }).sort((a, b) => (a.背番号 || '').localeCompare(b.背番号 || ''));
   
   container.innerHTML = filteredProducts.map(product => {
     const isSelected = tempSelectedSebanggo.includes(product.背番号);
@@ -370,8 +370,142 @@ function removeSebanggoFromSelection(sebanggo) {
   updateSelectedProductsDisplay();
 }
 
+// Check for existing PDFs before upload
+async function checkAndUploadPDF() {
+  const fileInput = document.getElementById('pdfFileInput');
+  
+  if (!fileInput.files[0]) {
+    alert('Please select a PDF file');
+    return;
+  }
+  
+  if (selectedSebanggoArray.length === 0) {
+    alert('Please select at least one product');
+    return;
+  }
+  
+  // Check for existing PDFs
+  try {
+    const response = await fetch(`${BASE_URL}api/check-existing-pdfs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pdfType: currentPDFType,
+        背番号Array: selectedSebanggoArray
+      })
+    });
+    
+    const conflicts = await response.json();
+    
+    if (conflicts.hasConflicts) {
+      // Show conflict resolution modal
+      showConflictModal(conflicts);
+    } else {
+      // No conflicts, proceed with upload
+      uploadProductPDF();
+    }
+  } catch (error) {
+    console.error('Error checking existing PDFs:', error);
+    alert('Error checking for existing PDFs. Proceed anyway?') && uploadProductPDF();
+  }
+}
+
+// Show conflict resolution modal
+function showConflictModal(conflicts) {
+  const { existing, newProducts, pdfType } = conflicts;
+  
+  const modal = document.createElement('div');
+  modal.id = 'conflictModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center';
+  
+  const existingHTML = existing.map(item => {
+    const dates = item.pdfs.map(p => new Date(p.uploadedAt).toLocaleDateString('ja-JP')).join(', ');
+    const count = item.pdfs.length;
+    return `
+      <div class="border-b dark:border-gray-700 py-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="font-semibold text-gray-900 dark:text-white">${item.背番号}</span>
+            <span class="text-sm text-gray-500 dark:text-gray-400 ml-2">${count} existing PDF${count > 1 ? 's' : ''}</span>
+          </div>
+          ${count > 1 ? `
+            <select id="action-${item.背番号}" class="text-sm border dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-white">
+              <option value="all">Overwrite all</option>
+              <option value="newest">Overwrite newest only</option>
+              <option value="skip">Skip this product</option>
+            </select>
+          ` : `
+            <select id="action-${item.背番号}" class="text-sm border dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-700 dark:text-white">
+              <option value="overwrite">Overwrite</option>
+              <option value="skip">Skip this product</option>
+            </select>
+          `}
+        </div>
+        <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">Uploaded: ${dates}</div>
+      </div>
+    `;
+  }).join('');
+  
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+      <div class="p-6 border-b dark:border-gray-700">
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">⚠️ Existing PDFs Detected</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+          <span class="font-semibold">${existing.length}</span> product(s) already have <span class="font-semibold">${pdfType}</span> PDFs.
+          ${newProducts.length > 0 ? `Upload will apply to the remaining <span class="font-semibold">${newProducts.length}</span> product(s).` : ''}
+        </p>
+      </div>
+      
+      <div class="p-6 overflow-y-auto max-h-[50vh]">
+        <h4 class="font-semibold text-gray-900 dark:text-white mb-3">Products with existing PDFs:</h4>
+        ${existingHTML}
+        
+        ${newProducts.length > 0 ? `
+          <div class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded">
+            <h4 class="font-semibold text-blue-900 dark:text-blue-300 mb-2">New products (no conflicts):</h4>
+            <div class="text-sm text-blue-800 dark:text-blue-400">${newProducts.join(', ')}</div>
+          </div>
+        ` : ''}
+      </div>
+      
+      <div class="p-6 border-t dark:border-gray-700 flex justify-end gap-3">
+        <button onclick="closeConflictModal()" class="px-4 py-2 border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
+          Cancel
+        </button>
+        <button onclick="proceedWithConflictResolution()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded">
+          Continue Upload
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+}
+
+function closeConflictModal() {
+  const modal = document.getElementById('conflictModal');
+  if (modal) modal.remove();
+}
+
+async function proceedWithConflictResolution() {
+  // Collect user choices for each conflicted product
+  const resolutions = {};
+  const modal = document.getElementById('conflictModal');
+  const selects = modal.querySelectorAll('select[id^="action-"]');
+  
+  selects.forEach(select => {
+    const sebanggo = select.id.replace('action-', '');
+    resolutions[sebanggo] = select.value;
+  });
+  
+  closeConflictModal();
+  
+  // Proceed with upload, passing resolution choices
+  uploadProductPDF(resolutions);
+}
+
 // Upload PDF
-async function uploadProductPDF() {
+async function uploadProductPDF(resolutions = {}) {
   const fileInput = document.getElementById('pdfFileInput');
   const uploadBtn = document.getElementById('uploadBtn');
   const progress = document.getElementById('uploadProgress');
@@ -422,7 +556,8 @@ async function uploadProductPDF() {
         背番号Array: selectedSebanggoArray,
         pdfBase64,
         fileName: file.name,
-        uploadedBy: currentUser.username || 'admin'
+        uploadedBy: currentUser.username || 'admin',
+        resolutions: resolutions
       })
     });
     
@@ -755,7 +890,10 @@ window.toggleSebanggoSelection = toggleSebanggoSelection;
 window.checkAllSebanggo = checkAllSebanggo;
 window.uncheckAllSebanggo = uncheckAllSebanggo;
 window.removeSebanggoFromSelection = removeSebanggoFromSelection;
+window.checkAndUploadPDF = checkAndUploadPDF;
 window.uploadProductPDF = uploadProductPDF;
+window.closeConflictModal = closeConflictModal;
+window.proceedWithConflictResolution = proceedWithConflictResolution;
 window.deletePDF = deletePDF;
 window.openTrash = openTrash;
 window.closeTrash = closeTrash;
