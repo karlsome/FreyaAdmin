@@ -2,6 +2,13 @@
 
 let currentPDFType = '梱包'; // Default active sub-tab
 let allProducts = []; // Cache of all products for filtering
+let pdfListPage = 1;
+let pdfListLimit = 25;
+let pdfListTotalPages = 1;
+let trashPage = 1;
+let trashLimit = 25;
+let trashTotalPages = 1;
+let trashItemsCache = [];
 
 // Initialize Product PDFs page
 async function initProductPDFsPage() {
@@ -146,6 +153,7 @@ async function initProductPDFsPage() {
         <div id="pdfsList" class="space-y-4">
           <p class="text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
+        <div id="pdfPagination" class="mt-4"></div>
       </div>
     </div>
 
@@ -197,6 +205,7 @@ async function initProductPDFsPage() {
 // Switch between PDF types
 function switchPDFType(type) {
   currentPDFType = type;
+  pdfListPage = 1;
   
   // Update tab styles
   document.querySelectorAll('.pdf-type-tab').forEach(tab => {
@@ -1032,14 +1041,25 @@ function loadScript(src) {
 // Load PDFs list
 async function loadPDFsList() {
   const container = document.getElementById('pdfsList');
+  const pagination = document.getElementById('pdfPagination');
   container.innerHTML = '<p class="text-gray-500 dark:text-gray-400">Loading...</p>';
+  if (pagination) pagination.innerHTML = '';
   
   try {
-    const response = await fetch(`${BASE_URL}api/product-pdfs-by-type/${currentPDFType}`);
-    const pdfs = await response.json();
+    const response = await fetch(`${BASE_URL}api/product-pdfs-by-type/${currentPDFType}?page=${pdfListPage}&limit=${pdfListLimit}`);
+    const data = await response.json();
+    const pdfs = Array.isArray(data) ? data : (data.items || []);
+    const meta = Array.isArray(data) ? {
+      page: 1,
+      limit: pdfs.length,
+      total: pdfs.length,
+      totalPages: 1
+    } : data;
+    pdfListTotalPages = meta.totalPages || 1;
     
     if (pdfs.length === 0) {
       container.innerHTML = '<p class="text-gray-500 dark:text-gray-400">No PDFs uploaded yet</p>';
+      renderPDFPagination(meta);
       return;
     }
     
@@ -1077,11 +1097,72 @@ async function loadPDFsList() {
         </div>
       </div>
     `).join('');
+
+    renderPDFPagination(meta);
     
   } catch (error) {
     console.error('❌ Error loading PDFs:', error);
     container.innerHTML = '<p class="text-red-500">Error loading PDFs</p>';
+    if (pagination) pagination.innerHTML = '';
   }
+}
+
+function renderPDFPagination(meta) {
+  const container = document.getElementById('pdfPagination');
+  if (!container) return;
+
+  const page = meta?.page || 1;
+  const limit = meta?.limit || pdfListLimit;
+  const total = meta?.total || 0;
+  const totalPages = meta?.totalPages || 1;
+
+  if (totalPages <= 1) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const start = total === 0 ? 0 : (page - 1) * limit + 1;
+  const end = Math.min(page * limit, total);
+
+  const prevDisabled = page <= 1 ? 'opacity-50 pointer-events-none' : '';
+  const nextDisabled = page >= totalPages ? 'opacity-50 pointer-events-none' : '';
+
+  container.innerHTML = `
+    <div class="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600 dark:text-gray-400">
+      <div class="flex items-center gap-3">
+        <span>Showing ${start}-${end} of ${total}</span>
+        <label class="flex items-center gap-2">
+          <span>Per page</span>
+          <select id="pdfPageSize" onchange="changePDFPageSize()" class="p-1 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white">
+            ${[10, 25, 50, 100].map(size => `<option value="${size}" ${size === limit ? 'selected' : ''}>${size}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="changePDFPage(${page - 1})" class="px-2 py-1 border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${prevDisabled}">
+          Prev
+        </button>
+        <span>Page ${page} / ${totalPages}</span>
+        <button onclick="changePDFPage(${page + 1})" class="px-2 py-1 border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${nextDisabled}">
+          Next
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function changePDFPage(nextPage) {
+  if (nextPage < 1 || nextPage > pdfListTotalPages) return;
+  pdfListPage = nextPage;
+  loadPDFsList();
+}
+
+function changePDFPageSize() {
+  const select = document.getElementById('pdfPageSize');
+  const nextLimit = parseInt(select?.value, 10) || 25;
+  pdfListLimit = nextLimit;
+  pdfListPage = 1;
+  loadPDFsList();
 }
 
 // Delete PDF
@@ -1109,9 +1190,8 @@ async function deletePDF(documentId) {
 // Trash Management
 async function openTrash() {
   try {
-    const response = await fetch(`${BASE_URL}api/product-pdfs-trash`);
-    const trashedPDFs = await response.json();
-    
+    trashPage = 1;
+
     // Create trash modal
     const modal = document.createElement('div');
     modal.id = 'trashModal';
@@ -1123,17 +1203,27 @@ async function openTrash() {
             <h3 class="text-2xl font-semibold text-gray-900 dark:text-white">🗑️ Trash</h3>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">PDFs will be permanently deleted after 30 days</p>
           </div>
-          <button onclick="closeTrash()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-            <i class="ri-close-line text-2xl"></i>
-          </button>
+          <div class="flex items-center gap-2">
+            <button onclick="recoverAllTrash()" class="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded">
+              Recover All
+            </button>
+            <button onclick="deleteAllTrash()" class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded">
+              Delete All
+            </button>
+            <button onclick="closeTrash()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+              <i class="ri-close-line text-2xl"></i>
+            </button>
+          </div>
         </div>
-        <div class="p-6 overflow-y-auto max-h-[65vh]" id="trashContent">
-          ${trashedPDFs.length === 0 ? '<p class="text-gray-500 dark:text-gray-400 text-center py-8">Trash is empty</p>' : renderTrashItems(trashedPDFs)}
+        <div class="p-6 overflow-y-auto max-h-[60vh]" id="trashContent">
+          <p class="text-gray-500 dark:text-gray-400 text-center py-8">Loading...</p>
         </div>
+        <div class="px-6 pb-6" id="trashPagination"></div>
       </div>
     `;
     
     document.body.appendChild(modal);
+    loadTrashPage();
   } catch (error) {
     console.error('❌ Error loading trash:', error);
     alert('Error loading trash');
@@ -1146,33 +1236,38 @@ function closeTrash() {
 }
 
 function renderTrashItems(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '<p class="text-gray-500 dark:text-gray-400 text-center py-8">Trash is empty</p>';
+  }
+
   return `
-    <div class="space-y-4">
+    <div class="space-y-3">
       ${items.map(pdf => {
         const deletedDate = new Date(pdf.deletedAt);
         const daysAgo = Math.floor((Date.now() - deletedDate.getTime()) / (1000 * 60 * 60 * 24));
         const daysLeft = Math.max(0, 30 - daysAgo);
+        const title = pdf.背番号Array?.length
+          ? `${pdf.背番号Array.slice(0, 8).join(', ')}${pdf.背番号Array.length > 8 ? ` +${pdf.背番号Array.length - 8} more` : ''}`
+          : 'Unknown';
         
         return `
-          <div class="border dark:border-gray-700 rounded-lg p-4 hover:shadow-lg transition">
-            <div class="flex items-start gap-4">
+          <div class="border dark:border-gray-700 rounded-lg p-3 hover:shadow-md transition">
+            <div class="flex items-start gap-3">
               <!-- Thumbnail -->
-              <div class="w-32 h-20 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
+              <div class="w-24 h-16 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
                 ${pdf.imageURL ? `<img src="${pdf.imageURL}" alt="${pdf.fileName}" class="w-full h-full object-contain rounded" />` : '<i class="ri-file-pdf-line text-4xl text-gray-400"></i>'}
               </div>
               
               <!-- Info -->
               <div class="flex-1">
-                <div class="flex items-start justify-between">
+                <div class="flex items-start justify-between gap-2">
                   <div>
-                    <h4 class="font-semibold text-gray-900 dark:text-white">${pdf.fileName}</h4>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">${title}</h4>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${pdf.fileName}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                       Type: <span class="font-medium">${pdf.pdfType}</span>
                     </p>
-                    <p class="text-sm text-gray-500 dark:text-gray-400">
-                      ${pdf.背番号Array.length} products: ${pdf.背番号Array.slice(0, 5).join(', ')}${pdf.背番号Array.length > 5 ? '...' : ''}
-                    </p>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                       Deleted ${daysAgo} days ago • ${daysLeft} days until permanent deletion
                     </p>
                   </div>
@@ -1186,11 +1281,11 @@ function renderTrashItems(items) {
                 </div>
                 
                 <!-- Actions -->
-                <div class="flex gap-2 mt-3">
-                  <button onclick="recoverPDF('${pdf._id}')" class="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm">
+                <div class="flex gap-2 mt-2">
+                  <button onclick="recoverPDF('${pdf._id}')" class="px-2.5 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded">
                     <i class="ri-refresh-line"></i> Recover
                   </button>
-                  <button onclick="permanentlyDeletePDF('${pdf._id}', '${pdf.fileName}')" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm">
+                  <button onclick="permanentlyDeletePDF('${pdf._id}', '${pdf.fileName}')" class="px-2.5 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded">
                     <i class="ri-delete-bin-line"></i> Delete Permanently
                   </button>
                 </div>
@@ -1201,6 +1296,133 @@ function renderTrashItems(items) {
       }).join('')}
     </div>
   `;
+}
+
+async function loadTrashPage() {
+  const content = document.getElementById('trashContent');
+  const pagination = document.getElementById('trashPagination');
+  if (!content) return;
+
+  content.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">Loading...</p>';
+  if (pagination) pagination.innerHTML = '';
+
+  try {
+    const response = await fetch(`${BASE_URL}api/product-pdfs-trash?page=${trashPage}&limit=${trashLimit}`);
+    const data = await response.json();
+    const items = Array.isArray(data) ? data : (data.items || []);
+    const meta = Array.isArray(data) ? {
+      page: 1,
+      limit: items.length,
+      total: items.length,
+      totalPages: 1
+    } : data;
+
+    trashTotalPages = meta.totalPages || 1;
+    trashItemsCache = items;
+    content.innerHTML = renderTrashItems(items);
+    renderTrashPagination(meta);
+  } catch (error) {
+    console.error('❌ Error loading trash:', error);
+    content.innerHTML = '<p class="text-red-500 text-center py-8">Error loading trash</p>';
+    if (pagination) pagination.innerHTML = '';
+  }
+}
+
+async function recoverAllTrash() {
+  if (!trashItemsCache.length) {
+    alert('Trash is empty');
+    return;
+  }
+
+  if (!confirm(`Recover all ${trashItemsCache.length} items?`)) return;
+
+  try {
+    for (const item of trashItemsCache) {
+      await fetch(`${BASE_URL}api/product-pdf-recover/${item._id}`, { method: 'POST' });
+    }
+    loadTrashPage();
+    loadPDFsList();
+  } catch (error) {
+    console.error('❌ Error recovering all trash items:', error);
+    alert('Error recovering all items');
+  }
+}
+
+async function deleteAllTrash() {
+  if (!trashItemsCache.length) {
+    alert('Trash is empty');
+    return;
+  }
+
+  if (!confirm(`⚠️ WARNING: Permanently delete all ${trashItemsCache.length} items? This cannot be undone.`)) return;
+  if (!confirm('Final confirmation: Delete all permanently?')) return;
+
+  try {
+    for (const item of trashItemsCache) {
+      await fetch(`${BASE_URL}api/product-pdf-permanent/${item._id}`, { method: 'DELETE' });
+    }
+    loadTrashPage();
+  } catch (error) {
+    console.error('❌ Error deleting all trash items:', error);
+    alert('Error deleting all items');
+  }
+}
+
+function renderTrashPagination(meta) {
+  const container = document.getElementById('trashPagination');
+  if (!container) return;
+
+  const page = meta?.page || 1;
+  const limit = meta?.limit || trashLimit;
+  const total = meta?.total || 0;
+  const totalPages = meta?.totalPages || 1;
+
+  if (totalPages <= 1) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const start = total === 0 ? 0 : (page - 1) * limit + 1;
+  const end = Math.min(page * limit, total);
+  const prevDisabled = page <= 1 ? 'opacity-50 pointer-events-none' : '';
+  const nextDisabled = page >= totalPages ? 'opacity-50 pointer-events-none' : '';
+
+  container.innerHTML = `
+    <div class="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600 dark:text-gray-400">
+      <div class="flex items-center gap-3">
+        <span>Showing ${start}-${end} of ${total}</span>
+        <label class="flex items-center gap-2">
+          <span>Per page</span>
+          <select id="trashPageSize" onchange="changeTrashPageSize()" class="p-1 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white">
+            ${[10, 25, 50, 100].map(size => `<option value="${size}" ${size === limit ? 'selected' : ''}>${size}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="changeTrashPage(${page - 1})" class="px-2 py-1 border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${prevDisabled}">
+          Prev
+        </button>
+        <span>Page ${page} / ${totalPages}</span>
+        <button onclick="changeTrashPage(${page + 1})" class="px-2 py-1 border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${nextDisabled}">
+          Next
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function changeTrashPage(nextPage) {
+  if (nextPage < 1 || nextPage > trashTotalPages) return;
+  trashPage = nextPage;
+  loadTrashPage();
+}
+
+function changeTrashPageSize() {
+  const select = document.getElementById('trashPageSize');
+  const nextLimit = parseInt(select?.value, 10) || 25;
+  trashLimit = nextLimit;
+  trashPage = 1;
+  loadTrashPage();
 }
 
 async function recoverPDF(documentId) {
@@ -1215,7 +1437,7 @@ async function recoverPDF(documentId) {
     
     if (result.success) {
       alert('PDF recovered successfully!');
-      closeTrash();
+      loadTrashPage();
       loadPDFsList(); // Refresh the main list
     } else {
       alert('Failed to recover PDF');
@@ -1241,8 +1463,7 @@ async function permanentlyDeletePDF(documentId, fileName) {
     
     if (result.success) {
       alert('PDF permanently deleted from all locations');
-      closeTrash();
-      openTrash(); // Reopen trash to refresh
+      loadTrashPage();
     } else {
       alert('Failed to permanently delete PDF');
     }
@@ -1301,6 +1522,12 @@ window.uploadProductPDF = uploadProductPDF;
 window.reviewBulkUpload = reviewBulkUpload;
 window.closeBulkMatchModal = closeBulkMatchModal;
 window.confirmBulkUpload = confirmBulkUpload;
+window.changePDFPage = changePDFPage;
+window.changePDFPageSize = changePDFPageSize;
+window.changeTrashPage = changeTrashPage;
+window.changeTrashPageSize = changeTrashPageSize;
+window.recoverAllTrash = recoverAllTrash;
+window.deleteAllTrash = deleteAllTrash;
 window.closeConflictModal = closeConflictModal;
 window.proceedWithConflictResolution = proceedWithConflictResolution;
 window.deletePDF = deletePDF;
