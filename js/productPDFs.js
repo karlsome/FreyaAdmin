@@ -12,6 +12,12 @@ let trashItemsCache = [];
 let pdfViewMode = 'grid';
 let selectedPdfIds = new Set();
 let currentPdfItems = [];
+let pdfSearchQuery = '';
+let pdfModelFilterValue = '';
+let pdfSearchDebounce = null;
+let pdfSearchTokens = [];
+let pdfSortField = 'uploadedAt';
+let pdfSortDir = 'desc';
 
 // Initialize Product PDFs page
 async function initProductPDFsPage() {
@@ -163,6 +169,15 @@ async function initProductPDFsPage() {
             </button>
           </div>
         </div>
+        <div class="flex flex-wrap gap-4 mb-4">
+          <div id="pdfSearchContainer" class="p-2 border rounded flex flex-wrap items-center gap-2 flex-1 min-w-64">
+            <div id="pdfSearchTags" class="flex flex-wrap gap-2"></div>
+            <input type="text" id="pdfSearchInput" oninput="handlePdfSearchInput()" onkeydown="handlePdfSearchKeydown(event)" placeholder="背番号、品番、モデルで検索..." class="outline-none flex-1 min-w-[8rem] bg-transparent" />
+          </div>
+          <select id="pdfModelFilter" onchange="handlePdfModelFilter()" class="p-2 border rounded">
+            <option value="">All Models</option>
+          </select>
+        </div>
         <div id="pdfsList" class="space-y-4">
           <p class="text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
@@ -277,6 +292,7 @@ async function loadAllProducts() {
 async function loadModels() {
   const models = [...new Set(allProducts.map(p => p.モデル).filter(Boolean))].sort();
   const select = document.getElementById('modelFilter');
+  const pdfSelect = document.getElementById('pdfModelFilter');
   
   select.innerHTML = '<option value="">Select Model...</option>';
   models.forEach(model => {
@@ -285,6 +301,16 @@ async function loadModels() {
     option.textContent = model;
     select.appendChild(option);
   });
+
+  if (pdfSelect) {
+    pdfSelect.innerHTML = '<option value="">All Models</option>';
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model;
+      pdfSelect.appendChild(option);
+    });
+  }
 }
 
 // Handle filter type change
@@ -1062,7 +1088,12 @@ async function loadPDFsList() {
   
   try {
     const includeHinban = pdfViewMode === 'list' || pdfViewMode === 'grid' ? '&includeHinban=1' : '';
-    const response = await fetch(`${BASE_URL}api/product-pdfs-by-type/${currentPDFType}?page=${pdfListPage}&limit=${pdfListLimit}${includeHinban}`);
+    const searchParam = pdfSearchQuery ? `&q=${encodeURIComponent(pdfSearchQuery)}` : '';
+    const modelParam = pdfModelFilterValue ? `&model=${encodeURIComponent(pdfModelFilterValue)}` : '';
+    const sortParam = pdfViewMode === 'list'
+      ? `&sortField=${encodeURIComponent(pdfSortField)}&sortDir=${encodeURIComponent(pdfSortDir)}`
+      : '';
+    const response = await fetch(`${BASE_URL}api/product-pdfs-by-type/${currentPDFType}?page=${pdfListPage}&limit=${pdfListLimit}${includeHinban}${searchParam}${modelParam}${sortParam}`);
     const data = await response.json();
     const pdfs = Array.isArray(data) ? data : (data.items || []);
     const meta = Array.isArray(data) ? {
@@ -1095,9 +1126,89 @@ async function loadPDFsList() {
   }
 }
 
+function handlePdfSearchInput() {
+  const input = document.getElementById('pdfSearchInput');
+  const nextValue = input?.value || '';
+  updatePdfSearchQuery(nextValue);
+}
+
+function handlePdfSearchKeydown(event) {
+  if (event.key === 'Enter' || event.key === ',') {
+    event.preventDefault();
+    const input = document.getElementById('pdfSearchInput');
+    const value = input?.value || '';
+    const tokens = value.split(/[\s,]+/).filter(Boolean);
+    if (tokens.length === 0) return;
+
+    tokens.forEach(token => addPdfSearchToken(token));
+    if (input) input.value = '';
+    updatePdfSearchQuery('');
+    return;
+  }
+
+  if (event.key === 'Backspace') {
+    const input = document.getElementById('pdfSearchInput');
+    if (input && input.value === '' && pdfSearchTokens.length > 0) {
+      pdfSearchTokens.pop();
+      renderPdfSearchTags();
+      updatePdfSearchQuery('');
+    }
+  }
+}
+
+function addPdfSearchToken(token) {
+  const normalized = token.trim();
+  if (!normalized) return;
+  if (pdfSearchTokens.includes(normalized)) return;
+  pdfSearchTokens.push(normalized);
+  renderPdfSearchTags();
+}
+
+function removePdfSearchToken(token) {
+  pdfSearchTokens = pdfSearchTokens.filter(t => t !== token);
+  renderPdfSearchTags();
+  updatePdfSearchQuery(document.getElementById('pdfSearchInput')?.value || '');
+}
+
+function renderPdfSearchTags() {
+  const container = document.getElementById('pdfSearchTags');
+  if (!container) return;
+  container.innerHTML = pdfSearchTokens.map(token => `
+    <span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center gap-1">
+      ${token}
+      <button type="button" class="text-blue-600 hover:text-blue-800" onclick="removePdfSearchToken('${token}')">×</button>
+    </span>
+  `).join('');
+}
+
+function updatePdfSearchQuery(currentInput) {
+  const parts = [...pdfSearchTokens];
+  const trimmed = String(currentInput || '').trim();
+  if (trimmed) parts.push(trimmed);
+  pdfSearchQuery = parts.join(' ');
+  pdfListPage = 1;
+
+  if (pdfSearchDebounce) {
+    clearTimeout(pdfSearchDebounce);
+  }
+
+  pdfSearchDebounce = setTimeout(() => {
+    loadPDFsList();
+  }, 300);
+}
+
+function handlePdfModelFilter() {
+  const select = document.getElementById('pdfModelFilter');
+  pdfModelFilterValue = select?.value || '';
+  pdfListPage = 1;
+  loadPDFsList();
+}
+
 function renderPDFGridView(pdfs) {
   const allSelected = currentPdfItems.length > 0 && selectedPdfIds.size === currentPdfItems.length;
   const selectedCount = selectedPdfIds.size;
+  const disabledAttr = selectedCount === 0 ? 'disabled' : '';
+  const disabledClass = selectedCount === 0 ? 'opacity-50 cursor-not-allowed' : '';
 
   return `
     <div class="flex items-center justify-between mb-2 text-sm text-gray-600 dark:text-gray-400">
@@ -1105,7 +1216,7 @@ function renderPDFGridView(pdfs) {
         <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="togglePdfSelectAll(this)" />
         <span>${selectedCount} selected</span>
       </div>
-      <button onclick="deleteSelectedPDFs()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs">
+      <button onclick="deleteSelectedPDFs()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs ${disabledClass}" ${disabledAttr}>
         Delete Selected
       </button>
     </div>
@@ -1163,10 +1274,12 @@ function renderPDFGridView(pdfs) {
 function renderPDFListView(pdfs) {
   const selectedCount = selectedPdfIds.size;
   const allSelected = currentPdfItems.length > 0 && selectedPdfIds.size === currentPdfItems.length;
+  const disabledAttr = selectedCount === 0 ? 'disabled' : '';
+  const disabledClass = selectedCount === 0 ? 'opacity-50 cursor-not-allowed' : '';
   return `
     <div class="flex items-center justify-between mb-2 text-sm text-gray-600 dark:text-gray-400">
       <span>${selectedCount} selected</span>
-      <button onclick="deleteSelectedPDFs()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs">
+      <button onclick="deleteSelectedPDFs()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs ${disabledClass}" ${disabledAttr}>
         Delete Selected
       </button>
     </div>
@@ -1177,12 +1290,24 @@ function renderPDFListView(pdfs) {
             <th class="px-3 py-2 text-left">
               <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="togglePdfSelectAll(this)" />
             </th>
-            <th class="px-3 py-2 text-left">背番号</th>
-            <th class="px-3 py-2 text-left">品番</th>
-            <th class="px-3 py-2 text-left">File</th>
-            <th class="px-3 py-2 text-left">Uploader</th>
-            <th class="px-3 py-2 text-left">Uploaded</th>
-            <th class="px-3 py-2 text-left">Updated</th>
+            <th class="px-3 py-2 text-left cursor-pointer select-none" onclick="togglePdfSort('sebanggo')">
+              背番号 ${getPdfSortIcon('sebanggo')}
+            </th>
+            <th class="px-3 py-2 text-left cursor-pointer select-none" onclick="togglePdfSort('hinban')">
+              品番 ${getPdfSortIcon('hinban')}
+            </th>
+            <th class="px-3 py-2 text-left cursor-pointer select-none" onclick="togglePdfSort('fileName')">
+              File ${getPdfSortIcon('fileName')}
+            </th>
+            <th class="px-3 py-2 text-left cursor-pointer select-none" onclick="togglePdfSort('uploader')">
+              Uploader ${getPdfSortIcon('uploader')}
+            </th>
+            <th class="px-3 py-2 text-left cursor-pointer select-none" onclick="togglePdfSort('uploadedAt')">
+              Uploaded ${getPdfSortIcon('uploadedAt')}
+            </th>
+            <th class="px-3 py-2 text-left cursor-pointer select-none" onclick="togglePdfSort('updatedAt')">
+              Updated ${getPdfSortIcon('updatedAt')}
+            </th>
             <th class="px-3 py-2 text-right">Actions</th>
           </tr>
         </thead>
@@ -1241,6 +1366,27 @@ function setPDFViewMode(mode, skipReload = false) {
   if (!skipReload) {
     loadPDFsList();
   }
+}
+
+function togglePdfSort(field) {
+  if (pdfSortField === field) {
+    pdfSortDir = pdfSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    pdfSortField = field;
+    pdfSortDir = 'asc';
+  }
+  pdfListPage = 1;
+  loadPDFsList();
+}
+
+function getPdfSortIcon(field) {
+  if (pdfSortField !== field) {
+    return '<i class="ri-arrow-up-down-line ml-1 text-xs opacity-50"></i>';
+  }
+
+  return pdfSortDir === 'asc'
+    ? '<i class="ri-arrow-up-s-line ml-1 text-xs"></i>'
+    : '<i class="ri-arrow-down-s-line ml-1 text-xs"></i>';
 }
 
 function togglePdfSelection(id) {
@@ -1729,7 +1875,12 @@ window.changeTrashPage = changeTrashPage;
 window.changeTrashPageSize = changeTrashPageSize;
 window.recoverAllTrash = recoverAllTrash;
 window.deleteAllTrash = deleteAllTrash;
+window.handlePdfSearchInput = handlePdfSearchInput;
+window.handlePdfModelFilter = handlePdfModelFilter;
 window.closeConflictModal = closeConflictModal;
+window.handlePdfSearchKeydown = handlePdfSearchKeydown;
+window.removePdfSearchToken = removePdfSearchToken;
+window.togglePdfSort = togglePdfSort;
 window.proceedWithConflictResolution = proceedWithConflictResolution;
 window.deletePDF = deletePDF;
 window.openTrash = openTrash;
