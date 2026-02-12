@@ -9,6 +9,9 @@ let trashPage = 1;
 let trashLimit = 25;
 let trashTotalPages = 1;
 let trashItemsCache = [];
+let pdfViewMode = 'grid';
+let selectedPdfIds = new Set();
+let currentPdfItems = [];
 
 // Initialize Product PDFs page
 async function initProductPDFsPage() {
@@ -149,7 +152,17 @@ async function initProductPDFsPage() {
 
       <!-- Uploaded PDFs List -->
       <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-        <h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Uploaded PDFs</h3>
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Uploaded PDFs</h3>
+          <div class="flex items-center gap-2">
+            <button onclick="setPDFViewMode('grid')" id="pdfViewGrid" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700" title="Grid view">
+              <i class="ri-layout-grid-line text-lg"></i>
+            </button>
+            <button onclick="setPDFViewMode('list')" id="pdfViewList" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700" title="List view">
+              <i class="ri-list-unordered text-lg"></i>
+            </button>
+          </div>
+        </div>
         <div id="pdfsList" class="space-y-4">
           <p class="text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
@@ -195,6 +208,7 @@ async function initProductPDFsPage() {
   `;
 
   document.getElementById('mainContent').innerHTML = content;
+  setPDFViewMode(pdfViewMode, true);
   
   // Load products and initial data
   await loadAllProducts();
@@ -206,6 +220,7 @@ async function initProductPDFsPage() {
 function switchPDFType(type) {
   currentPDFType = type;
   pdfListPage = 1;
+  selectedPdfIds = new Set();
   
   // Update tab styles
   document.querySelectorAll('.pdf-type-tab').forEach(tab => {
@@ -1046,7 +1061,8 @@ async function loadPDFsList() {
   if (pagination) pagination.innerHTML = '';
   
   try {
-    const response = await fetch(`${BASE_URL}api/product-pdfs-by-type/${currentPDFType}?page=${pdfListPage}&limit=${pdfListLimit}`);
+    const includeHinban = pdfViewMode === 'list' || pdfViewMode === 'grid' ? '&includeHinban=1' : '';
+    const response = await fetch(`${BASE_URL}api/product-pdfs-by-type/${currentPDFType}?page=${pdfListPage}&limit=${pdfListLimit}${includeHinban}`);
     const data = await response.json();
     const pdfs = Array.isArray(data) ? data : (data.items || []);
     const meta = Array.isArray(data) ? {
@@ -1057,46 +1073,18 @@ async function loadPDFsList() {
     } : data;
     pdfListTotalPages = meta.totalPages || 1;
     
+    currentPdfItems = pdfs;
+    selectedPdfIds = new Set();
+
     if (pdfs.length === 0) {
       container.innerHTML = '<p class="text-gray-500 dark:text-gray-400">No PDFs uploaded yet</p>';
       renderPDFPagination(meta);
       return;
     }
     
-    container.innerHTML = pdfs.map(pdf => `
-      <div class="border dark:border-gray-700 rounded-lg p-2 hover:shadow-lg transition cursor-pointer" onclick="${pdf.imageURL ? `previewPDFImage('${pdf.imageURL}', '${pdf.背番号Array.join(', ')}', '${pdf.fileName}')` : ''}">
-        <div class="flex items-start gap-3">
-          <!-- Thumbnail -->
-          <div class="w-24 h-16 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
-            ${pdf.imageURL ? `<img src="${pdf.imageURL}" alt="${pdf.fileName}" class="w-full h-full object-contain rounded" />` : '<i class="ri-file-pdf-line text-3xl text-gray-400"></i>'}
-          </div>
-          
-          <!-- Info -->
-          <div class="flex-1">
-            <h4 class="text-sm font-bold text-gray-900 dark:text-white">
-              ${pdf.背番号Array.slice(0, 8).join(', ')}${pdf.背番号Array.length > 8 ? ` +${pdf.背番号Array.length - 8} more` : ''}
-            </h4>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              ${pdf.fileName}
-            </p>
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-              ${pdf.uploadedBy} • ${new Date(pdf.uploadedAt).toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-            </p>
-          </div>
-          
-          <!-- Actions -->
-          <div class="flex gap-2" onclick="event.stopPropagation()">
-            <a href="${pdf.pdfURL}" target="_blank" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="View Original PDF">
-              <i class="ri-file-pdf-line text-xl"></i>
-            </a>
-            ${pdf.imageURL ? `<a href="${pdf.imageURL}" target="_blank" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="Open in New Tab"><i class="ri-external-link-line text-xl"></i></a>` : ''}
-            <button onclick="deletePDF('${pdf._id}')" class="p-2 hover:bg-red-100 dark:hover:bg-red-900 rounded text-red-600 dark:text-red-400" title="Delete">
-              <i class="ri-delete-bin-line text-xl"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-    `).join('');
+    container.innerHTML = pdfViewMode === 'list'
+      ? renderPDFListView(pdfs)
+      : renderPDFGridView(pdfs);
 
     renderPDFPagination(meta);
     
@@ -1105,6 +1093,219 @@ async function loadPDFsList() {
     container.innerHTML = '<p class="text-red-500">Error loading PDFs</p>';
     if (pagination) pagination.innerHTML = '';
   }
+}
+
+function renderPDFGridView(pdfs) {
+  const allSelected = currentPdfItems.length > 0 && selectedPdfIds.size === currentPdfItems.length;
+  const selectedCount = selectedPdfIds.size;
+
+  return `
+    <div class="flex items-center justify-between mb-2 text-sm text-gray-600 dark:text-gray-400">
+      <div class="flex items-center gap-2">
+        <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="togglePdfSelectAll(this)" />
+        <span>${selectedCount} selected</span>
+      </div>
+      <button onclick="deleteSelectedPDFs()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs">
+        Delete Selected
+      </button>
+    </div>
+    <div class="space-y-4">
+      ${pdfs.map(pdf => {
+        const checked = selectedPdfIds.has(pdf._id) ? 'checked' : '';
+        return `
+          <div class="relative border dark:border-gray-700 rounded-lg p-2 hover:shadow-lg transition cursor-pointer" onclick="${pdf.imageURL ? `previewPDFImage('${pdf.imageURL}', '${pdf.背番号Array.join(', ')}', '${pdf.fileName}')` : ''}">
+            <div class="absolute top-2 left-2" onclick="event.stopPropagation()">
+              <input type="checkbox" ${checked} onchange="togglePdfSelection('${pdf._id}')" />
+            </div>
+            <div class="flex items-start gap-3 pl-6">
+              <!-- Thumbnail -->
+              <div class="w-24 h-16 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center flex-shrink-0">
+                ${pdf.imageURL ? `<img src="${pdf.imageURL}" alt="${pdf.fileName}" class="w-full h-full object-contain rounded" />` : '<i class="ri-file-pdf-line text-3xl text-gray-400"></i>'}
+              </div>
+              
+              <!-- Info -->
+              <div class="flex-1">
+                <h4 class="text-sm font-bold text-gray-900 dark:text-white">
+                  ${pdf.背番号Array.slice(0, 8).join(', ')}${pdf.背番号Array.length > 8 ? ` +${pdf.背番号Array.length - 8} more` : ''}
+                </h4>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  ${Array.isArray(pdf.hinbanList) && pdf.hinbanList.length
+                    ? pdf.hinbanList.map(h => h.品番).filter(Boolean).slice(0, 6).join(', ')
+                    : '-'
+                  }
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  ${pdf.fileName}
+                </p>
+                <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  ${pdf.uploadedBy} • ${formatDateTime(pdf.uploadedAt)}
+                </p>
+              </div>
+              
+              <!-- Actions -->
+              <div class="flex gap-2" onclick="event.stopPropagation()">
+                <a href="${pdf.pdfURL}" target="_blank" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="View Original PDF">
+                  <i class="ri-file-pdf-line text-xl"></i>
+                </a>
+                ${pdf.imageURL ? `<a href="${pdf.imageURL}" target="_blank" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="Open in New Tab"><i class="ri-external-link-line text-xl"></i></a>` : ''}
+                <button onclick="deletePDF('${pdf._id}')" class="p-2 hover:bg-red-100 dark:hover:bg-red-900 rounded text-red-600 dark:text-red-400" title="Delete">
+                  <i class="ri-delete-bin-line text-xl"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderPDFListView(pdfs) {
+  const selectedCount = selectedPdfIds.size;
+  const allSelected = currentPdfItems.length > 0 && selectedPdfIds.size === currentPdfItems.length;
+  return `
+    <div class="flex items-center justify-between mb-2 text-sm text-gray-600 dark:text-gray-400">
+      <span>${selectedCount} selected</span>
+      <button onclick="deleteSelectedPDFs()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs">
+        Delete Selected
+      </button>
+    </div>
+    <div class="overflow-x-auto border dark:border-gray-700 rounded">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-400">
+          <tr>
+            <th class="px-3 py-2 text-left">
+              <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="togglePdfSelectAll(this)" />
+            </th>
+            <th class="px-3 py-2 text-left">背番号</th>
+            <th class="px-3 py-2 text-left">品番</th>
+            <th class="px-3 py-2 text-left">File</th>
+            <th class="px-3 py-2 text-left">Uploader</th>
+            <th class="px-3 py-2 text-left">Uploaded</th>
+            <th class="px-3 py-2 text-left">Updated</th>
+            <th class="px-3 py-2 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y dark:divide-gray-700">
+          ${pdfs.map(pdf => {
+            const sebanggoText = pdf.背番号Array?.length
+              ? `${pdf.背番号Array.slice(0, 6).join(', ')}${pdf.背番号Array.length > 6 ? ` +${pdf.背番号Array.length - 6} more` : ''}`
+              : '-';
+            const hinbanText = Array.isArray(pdf.hinbanList) && pdf.hinbanList.length
+              ? pdf.hinbanList.map(h => h.品番).filter(Boolean).slice(0, 6).join(', ')
+              : '-';
+            const checked = selectedPdfIds.has(pdf._id) ? 'checked' : '';
+            return `
+              <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+                <td class="px-3 py-2">
+                  <input type="checkbox" ${checked} onchange="togglePdfSelection('${pdf._id}')" />
+                </td>
+                <td class="px-3 py-2 font-semibold text-gray-900 dark:text-white">${sebanggoText}</td>
+                <td class="px-3 py-2 text-gray-600 dark:text-gray-300">${hinbanText}</td>
+                <td class="px-3 py-2 text-gray-600 dark:text-gray-300">${pdf.fileName}</td>
+                <td class="px-3 py-2 text-gray-600 dark:text-gray-300">${pdf.uploadedBy || '-'}</td>
+                <td class="px-3 py-2 text-gray-600 dark:text-gray-300">${formatDateTime(pdf.uploadedAt)}</td>
+                <td class="px-3 py-2 text-gray-600 dark:text-gray-300">${formatDateTime(pdf.updatedAt || pdf.uploadedAt)}</td>
+                <td class="px-3 py-2 text-right">
+                  <div class="flex items-center justify-end gap-2">
+                    <a href="${pdf.pdfURL}" target="_blank" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="View Original PDF">
+                      <i class="ri-file-pdf-line"></i>
+                    </a>
+                    ${pdf.imageURL ? `<a href="${pdf.imageURL}" target="_blank" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="Open in New Tab"><i class="ri-external-link-line"></i></a>` : ''}
+                    <button onclick="deletePDF('${pdf._id}')" class="p-1.5 hover:bg-red-100 dark:hover:bg-red-900 rounded text-red-600 dark:text-red-400" title="Delete">
+                      <i class="ri-delete-bin-line"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function setPDFViewMode(mode, skipReload = false) {
+  pdfViewMode = mode;
+  const gridBtn = document.getElementById('pdfViewGrid');
+  const listBtn = document.getElementById('pdfViewList');
+  if (gridBtn && listBtn) {
+    gridBtn.classList.toggle('bg-gray-100', mode === 'grid');
+    gridBtn.classList.toggle('dark:bg-gray-700', mode === 'grid');
+    listBtn.classList.toggle('bg-gray-100', mode === 'list');
+    listBtn.classList.toggle('dark:bg-gray-700', mode === 'list');
+  }
+  pdfListPage = 1;
+  selectedPdfIds = new Set();
+  if (!skipReload) {
+    loadPDFsList();
+  }
+}
+
+function togglePdfSelection(id) {
+  if (selectedPdfIds.has(id)) {
+    selectedPdfIds.delete(id);
+  } else {
+    selectedPdfIds.add(id);
+  }
+  renderCurrentPdfView();
+}
+
+function togglePdfSelectAll(checkbox) {
+  if (checkbox.checked) {
+    selectedPdfIds = new Set(currentPdfItems.map(item => item._id));
+  } else {
+    selectedPdfIds = new Set();
+  }
+  renderCurrentPdfView();
+}
+
+function renderCurrentPdfView() {
+  const container = document.getElementById('pdfsList');
+  if (!container) return;
+  container.innerHTML = pdfViewMode === 'list'
+    ? renderPDFListView(currentPdfItems)
+    : renderPDFGridView(currentPdfItems);
+}
+
+async function deleteSelectedPDFs() {
+  if (selectedPdfIds.size === 0) {
+    alert('No PDFs selected');
+    return;
+  }
+
+  if (!confirm(`Delete ${selectedPdfIds.size} PDF(s)?`)) return;
+
+  try {
+    const response = await fetch(`${BASE_URL}api/product-pdf-batch-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentIds: Array.from(selectedPdfIds) })
+    });
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Batch delete failed');
+    }
+
+    selectedPdfIds = new Set();
+    loadPDFsList();
+  } catch (error) {
+    console.error('❌ Error batch deleting PDFs:', error);
+    alert('Error deleting selected PDFs');
+  }
+}
+
+function formatDateTime(value) {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function renderPDFPagination(meta) {
