@@ -95,6 +95,9 @@ async function initProductPDFsPage() {
               PDF File (will be converted to 1920x1080 image)
             </label>
             <input type="file" id="pdfFileInput" accept=".pdf" class="w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white" />
+            <button onclick="clearPdfSelection('pdfFileInput')" class="mt-2 text-xs text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
+              Clear selected file
+            </button>
           </div>
 
           <button onclick="checkAndUploadPDF()" id="uploadBtn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:bg-gray-400 disabled:cursor-not-allowed">
@@ -107,6 +110,31 @@ async function initProductPDFsPage() {
               <div id="uploadProgressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
             </div>
             <p id="uploadStatus" class="text-sm text-gray-600 dark:text-gray-400 mt-2"></p>
+          </div>
+        </div>
+
+        <!-- Bulk Upload -->
+        <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Bulk PDF Upload (match by filename)
+            </label>
+            <input type="file" id="bulkPdfInput" accept=".pdf" multiple class="w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white" />
+            <button onclick="clearPdfSelection('bulkPdfInput')" class="mt-2 text-xs text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">
+              Clear selected files
+            </button>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Matches selected 背番号 by filename (e.g., 310D C74.pdf contains C74)
+            </p>
+          </div>
+          <button onclick="reviewBulkUpload()" id="bulkMatchBtn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded disabled:bg-gray-400 disabled:cursor-not-allowed">
+            Match & Review
+          </button>
+          <div id="bulkUploadProgress" class="hidden">
+            <div class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+              <div id="bulkUploadProgressBar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+            </div>
+            <p id="bulkUploadStatus" class="text-sm text-gray-600 dark:text-gray-400 mt-2"></p>
           </div>
         </div>
         </div>
@@ -271,6 +299,12 @@ function handleModelFilter() {
 // Sebanggo selector
 let selectedSebanggoArray = [];
 let tempSelectedSebanggo = [];
+let conflictProceedHandler = null;
+
+function clearPdfSelection(inputId) {
+  const input = document.getElementById(inputId);
+  if (input) input.value = '';
+}
 
 function openSebanggoSelector() {
   tempSelectedSebanggo = [...selectedSebanggoArray];
@@ -434,8 +468,9 @@ async function checkAndUploadPDF() {
 }
 
 // Show conflict resolution modal
-function showConflictModal(conflicts) {
+function showConflictModal(conflicts, onProceed) {
   const { existing, newProducts, pdfType } = conflicts;
+  conflictProceedHandler = typeof onProceed === 'function' ? onProceed : null;
   
   const modal = document.createElement('div');
   modal.id = 'conflictModal';
@@ -522,9 +557,15 @@ async function proceedWithConflictResolution() {
   });
   
   closeConflictModal();
-  
-  // Proceed with upload, passing resolution choices
-  uploadProductPDF(resolutions);
+
+  if (conflictProceedHandler) {
+    const handler = conflictProceedHandler;
+    conflictProceedHandler = null;
+    handler(resolutions);
+  } else {
+    // Proceed with upload, passing resolution choices
+    uploadProductPDF(resolutions);
+  }
 }
 
 // Upload PDF
@@ -623,6 +664,315 @@ async function uploadProductPDF(resolutions = {}) {
   } finally {
     uploadBtn.disabled = false;
   }
+}
+
+// Bulk upload: match filenames to selected 背番号
+let bulkMatchCache = null;
+
+function reviewBulkUpload() {
+  const fileInput = document.getElementById('bulkPdfInput');
+  const files = Array.from(fileInput.files || []);
+
+  if (files.length === 0) {
+    alert('Please select PDF files for bulk upload');
+    return;
+  }
+
+  if (selectedSebanggoArray.length === 0) {
+    alert('Please select at least one product before bulk upload');
+    return;
+  }
+
+  bulkMatchCache = buildBulkMatch(files, selectedSebanggoArray);
+  showBulkMatchModal(bulkMatchCache);
+}
+
+function buildBulkMatch(files, sebanggoList) {
+  const matched = [];
+  const toAssign = [];
+  const matchedSebanggo = new Set();
+
+  files.forEach(file => {
+    const matches = findSebanggoMatches(file.name, sebanggoList);
+    if (matches.length === 1) {
+      matched.push({ file, sebanggo: matches[0] });
+      matchedSebanggo.add(matches[0]);
+    } else {
+      toAssign.push({ file, candidates: matches });
+    }
+  });
+
+  const unassignedSebanggo = sebanggoList.filter(s => !matchedSebanggo.has(s));
+
+  return {
+    matched,
+    toAssign,
+    unassignedSebanggo
+  };
+}
+
+function findSebanggoMatches(fileName, sebanggoList) {
+  const upperName = String(fileName || '').toUpperCase();
+  return sebanggoList.filter(sebanggo => {
+    if (!sebanggo) return false;
+    return upperName.includes(String(sebanggo).toUpperCase());
+  });
+}
+
+function showBulkMatchModal(matchData) {
+  const { matched, toAssign, unassignedSebanggo } = matchData;
+  const total = matched.length + toAssign.length;
+
+  const modal = document.createElement('div');
+  modal.id = 'bulkMatchModal';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center';
+
+  const matchedHTML = matched.length === 0
+    ? '<p class="text-sm text-gray-500 dark:text-gray-400">No automatic matches found.</p>'
+    : matched.map(item => `
+      <div class="flex items-center justify-between py-2 border-b dark:border-gray-700">
+        <div class="text-sm text-gray-900 dark:text-white">${item.file.name}</div>
+        <div class="text-sm font-semibold text-green-700 dark:text-green-300">${item.sebanggo}</div>
+      </div>
+    `).join('');
+
+  const assignHTML = toAssign.length === 0
+    ? '<p class="text-sm text-gray-500 dark:text-gray-400">No unmatched files.</p>'
+    : toAssign.map((item, index) => {
+      const candidates = item.candidates.length > 0 ? `Candidates: ${item.candidates.join(', ')}` : 'No filename match';
+      const options = ['<option value="">Skip this file</option>']
+        .concat(selectedSebanggoArray.map(s => `<option value="${s}">${s}</option>`))
+        .join('');
+      return `
+        <div class="py-2 border-b dark:border-gray-700">
+          <div class="text-sm text-gray-900 dark:text-white">${item.file.name}</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">${candidates}</div>
+          <select data-assign-index="${index}" class="mt-2 w-full p-1.5 border dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white text-sm">
+            ${options}
+          </select>
+        </div>
+      `;
+    }).join('');
+
+  const unassignedHTML = unassignedSebanggo.length === 0
+    ? '<p class="text-sm text-gray-500 dark:text-gray-400">All selected 背番号 have a file match.</p>'
+    : `<p class="text-sm text-gray-700 dark:text-gray-300">${unassignedSebanggo.join(', ')}</p>`;
+
+  modal.innerHTML = `
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[85vh] overflow-hidden">
+      <div class="p-5 border-b dark:border-gray-700 flex items-start justify-between">
+        <div>
+          <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Bulk Upload Match Summary</h3>
+          <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            Total files: <span class="font-semibold">${total}</span> • Matched: <span class="font-semibold text-green-700 dark:text-green-300">${matched.length}</span> • Unmatched: <span class="font-semibold text-yellow-700 dark:text-yellow-300">${toAssign.length}</span>
+          </p>
+        </div>
+        <button onclick="closeBulkMatchModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+          <i class="ri-close-line text-2xl"></i>
+        </button>
+      </div>
+
+      <div class="p-5 overflow-y-auto max-h-[60vh] space-y-4">
+        <div>
+          <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">Matched Files</h4>
+          <div class="border dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-900">
+            ${matchedHTML}
+          </div>
+        </div>
+
+        <div>
+          <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">Unmatched Files (manual assign)</h4>
+          <div class="border dark:border-gray-700 rounded p-3">
+            ${assignHTML}
+          </div>
+        </div>
+
+        <div>
+          <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">Selected 背番号 Without a File</h4>
+          <div class="border dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-900">
+            ${unassignedHTML}
+          </div>
+        </div>
+      </div>
+
+      <div class="p-5 border-t dark:border-gray-700 flex justify-end gap-3">
+        <button onclick="closeBulkMatchModal()" class="px-4 py-2 border dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
+          Cancel
+        </button>
+        <button onclick="confirmBulkUpload()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded">
+          Confirm Upload
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+}
+
+function closeBulkMatchModal() {
+  const modal = document.getElementById('bulkMatchModal');
+  if (modal) modal.remove();
+}
+
+async function confirmBulkUpload() {
+  const modal = document.getElementById('bulkMatchModal');
+  if (!modal || !bulkMatchCache) return;
+
+  const assignments = [...bulkMatchCache.matched.map(item => ({
+    file: item.file,
+    sebanggo: item.sebanggo
+  }))];
+
+  const selects = modal.querySelectorAll('select[data-assign-index]');
+  selects.forEach(select => {
+    const index = Number(select.getAttribute('data-assign-index'));
+    const sebanggo = select.value;
+    const file = bulkMatchCache.toAssign[index]?.file;
+    if (sebanggo && file) {
+      assignments.push({ file, sebanggo });
+    }
+  });
+
+  closeBulkMatchModal();
+
+  if (assignments.length === 0) {
+    alert('No files assigned for upload');
+    return;
+  }
+
+  await checkBulkConflictsAndUpload(assignments);
+}
+
+async function checkBulkConflictsAndUpload(assignments) {
+  const sebanggoArray = assignments.map(item => item.sebanggo);
+
+  try {
+    const response = await fetch(`${BASE_URL}api/check-existing-pdfs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pdfType: currentPDFType,
+        背番号Array: sebanggoArray
+      })
+    });
+
+    const conflicts = await response.json();
+
+    if (conflicts.hasConflicts) {
+      showConflictModal(conflicts, (resolutions) => {
+        proceedBulkUploadWithResolutions(assignments, resolutions);
+      });
+      return;
+    }
+  } catch (error) {
+    console.error('Error checking existing PDFs (bulk):', error);
+  }
+
+  proceedBulkUploadWithResolutions(assignments, {});
+}
+
+async function proceedBulkUploadWithResolutions(assignments, resolutions) {
+  const filteredAssignments = assignments.filter(item => resolutions[item.sebanggo] !== 'skip');
+  if (filteredAssignments.length === 0) {
+    alert('All matched products were skipped');
+    return;
+  }
+
+  await uploadBulkAssignments(filteredAssignments, resolutions);
+}
+
+async function uploadBulkAssignments(assignments, resolutions = {}) {
+  const progress = document.getElementById('bulkUploadProgress');
+  const progressBar = document.getElementById('bulkUploadProgressBar');
+  const status = document.getElementById('bulkUploadStatus');
+  const bulkBtn = document.getElementById('bulkMatchBtn');
+
+  bulkBtn.disabled = true;
+  progress.classList.remove('hidden');
+  progressBar.style.width = '0%';
+
+  let successCount = 0;
+  const failures = [];
+
+  for (let i = 0; i < assignments.length; i += 1) {
+    const { file, sebanggo } = assignments[i];
+    status.textContent = `Uploading ${i + 1}/${assignments.length}: ${file.name}`;
+    progressBar.style.width = `${Math.round((i / assignments.length) * 100)}%`;
+
+    try {
+      const resolution = resolutions[sebanggo];
+      const resolutionMap = resolution ? { [sebanggo]: resolution } : {};
+      await uploadSinglePDFFile(file, [sebanggo], resolutionMap);
+      successCount += 1;
+    } catch (error) {
+      failures.push({ fileName: file.name, error: error.message });
+    }
+  }
+
+  progressBar.style.width = '100%';
+  status.textContent = `Bulk upload complete. Success: ${successCount}, Failed: ${failures.length}`;
+
+  setTimeout(() => {
+    progress.classList.add('hidden');
+    progressBar.style.width = '0%';
+    const bulkInput = document.getElementById('bulkPdfInput');
+    if (bulkInput) bulkInput.value = '';
+    bulkBtn.disabled = false;
+    loadPDFsList();
+  }, 2000);
+
+  if (failures.length > 0) {
+    console.error('❌ Bulk upload failures:', failures);
+    alert(`Some files failed to upload: ${failures.length}`);
+  }
+}
+
+async function uploadSinglePDFFile(file, sebanggoArray, resolutions = {}) {
+  const pdfBase64 = await readFileAsDataUrl(file);
+  const imageBase64 = await convertPDFToImage(pdfBase64);
+  const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+
+  const uploadResponse = await fetch(`${BASE_URL}api/upload-product-pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pdfType: currentPDFType,
+      背番号Array: sebanggoArray,
+      pdfBase64,
+      fileName: file.name,
+      uploadedBy: currentUser.username || 'admin',
+      resolutions: resolutions
+    })
+  });
+
+  const uploadResult = await uploadResponse.json();
+  if (!uploadResult.success) {
+    throw new Error(uploadResult.error || 'Upload failed');
+  }
+
+  const imageResponse = await fetch(`${BASE_URL}api/upload-pdf-image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      documentId: uploadResult.documentId,
+      imageBase64,
+      pdfType: currentPDFType
+    })
+  });
+
+  const imageResult = await imageResponse.json();
+  if (!imageResult.success) {
+    throw new Error(imageResult.error || 'Image upload failed');
+  }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
 }
 
 // Convert PDF to 1920x1080 image using PDF.js
@@ -937,6 +1287,7 @@ window.switchPDFType = switchPDFType;
 window.toggleUploadForm = toggleUploadForm;
 window.handleFilterTypeChange = handleFilterTypeChange;
 window.handleModelFilter = handleModelFilter;
+window.clearPdfSelection = clearPdfSelection;
 window.openSebanggoSelector = openSebanggoSelector;
 window.closeSebanggoSelector = closeSebanggoSelector;
 window.confirmSebanggoSelection = confirmSebanggoSelection;
@@ -947,6 +1298,9 @@ window.uncheckAllSebanggo = uncheckAllSebanggo;
 window.removeSebanggoFromSelection = removeSebanggoFromSelection;
 window.checkAndUploadPDF = checkAndUploadPDF;
 window.uploadProductPDF = uploadProductPDF;
+window.reviewBulkUpload = reviewBulkUpload;
+window.closeBulkMatchModal = closeBulkMatchModal;
+window.confirmBulkUpload = confirmBulkUpload;
 window.closeConflictModal = closeConflictModal;
 window.proceedWithConflictResolution = proceedWithConflictResolution;
 window.deletePDF = deletePDF;
