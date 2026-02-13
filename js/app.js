@@ -13,11 +13,11 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
-  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
-  係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "scna", "noda"],
+  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
+  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
+  係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"], // Same as 班長 but factory-limited
+  班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"],
   member: ["dashboard", "noda"]
 };
 
@@ -30,6 +30,7 @@ const navItemsConfig = {
   inventory: { icon: "ri-archive-line", label: "inventory" },
   notifications: { icon: "ri-notification-line", label: "notifications" },
   analytics: { icon: "ri-line-chart-line", label: "analytics" },
+  financials: { icon: "ri-funds-line", label: "financials" },
   userManagement: { icon: "ri-user-settings-line", label: "userManagement" },
   approvals: { icon: "ri-checkbox-line", label: "approvals", badge: "12" },
   customerManagement: { icon: "ri-user-3-line", label: "customerManagement" },
@@ -554,7 +555,143 @@ function loadPage(page) {
             } else if (typeof applyLanguage === 'function') {
               applyLanguage();
             }
-            break;        case "approvals":
+            break;
+
+          case "financials":
+            mainContent.innerHTML = `
+              <div class="space-y-6">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                  <div>
+                    <h2 class="text-3xl font-bold text-gray-900" data-i18n="financialsTitle">Financials</h2>
+                    <p class="mt-2 text-gray-600" data-i18n="financialsSubtitle">Production value and scrap analysis</p>
+                    <div class="mt-2 text-sm text-blue-600" id="financialsDateRangeDisplay">Loading...</div>
+                  </div>
+                  <div class="flex items-center space-x-3">
+                    <button id="financialsExportBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors" disabled>
+                      <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
+                    </button>
+                    <button id="financialsRefreshBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                      <i class="ri-refresh-line mr-2"></i><span data-i18n="update">Update</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                  <div class="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="periodSelection">Period Selection</label>
+                      <select id="financialsRangeSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="today" data-i18n="today">Today</option>
+                        <option value="last7" data-i18n="last7Days">Last 7 Days</option>
+                        <option value="last30" selected data-i18n="last30Days">Last 30 Days</option>
+                        <option value="last90" data-i18n="last3Months">Last 3 Months</option>
+                        <option value="thisMonth" data-i18n="thisMonth">This Month</option>
+                        <option value="lastMonth" data-i18n="lastMonth">Last Month</option>
+                        <option value="custom" data-i18n="customRange">Custom Range</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="startDate">Start Date</label>
+                      <input type="date" id="financialsFromDate" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="endDate">End Date</label>
+                      <input type="date" id="financialsToDate" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="model">Model</label>
+                      <select id="financialsModelFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="">All Models</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="hinban">Hinban</label>
+                      <input type="text" id="financialsHinbanFilter" class="w-full p-2 border border-gray-300 rounded-md" placeholder="67162-X1B38-B1">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="process">Process</label>
+                      <select id="financialsProcessFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="all" data-i18n="allProcesses">All Processes</option>
+                        <option value="pressDB" data-i18n="press">Press (pressDB)</option>
+                        <option value="slitDB" data-i18n="slit">Slit (slitDB)</option>
+                        <option value="SRSDB" data-i18n="srs">SRS (SRSDB)</option>
+                        <option value="kensaDB" data-i18n="inspection">Inspection (kensaDB)</option>
+                      </select>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input type="checkbox" id="financialsIncludeAllNg" class="h-4 w-4" checked>
+                      <label for="financialsIncludeAllNg" class="text-sm text-gray-700" data-i18n="includeAllNg">Include NG across all processes</label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="totalValue">Total Value</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsTotalValue">0</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="scrapLoss">Scrap Loss</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsScrapLoss">0</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="yield">Yield %</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsYield">0%</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="totalQuantity">Total Qty</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsTotalQty">0</p>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="valueTrend">Value vs Scrap Trend</h3>
+                    <div class="h-72">
+                      <canvas id="financialsValueTrend"></canvas>
+                    </div>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="scrapByProcess">Scrap by Process</h3>
+                    <div class="h-72">
+                      <canvas id="financialsScrapByProcess"></canvas>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg border border-gray-200">
+                  <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="detailBreakdown">Detail Breakdown</h3>
+                  <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm text-left">
+                      <thead class="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th class="px-4 py-2">Date</th>
+                          <th class="px-4 py-2">品番</th>
+                          <th class="px-4 py-2">背番号</th>
+                          <th class="px-4 py-2">Model</th>
+                          <th class="px-4 py-2">Good Qty</th>
+                          <th class="px-4 py-2">Total NG</th>
+                          <th class="px-4 py-2">Yield %</th>
+                          <th class="px-4 py-2">Value</th>
+                          <th class="px-4 py-2">Scrap Loss</th>
+                        </tr>
+                      </thead>
+                      <tbody id="financialsDetailBody" class="divide-y divide-gray-100">
+                        <tr>
+                          <td class="px-4 py-3 text-gray-500" colspan="9">No data loaded.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            `;
+            if (typeof initFinancialsPage === "function") {
+              initFinancialsPage();
+            }
+            break;
+
+          case "approvals":
             mainContent.innerHTML = `
                 <h2 class="text-2xl font-semibold mb-6" data-i18n="approvalsTitle">Data Approval System</h2>
                 
