@@ -13,11 +13,11 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
-  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
-  係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "scna", "noda"],
+  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
+  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
+  係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"], // Same as 班長 but factory-limited
+  班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"],
   member: ["dashboard", "noda"]
 };
 
@@ -30,6 +30,7 @@ const navItemsConfig = {
   inventory: { icon: "ri-archive-line", label: "inventory" },
   notifications: { icon: "ri-notification-line", label: "notifications" },
   analytics: { icon: "ri-line-chart-line", label: "analytics" },
+  financials: { icon: "ri-funds-line", label: "financials" },
   userManagement: { icon: "ri-user-settings-line", label: "userManagement" },
   approvals: { icon: "ri-checkbox-line", label: "approvals", badge: "12" },
   customerManagement: { icon: "ri-user-3-line", label: "customerManagement" },
@@ -554,7 +555,282 @@ function loadPage(page) {
             } else if (typeof applyLanguage === 'function') {
               applyLanguage();
             }
-            break;        case "approvals":
+            break;
+
+          case "financials":
+            mainContent.innerHTML = `
+              <div class="space-y-6">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                  <div>
+                    <h2 class="text-3xl font-bold text-gray-900" data-i18n="financialsTitle">Financials</h2>
+                    <p class="mt-2 text-gray-600" data-i18n="financialsSubtitle">Production value and scrap analysis</p>
+                    <div class="mt-2 text-sm text-blue-600" id="financialsDateRangeDisplay">Loading...</div>
+                  </div>
+                  <div class="flex items-center space-x-3">
+                    <button id="financialsExportBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors" disabled>
+                      <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
+                    </button>
+                    <button id="financialsRefreshBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                      <i class="ri-refresh-line mr-2"></i><span data-i18n="update">Update</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                  <!-- Row 1: Period, Dates, Factory -->
+                  <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end mb-4">
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="periodSelection">Period Selection</label>
+                      <select id="financialsRangeSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="today" data-i18n="today">Today</option>
+                        <option value="last7" data-i18n="last7Days">Last 7 Days</option>
+                        <option value="last30" selected data-i18n="last30Days">Last 30 Days</option>
+                        <option value="last90" data-i18n="last3Months">Last 3 Months</option>
+                        <option value="thisMonth" data-i18n="thisMonth">This Month</option>
+                        <option value="lastMonth" data-i18n="lastMonth">Last Month</option>
+                        <option value="custom" data-i18n="customRange">Custom Range</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="startDate">Start Date</label>
+                      <input type="date" id="financialsFromDate" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="endDate">End Date</label>
+                      <input type="date" id="financialsToDate" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2">Filter Type</label>
+                      <select id="financialsFilterType" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="model">モデル (Model)</option>
+                        <option value="sebanggo">背番号 (Serial Number)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory</label>
+                      <select id="financialsFactoryFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="" data-i18n="allFactories">All Factories</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <!-- Row 2: Model dropdown or Sebanggo selector based on Filter Type -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <!-- Model Filter (shown when filter type is model) -->
+                    <div id="financialsModelFilterContainer">
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="model">モデル / Model</label>
+                      <select id="financialsModelFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="">Select Model...</option>
+                      </select>
+                    </div>
+                    
+                    <!-- Sebanggo selector button (hidden by default) -->
+                    <div id="financialsSebanggoFilterContainer" style="display: none;">
+                      <label class="block text-sm font-medium text-gray-700 mb-2">背番号 / Serial Numbers</label>
+                      <button onclick="openFinancialsSebanggoSelector()" class="w-full p-2 border border-gray-300 rounded-md bg-white text-left text-gray-700 hover:bg-gray-50">
+                        <span id="financialsSelectedCount">Select products...</span>
+                      </button>
+                    </div>
+                    
+                    <!-- Selected Products Display -->
+                    <div>
+                      <div class="flex items-center justify-between mb-2">
+                        <label class="block text-sm font-medium text-gray-700">Selected Products</label>
+                        <button onclick="openFinancialsSebanggoSelector()" class="text-xs text-blue-600 hover:text-blue-700">
+                          Show all
+                        </button>
+                      </div>
+                      <div id="financialsSelectedProductsDisplay" class="p-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700 h-[42px] overflow-y-auto">
+                        None selected
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Selected Products Tags -->
+                  <div id="financialsSelectedProductsTags" class="flex flex-wrap gap-2 min-h-[1.5rem] mb-4"></div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="totalCost">Total Cost (¥)</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsTotalValue">¥0</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-red-600" data-i18n="scrapLoss">Scrap Loss (¥)</p>
+                    <p class="text-2xl font-bold text-red-700" id="financialsScrapLoss">¥0</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-green-600" data-i18n="totalCreated">Total Created (pcs)</p>
+                    <p class="text-2xl font-bold text-green-700" id="financialsTotalCreated">0 pcs</p>
+                    <p class="text-xs text-gray-500" data-i18n="fromPress">(from Press)</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-red-600" data-i18n="totalLoss">Total Loss (pcs)</p>
+                    <p class="text-2xl font-bold text-red-700" id="financialsTotalLoss">0 pcs</p>
+                    <p class="text-xs text-gray-500" data-i18n="sumOfAllNg">(Sum of all NG)</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-blue-600" data-i18n="finalGood">Final Good (pcs)</p>
+                    <p class="text-2xl font-bold text-blue-700" id="financialsFinalGood">0 pcs</p>
+                    <p class="text-xs text-gray-500" data-i18n="createdMinusTotalNg">(Created - Total NG)</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsDefectRate">0%</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="yield">Yield %</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsYield">0%</p>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="createdVsGoodByFactory">Created vs Final Good by Factory</h3>
+                    <div class="h-72">
+                      <canvas id="financialsCreatedVsGood"></canvas>
+                    </div>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="scrapByProcess">Scrap by Process</h3>
+                    <div class="h-72">
+                      <canvas id="financialsScrapByProcess"></canvas>
+                    </div>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="valueByFactory">Value by Factory</h3>
+                    <div class="h-72">
+                      <canvas id="financialsValueByFactory"></canvas>
+                    </div>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="scrapByFactory">Scrap Loss by Factory</h3>
+                    <div class="h-72">
+                      <canvas id="financialsScrapByFactory"></canvas>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg border border-gray-200">
+                  <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="detailBreakdown">Detail Breakdown by 品番</h3>
+                  <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm text-left">
+                      <thead class="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('hinban')">品番 <span id="financialsSortIcon-hinban"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('ban')">背番号 <span id="financialsSortIcon-ban"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('model')">Model <span id="financialsSortIcon-model"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('factory')">工場 <span id="financialsSortIcon-factory"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('created')">Created (pcs) <span id="financialsSortIcon-created"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pressNg')">Press NG <span id="financialsSortIcon-pressNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('slitNg')">Slit NG <span id="financialsSortIcon-slitNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('srsNg')">SRS NG <span id="financialsSortIcon-srsNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('kensaNg')">Kensa NG <span id="financialsSortIcon-kensaNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('totalNg')">Total NG <span id="financialsSortIcon-totalNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('finalGood')">Final Good (pcs) <span id="financialsSortIcon-finalGood"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('yieldPercent')">Yield % <span id="financialsSortIcon-yieldPercent"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pricePerPc')">pricePerPiece (¥) <span id="financialsSortIcon-pricePerPc"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('cost')">Cost (¥) <span id="financialsSortIcon-cost"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('scrapLoss')">Scrap Loss (¥) <span id="financialsSortIcon-scrapLoss"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('value')">Value (¥) <span id="financialsSortIcon-value"></span></button>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody id="financialsDetailBody" class="divide-y divide-gray-100">
+                        <tr>
+                          <td class="px-4 py-3 text-gray-500" colspan="16">No data loaded.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div class="text-sm text-gray-600" id="financialsPageInfo">0件中 0-0件を表示</div>
+                    <div class="flex items-center gap-2">
+                      <button id="financialsPrevPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" disabled>Prev</button>
+                      <button id="financialsNextPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" disabled>Next</button>
+                      <select id="financialsPageSizeSelect" class="p-1 border rounded text-sm">
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Sebanggo Selector Modal -->
+              <div id="financialsSebanggoSelectorModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+                <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+                  <div class="p-4 border-b">
+                    <div class="flex items-center justify-between">
+                      <h3 class="text-base font-semibold text-gray-900">Select Products (背番号)</h3>
+                      <button onclick="closeFinancialsSebanggoSelector()" class="text-gray-500 hover:text-gray-700">
+                        <i class="ri-close-line text-2xl"></i>
+                      </button>
+                    </div>
+                    <input type="text" id="financialsSebanggoSearch" oninput="filterFinancialsSebanggoList()" placeholder="Search..." class="w-full mt-3 p-2 text-sm border rounded bg-white" />
+                  </div>
+                  <div class="p-3 overflow-y-auto max-h-[55vh]" id="financialsSebanggoListContainer">
+                    <p class="text-gray-500">Loading products...</p>
+                  </div>
+                  <div class="p-4 border-t flex items-center justify-between gap-2">
+                    <div class="flex gap-2">
+                      <button onclick="checkAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                        Check all
+                      </button>
+                      <button onclick="uncheckAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                        Uncheck all
+                      </button>
+                    </div>
+                    <div class="flex gap-2">
+                      <button onclick="closeFinancialsSebanggoSelector()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                        Cancel
+                      </button>
+                      <button onclick="confirmFinancialsSebanggoSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded">
+                        Confirm Selection
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+            if (typeof initFinancialsPage === "function") {
+              initFinancialsPage();
+            }
+            break;
+
+          case "approvals":
             mainContent.innerHTML = `
                 <h2 class="text-2xl font-semibold mb-6" data-i18n="approvalsTitle">Data Approval System</h2>
                 
