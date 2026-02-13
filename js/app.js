@@ -600,9 +600,10 @@ function loadPage(page) {
                       <input type="date" id="financialsToDate" class="w-full p-2 border border-gray-300 rounded-md">
                     </div>
                     <div>
-                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="model">Model</label>
-                      <select id="financialsModelFilter" class="w-full p-2 border border-gray-300 rounded-md">
-                        <option value="">All Models</option>
+                      <label class="block text-sm font-medium text-gray-700 mb-2">Filter Type</label>
+                      <select id="financialsFilterType" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="model">モデル (Model)</option>
+                        <option value="sebanggo">背番号 (Serial Number)</option>
                       </select>
                     </div>
                     <div>
@@ -613,45 +614,40 @@ function loadPage(page) {
                     </div>
                   </div>
                   
-                  <!-- Row 2: 品番 and 背番号 Tag Inputs -->
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <div class="flex items-center justify-between mb-2">
-                        <label class="block text-sm font-medium text-gray-700" data-i18n="hinban">品番 (Part Number)</label>
-                        <button onclick="openFinancialsHinbanSelector()" class="text-xs text-blue-600 hover:text-blue-700">
-                          Show all
-                        </button>
-                      </div>
-                      <div id="financialsHinbanTagContainer" class="p-2 border border-gray-300 rounded-md flex flex-wrap items-center gap-2 min-h-[42px] bg-white">
-                        <div id="financialsHinbanTags" class="flex flex-wrap gap-2"></div>
-                        <input type="text" id="financialsHinbanInput" class="outline-none flex-1 min-w-[8rem] bg-transparent text-sm" placeholder="例: 67162-X1B38-B1 (Enter)">
-                      </div>
+                  <!-- Row 2: Model dropdown or Sebanggo selector based on Filter Type -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <!-- Model Filter (shown when filter type is model) -->
+                    <div id="financialsModelFilterContainer">
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="model">モデル / Model</label>
+                      <select id="financialsModelFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="">Select Model...</option>
+                      </select>
                     </div>
+                    
+                    <!-- Sebanggo selector button (hidden by default) -->
+                    <div id="financialsSebanggoFilterContainer" style="display: none;">
+                      <label class="block text-sm font-medium text-gray-700 mb-2">背番号 / Serial Numbers</label>
+                      <button onclick="openFinancialsSebanggoSelector()" class="w-full p-2 border border-gray-300 rounded-md bg-white text-left text-gray-700 hover:bg-gray-50">
+                        <span id="financialsSelectedCount">Select products...</span>
+                      </button>
+                    </div>
+                    
+                    <!-- Selected Products Display -->
                     <div>
                       <div class="flex items-center justify-between mb-2">
-                        <label class="block text-sm font-medium text-gray-700" data-i18n="ban">背番号 (Serial Number)</label>
-                        <button onclick="openFinancialsBanSelector()" class="text-xs text-blue-600 hover:text-blue-700">
+                        <label class="block text-sm font-medium text-gray-700">Selected Products</label>
+                        <button onclick="openFinancialsSebanggoSelector()" class="text-xs text-blue-600 hover:text-blue-700">
                           Show all
                         </button>
                       </div>
-                      <div id="financialsBanTagContainer" class="p-2 border border-gray-300 rounded-md flex flex-wrap items-center gap-2 min-h-[42px] bg-white">
-                        <div id="financialsBanTags" class="flex flex-wrap gap-2"></div>
-                        <input type="text" id="financialsBanInput" class="outline-none flex-1 min-w-[8rem] bg-transparent text-sm" placeholder="例: 1TD (Enter)">
+                      <div id="financialsSelectedProductsDisplay" class="p-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700 h-[42px] overflow-y-auto">
+                        None selected
                       </div>
                     </div>
                   </div>
                   
-                  <!-- Available products from selected model -->
-                  <div id="financialsAvailableProducts" class="mt-4 hidden">
-                    <div class="flex items-center justify-between mb-2">
-                      <span class="text-sm text-gray-600">Available from selected model:</span>
-                      <div class="flex gap-2">
-                        <button onclick="selectAllFinancialsProducts()" class="text-xs text-blue-600 hover:text-blue-700">Select All</button>
-                        <button onclick="clearAllFinancialsProducts()" class="text-xs text-red-600 hover:text-red-700">Clear All</button>
-                      </div>
-                    </div>
-                    <div id="financialsProductTags" class="flex flex-wrap gap-2"></div>
-                  </div>
+                  <!-- Selected Products Tags -->
+                  <div id="financialsSelectedProductsTags" class="flex flex-wrap gap-2 min-h-[1.5rem] mb-4"></div>
                 </div>
 
                 <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
@@ -793,35 +789,35 @@ function loadPage(page) {
                 </div>
               </div>
               
-              <!-- Product Selector Modal (品番/背番号) -->
-              <div id="financialsProductSelectorModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+              <!-- Sebanggo Selector Modal -->
+              <div id="financialsSebanggoSelectorModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
                 <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
                   <div class="p-4 border-b">
                     <div class="flex items-center justify-between">
-                      <h3 class="text-base font-semibold text-gray-900" id="financialsSelectorModalTitle">Select Products</h3>
-                      <button onclick="closeFinancialsProductSelector()" class="text-gray-500 hover:text-gray-700">
+                      <h3 class="text-base font-semibold text-gray-900">Select Products (背番号)</h3>
+                      <button onclick="closeFinancialsSebanggoSelector()" class="text-gray-500 hover:text-gray-700">
                         <i class="ri-close-line text-2xl"></i>
                       </button>
                     </div>
-                    <input type="text" id="financialsProductSearch" oninput="filterFinancialsProductList()" placeholder="Search..." class="w-full mt-3 p-2 text-sm border rounded bg-white" />
+                    <input type="text" id="financialsSebanggoSearch" oninput="filterFinancialsSebanggoList()" placeholder="Search..." class="w-full mt-3 p-2 text-sm border rounded bg-white" />
                   </div>
-                  <div class="p-3 overflow-y-auto max-h-[55vh]" id="financialsProductListContainer">
+                  <div class="p-3 overflow-y-auto max-h-[55vh]" id="financialsSebanggoListContainer">
                     <p class="text-gray-500">Loading products...</p>
                   </div>
                   <div class="p-4 border-t flex items-center justify-between gap-2">
                     <div class="flex gap-2">
-                      <button onclick="checkAllFinancialsProducts()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                      <button onclick="checkAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
                         Check all
                       </button>
-                      <button onclick="uncheckAllFinancialsProducts()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                      <button onclick="uncheckAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
                         Uncheck all
                       </button>
                     </div>
                     <div class="flex gap-2">
-                      <button onclick="closeFinancialsProductSelector()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                      <button onclick="closeFinancialsSebanggoSelector()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
                         Cancel
                       </button>
-                      <button onclick="confirmFinancialsProductSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded">
+                      <button onclick="confirmFinancialsSebanggoSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded">
                         Confirm Selection
                       </button>
                     </div>
