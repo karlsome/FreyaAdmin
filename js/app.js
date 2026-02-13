@@ -609,31 +609,17 @@ function loadPage(page) {
                       <input type="text" id="financialsHinbanFilter" class="w-full p-2 border border-gray-300 rounded-md" placeholder="67162-X1B38-B1">
                     </div>
                     <div>
-                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="process">Process</label>
-                      <select id="financialsProcessFilter" class="w-full p-2 border border-gray-300 rounded-md">
-                        <option value="all" data-i18n="allProcesses">All Processes</option>
-                        <option value="pressDB" data-i18n="press">Press (pressDB)</option>
-                        <option value="slitDB" data-i18n="slit">Slit (slitDB)</option>
-                        <option value="SRSDB" data-i18n="srs">SRS (SRSDB)</option>
-                        <option value="kensaDB" data-i18n="inspection">Inspection (kensaDB)</option>
-                      </select>
-                    </div>
-                    <div>
                       <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory</label>
                       <select id="financialsFactoryFilter" class="w-full p-2 border border-gray-300 rounded-md">
                         <option value="" data-i18n="allFactories">All Factories</option>
                       </select>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <input type="checkbox" id="financialsIncludeAllNg" class="h-4 w-4" checked>
-                      <label for="financialsIncludeAllNg" class="text-sm text-gray-700" data-i18n="includeAllNg">Include NG across all processes</label>
                     </div>
                   </div>
                 </div>
 
                 <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="totalValue">Total Value (¥)</p>
+                    <p class="text-sm font-medium text-gray-600" data-i18n="totalCost">Total Cost (¥)</p>
                     <p class="text-2xl font-bold text-gray-900" id="financialsTotalValue">¥0</p>
                   </div>
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
@@ -714,25 +700,43 @@ function loadPage(page) {
                             <button class="flex items-center gap-1" onclick="toggleFinancialsSort('created')">Created (pcs) <span id="financialsSortIcon-created"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('finalGood')">Final Good (pcs) <span id="financialsSortIcon-finalGood"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pressNg')">Press NG <span id="financialsSortIcon-pressNg"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('loss')">Loss (pcs) <span id="financialsSortIcon-loss"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('slitNg')">Slit NG <span id="financialsSortIcon-slitNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('srsNg')">SRS NG <span id="financialsSortIcon-srsNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('kensaNg')">Kensa NG <span id="financialsSortIcon-kensaNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('totalNg')">Total NG <span id="financialsSortIcon-totalNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('finalGood')">Final Good (pcs) <span id="financialsSortIcon-finalGood"></span></button>
                           </th>
                           <th class="px-4 py-2">
                             <button class="flex items-center gap-1" onclick="toggleFinancialsSort('yieldPercent')">Yield % <span id="financialsSortIcon-yieldPercent"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('value')">Value (¥) <span id="financialsSortIcon-value"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pricePerPc')">pricePerPiece (¥) <span id="financialsSortIcon-pricePerPc"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('cost')">Cost (¥) <span id="financialsSortIcon-cost"></span></button>
                           </th>
                           <th class="px-4 py-2">
                             <button class="flex items-center gap-1" onclick="toggleFinancialsSort('scrapLoss')">Scrap Loss (¥) <span id="financialsSortIcon-scrapLoss"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('value')">Value (¥) <span id="financialsSortIcon-value"></span></button>
                           </th>
                         </tr>
                       </thead>
                       <tbody id="financialsDetailBody" class="divide-y divide-gray-100">
                         <tr>
-                          <td class="px-4 py-3 text-gray-500" colspan="10">No data loaded.</td>
+                          <td class="px-4 py-3 text-gray-500" colspan="16">No data loaded.</td>
                         </tr>
                       </tbody>
                     </table>

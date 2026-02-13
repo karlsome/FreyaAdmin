@@ -185,8 +185,6 @@ async function loadFinancialsFactoryOptions() {
 function setupFinancialsFilters() {
   const modelSelect = document.getElementById("financialsModelFilter");
   const factorySelect = document.getElementById("financialsFactoryFilter");
-  const processSelect = document.getElementById("financialsProcessFilter");
-  const includeAllNg = document.getElementById("financialsIncludeAllNg");
   const hinbanInput = document.getElementById("financialsHinbanFilter");
 
   if (modelSelect) {
@@ -198,20 +196,6 @@ function setupFinancialsFilters() {
 
   if (factorySelect) {
     factorySelect.addEventListener("change", () => {
-      resetFinancialsPage();
-      loadFinancialsData();
-    });
-  }
-
-  if (processSelect) {
-    processSelect.addEventListener("change", () => {
-      resetFinancialsPage();
-      loadFinancialsData();
-    });
-  }
-
-  if (includeAllNg) {
-    includeAllNg.addEventListener("change", () => {
       resetFinancialsPage();
       loadFinancialsData();
     });
@@ -272,9 +256,7 @@ async function loadFinancialsData() {
   const toDate = document.getElementById("financialsToDate")?.value;
   const model = document.getElementById("financialsModelFilter")?.value || "";
   const hinban = document.getElementById("financialsHinbanFilter")?.value?.trim() || "";
-  const process = document.getElementById("financialsProcessFilter")?.value || "all";
   const factory = document.getElementById("financialsFactoryFilter")?.value || "";
-  const includeAllNg = document.getElementById("financialsIncludeAllNg")?.checked ?? true;
 
   if (!fromDate || !toDate) {
     return;
@@ -290,13 +272,11 @@ async function loadFinancialsData() {
         toDate,
         model,
         hinban,
-        process,
         factory,
         page: financialsState.page,
         limit: financialsState.limit,
         sortField: financialsState.sortField,
-        sortDir: financialsState.sortDir,
-        includeAllNg
+        sortDir: financialsState.sortDir
       })
     });
 
@@ -619,7 +599,7 @@ function renderFinancialsTable(rows) {
   if (!rows.length) {
     body.innerHTML = `
       <tr>
-        <td class="px-4 py-3 text-gray-500" colspan="10">No data loaded.</td>
+        <td class="px-4 py-3 text-gray-500" colspan="16">No data loaded.</td>
       </tr>
     `;
     return;
@@ -632,11 +612,17 @@ function renderFinancialsTable(rows) {
       <td class="px-4 py-3">${row.model || "-"}</td>
       <td class="px-4 py-3">${row.factory || "-"}</td>
       <td class="px-4 py-3">${formatNumber(row.created || 0)}</td>
+      <td class="px-4 py-3">${formatNumber(row.pressNg || 0)}</td>
+      <td class="px-4 py-3">${formatNumber(row.slitNg || 0)}</td>
+      <td class="px-4 py-3">${formatNumber(row.srsNg || 0)}</td>
+      <td class="px-4 py-3">${formatNumber(row.kensaNg || 0)}</td>
+      <td class="px-4 py-3">${formatNumber(row.totalNg || 0)}</td>
       <td class="px-4 py-3">${formatNumber(row.finalGood || 0)}</td>
-      <td class="px-4 py-3">${formatNumber(row.loss || 0)}</td>
       <td class="px-4 py-3">${formatNumber(row.yieldPercent || 0)}%</td>
-      <td class="px-4 py-3">¥${formatNumber(row.value || 0)}</td>
+      <td class="px-4 py-3">¥${formatNumber(row.pricePerPc || 0)}</td>
+      <td class="px-4 py-3">¥${formatNumber(row.cost || 0)}</td>
       <td class="px-4 py-3">¥${formatNumber(row.scrapLoss || 0)}</td>
+      <td class="px-4 py-3">¥${formatNumber(row.value || 0)}</td>
     </tr>
   `).join("");
 }
