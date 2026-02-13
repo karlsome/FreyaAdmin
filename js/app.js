@@ -577,7 +577,7 @@ function loadPage(page) {
                 </div>
 
                 <div class="bg-white p-6 rounded-lg border border-gray-200">
-                  <div class="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
+                  <div class="grid grid-cols-1 md:grid-cols-8 gap-4 items-end">
                     <div>
                       <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="periodSelection">Period Selection</label>
                       <select id="financialsRangeSelect" class="w-full p-2 border border-gray-300 rounded-md">
@@ -618,6 +618,12 @@ function loadPage(page) {
                         <option value="kensaDB" data-i18n="inspection">Inspection (kensaDB)</option>
                       </select>
                     </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory</label>
+                      <select id="financialsFactoryFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="" data-i18n="allFactories">All Factories</option>
+                      </select>
+                    </div>
                     <div class="flex items-center gap-2">
                       <input type="checkbox" id="financialsIncludeAllNg" class="h-4 w-4" checked>
                       <label for="financialsIncludeAllNg" class="text-sm text-gray-700" data-i18n="includeAllNg">Include NG across all processes</label>
@@ -625,30 +631,45 @@ function loadPage(page) {
                   </div>
                 </div>
 
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="totalValue">Total Value</p>
-                    <p class="text-2xl font-bold text-gray-900" id="financialsTotalValue">0</p>
+                    <p class="text-sm font-medium text-gray-600" data-i18n="totalValue">Total Value (¥)</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsTotalValue">¥0</p>
                   </div>
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="scrapLoss">Scrap Loss</p>
-                    <p class="text-2xl font-bold text-gray-900" id="financialsScrapLoss">0</p>
+                    <p class="text-sm font-medium text-gray-600" data-i18n="scrapLoss">Scrap Loss (¥)</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsScrapLoss">¥0</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-green-600" data-i18n="totalCreated">Total Created (pcs)</p>
+                    <p class="text-2xl font-bold text-green-700" id="financialsTotalCreated">0 pcs</p>
+                    <p class="text-xs text-gray-500" data-i18n="fromPress">(from Press)</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-red-600" data-i18n="totalLoss">Total Loss (pcs)</p>
+                    <p class="text-2xl font-bold text-red-700" id="financialsTotalLoss">0 pcs</p>
+                    <p class="text-xs text-gray-500" data-i18n="createdMinusGood">(Created - Good)</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-blue-600" data-i18n="finalGood">Final Good (pcs)</p>
+                    <p class="text-2xl font-bold text-blue-700" id="financialsFinalGood">0 pcs</p>
+                    <p class="text-xs text-gray-500" data-i18n="fromKensa">(from Kensa)</p>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <p class="text-sm font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
+                    <p class="text-2xl font-bold text-gray-900" id="financialsDefectRate">0%</p>
                   </div>
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
                     <p class="text-sm font-medium text-gray-600" data-i18n="yield">Yield %</p>
                     <p class="text-2xl font-bold text-gray-900" id="financialsYield">0%</p>
                   </div>
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="totalQuantity">Total Qty</p>
-                    <p class="text-2xl font-bold text-gray-900" id="financialsTotalQty">0</p>
-                  </div>
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="valueTrend">Value vs Scrap Trend</h3>
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="createdVsGoodByFactory">Created vs Final Good by Factory</h3>
                     <div class="h-72">
-                      <canvas id="financialsValueTrend"></canvas>
+                      <canvas id="financialsCreatedVsGood"></canvas>
                     </div>
                   </div>
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
@@ -657,31 +678,76 @@ function loadPage(page) {
                       <canvas id="financialsScrapByProcess"></canvas>
                     </div>
                   </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="valueByFactory">Value by Factory</h3>
+                    <div class="h-72">
+                      <canvas id="financialsValueByFactory"></canvas>
+                    </div>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="scrapByFactory">Scrap Loss by Factory</h3>
+                    <div class="h-72">
+                      <canvas id="financialsScrapByFactory"></canvas>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="bg-white p-4 rounded-lg border border-gray-200">
-                  <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="detailBreakdown">Detail Breakdown</h3>
+                  <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="detailBreakdown">Detail Breakdown by 品番</h3>
                   <div class="overflow-x-auto">
                     <table class="min-w-full text-sm text-left">
                       <thead class="bg-gray-50 text-gray-600">
                         <tr>
-                          <th class="px-4 py-2">Date</th>
-                          <th class="px-4 py-2">品番</th>
-                          <th class="px-4 py-2">背番号</th>
-                          <th class="px-4 py-2">Model</th>
-                          <th class="px-4 py-2">Good Qty</th>
-                          <th class="px-4 py-2">Total NG</th>
-                          <th class="px-4 py-2">Yield %</th>
-                          <th class="px-4 py-2">Value</th>
-                          <th class="px-4 py-2">Scrap Loss</th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('hinban')">品番 <span id="financialsSortIcon-hinban"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('ban')">背番号 <span id="financialsSortIcon-ban"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('model')">Model <span id="financialsSortIcon-model"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('factory')">工場 <span id="financialsSortIcon-factory"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('created')">Created (pcs) <span id="financialsSortIcon-created"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('finalGood')">Final Good (pcs) <span id="financialsSortIcon-finalGood"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('loss')">Loss (pcs) <span id="financialsSortIcon-loss"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('yieldPercent')">Yield % <span id="financialsSortIcon-yieldPercent"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('value')">Value (¥) <span id="financialsSortIcon-value"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('scrapLoss')">Scrap Loss (¥) <span id="financialsSortIcon-scrapLoss"></span></button>
+                          </th>
                         </tr>
                       </thead>
                       <tbody id="financialsDetailBody" class="divide-y divide-gray-100">
                         <tr>
-                          <td class="px-4 py-3 text-gray-500" colspan="9">No data loaded.</td>
+                          <td class="px-4 py-3 text-gray-500" colspan="10">No data loaded.</td>
                         </tr>
                       </tbody>
                     </table>
+                  </div>
+                  <div class="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div class="text-sm text-gray-600" id="financialsPageInfo">0件中 0-0件を表示</div>
+                    <div class="flex items-center gap-2">
+                      <button id="financialsPrevPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" disabled>Prev</button>
+                      <button id="financialsNextPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" disabled>Next</button>
+                      <select id="financialsPageSizeSelect" class="p-1 border rounded text-sm">
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
