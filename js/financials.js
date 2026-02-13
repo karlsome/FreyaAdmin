@@ -7,7 +7,12 @@ const financialsState = {
   totalRows: 0,
   sortField: "hinban",
   sortDir: "asc",
-  hinbanDebounce: null
+  hinbanDebounce: null,
+  // Tag filter state
+  selectedHinbans: [],
+  selectedBans: [],
+  availableProducts: [],
+  currentSelectorType: null // 'hinban' or 'ban'
 };
 
 function initFinancialsPage() {
@@ -185,10 +190,17 @@ async function loadFinancialsFactoryOptions() {
 function setupFinancialsFilters() {
   const modelSelect = document.getElementById("financialsModelFilter");
   const factorySelect = document.getElementById("financialsFactoryFilter");
-  const hinbanInput = document.getElementById("financialsHinbanFilter");
+  const hinbanInput = document.getElementById("financialsHinbanInput");
+  const banInput = document.getElementById("financialsBanInput");
 
   if (modelSelect) {
     modelSelect.addEventListener("change", () => {
+      // Reset selected tags when model changes
+      financialsState.selectedHinbans = [];
+      financialsState.selectedBans = [];
+      renderFinancialsHinbanTags();
+      renderFinancialsBanTags();
+      loadFinancialsAvailableProducts();
       resetFinancialsPage();
       loadFinancialsData();
     });
@@ -201,17 +213,399 @@ function setupFinancialsFilters() {
     });
   }
 
+  // Hinban tag input
   if (hinbanInput) {
-    hinbanInput.addEventListener("input", () => {
-      if (financialsState.hinbanDebounce) {
-        clearTimeout(financialsState.hinbanDebounce);
+    hinbanInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const value = hinbanInput.value.trim();
+        if (value && !financialsState.selectedHinbans.includes(value)) {
+          financialsState.selectedHinbans.push(value);
+          renderFinancialsHinbanTags();
+          hinbanInput.value = "";
+          resetFinancialsPage();
+          loadFinancialsData();
+        }
+      } else if (e.key === "Backspace" && !hinbanInput.value) {
+        if (financialsState.selectedHinbans.length > 0) {
+          financialsState.selectedHinbans.pop();
+          renderFinancialsHinbanTags();
+          resetFinancialsPage();
+          loadFinancialsData();
+        }
       }
-      financialsState.hinbanDebounce = setTimeout(() => {
-        resetFinancialsPage();
-        loadFinancialsData();
-      }, 300);
     });
   }
+
+  // Ban tag input
+  if (banInput) {
+    banInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const value = banInput.value.trim();
+        if (value && !financialsState.selectedBans.includes(value)) {
+          financialsState.selectedBans.push(value);
+          renderFinancialsBanTags();
+          banInput.value = "";
+          resetFinancialsPage();
+          loadFinancialsData();
+        }
+      } else if (e.key === "Backspace" && !banInput.value) {
+        if (financialsState.selectedBans.length > 0) {
+          financialsState.selectedBans.pop();
+          renderFinancialsBanTags();
+          resetFinancialsPage();
+          loadFinancialsData();
+        }
+      }
+    });
+  }
+}
+
+// === Tag Rendering Functions ===
+function renderFinancialsHinbanTags() {
+  const container = document.getElementById("financialsHinbanTags");
+  if (!container) return;
+
+  container.innerHTML = financialsState.selectedHinbans.map(hinban =>
+    `<span class="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm">
+      ${hinban}
+      <button type="button" onclick="removeFinancialsHinban('${hinban}')" class="text-blue-600 hover:text-blue-900">
+        <i class="ri-close-line"></i>
+      </button>
+    </span>`
+  ).join("");
+}
+
+function renderFinancialsBanTags() {
+  const container = document.getElementById("financialsBanTags");
+  if (!container) return;
+
+  container.innerHTML = financialsState.selectedBans.map(ban =>
+    `<span class="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-800 rounded text-sm">
+      ${ban}
+      <button type="button" onclick="removeFinancialsBan('${ban}')" class="text-green-600 hover:text-green-900">
+        <i class="ri-close-line"></i>
+      </button>
+    </span>`
+  ).join("");
+}
+
+function removeFinancialsHinban(hinban) {
+  financialsState.selectedHinbans = financialsState.selectedHinbans.filter(h => h !== hinban);
+  renderFinancialsHinbanTags();
+  resetFinancialsPage();
+  loadFinancialsData();
+}
+
+function removeFinancialsBan(ban) {
+  financialsState.selectedBans = financialsState.selectedBans.filter(b => b !== ban);
+  renderFinancialsBanTags();
+  resetFinancialsPage();
+  loadFinancialsData();
+}
+
+// === Available Products Loading ===
+async function loadFinancialsAvailableProducts() {
+  const model = document.getElementById("financialsModelFilter")?.value || "";
+  const container = document.getElementById("financialsAvailableProducts");
+  
+  if (!container) return;
+  
+  if (!model) {
+    container.innerHTML = '<p class="text-sm text-gray-500">Select a model to see available 品番/背番号</p>';
+    financialsState.availableProducts = [];
+    return;
+  }
+
+  container.innerHTML = '<p class="text-sm text-gray-500">Loading...</p>';
+
+  try {
+    const baseUrl = typeof BASE_URL !== "undefined" ? BASE_URL : (window.BASE_URL || "http://localhost:3000/");
+    const response = await fetch(`${baseUrl}api/masterdb/products?model=${encodeURIComponent(model)}`);
+    const data = await response.json();
+
+    if (response.ok && data.success && Array.isArray(data.data)) {
+      financialsState.availableProducts = data.data;
+      renderFinancialsAvailableProducts();
+    } else {
+      container.innerHTML = '<p class="text-sm text-gray-500">No products found</p>';
+      financialsState.availableProducts = [];
+    }
+  } catch (error) {
+    console.error("Failed to load available products:", error);
+    container.innerHTML = '<p class="text-sm text-red-500">Failed to load products</p>';
+    financialsState.availableProducts = [];
+  }
+}
+
+function renderFinancialsAvailableProducts() {
+  const container = document.getElementById("financialsAvailableProducts");
+  if (!container) return;
+
+  const products = financialsState.availableProducts;
+  if (products.length === 0) {
+    container.innerHTML = '<p class="text-sm text-gray-500">No products found for this model</p>';
+    return;
+  }
+
+  // Get unique hinbans and bans
+  const hinbanSet = new Set();
+  const banSet = new Set();
+  products.forEach(p => {
+    if (p.品番) hinbanSet.add(p.品番);
+    if (p.背番号) banSet.add(String(p.背番号));
+  });
+
+  const hinbans = Array.from(hinbanSet).sort();
+  const bans = Array.from(banSet).sort((a, b) => parseInt(a) - parseInt(b));
+
+  // Show max 5 tags each, with "Show all" button
+  const maxVisible = 5;
+  const visibleHinbans = hinbans.slice(0, maxVisible);
+  const visibleBans = bans.slice(0, maxVisible);
+  const moreHinbans = hinbans.length - maxVisible;
+  const moreBans = bans.length - maxVisible;
+
+  let html = '<div class="space-y-2">';
+  
+  // Hinban tags
+  html += '<div class="flex flex-wrap items-center gap-1">';
+  html += '<span class="text-xs text-gray-500 mr-1">品番:</span>';
+  visibleHinbans.forEach(h => {
+    const isSelected = financialsState.selectedHinbans.includes(h);
+    html += `<button type="button" onclick="toggleFinancialsHinban('${h}')" 
+      class="px-2 py-0.5 text-xs rounded border ${isSelected ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
+      ${h}
+    </button>`;
+  });
+  if (moreHinbans > 0) {
+    html += `<button type="button" onclick="openFinancialsProductSelector('hinban')" class="text-xs text-blue-600 hover:underline ml-1">
+      +${moreHinbans} more (Show all)
+    </button>`;
+  }
+  html += '</div>';
+
+  // Ban tags
+  html += '<div class="flex flex-wrap items-center gap-1">';
+  html += '<span class="text-xs text-gray-500 mr-1">背番号:</span>';
+  visibleBans.forEach(b => {
+    const isSelected = financialsState.selectedBans.includes(b);
+    html += `<button type="button" onclick="toggleFinancialsBan('${b}')" 
+      class="px-2 py-0.5 text-xs rounded border ${isSelected ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'}">
+      ${b}
+    </button>`;
+  });
+  if (moreBans > 0) {
+    html += `<button type="button" onclick="openFinancialsProductSelector('ban')" class="text-xs text-green-600 hover:underline ml-1">
+      +${moreBans} more (Show all)
+    </button>`;
+  }
+  html += '</div>';
+  
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function toggleFinancialsHinban(hinban) {
+  const idx = financialsState.selectedHinbans.indexOf(hinban);
+  if (idx === -1) {
+    financialsState.selectedHinbans.push(hinban);
+  } else {
+    financialsState.selectedHinbans.splice(idx, 1);
+  }
+  renderFinancialsHinbanTags();
+  renderFinancialsAvailableProducts();
+  resetFinancialsPage();
+  loadFinancialsData();
+}
+
+function toggleFinancialsBan(ban) {
+  const idx = financialsState.selectedBans.indexOf(ban);
+  if (idx === -1) {
+    financialsState.selectedBans.push(ban);
+  } else {
+    financialsState.selectedBans.splice(idx, 1);
+  }
+  renderFinancialsBanTags();
+  renderFinancialsAvailableProducts();
+  resetFinancialsPage();
+  loadFinancialsData();
+}
+
+// === Modal Functions ===
+function openFinancialsProductSelector(type) {
+  financialsState.currentSelectorType = type;
+  const modal = document.getElementById("financialsProductSelectorModal");
+  const title = document.getElementById("financialsSelectorModalTitle");
+  const searchInput = document.getElementById("financialsProductSearch");
+  
+  if (!modal) return;
+  
+  title.textContent = type === 'hinban' ? 'Select 品番' : 'Select 背番号';
+  if (searchInput) searchInput.value = "";
+  
+  renderFinancialsProductList();
+  modal.classList.remove("hidden");
+}
+
+function closeFinancialsProductSelector() {
+  const modal = document.getElementById("financialsProductSelectorModal");
+  if (modal) modal.classList.add("hidden");
+  financialsState.currentSelectorType = null;
+}
+
+function renderFinancialsProductList() {
+  const container = document.getElementById("financialsProductListContainer");
+  const searchInput = document.getElementById("financialsProductSearch");
+  if (!container) return;
+
+  const type = financialsState.currentSelectorType;
+  const searchTerm = (searchInput?.value || "").toLowerCase();
+  const products = financialsState.availableProducts;
+
+  // Get unique values
+  const valueSet = new Set();
+  products.forEach(p => {
+    if (type === 'hinban' && p.品番) valueSet.add(p.品番);
+    if (type === 'ban' && p.背番号) valueSet.add(String(p.背番号));
+  });
+
+  let values = Array.from(valueSet);
+  
+  // Sort
+  if (type === 'ban') {
+    values.sort((a, b) => parseInt(a) - parseInt(b));
+  } else {
+    values.sort();
+  }
+
+  // Filter by search
+  if (searchTerm) {
+    values = values.filter(v => v.toLowerCase().includes(searchTerm));
+  }
+
+  if (values.length === 0) {
+    container.innerHTML = '<p class="text-gray-500 text-sm">No items found</p>';
+    return;
+  }
+
+  const selectedArray = type === 'hinban' ? financialsState.selectedHinbans : financialsState.selectedBans;
+  
+  let html = '<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">';
+  values.forEach(v => {
+    const isChecked = selectedArray.includes(v);
+    html += `<label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50 cursor-pointer ${isChecked ? 'bg-blue-50 border-blue-300' : 'bg-white'}">
+      <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleFinancialsModalItem('${v}')" class="rounded text-blue-600" />
+      <span class="text-sm truncate">${v}</span>
+    </label>`;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function filterFinancialsProductList() {
+  renderFinancialsProductList();
+}
+
+function toggleFinancialsModalItem(value) {
+  const type = financialsState.currentSelectorType;
+  const selectedArray = type === 'hinban' ? financialsState.selectedHinbans : financialsState.selectedBans;
+  
+  const idx = selectedArray.indexOf(value);
+  if (idx === -1) {
+    selectedArray.push(value);
+  } else {
+    selectedArray.splice(idx, 1);
+  }
+  
+  renderFinancialsProductList();
+}
+
+function checkAllFinancialsProducts() {
+  const type = financialsState.currentSelectorType;
+  const searchInput = document.getElementById("financialsProductSearch");
+  const searchTerm = (searchInput?.value || "").toLowerCase();
+  const products = financialsState.availableProducts;
+
+  // Get unique values
+  const valueSet = new Set();
+  products.forEach(p => {
+    if (type === 'hinban' && p.品番) valueSet.add(p.品番);
+    if (type === 'ban' && p.背番号) valueSet.add(String(p.背番号));
+  });
+
+  let values = Array.from(valueSet);
+  if (searchTerm) {
+    values = values.filter(v => v.toLowerCase().includes(searchTerm));
+  }
+
+  if (type === 'hinban') {
+    values.forEach(v => {
+      if (!financialsState.selectedHinbans.includes(v)) {
+        financialsState.selectedHinbans.push(v);
+      }
+    });
+  } else {
+    values.forEach(v => {
+      if (!financialsState.selectedBans.includes(v)) {
+        financialsState.selectedBans.push(v);
+      }
+    });
+  }
+
+  renderFinancialsProductList();
+}
+
+function uncheckAllFinancialsProducts() {
+  const type = financialsState.currentSelectorType;
+  const searchInput = document.getElementById("financialsProductSearch");
+  const searchTerm = (searchInput?.value || "").toLowerCase();
+  const products = financialsState.availableProducts;
+
+  // Get unique values
+  const valueSet = new Set();
+  products.forEach(p => {
+    if (type === 'hinban' && p.品番) valueSet.add(p.品番);
+    if (type === 'ban' && p.背番号) valueSet.add(String(p.背番号));
+  });
+
+  let values = Array.from(valueSet);
+  if (searchTerm) {
+    values = values.filter(v => v.toLowerCase().includes(searchTerm));
+  }
+
+  if (type === 'hinban') {
+    financialsState.selectedHinbans = financialsState.selectedHinbans.filter(h => !values.includes(h));
+  } else {
+    financialsState.selectedBans = financialsState.selectedBans.filter(b => !values.includes(b));
+  }
+
+  renderFinancialsProductList();
+}
+
+function confirmFinancialsProductSelection() {
+  closeFinancialsProductSelector();
+  renderFinancialsHinbanTags();
+  renderFinancialsBanTags();
+  renderFinancialsAvailableProducts();
+  resetFinancialsPage();
+  loadFinancialsData();
+}
+
+function selectAllFinancialsProducts() {
+  checkAllFinancialsProducts();
+  confirmFinancialsProductSelection();
+}
+
+function clearAllFinancialsProducts() {
+  financialsState.selectedHinbans = [];
+  financialsState.selectedBans = [];
+  renderFinancialsHinbanTags();
+  renderFinancialsBanTags();
+  renderFinancialsAvailableProducts();
+  resetFinancialsPage();
+  loadFinancialsData();
 }
 
 function initFinancialsPagination() {
@@ -255,8 +649,11 @@ async function loadFinancialsData() {
   const fromDate = document.getElementById("financialsFromDate")?.value;
   const toDate = document.getElementById("financialsToDate")?.value;
   const model = document.getElementById("financialsModelFilter")?.value || "";
-  const hinban = document.getElementById("financialsHinbanFilter")?.value?.trim() || "";
   const factory = document.getElementById("financialsFactoryFilter")?.value || "";
+  
+  // Use selected tags arrays
+  const hinbans = financialsState.selectedHinbans;
+  const bans = financialsState.selectedBans;
 
   if (!fromDate || !toDate) {
     return;
@@ -271,7 +668,8 @@ async function loadFinancialsData() {
         fromDate,
         toDate,
         model,
-        hinban,
+        hinbans,
+        bans,
         factory,
         page: financialsState.page,
         limit: financialsState.limit,
