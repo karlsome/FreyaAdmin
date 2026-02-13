@@ -656,8 +656,8 @@ function loadPage(page) {
                     <p class="text-2xl font-bold text-gray-900" id="financialsTotalValue">¥0</p>
                   </div>
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="scrapLoss">Scrap Loss (¥)</p>
-                    <p class="text-2xl font-bold text-gray-900" id="financialsScrapLoss">¥0</p>
+                    <p class="text-sm font-medium text-red-600" data-i18n="scrapLoss">Scrap Loss (¥)</p>
+                    <p class="text-2xl font-bold text-red-700" id="financialsScrapLoss">¥0</p>
                   </div>
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
                     <p class="text-sm font-medium text-green-600" data-i18n="totalCreated">Total Created (pcs)</p>
