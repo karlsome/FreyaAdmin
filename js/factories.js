@@ -1008,6 +1008,12 @@ function showSensorHistoryModal(deviceId, factoryName) {
     modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
     
     let currentPage = 1;
+    let allHistoryData = []; // Store all fetched data for CSV export
+    
+    // Set default dates (current date only)
+    const today = new Date().toISOString().split('T')[0];
+    let startDate = today;
+    let endDate = today;
     
     const formatDateTime = (date, time) => {
         try {
@@ -1045,15 +1051,29 @@ function showSensorHistoryModal(deviceId, factoryName) {
         historyContainer.innerHTML = `<div class="text-center py-8"><i class="ri-loader-4-line animate-spin text-2xl text-blue-500"></i> <div class="mt-2 text-gray-600" data-i18n="loading">読み込み中...</div></div>`;
         
         try {
-            const data = await getSensorHistory(deviceId, page, 15, factoryName);
+            const data = await fetch(BASE_URL + "api/sensor-history", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    deviceId: deviceId,
+                    page: page,
+                    limit: 15,
+                    factoryName: factoryName,
+                    startDate: startDate,
+                    endDate: endDate
+                })
+            }).then(res => res.json());
             
-            if (data.error) {
+            if (!data.success) {
                 historyContainer.innerHTML = `<div class="text-center py-8 text-red-600"><i class="ri-error-warning-line text-2xl mb-2"></i><div><span data-i18n="error">エラー</span>: ${data.error}</div></div>`;
                 return;
             }
             
-            if (data.history.length === 0) {
-                historyContainer.innerHTML = `<div class="text-center py-8 text-gray-500"><i class="ri-database-line text-3xl mb-2 opacity-50"></i><div data-i18n="noDataAvailable">履歴データがありません</div><div class="text-sm mt-1">過去30日間のデータが見つかりません</div></div>`;
+            // Store all history data for CSV export
+            allHistoryData = data.data || [];
+            
+            if (allHistoryData.length === 0) {
+                historyContainer.innerHTML = `<div class="text-center py-8 text-gray-500"><i class="ri-database-line text-3xl mb-2 opacity-50"></i><div data-i18n="noDataAvailable">履歴データがありません</div><div class="text-sm mt-1">選択された期間にはデータがありません</div></div>`;
                 paginationContainer.innerHTML = '';
                 return;
             }
@@ -1070,7 +1090,7 @@ function showSensorHistoryModal(deviceId, factoryName) {
             historyContainer.innerHTML = `
                 ${queryInfo}
                 <div class="space-y-2">
-                    ${data.history.map((record, index) => `
+                    ${allHistoryData.map((record, index) => `
                         <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors sensor-history-card">
                             <div class="flex justify-between items-start mb-3">
                                 <div class="text-sm font-medium text-gray-900">
@@ -1228,8 +1248,121 @@ function showSensorHistoryModal(deviceId, factoryName) {
     // Make loadHistoryPage available globally for pagination buttons
     window.loadHistoryPage = loadHistoryPage;
     
+    // Function to export data to CSV from server
+    function exportToCSV() {
+        // Show loading toast
+        const loadingId = 'exportLoading-' + Date.now();
+        const loadingToast = document.createElement('div');
+        loadingToast.id = loadingId;
+        loadingToast.className = 'fixed bottom-4 right-4 bg-blue-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-slide-in';
+        loadingToast.innerHTML = `
+            <i class="ri-loader-4-line animate-spin text-lg"></i>
+            <span>ファイルを生成中...</span>
+        `;
+        document.body.appendChild(loadingToast);
+
+        try {
+            // Request CSV export from server (will handle all records for date range)
+            fetch(BASE_URL + "api/sensor-history/export-csv", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    deviceId: deviceId,
+                    startDate: startDate,
+                    endDate: endDate,
+                    factoryName: factoryName
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                // Get record count from header
+                const recordCount = response.headers.get('X-Records-Count') || 'unknown';
+                
+                // Extract filename from Content-Disposition header
+                let filename = `sensor_history_${deviceId}_${startDate}_${endDate}.csv`;
+                const contentDisposition = response.headers.get('Content-Disposition');
+                if (contentDisposition && contentDisposition.includes('filename=')) {
+                    filename = contentDisposition
+                        .split('filename=')[1]
+                        .replace(/['"]/g, '');
+                }
+                
+                return response.blob().then(blob => ({
+                    blob: blob,
+                    filename: filename,
+                    recordCount: recordCount
+                }));
+            })
+            .then(({ blob, filename, recordCount }) => {
+                // Trigger download
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                // Show success toast
+                const successToast = document.createElement('div');
+                successToast.className = 'fixed bottom-4 right-4 bg-green-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-slide-in';
+                successToast.innerHTML = `
+                    <i class="ri-checkbox-circle-line text-lg"></i>
+                    <span>ダウンロード完了 (${recordCount}件)</span>
+                `;
+                document.body.appendChild(successToast);
+                
+                // Remove loading toast
+                const loading = document.getElementById(loadingId);
+                if (loading) loading.remove();
+                
+                // Auto remove success toast after 3 seconds
+                setTimeout(() => {
+                    if (successToast.parentElement) {
+                        successToast.remove();
+                    }
+                }, 3000);
+            })
+            .catch(error => {
+                console.error('CSV export error:', error);
+                
+                // Show error toast
+                const errorToast = document.createElement('div');
+                errorToast.className = 'fixed bottom-4 right-4 bg-red-600 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-slide-in';
+                errorToast.innerHTML = `
+                    <i class="ri-error-warning-line text-lg"></i>
+                    <span>エラーが発生しました</span>
+                `;
+                document.body.appendChild(errorToast);
+                
+                // Remove loading toast
+                const loading = document.getElementById(loadingId);
+                if (loading) loading.remove();
+                
+                // Auto remove error toast after 3 seconds
+                setTimeout(() => {
+                    if (errorToast.parentElement) {
+                        errorToast.remove();
+                    }
+                }, 3000);
+            });
+        } catch (error) {
+            console.error('CSV export error:', error);
+            
+            // Remove loading toast
+            const loading = document.getElementById(loadingId);
+            if (loading) loading.remove();
+        }
+    }
+    
+    window.exportToCSV = exportToCSV;
+    
     modal.innerHTML = `
-        <div class="bg-white rounded-lg shadow-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden">
+        <div class="bg-white rounded-lg shadow-lg max-w-3xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex justify-between items-center">
                     <div>
@@ -1242,7 +1375,35 @@ function showSensorHistoryModal(deviceId, factoryName) {
                 </div>
             </div>
             
-            <div class="p-6 overflow-y-auto" style="max-height: calc(90vh - 120px);">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">開始日</label>
+                        <input type="date" id="startDateInput" value="${startDate}" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                            onchange="updateDateRange()">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">終了日</label>
+                        <input type="date" id="endDateInput" value="${endDate}" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                            onchange="updateDateRange()">
+                    </div>
+                    <div class="flex items-end">
+                        <button onclick="loadHistoryPage(1)" 
+                            class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="ri-search-line mr-1"></i>検索
+                        </button>
+                    </div>
+                </div>
+                
+                <button onclick="exportToCSV()" 
+                    class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm">
+                    <i class="ri-download-csv-line mr-1"></i>CSV出力
+                </button>
+            </div>
+            
+            <div class="p-6 overflow-y-auto flex-1" style="max-height: calc(90vh - 240px);">
                 <div id="historyContainer">
                     <!-- History will be loaded here -->
                 </div>
@@ -1252,6 +1413,19 @@ function showSensorHistoryModal(deviceId, factoryName) {
             </div>
         </div>
     `;
+    
+    // Function to update date range and reload data
+    window.updateDateRange = function() {
+        startDate = document.getElementById('startDateInput').value;
+        endDate = document.getElementById('endDateInput').value;
+        
+        if (startDate > endDate) {
+            alert('終了日は開始日より後の日付を選択してください');
+            document.getElementById('endDateInput').value = startDate;
+            endDate = startDate;
+            return;
+        }
+    };
     
     document.body.appendChild(modal);
     
