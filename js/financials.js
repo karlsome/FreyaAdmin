@@ -117,7 +117,8 @@ async function loadFinancialsModelOptions() {
     return;
   }
 
-  modelSelect.innerHTML = '<option value="">Loading...</option>';
+  const loadingText = (typeof t === 'function') ? t('loading') : 'Loading...';
+  modelSelect.innerHTML = `<option value="">${loadingText}</option>`;
   modelSelect.disabled = true;
 
   try {
@@ -126,17 +127,20 @@ async function loadFinancialsModelOptions() {
     const data = await response.json();
 
     if (response.ok && data.success && Array.isArray(data.data)) {
-      const options = ['<option value="">All Models</option>'];
+      const allModelsText = (typeof t === 'function') ? t('allModels') : 'All Models';
+      const options = [`<option value="">${allModelsText}</option>`];
       data.data.forEach(model => {
         options.push(`<option value="${model}">${model}</option>`);
       });
       modelSelect.innerHTML = options.join("");
     } else {
-      modelSelect.innerHTML = '<option value="">All Models</option>';
+      const allModelsText = (typeof t === 'function') ? t('allModels') : 'All Models';
+      modelSelect.innerHTML = `<option value="">${allModelsText}</option>`;
     }
   } catch (error) {
     console.error("Failed to load model options:", error);
-    modelSelect.innerHTML = '<option value="">All Models</option>';
+    const allModelsText = (typeof t === 'function') ? t('allModels') : 'All Models';
+    modelSelect.innerHTML = `<option value="">${allModelsText}</option>`;
   } finally {
     modelSelect.disabled = false;
   }
@@ -148,7 +152,8 @@ async function loadFinancialsFactoryOptions() {
     return;
   }
 
-  factorySelect.innerHTML = '<option value="">Loading...</option>';
+  const loadingText = (typeof t === 'function') ? t('loading') : 'Loading...';
+  factorySelect.innerHTML = `<option value="">${loadingText}</option>`;
   factorySelect.disabled = true;
 
   try {
@@ -170,17 +175,20 @@ async function loadFinancialsFactoryOptions() {
         });
       });
       const factories = Array.from(factorySet).sort();
-      const options = ['<option value="">All Factories</option>'];
+      const allFactoriesText = (typeof t === 'function') ? t('allFactories') : 'All Factories';
+      const options = [`<option value="">${allFactoriesText}</option>`];
       factories.forEach(factory => {
         options.push(`<option value="${factory}">${factory}</option>`);
       });
       factorySelect.innerHTML = options.join("");
     } else {
-      factorySelect.innerHTML = '<option value="">All Factories</option>';
+      const allFactoriesText = (typeof t === 'function') ? t('allFactories') : 'All Factories';
+      factorySelect.innerHTML = `<option value="">${allFactoriesText}</option>`;
     }
   } catch (error) {
     console.error("Failed to load factory options:", error);
-    factorySelect.innerHTML = '<option value="">All Factories</option>';
+    const allFactoriesText = (typeof t === 'function') ? t('allFactories') : 'All Factories';
+    factorySelect.innerHTML = `<option value="">${allFactoriesText}</option>`;
   } finally {
     factorySelect.disabled = false;
   }
@@ -368,13 +376,13 @@ function updateFinancialsSelectedProductsDisplay() {
   const count = document.getElementById("financialsSelectedCount");
   
   if (financialsState.selectedSebanggoArray.length === 0) {
-    if (display) display.textContent = "None selected";
+    if (display) display.textContent = t ? t("noneSelected") : "None selected";
     if (tags) tags.innerHTML = "";
-    if (count) count.textContent = "Select products...";
+    if (count) count.textContent = t ? t("selectProducts") : "Select products...";
     return;
   }
   
-  if (display) display.textContent = `${financialsState.selectedSebanggoArray.length} products selected`;
+  if (display) display.textContent = `${financialsState.selectedSebanggoArray.length} ${t ? t("selectedProducts").toLowerCase() : "products selected"}`;
   if (count) count.textContent = `${financialsState.selectedSebanggoArray.length} selected`;
   
   // Show first 10 as tags
@@ -789,7 +797,7 @@ function renderFinancialsTable(rows) {
   if (!rows.length) {
     body.innerHTML = `
       <tr>
-        <td class="px-4 py-3 text-gray-500" colspan="16">No data loaded.</td>
+        <td class="px-4 py-3 text-gray-500" colspan="16" data-i18n="noDataLoaded">No data loaded.</td>
       </tr>
     `;
     return;

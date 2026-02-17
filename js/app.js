@@ -600,10 +600,10 @@ function loadPage(page) {
                       <input type="date" id="financialsToDate" class="w-full p-2 border border-gray-300 rounded-md">
                     </div>
                     <div>
-                      <label class="block text-sm font-medium text-gray-700 mb-2">Filter Type</label>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="filterType">Filter Type</label>
                       <select id="financialsFilterType" class="w-full p-2 border border-gray-300 rounded-md">
-                        <option value="model">モデル (Model)</option>
-                        <option value="sebanggo">背番号 (Serial Number)</option>
+                        <option value="model" data-i18n="model">モデル (Model)</option>
+                        <option value="sebanggo" data-i18n="sebanggo">背番号 (Serial Number)</option>
                       </select>
                     </div>
                     <div>
@@ -620,27 +620,27 @@ function loadPage(page) {
                     <div id="financialsModelFilterContainer">
                       <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="model">モデル / Model</label>
                       <select id="financialsModelFilter" class="w-full p-2 border border-gray-300 rounded-md">
-                        <option value="">Select Model...</option>
+                        <option value="" data-i18n="selectModel">Select Model...</option>
                       </select>
                     </div>
                     
                     <!-- Sebanggo selector button (hidden by default) -->
                     <div id="financialsSebanggoFilterContainer" style="display: none;">
-                      <label class="block text-sm font-medium text-gray-700 mb-2">背番号 / Serial Numbers</label>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="sebanggo">背番号 / Serial Numbers</label>
                       <button onclick="openFinancialsSebanggoSelector()" class="w-full p-2 border border-gray-300 rounded-md bg-white text-left text-gray-700 hover:bg-gray-50">
-                        <span id="financialsSelectedCount">Select products...</span>
+                        <span id="financialsSelectedCount" data-i18n="selectProducts">Select products...</span>
                       </button>
                     </div>
                     
                     <!-- Selected Products Display -->
                     <div>
                       <div class="flex items-center justify-between mb-2">
-                        <label class="block text-sm font-medium text-gray-700">Selected Products</label>
-                        <button onclick="openFinancialsSebanggoSelector()" class="text-xs text-blue-600 hover:text-blue-700">
+                        <label class="block text-sm font-medium text-gray-700" data-i18n="selectedProducts">Selected Products</label>
+                        <button onclick="openFinancialsSebanggoSelector()" class="text-xs text-blue-600 hover:text-blue-700" data-i18n="showAll">
                           Show all
                         </button>
                       </div>
-                      <div id="financialsSelectedProductsDisplay" class="p-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700 h-[42px] overflow-y-auto">
+                      <div id="financialsSelectedProductsDisplay" class="p-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700 h-[42px] overflow-y-auto" data-i18n="noneSelected">
                         None selected
                       </div>
                     </div>
@@ -777,8 +777,8 @@ function loadPage(page) {
                   <div class="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                     <div class="text-sm text-gray-600" id="financialsPageInfo">0件中 0-0件を表示</div>
                     <div class="flex items-center gap-2">
-                      <button id="financialsPrevPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" disabled>Prev</button>
-                      <button id="financialsNextPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" disabled>Next</button>
+                      <button id="financialsPrevPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" data-i18n="prev" disabled>Prev</button>
+                      <button id="financialsNextPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" data-i18n="next" disabled>Next</button>
                       <select id="financialsPageSizeSelect" class="p-1 border rounded text-sm">
                         <option value="10" selected>10</option>
                         <option value="25">25</option>
@@ -794,30 +794,30 @@ function loadPage(page) {
                 <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
                   <div class="p-4 border-b">
                     <div class="flex items-center justify-between">
-                      <h3 class="text-base font-semibold text-gray-900">Select Products (背番号)</h3>
+                      <h3 class="text-base font-semibold text-gray-900" data-i18n="selectProductsSebanggo">Select Products (背番号)</h3>
                       <button onclick="closeFinancialsSebanggoSelector()" class="text-gray-500 hover:text-gray-700">
                         <i class="ri-close-line text-2xl"></i>
                       </button>
                     </div>
-                    <input type="text" id="financialsSebanggoSearch" oninput="filterFinancialsSebanggoList()" placeholder="Search..." class="w-full mt-3 p-2 text-sm border rounded bg-white" />
+                    <input type="text" id="financialsSebanggoSearch" oninput="filterFinancialsSebanggoList()" data-i18n-placeholder="searchProducts" placeholder="Search..." class="w-full mt-3 p-2 text-sm border rounded bg-white" />
                   </div>
                   <div class="p-3 overflow-y-auto max-h-[55vh]" id="financialsSebanggoListContainer">
-                    <p class="text-gray-500">Loading products...</p>
+                    <p class="text-gray-500" data-i18n="loadingProducts">Loading products...</p>
                   </div>
                   <div class="p-4 border-t flex items-center justify-between gap-2">
                     <div class="flex gap-2">
-                      <button onclick="checkAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                      <button onclick="checkAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700" data-i18n="checkAll">
                         Check all
                       </button>
-                      <button onclick="uncheckAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                      <button onclick="uncheckAllFinancialsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700" data-i18n="uncheckAll">
                         Uncheck all
                       </button>
                     </div>
                     <div class="flex gap-2">
-                      <button onclick="closeFinancialsSebanggoSelector()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">
+                      <button onclick="closeFinancialsSebanggoSelector()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700" data-i18n="cancel">
                         Cancel
                       </button>
-                      <button onclick="confirmFinancialsSebanggoSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded">
+                      <button onclick="confirmFinancialsSebanggoSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded" data-i18n="confirmSelection">
                         Confirm Selection
                       </button>
                     </div>
@@ -825,6 +825,9 @@ function loadPage(page) {
                 </div>
               </div>
             `;
+            if (typeof applyLanguage === "function") {
+              applyLanguage();
+            }
             if (typeof initFinancialsPage === "function") {
               initFinancialsPage();
             }
