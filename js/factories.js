@@ -5648,24 +5648,78 @@ function showSidebar(item) {
     ` : "";
 
     const maintenanceData = item.Maintenance_Data;
-    const maintenanceRecords = Array.isArray(maintenanceData?.records) ? maintenanceData.records : [];
+    const maintenanceRecords = Array.isArray(maintenanceData?.records)
+        ? maintenanceData.records
+        : (maintenanceData?.records && typeof maintenanceData.records === "object")
+            ? Object.values(maintenanceData.records)
+            : [];
+    const parseTimeToMinutes = (timeValue) => {
+        if (!timeValue || typeof timeValue !== "string") return null;
+        const [hours, minutes] = timeValue.split(":").map(Number);
+        if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+        return (hours * 60) + minutes;
+    };
+    const calculateDurationMinutes = (startTime, endTime) => {
+        const startMinutes = parseTimeToMinutes(startTime);
+        const endMinutes = parseTimeToMinutes(endTime);
+        if (startMinutes === null || endMinutes === null) return null;
+        let diff = endMinutes - startMinutes;
+        if (diff < 0) diff += 24 * 60;
+        return diff;
+    };
     const maintenanceSection = maintenanceData ? `
         <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-6 mb-6">
             <h4 class="text-lg font-semibold text-indigo-900 mb-4">Maintenance Information</h4>
             ${maintenanceRecords.length > 0 ? `
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                     ${maintenanceRecords.map((record, index) => {
-                        const entries = Object.entries(record || {})
-                            .map(([key, value]) => `
-                                <div class="text-sm">
-                                    <span class="text-indigo-700">${key}:</span>
-                                    <span class="text-indigo-900 ml-1">${value || "N/A"}</span>
-                                </div>
-                            `).join("");
+                        const durationMinutes = calculateDurationMinutes(record?.startTime, record?.endTime);
+                        const rawPhotos = record?.photos;
+                        const photoItems = Array.isArray(rawPhotos)
+                            ? rawPhotos
+                            : (typeof rawPhotos === "string" && rawPhotos.trim())
+                                ? rawPhotos.split(",").map(url => url.trim()).filter(Boolean)
+                                : [];
+                        const reasonText = record?.comment || record?.reason || "N/A";
+                        const photoGrid = photoItems.length > 0
+                            ? `<div class="grid grid-cols-3 gap-2">
+                                ${photoItems.map((url, photoIndex) => `
+                                    <a href="${url}" target="_blank" rel="noopener" class="block">
+                                        <img src="${url}" alt="Maintenance ${index + 1} Photo ${photoIndex + 1}" class="w-full h-20 object-cover rounded border border-indigo-200 hover:opacity-90" />
+                                    </a>
+                                `).join("")}
+                            </div>`
+                            : `<div class="text-sm text-indigo-700">No photos.</div>`;
+
                         return `
-                            <div class="border border-indigo-200 rounded p-3 bg-white">
-                                <h6 class="font-medium text-indigo-900 mb-2">Record ${index + 1}</h6>
-                                <div class="space-y-1">${entries || '<div class="text-sm text-indigo-700">No details</div>'}</div>
+                            <div class="border border-indigo-200 rounded p-4 bg-white">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h6 class="font-medium text-indigo-900">Record ${index + 1}</h6>
+                                    <span class="text-xs text-indigo-700">ID: ${record?.id ?? "N/A"}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-sm mb-3">
+                                    <div>
+                                        <dt class="text-indigo-700">Start</dt>
+                                        <dd class="text-indigo-900 mt-1">${record?.startTime || "N/A"}</dd>
+                                    </div>
+                                    <div>
+                                        <dt class="text-indigo-700">End</dt>
+                                        <dd class="text-indigo-900 mt-1">${record?.endTime || "N/A"}</dd>
+                                    </div>
+                                    <div>
+                                        <dt class="text-indigo-700">Duration</dt>
+                                        <dd class="text-indigo-900 mt-1">${durationMinutes !== null ? `${durationMinutes} minutes` : "N/A"}</dd>
+                                    </div>
+                                    <div>
+                                        <dt class="text-indigo-700">Timestamp</dt>
+                                        <dd class="text-indigo-900 mt-1">${record?.timestamp || "N/A"}</dd>
+                                    </div>
+                                </div>
+                                <div class="text-sm mb-3">
+                                    <dt class="text-indigo-700">Reason</dt>
+                                    <dd class="text-indigo-900 mt-1">${reasonText}</dd>
+                                </div>
+                                ${photoGrid}
                             </div>
                         `;
                     }).join("")}
@@ -5679,6 +5733,14 @@ function showSidebar(item) {
                 <div>
                     <dt class="text-sm font-medium text-indigo-700">Total Hours</dt>
                     <dd class="text-sm text-indigo-900 mt-1">${maintenanceData?.totalHours ?? 0} hours</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-indigo-700">Total Trouble Minutes</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${item.Total_Trouble_Minutes ?? 0} minutes</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-indigo-700">Total Trouble Hours</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${item.Total_Trouble_Hours ?? 0} hours</dd>
                 </div>
             </div>
         </div>
