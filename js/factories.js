@@ -5183,7 +5183,7 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
                         <div id="detailModalPanel" class="bg-white rounded-lg max-w-6xl w-full max-h-screen overflow-y-auto">
                             <div class="p-6 border-b border-gray-200">
                                 <div class="flex items-center justify-between">
-                                    <h3 class="text-lg font-semibold">Production Record Details</h3>
+                                    <h3 class="text-lg font-semibold">${translations[currentLang].productionRecordDetails || 'Production Record Details'}</h3>
                                     <button onclick="closeSidebar()" class="text-gray-400 hover:text-gray-600">
                                         <i class="ri-close-line text-xl"></i>
                                     </button>
@@ -5222,11 +5222,11 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         <!-- Charts -->
         <div class="grid grid-cols-1 gap-4">
         <div class="bg-white p-3 sm:p-4 rounded shadow">
-            <h3 class="font-semibold text-sm sm:text-base mb-2">${translations[currentLang].defectRate} per Process</h3>
+            <h3 class="font-semibold text-sm sm:text-base mb-2">${translations[currentLang].defectRatePerProcess || translations[currentLang].defectRate + ' per Process'}</h3>
             <div id="defectRateChart" style="height: 250px; sm:height: 300px;"></div>
         </div>
         <div class="bg-white p-3 sm:p-4 rounded shadow">
-            <h3 class="font-semibold text-sm sm:text-base mb-2">Cycle Time per Process</h3>
+            <h3 class="font-semibold text-sm sm:text-base mb-2">${translations[currentLang].cycleTimePerProcess || 'Cycle Time per Process'}</h3>
             <div id="cycleTimeChart" style="height: 250px; sm:height: 300px;"></div>
         </div>
         </div>
@@ -5275,7 +5275,7 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
  */
 async function loadDailyProduction(factory, date) {
     const dailyContainer = document.getElementById("dailyProduction");
-    dailyContainer.innerHTML = "Loading daily data...";
+    dailyContainer.innerHTML = translations[currentLang].loadingDailyData || "Loading daily data...";
 
     const processes = [
         { name: "Kensa", collection: "kensaDB" },
@@ -5338,7 +5338,7 @@ async function loadDailyProduction(factory, date) {
                         <i class="${iconClass} text-2xl"></i>
                         <div>
                           <h3 class="font-semibold text-gray-800">${proc.name}</h3>
-                          <p class="text-sm text-gray-600">${data.length} records</p>
+                          <p class="text-sm text-gray-600">${data.length} ${translations[currentLang].records || 'records'}</p>
                         </div>
                       </div>
                     </div>
@@ -5349,7 +5349,7 @@ async function loadDailyProduction(factory, date) {
                     ${data.length === 0 ? `
                       <div class="text-center py-8">
                         <i class="ri-database-line text-3xl text-gray-400 mb-2 block"></i>
-                        <p class="text-gray-500 text-sm">No data for today</p>
+                        <p class="text-gray-500 text-sm">${translations[currentLang].noDataForToday || 'No data for today'}</p>
                       </div>
                     ` : `
                       <div class="space-y-2 max-h-64 overflow-y-auto">
@@ -5397,7 +5397,7 @@ async function loadDailyProduction(factory, date) {
 
     } catch (err) {
         console.error("Error loading daily production:", err);
-        dailyContainer.innerHTML = `<p class="text-red-500">Failed to load daily data</p>`;
+        dailyContainer.innerHTML = `<p class="text-red-500">${translations[currentLang].failedToLoadDailyData || 'Failed to load daily data'}</p>`;
     }
 }
 
@@ -5748,24 +5748,25 @@ function showSidebar(item) {
     const rightEntries = entries.slice(midIndex);
 
     const totalNG = Number(item.Total_NG ?? 0);
+    const _lang = translations[currentLang] || {};
     const statsRows = [
-        { label: "Quantity Made", value: Number(item.Process_Quantity ?? 0).toLocaleString() },
-        { label: "Actual Total", value: Number(item.Total ?? 0).toLocaleString() },
-        { label: "Cycle Time", value: item.Cycle_Time ? `${item.Cycle_Time}s` : "N/A" },
-        { label: "Shot Count", value: item["ショット数"] ?? "N/A" }
+        { label: _lang.quantityMade || "Quantity Made", value: Number(item.Process_Quantity ?? 0).toLocaleString() },
+        { label: _lang.actualTotal || "Actual Total", value: Number(item.Total ?? 0).toLocaleString() },
+        { label: _lang.cycleTime || "Cycle Time", value: item.Cycle_Time ? `${item.Cycle_Time}s` : "N/A" },
+        { label: _lang.shotCount || "Shot Count", value: item["ショット数"] ?? "N/A" }
     ];
 
-    let ngRows = [{ label: "Total NG", value: totalNG.toLocaleString() }];
+    let ngRows = [{ label: _lang.totalNG || "Total NG", value: totalNG.toLocaleString() }];
     if (isPress || isSlit) {
         ngRows = [
-            { label: "Total NG", value: totalNG.toLocaleString() },
-            { label: "Non Conforming (Internal)", value: Number(item["疵引不良"] ?? 0).toLocaleString() },
-            { label: "Non Conforming (Supplier)", value: Number(item["加工不良"] ?? 0).toLocaleString() },
-            { label: "Others", value: Number(item["その他"] ?? 0).toLocaleString() }
+            { label: _lang.totalNG || "Total NG", value: totalNG.toLocaleString() },
+            { label: _lang.nonConformingInternal || "Non Conforming (Internal)", value: Number(item["疵引不良"] ?? 0).toLocaleString() },
+            { label: _lang.nonConformingSupplier || "Non Conforming (Supplier)", value: Number(item["加工不良"] ?? 0).toLocaleString() },
+            { label: _lang.others || "Others", value: Number(item["その他"] ?? 0).toLocaleString() }
         ];
     } else if (isSRS) {
         ngRows = [
-            { label: "Total NG", value: totalNG.toLocaleString() },
+            { label: _lang.totalNG || "Total NG", value: totalNG.toLocaleString() },
             { label: "くっつき・めくれ", value: Number(item["くっつき・めくれ"] ?? 0).toLocaleString() },
             { label: "シワ", value: Number(item["シワ"] ?? 0).toLocaleString() },
             { label: "転写位置ズレ", value: Number(item["転写位置ズレ"] ?? 0).toLocaleString() },
@@ -5797,7 +5798,7 @@ function showSidebar(item) {
 
     const breakSection = breakData ? `
         <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
-            <h4 class="text-lg font-semibold text-yellow-900 mb-4">Break Time Information</h4>
+            <h4 class="text-lg font-semibold text-yellow-900 mb-4">${translations[currentLang].breakTimeInformation || 'Break Time Information'}</h4>
             ${breakEntries.length > 0 ? `
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     ${breakEntries.map(entry => `
@@ -5807,15 +5808,15 @@ function showSidebar(item) {
                         </div>
                     `).join("")}
                 </div>
-            ` : `<div class="text-sm text-yellow-800 mb-4">No break entries recorded.</div>`}
+            ` : `<div class="text-sm text-yellow-800 mb-4">${translations[currentLang].noBreakEntriesRecorded || 'No break entries recorded.'}</div>`}
             <div class="flex flex-wrap gap-6">
                 <div>
-                    <dt class="text-sm font-medium text-yellow-700">Total Break Minutes</dt>
-                    <dd class="text-sm text-yellow-900 mt-1">${item.Total_Break_Minutes ?? 0} minutes</dd>
+                    <dt class="text-sm font-medium text-yellow-700">${translations[currentLang].totalBreakMinutes || 'Total Break Minutes'}</dt>
+                    <dd class="text-sm text-yellow-900 mt-1">${item.Total_Break_Minutes ?? 0} ${translations[currentLang].minutes || 'minutes'}</dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-yellow-700">Total Break Hours</dt>
-                    <dd class="text-sm text-yellow-900 mt-1">${item.Total_Break_Hours ?? 0} hours</dd>
+                    <dt class="text-sm font-medium text-yellow-700">${translations[currentLang].totalBreakHours || 'Total Break Hours'}</dt>
+                    <dd class="text-sm text-yellow-900 mt-1">${item.Total_Break_Hours ?? 0} ${translations[currentLang].hours || 'hours'}</dd>
                 </div>
             </div>
         </div>
@@ -5843,7 +5844,7 @@ function showSidebar(item) {
     };
     const maintenanceSection = maintenanceData ? `
         <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-6 mb-6">
-            <h4 class="text-lg font-semibold text-indigo-900 mb-4">Maintenance Information</h4>
+            <h4 class="text-lg font-semibold text-indigo-900 mb-4">${translations[currentLang].maintenanceInformation || 'Maintenance Information'}</h4>
             ${maintenanceRecords.length > 0 ? `
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                     ${maintenanceRecords.map((record, index) => {
@@ -5863,34 +5864,34 @@ function showSidebar(item) {
                                     </a>
                                 `).join("")}
                             </div>`
-                            : `<div class="text-sm text-indigo-700">No photos.</div>`;
+                            : `<div class="text-sm text-indigo-700">${translations[currentLang].noPhotosAvailable || 'No photos.'}</div>`;
 
                         return `
                             <div class="border border-indigo-200 rounded p-4 bg-white">
                                 <div class="flex items-center justify-between mb-3">
-                                    <h6 class="font-medium text-indigo-900">Record ${index + 1}</h6>
+                                    <h6 class="font-medium text-indigo-900">${translations[currentLang].maintenanceRecord || 'Record'} ${index + 1}</h6>
                                     <span class="text-xs text-indigo-700">ID: ${record?.id ?? "N/A"}</span>
                                 </div>
                                 <div class="grid grid-cols-2 gap-3 text-sm mb-3">
                                     <div>
-                                        <dt class="text-indigo-700">Start</dt>
+                                        <dt class="text-indigo-700">${translations[currentLang].start || 'Start'}</dt>
                                         <dd class="text-indigo-900 mt-1">${record?.startTime || "N/A"}</dd>
                                     </div>
                                     <div>
-                                        <dt class="text-indigo-700">End</dt>
+                                        <dt class="text-indigo-700">${translations[currentLang].end || 'End'}</dt>
                                         <dd class="text-indigo-900 mt-1">${record?.endTime || "N/A"}</dd>
                                     </div>
                                     <div>
-                                        <dt class="text-indigo-700">Duration</dt>
-                                        <dd class="text-indigo-900 mt-1">${durationMinutes !== null ? `${durationMinutes} minutes` : "N/A"}</dd>
+                                        <dt class="text-indigo-700">${translations[currentLang].duration || 'Duration'}</dt>
+                                        <dd class="text-indigo-900 mt-1">${durationMinutes !== null ? `${durationMinutes} ${translations[currentLang].minutes || 'minutes'}` : "N/A"}</dd>
                                     </div>
                                     <div>
-                                        <dt class="text-indigo-700">Timestamp</dt>
+                                        <dt class="text-indigo-700">${translations[currentLang].timestamp || 'Timestamp'}</dt>
                                         <dd class="text-indigo-900 mt-1">${record?.timestamp || "N/A"}</dd>
                                     </div>
                                 </div>
                                 <div class="text-sm mb-3">
-                                    <dt class="text-indigo-700">Reason</dt>
+                                    <dt class="text-indigo-700">${translations[currentLang].reason || 'Reason'}</dt>
                                     <dd class="text-indigo-900 mt-1">${reasonText}</dd>
                                 </div>
                                 ${photoGrid}
@@ -5898,23 +5899,23 @@ function showSidebar(item) {
                         `;
                     }).join("")}
                 </div>
-            ` : `<div class="text-sm text-indigo-800 mb-4">No maintenance records.</div>`}
+            ` : `<div class="text-sm text-indigo-800 mb-4">${translations[currentLang].noMaintenanceRecords || 'No maintenance records.'}</div>`}
             <div class="flex flex-wrap gap-6">
                 <div>
-                    <dt class="text-sm font-medium text-indigo-700">Total Minutes</dt>
-                    <dd class="text-sm text-indigo-900 mt-1">${maintenanceData?.totalMinutes ?? 0} minutes</dd>
+                    <dt class="text-sm font-medium text-indigo-700">${translations[currentLang].maintenanceTotalMinutes || 'Total Minutes'}</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${maintenanceData?.totalMinutes ?? 0} ${translations[currentLang].minutes || 'minutes'}</dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-indigo-700">Total Hours</dt>
-                    <dd class="text-sm text-indigo-900 mt-1">${maintenanceData?.totalHours ?? 0} hours</dd>
+                    <dt class="text-sm font-medium text-indigo-700">${translations[currentLang].maintenanceTotalHours || 'Total Hours'}</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${maintenanceData?.totalHours ?? 0} ${translations[currentLang].hours || 'hours'}</dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-indigo-700">Total Trouble Minutes</dt>
-                    <dd class="text-sm text-indigo-900 mt-1">${item.Total_Trouble_Minutes ?? 0} minutes</dd>
+                    <dt class="text-sm font-medium text-indigo-700">${translations[currentLang].maintenanceTotalTroubleMinutes || 'Total Trouble Minutes'}</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${item.Total_Trouble_Minutes ?? 0} ${translations[currentLang].minutes || 'minutes'}</dd>
                 </div>
                 <div>
-                    <dt class="text-sm font-medium text-indigo-700">Total Trouble Hours</dt>
-                    <dd class="text-sm text-indigo-900 mt-1">${item.Total_Trouble_Hours ?? 0} hours</dd>
+                    <dt class="text-sm font-medium text-indigo-700">${translations[currentLang].maintenanceTotalTroubleHours || 'Total Trouble Hours'}</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${item.Total_Trouble_Hours ?? 0} ${translations[currentLang].hours || 'hours'}</dd>
                 </div>
             </div>
         </div>
@@ -5988,7 +5989,7 @@ function showSidebar(item) {
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             <div class="lg:col-span-2">
                 <div class="bg-white border border-gray-200 rounded-lg p-6">
-                    <h4 class="text-lg font-semibold text-gray-900 mb-4">Production Information</h4>
+                    <h4 class="text-lg font-semibold text-gray-900 mb-4">${_lang.productionInformation || 'Production Information'}</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="sidebarFields">
                         <div class="space-y-3">
                             ${leftEntries.map(renderEntry).join("")}
@@ -5998,15 +5999,15 @@ function showSidebar(item) {
                         </div>
                     </div>
                     <div class="mt-4 flex gap-2">
-                        <button id="editSidebarBtn" class="text-blue-600 underline text-sm">Edit</button>
-                        <button id="saveSidebarBtn" class="hidden bg-green-500 text-white px-3 py-1 rounded text-sm">OK</button>
-                        <button id="cancelSidebarBtn" class="hidden bg-gray-300 text-black px-3 py-1 rounded text-sm">Cancel</button>
+                        <button id="editSidebarBtn" class="text-blue-600 underline text-sm">${_lang.edit || 'Edit'}</button>
+                        <button id="saveSidebarBtn" class="hidden bg-green-500 text-white px-3 py-1 rounded text-sm">${_lang.ok || 'OK'}</button>
+                        <button id="cancelSidebarBtn" class="hidden bg-gray-300 text-black px-3 py-1 rounded text-sm">${_lang.cancel || 'Cancel'}</button>
                     </div>
                 </div>
             </div>
             <div class="space-y-4">
                 <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h5 class="font-medium text-blue-900 mb-3">Production Stats</h5>
+                    <h5 class="font-medium text-blue-900 mb-3">${_lang.productionStats || 'Production Stats'}</h5>
                     <div class="space-y-2">
                         ${statsRows.map(row => `
                             <div class="flex justify-between">
@@ -6017,7 +6018,7 @@ function showSidebar(item) {
                     </div>
                 </div>
                 <div class="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <h5 class="font-medium text-red-900 mb-3">NG Analysis</h5>
+                    <h5 class="font-medium text-red-900 mb-3">${_lang.ngAnalysis || 'NG Analysis'}</h5>
                     <div class="space-y-2">
                         ${ngRows.map(row => `
                             <div class="flex justify-between">
@@ -6032,7 +6033,7 @@ function showSidebar(item) {
         ${breakSection}
         ${maintenanceSection}
         <div class="border border-gray-200 rounded-lg p-6">
-            <h4 class="text-lg font-semibold text-gray-900 mb-4">Images</h4>
+            <h4 class="text-lg font-semibold text-gray-900 mb-4">${_lang.images || 'Images'}</h4>
             <div id="masterImageContainer" class="mb-4">
                 <!-- Master DB image will be loaded here -->
             </div>
@@ -6051,7 +6052,7 @@ function showSidebar(item) {
                         </div>
                     `).join("")}
                 </div>
-            ` : `<div class="text-sm text-gray-500">No images available.</div>`}
+            ` : `<div class="text-sm text-gray-500">${_lang.noImagesAvailable || 'No images available.'}</div>`}
         </div>
     `;
 
@@ -6317,7 +6318,7 @@ const FACTORY_ITEMS_PER_PAGE = 10;
 
 async function loadProductionByPeriod(factory, from, to, partNumbers = [], serialNumbers = []) {
     const container = document.getElementById("dailyProduction");
-    container.innerHTML = "Loading production data...";
+    container.innerHTML = translations[currentLang].loadingProductionData || "Loading production data...";
   
     const processes = [
       { name: "Kensa", collection: "kensaDB" },
@@ -6543,7 +6544,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                             <h4 class="text-lg font-semibold">${proc.name} Process</h4>
                           </div>
                           <div class="text-sm text-gray-600">
-                            ${totalItems} records
+                            ${totalItems} ${translations[currentLang].records || 'records'}
                           </div>
                         </div>
                       </div>
@@ -6589,7 +6590,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                             ${pageData.length === 0 ? `
                               <tr>
                                 <td colspan="8" class="px-2 sm:px-4 py-6 sm:py-8 text-center text-gray-500 text-xs sm:text-sm">
-                                  ${searchTerm ? 'No results found for your search' : 'No data available'}
+                                  ${searchTerm ? (translations[currentLang].noDataFound || 'No results found for your search') : (translations[currentLang].noDataAvailable || 'No data available')}
                                 </td>
                               </tr>
                             ` : pageData.map((item, index) => {
