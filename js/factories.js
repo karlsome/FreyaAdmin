@@ -4996,26 +4996,29 @@ function renderFactoryDashboard({ factoryName, pressData, srsData, kensaData, sl
         </div>
         </div>
 
-        <!-- Production Results -->
-        <div id="dailyProduction" class="mb-10"></div>
+                <!-- Production Results -->
+                <div id="dailyProduction" class="mb-10"></div>
 
-        <!-- Detail Sidebar -->
-        <div id="detailSidebar" class="fixed top-0 right-0 w-full md:w-[600px] h-full bg-white shadow-lg transform translate-x-full transition-transform duration-300 z-50 p-4 overflow-y-auto max-h-screen">
-          <button onclick="closeSidebar()" class="mb-4 text-red-500 font-semibold w-full text-left md:w-auto">Close</button>
-          <div id="sidebarContent"></div>
-        </div>
+                <!-- Detail Modal Backdrop -->
+                <div id="sidebarBackdrop"
+                    class="fixed inset-0 bg-gray-600 bg-opacity-50 z-40 hidden"></div>
 
-        <!-- Backdrop for mobile -->
-        <div id="sidebarBackdrop"
-            class="fixed inset-0 bg-black bg-opacity-30 z-40 hidden"
-            onclick="closeSidebar()"></div>
-
-        <!-- Detail Sidebar -->
-        <div id="detailSidebar"
-            class="fixed top-0 right-0 w-full max-w-lg h-full bg-white shadow-lg transform translate-x-full transition-transform duration-300 z-50 p-4 overflow-y-auto md:w-[600px]">
-          <button onclick="closeSidebar()" class="mb-4 text-red-500 font-semibold">Close</button>
-          <div id="sidebarContent"></div>
-        </div>
+                <!-- Detail Modal -->
+                <div id="detailModal" class="fixed inset-0 z-50 hidden">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div id="detailModalPanel" class="bg-white rounded-lg max-w-6xl w-full max-h-screen overflow-y-auto">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-semibold">Production Record Details</h3>
+                                    <button onclick="closeSidebar()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="ri-close-line text-xl"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="sidebarContent" class="p-6"></div>
+                        </div>
+                    </div>
+                </div>
 
         <!-- Summary Cards -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-4 sm:mb-6">
@@ -5266,7 +5269,7 @@ function showSidebarFromElement(el) {
  * @param {Object} item - The PSA process record data
  */
 function showPSASidebar(item) {
-    const sidebar = document.getElementById("detailSidebar");
+    const modal = document.getElementById("detailModal");
     const backdrop = document.getElementById("sidebarBackdrop");
     const content = document.getElementById("sidebarContent");
 
@@ -5451,8 +5454,8 @@ function showPSASidebar(item) {
         </div>
     `;
 
-    // Show sidebar
-    sidebar.classList.remove("translate-x-full");
+    // Show modal
+    modal.classList.remove("hidden");
     backdrop.classList.remove("hidden");
     document.body.style.overflow = "hidden";
 }
@@ -5490,7 +5493,7 @@ function showPSASidebarFromElement(el) {
  * @param {Object} item - The production record data
  */
 function showSidebar(item) {
-  const sidebar = document.getElementById("detailSidebar");
+    const modal = document.getElementById("detailModal");
   const backdrop = document.getElementById("sidebarBackdrop");
   const content = document.getElementById("sidebarContent");
   const originalItem = JSON.parse(JSON.stringify(item));
@@ -5522,7 +5525,7 @@ function showSidebar(item) {
 
     console.log("Process Type Detected:", { isKensa, isPress, isSRS, isSlit });
 
-  if (isKensa) {
+    if (isKensa) {
     processType = "kensaDB";
     const fields = ["品番", "背番号", "工場", "日付", "作業者", "設備", "数量", "残数量", "不良数", "Total", "開始", "終了", "製造ロット", "コメント", "サイクルタイム"];
     fields.forEach(label => entries.push([label, item[labelToKeyMap[label]] ?? ""]));
@@ -5541,86 +5544,280 @@ function showSidebar(item) {
     fields.forEach(label => entries.push([label, item[labelToKeyMap[label]] ?? ""]));
   }
 
-  content.innerHTML = `
-    <h3 class="text-xl font-bold mb-4">${item["品番"] ?? "データ"}</h3>
-    <div class="space-y-2" id="sidebarFields">
-      ${entries.map(([label, value]) => {
+    const materialLabelImages = [];
+    const materialLabelImageSet = new Set();
+    const addMaterialLabelImage = (url, title) => {
+        if (!url || materialLabelImageSet.has(url)) return;
+        materialLabelImageSet.add(url);
+        materialLabelImages.push({ title, url });
+    };
+
+    if (Array.isArray(item.materialLabelImages)) {
+        item.materialLabelImages.forEach((url, index) => {
+            addMaterialLabelImage(url, `材料ラベル ${index + 1}`);
+        });
+    }
+
+    if (item["材料ラベル画像"]) {
+        addMaterialLabelImage(item["材料ラベル画像"], "材料ラベル");
+    }
+
+    Object.keys(item)
+        .filter(key => /^材料ラベル画像\d+$/.test(key))
+        .sort((a, b) => Number(a.replace("材料ラベル画像", "")) - Number(b.replace("材料ラベル画像", "")))
+        .forEach(key => {
+            addMaterialLabelImage(item[key], key);
+        });
+
+    const midIndex = Math.ceil(entries.length / 2);
+    const leftEntries = entries.slice(0, midIndex);
+    const rightEntries = entries.slice(midIndex);
+
+    const totalNG = Number(item.Total_NG ?? 0);
+    const statsRows = [
+        { label: "Quantity Made", value: Number(item.Process_Quantity ?? 0).toLocaleString() },
+        { label: "Actual Total", value: Number(item.Total ?? 0).toLocaleString() },
+        { label: "Cycle Time", value: item.Cycle_Time ? `${item.Cycle_Time}s` : "N/A" },
+        { label: "Shot Count", value: item["ショット数"] ?? "N/A" }
+    ];
+
+    let ngRows = [{ label: "Total NG", value: totalNG.toLocaleString() }];
+    if (isPress || isSlit) {
+        ngRows = [
+            { label: "Total NG", value: totalNG.toLocaleString() },
+            { label: "Non Conforming (Internal)", value: Number(item["疵引不良"] ?? 0).toLocaleString() },
+            { label: "Non Conforming (Supplier)", value: Number(item["加工不良"] ?? 0).toLocaleString() },
+            { label: "Others", value: Number(item["その他"] ?? 0).toLocaleString() }
+        ];
+    } else if (isSRS) {
+        ngRows = [
+            { label: "Total NG", value: totalNG.toLocaleString() },
+            { label: "くっつき・めくれ", value: Number(item["くっつき・めくれ"] ?? 0).toLocaleString() },
+            { label: "シワ", value: Number(item["シワ"] ?? 0).toLocaleString() },
+            { label: "転写位置ズレ", value: Number(item["転写位置ズレ"] ?? 0).toLocaleString() },
+            { label: "転写不良", value: Number(item["転写不良"] ?? 0).toLocaleString() },
+            { label: "その他", value: Number(item["その他"] ?? 0).toLocaleString() }
+        ];
+    }
+
+    const imageCards = [];
+    if (item["初物チェック画像"]) {
+        imageCards.push({ label: "初物チェック画像", url: item["初物チェック画像"] });
+    }
+    if (item["終物チェック画像"]) {
+        imageCards.push({ label: "終物チェック画像", url: item["終物チェック画像"] });
+    }
+    materialLabelImages.forEach(img => {
+        imageCards.push({ label: img.title, url: img.url });
+    });
+
+    const breakData = item.Break_Time_Data;
+    const breakEntries = breakData && typeof breakData === "object"
+        ? Object.entries(breakData)
+              .filter(([, data]) => data && (data.start || data.end))
+              .map(([key, data]) => ({
+                  label: key.toUpperCase(),
+                  value: `${data.start || "N/A"} - ${data.end || "N/A"}`
+              }))
+        : [];
+
+    const breakSection = breakData ? `
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
+            <h4 class="text-lg font-semibold text-yellow-900 mb-4">Break Time Information</h4>
+            ${breakEntries.length > 0 ? `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    ${breakEntries.map(entry => `
+                        <div>
+                            <dt class="text-sm font-medium text-yellow-700">${entry.label}</dt>
+                            <dd class="text-sm text-yellow-900 mt-1">${entry.value}</dd>
+                        </div>
+                    `).join("")}
+                </div>
+            ` : `<div class="text-sm text-yellow-800 mb-4">No break entries recorded.</div>`}
+            <div class="flex flex-wrap gap-6">
+                <div>
+                    <dt class="text-sm font-medium text-yellow-700">Total Break Minutes</dt>
+                    <dd class="text-sm text-yellow-900 mt-1">${item.Total_Break_Minutes ?? 0} minutes</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-yellow-700">Total Break Hours</dt>
+                    <dd class="text-sm text-yellow-900 mt-1">${item.Total_Break_Hours ?? 0} hours</dd>
+                </div>
+            </div>
+        </div>
+    ` : "";
+
+    const maintenanceData = item.Maintenance_Data;
+    const maintenanceRecords = Array.isArray(maintenanceData?.records) ? maintenanceData.records : [];
+    const maintenanceSection = maintenanceData ? `
+        <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-6 mb-6">
+            <h4 class="text-lg font-semibold text-indigo-900 mb-4">Maintenance Information</h4>
+            ${maintenanceRecords.length > 0 ? `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    ${maintenanceRecords.map((record, index) => {
+                        const entries = Object.entries(record || {})
+                            .map(([key, value]) => `
+                                <div class="text-sm">
+                                    <span class="text-indigo-700">${key}:</span>
+                                    <span class="text-indigo-900 ml-1">${value || "N/A"}</span>
+                                </div>
+                            `).join("");
+                        return `
+                            <div class="border border-indigo-200 rounded p-3 bg-white">
+                                <h6 class="font-medium text-indigo-900 mb-2">Record ${index + 1}</h6>
+                                <div class="space-y-1">${entries || '<div class="text-sm text-indigo-700">No details</div>'}</div>
+                            </div>
+                        `;
+                    }).join("")}
+                </div>
+            ` : `<div class="text-sm text-indigo-800 mb-4">No maintenance records.</div>`}
+            <div class="flex flex-wrap gap-6">
+                <div>
+                    <dt class="text-sm font-medium text-indigo-700">Total Minutes</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${maintenanceData?.totalMinutes ?? 0} minutes</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-indigo-700">Total Hours</dt>
+                    <dd class="text-sm text-indigo-900 mt-1">${maintenanceData?.totalHours ?? 0} hours</dd>
+                </div>
+            </div>
+        </div>
+    ` : "";
+
+    const renderEntry = ([label, value]) => {
         const isComment = label === "コメント" || label === "Comment";
         const isMaterialLot = label === "材料ロット" && isPress;
         const isManufacturingLot = label === "製造ロット" && isKensa;
-        
+
         if (isComment) {
-          return `
-            <div class="flex items-start gap-2">
-              <label class="font-medium w-32 shrink-0 pt-1">${label}</label>
-              <textarea class="editable-input p-1 border rounded w-full bg-gray-100 resize-none overflow-hidden" 
-                        data-label="${label}" 
-                        disabled
-                        style="min-height: 2.5rem;"
-                        oninput="this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'">${value ?? ""}</textarea>
-            </div>
-          `;
-        } else if (isMaterialLot && value) {
-          // Make 材料ロット clickable - split by comma or space and make each clickable
-          const lots = value.toString().split(/[,\s]+/).filter(lot => lot.trim());
-          const clickableLots = lots.map(lot => 
-            `<span class="material-lot-link text-blue-600 hover:text-blue-800 cursor-pointer underline" 
-                   onclick="openMaterialLotModal('${lot.trim()}', '${item["品番"] ?? ""}')">${lot.trim()}</span>`
-          ).join(', ');
-          
-          return `
-            <div class="flex items-center gap-2">
-              <label class="font-medium w-32 shrink-0">${label}</label>
-              <div class="editable-input p-1 border rounded w-full bg-gray-100" data-label="${label}" data-raw-value="${value ?? ""}">${clickableLots}</div>
-            </div>
-          `;
-        } else if (isManufacturingLot && value) {
-          // Make 製造ロット clickable for Kensa - opens pressDB detail
-          const lots = value.toString().split(/[,\s]+/).filter(lot => lot.trim());
-          const clickableLots = lots.map(lot => 
-            `<span class="manufacturing-lot-link text-blue-600 hover:text-blue-800 cursor-pointer underline" 
-                   onclick="openPressDetailModal('${lot.trim()}', '${item["品番"] ?? ""}', '${item["背番号"] ?? ""}')">${lot.trim()}</span>`
-          ).join(', ');
-          
-          return `
-            <div class="flex items-center gap-2">
-              <label class="font-medium w-32 shrink-0">${label}</label>
-              <div class="editable-input p-1 border rounded w-full bg-gray-100" data-label="${label}" data-raw-value="${value ?? ""}">${clickableLots}</div>
-            </div>
-          `;
-        } else {
-          return `
-            <div class="flex items-center gap-2">
-              <label class="font-medium w-32 shrink-0">${label}</label>
-              <input type="text" class="editable-input p-1 border rounded w-full bg-gray-100" data-label="${label}" value="${value ?? ""}" disabled />
-            </div>
-          `;
+            return `
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">${label}</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        <textarea class="editable-input p-2 border rounded w-full bg-gray-50 resize-none overflow-hidden" 
+                                  data-label="${label}" 
+                                  disabled
+                                  style="min-height: 2.5rem;"
+                                  oninput="this.style.height = 'auto'; this.style.height = this.scrollHeight + 'px'">${value ?? ""}</textarea>
+                    </dd>
+                </div>
+            `;
         }
-      }).join("")}
-    </div>
-    <div class="mt-4 flex gap-2">
-      <button id="editSidebarBtn" class="text-blue-600 underline text-sm">Edit</button>
-      <button id="saveSidebarBtn" class="hidden bg-green-500 text-white px-3 py-1 rounded text-sm">OK</button>
-      <button id="cancelSidebarBtn" class="hidden bg-gray-300 text-black px-3 py-1 rounded text-sm">Cancel</button>
-    </div>
-        <div class="mt-6 space-y-4">
-        <div id="masterImageContainer">
-          <!-- Master DB image will be loaded here -->
-        </div>
-        ${["初物チェック画像", "終物チェック画像", "材料ラベル画像"].map(label => {
-          const url = item[label];
-          if (!url) return "";
-          return `
+
+        if (isMaterialLot && value) {
+            const lots = value.toString().split(/[,\s]+/).filter(lot => lot.trim());
+            const clickableLots = lots.map(lot => 
+                `<span class="material-lot-link text-blue-600 hover:text-blue-800 cursor-pointer underline" 
+                       onclick="openMaterialLotModal('${lot.trim()}', '${item["品番"] ?? ""}')">${lot.trim()}</span>`
+            ).join(', ');
+
+            return `
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">${label}</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        <div class="editable-input p-2 border rounded w-full bg-gray-50" data-label="${label}" data-raw-value="${value ?? ""}">${clickableLots}</div>
+                    </dd>
+                </div>
+            `;
+        }
+
+        if (isManufacturingLot && value) {
+            const lots = value.toString().split(/[,\s]+/).filter(lot => lot.trim());
+            const clickableLots = lots.map(lot => 
+                `<span class="manufacturing-lot-link text-blue-600 hover:text-blue-800 cursor-pointer underline" 
+                       onclick="openPressDetailModal('${lot.trim()}', '${item["品番"] ?? ""}', '${item["背番号"] ?? ""}')">${lot.trim()}</span>`
+            ).join(', ');
+
+            return `
+                <div>
+                    <dt class="text-sm font-medium text-gray-500">${label}</dt>
+                    <dd class="text-sm text-gray-900 mt-1">
+                        <div class="editable-input p-2 border rounded w-full bg-gray-50" data-label="${label}" data-raw-value="${value ?? ""}">${clickableLots}</div>
+                    </dd>
+                </div>
+            `;
+        }
+
+        return `
             <div>
-              <p class="font-semibold text-sm mb-1">${label}</p>
-              <a href="#" onclick="openImageTab('${url}', '${label}'); return false;">
-                <img src="${url}" alt="${label}" class="rounded shadow w-full max-h-60 object-contain sm:max-w-md mx-auto hover:opacity-90 cursor-zoom-in" />
-              </a>
+                <dt class="text-sm font-medium text-gray-500">${label}</dt>
+                <dd class="text-sm text-gray-900 mt-1">
+                    <input type="text" class="editable-input p-2 border rounded w-full bg-gray-50" data-label="${label}" value="${value ?? ""}" disabled />
+                </dd>
             </div>
-          `;
-        }).join("")}
-      </div>
-  `;
+        `;
+    };
+
+    content.innerHTML = `
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="lg:col-span-2">
+                <div class="bg-white border border-gray-200 rounded-lg p-6">
+                    <h4 class="text-lg font-semibold text-gray-900 mb-4">Production Information</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="sidebarFields">
+                        <div class="space-y-3">
+                            ${leftEntries.map(renderEntry).join("")}
+                        </div>
+                        <div class="space-y-3">
+                            ${rightEntries.map(renderEntry).join("")}
+                        </div>
+                    </div>
+                    <div class="mt-4 flex gap-2">
+                        <button id="editSidebarBtn" class="text-blue-600 underline text-sm">Edit</button>
+                        <button id="saveSidebarBtn" class="hidden bg-green-500 text-white px-3 py-1 rounded text-sm">OK</button>
+                        <button id="cancelSidebarBtn" class="hidden bg-gray-300 text-black px-3 py-1 rounded text-sm">Cancel</button>
+                    </div>
+                </div>
+            </div>
+            <div class="space-y-4">
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h5 class="font-medium text-blue-900 mb-3">Production Stats</h5>
+                    <div class="space-y-2">
+                        ${statsRows.map(row => `
+                            <div class="flex justify-between">
+                                <span class="text-sm text-blue-700">${row.label}:</span>
+                                <span class="text-sm font-medium text-blue-900">${row.value}</span>
+                            </div>
+                        `).join("")}
+                    </div>
+                </div>
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <h5 class="font-medium text-red-900 mb-3">NG Analysis</h5>
+                    <div class="space-y-2">
+                        ${ngRows.map(row => `
+                            <div class="flex justify-between">
+                                <span class="text-sm text-red-700">${row.label}:</span>
+                                <span class="text-sm font-medium text-red-900">${row.value}</span>
+                            </div>
+                        `).join("")}
+                    </div>
+                </div>
+            </div>
+        </div>
+        ${breakSection}
+        ${maintenanceSection}
+        <div class="border border-gray-200 rounded-lg p-6">
+            <h4 class="text-lg font-semibold text-gray-900 mb-4">Images</h4>
+            <div id="masterImageContainer" class="mb-4">
+                <!-- Master DB image will be loaded here -->
+            </div>
+            ${imageCards.length > 0 ? `
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    ${imageCards.map(img => `
+                        <div class="space-y-2">
+                            <div class="text-sm font-medium text-gray-700">${img.label}</div>
+                            <div class="border border-gray-200 rounded-lg overflow-hidden">
+                                <img src="${img.url}"
+                                     alt="${img.label}"
+                                     class="w-full h-32 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                     onclick="openImageTab('${img.url}', '${img.label}')"
+                                />
+                            </div>
+                        </div>
+                    `).join("")}
+                </div>
+            ` : `<div class="text-sm text-gray-500">No images available.</div>`}
+        </div>
+    `;
 
   // Initialize textarea height for comment fields
   const commentTextareas = content.querySelectorAll('textarea[data-label="コメント"], textarea[data-label="Comment"]');
@@ -5633,8 +5830,9 @@ function showSidebar(item) {
   // Load master DB image
   loadMasterImage(item["品番"], item["背番号"]);
 
-  sidebar.classList.remove("translate-x-full");
-  backdrop.classList.remove("hidden");
+    modal.classList.remove("hidden");
+    backdrop.classList.remove("hidden");
+    document.body.style.overflow = "hidden";
   //picLINK(item["背番号"], item["品番"]);
 
   const inputs = () => Array.from(document.querySelectorAll(".editable-input"));
@@ -5855,20 +6053,14 @@ function validateInputs() {
  * Closes the right-side detail sidebar and hides the backdrop.
  */
 function closeSidebar() {
-    document.getElementById("detailSidebar").classList.add("translate-x-full");
-    document.getElementById("sidebarBackdrop").classList.add("hidden");
-    document.body.style.overflow = ""; // Restore scrolling
+        const modal = document.getElementById("detailModal");
+        const backdrop = document.getElementById("sidebarBackdrop");
+        if (modal) modal.classList.add("hidden");
+        if (backdrop) backdrop.classList.add("hidden");
+        document.body.style.overflow = ""; // Restore scrolling
 }
 
-// Ensure sidebar closes when clicking outside (desktop and mobile)
-document.addEventListener("mousedown", function(event) {
-  const sidebar = document.getElementById("detailSidebar");
-  const backdrop = document.getElementById("sidebarBackdrop");
-  if (!sidebar || sidebar.classList.contains("translate-x-full")) return; // Sidebar not open
-  if (!sidebar.contains(event.target)) {
-    closeSidebar();
-  }
-});
+// Outside click should not close the detail modal.
 
 
 /**
