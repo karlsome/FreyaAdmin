@@ -895,6 +895,14 @@ function loadPage(page) {
                                 <i class="ri-calendar-check-line mr-1 text-blue-500"></i>
                                 <span data-i18n="showingCurrentDate">Showing current date data</span>
                             </div>
+                            <button
+                              id="showAllImagesBtn"
+                              class="hidden px-3 py-2 text-sm font-medium rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+                              onclick="openAllImagesModal()"
+                            >
+                              <i class="ri-image-line mr-1"></i>
+                              <span data-i18n="showAllUploadedImages">Show All Uploaded Images</span>
+                            </button>
                         </div>
                     </div>
 
@@ -1014,6 +1022,22 @@ function loadPage(page) {
                             <div id="approvalModalContent" class="p-6"></div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Approval Images Modal -->
+                <div id="approvalImagesModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+                  <div class="flex items-center justify-center min-h-screen p-4">
+                    <div class="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+                      <div class="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
+                        <div>
+                          <h3 class="text-lg font-semibold">Uploaded Images</h3>
+                          <p id="approvalImagesSubtitle" class="text-xs text-gray-500"></p>
+                        </div>
+                        <button onclick="closeApprovalImagesModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+                      </div>
+                      <div id="approvalImagesModalContent" class="p-6"></div>
+                    </div>
+                  </div>
                 </div>
             `;
             initializeApprovalSystem();
@@ -6394,6 +6418,18 @@ let currentApprovalTab = 'kensaDB'; // Default tab
 let currentUserData = {}; // Cache user data
 let approvalStatistics = {}; // Cache statistics
 let dataRangeMode = 'current'; // 'current' or 'all' - controls whether to show current date or all historical data
+let lastSelectedApprovalItem = null;
+let lastSelectedApprovalItemId = null;
+let approvalGalleryEntries = [];
+let approvalGalleryRenderCount = 0;
+const approvalGalleryPageSize = 200;
+
+function updateShowAllImagesButtonVisibility() {
+  const button = document.getElementById('showAllImagesBtn');
+  if (!button) return;
+  const isPressTab = currentApprovalTab === 'pressDB';
+  button.classList.toggle('hidden', !isPressTab);
+}
 
 /**
  * Load unique factory options for the current approval tab
@@ -6630,6 +6666,7 @@ function initializeApprovalSystem() {
     
     // Initialize tab styles
     updateTabStyles();
+    updateShowAllImagesButtonVisibility();
     
     // Load factory options for all collections in batch (for better performance)
     if (typeof loadFactoryOptionsBatch === 'function') {
@@ -6657,6 +6694,7 @@ function initializeApprovalSystem() {
 window.switchApprovalTab = function(tabName) {
     currentApprovalTab = tabName;
     updateTabStyles();
+  updateShowAllImagesButtonVisibility();
     
     // Update factory dropdown for the new tab
     if (typeof updateFactoryDropdownForTab === 'function') {
@@ -8162,13 +8200,249 @@ function updateImageSrc(link) {
     imageElement.style.display = "block";
 }
 
+function normalizeImageList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value.trim() ? [value] : [];
+  }
+  return [];
+}
+
+function collectMaterialLabelImages(item) {
+  const images = [];
+  const baseImages = normalizeImageList(item['材料ラベル画像']);
+  images.push(...baseImages);
+
+  Object.keys(item || {}).forEach(key => {
+    if (key !== '材料ラベル画像' && key.startsWith('材料ラベル画像')) {
+      images.push(...normalizeImageList(item[key]));
+    }
+  });
+
+  return images;
+}
+
+function collectMaintenancePhotos(item) {
+  const photos = [];
+  const records = item?.Maintenance_Data?.records;
+  if (Array.isArray(records)) {
+    records.forEach(record => {
+      photos.push(...normalizeImageList(record?.photos));
+    });
+  }
+  return photos;
+}
+
+function collectApprovalImageEntries(item, tabName) {
+  const entries = [];
+  const seen = new Set();
+
+  const pushEntry = (label, url, sourceKey) => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    entries.push({ label, url, sourceKey });
+  };
+
+  const addFromList = (labelBase, urls, sourceKey) => {
+    urls.forEach((url, index) => {
+      const label = urls.length > 1 ? `${labelBase} #${index + 1}` : labelBase;
+      pushEntry(label, url, sourceKey);
+    });
+  };
+
+  addFromList('初物チェック', normalizeImageList(item['初物チェック画像']), '初物チェック画像');
+
+  if (tabName === 'pressDB') {
+    addFromList('終物チェック', normalizeImageList(item['終物チェック画像']), '終物チェック画像');
+    addFromList('材料ラベル', collectMaterialLabelImages(item), '材料ラベル画像');
+  }
+
+  addFromList('メンテ写真', collectMaintenancePhotos(item), 'Maintenance_Data');
+
+  const knownKeys = new Set(['初物チェック画像', '終物チェック画像', '材料ラベル画像', 'Maintenance_Data']);
+  Object.entries(item || {}).forEach(([key, value]) => {
+    if (knownKeys.has(key)) return;
+    if (!/(画像|image|photo)/i.test(key)) return;
+    const values = normalizeImageList(value);
+    values.forEach((url, index) => {
+      const label = values.length > 1 ? `${key} #${index + 1}` : key;
+      pushEntry(label, url, key);
+    });
+  });
+
+  return entries;
+}
+
+async function resolveApprovalItemForImages() {
+  if (lastSelectedApprovalItem && lastSelectedApprovalItem._id) {
+    return lastSelectedApprovalItem;
+  }
+
+  let itemId = null;
+  const viewMode = document.getElementById('viewModeSelect')?.value;
+  if (viewMode === 'list') {
+    const selected = document.querySelectorAll('.list-checkbox:checked:not(:disabled)');
+    if (selected.length === 1) {
+      itemId = selected[0].dataset.itemId;
+    }
+  }
+
+  if (!itemId && lastSelectedApprovalItemId) {
+    itemId = lastSelectedApprovalItemId;
+  }
+
+  if (!itemId) return null;
+
+  const cached = filteredApprovalData.find(d => d._id === itemId);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(BASE_URL + "queries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dbName: "submittedDB",
+        collectionName: currentApprovalTab,
+        query: { _id: itemId }
+      })
+    });
+
+    if (!response.ok) return null;
+    const items = await response.json();
+    return items[0] || null;
+  } catch (error) {
+    console.error('❌ Error fetching item for images:', error);
+    return null;
+  }
+}
+
+window.openAllImagesModal = async function() {
+  if (currentApprovalTab !== 'pressDB') return;
+  const content = document.getElementById('approvalImagesModalContent');
+  const subtitle = document.getElementById('approvalImagesSubtitle');
+
+  approvalGalleryEntries = [];
+  approvalGalleryRenderCount = 0;
+
+  if (content) {
+    content.innerHTML = '<div class="text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-xl mr-2"></i>Loading images...</div>';
+  }
+
+  if (subtitle) {
+    const dateFilter = document.getElementById('dateFilter')?.value || 'All Dates';
+    const factoryFilter = document.getElementById('factoryFilter')?.value || 'All Factories';
+    subtitle.textContent = `Filters: ${dateFilter} / ${factoryFilter}`;
+  }
+
+  document.getElementById('approvalImagesModal').classList.remove('hidden');
+
+  let allData = [];
+  try {
+    allData = await loadApprovalDataForListView();
+  } catch (error) {
+    console.error('❌ Error loading data for image gallery:', error);
+  }
+
+  allData.forEach(item => {
+    const entries = collectApprovalImageEntries(item, currentApprovalTab);
+    const summary = `${item.品番 || '-'} / ${item.背番号 || '-'} / ${item.工場 || '-'} / ${item.Date || '-'}`;
+    entries.forEach(entry => {
+      approvalGalleryEntries.push({
+        ...entry,
+        itemId: item._id,
+        itemSummary: summary
+      });
+    });
+  });
+
+  renderApprovalImagesGallery(true);
+};
+
+window.closeApprovalImagesModal = function() {
+  const modal = document.getElementById('approvalImagesModal');
+  if (modal) {
+    modal.classList.add('hidden');
+  }
+  approvalGalleryEntries = [];
+  approvalGalleryRenderCount = 0;
+};
+
+window.toggleImageActions = function(actionId) {
+  const actions = document.getElementById(actionId);
+  if (actions) {
+    actions.classList.toggle('hidden');
+  }
+};
+
+function renderApprovalImagesGallery(reset = false) {
+  const content = document.getElementById('approvalImagesModalContent');
+  if (!content) return;
+
+  if (reset) {
+    approvalGalleryRenderCount = 0;
+    content.innerHTML = '';
+  }
+
+  if (approvalGalleryEntries.length === 0) {
+    content.innerHTML = '<div class="text-center text-gray-500">No uploaded images found for the current filters.</div>';
+    return;
+  }
+
+  const sliceStart = approvalGalleryRenderCount;
+  const sliceEnd = Math.min(sliceStart + approvalGalleryPageSize, approvalGalleryEntries.length);
+  const slice = approvalGalleryEntries.slice(sliceStart, sliceEnd);
+
+  approvalGalleryRenderCount = sliceEnd;
+
+  let galleryGrid = content.querySelector('#approvalImagesGrid');
+  if (!galleryGrid) {
+    content.innerHTML = '<div id="approvalImagesGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div><div id="approvalImagesLoadMore" class="mt-6 text-center"></div>';
+    galleryGrid = content.querySelector('#approvalImagesGrid');
+  }
+
+  const newCards = slice.map((entry, indexOffset) => {
+    const entryIndex = sliceStart + indexOffset;
+    const actionId = `imageActions-${entryIndex}`;
+    return `
+      <div class="bg-gray-50 border rounded-lg p-3">
+        <div class="text-xs font-medium text-gray-700 mb-2">${entry.label}</div>
+        <div class="text-[11px] text-gray-500 mb-2">${entry.itemSummary}</div>
+        <img
+          src="${entry.url}"
+          alt="${entry.label}"
+          class="w-full h-40 object-cover rounded border cursor-pointer hover:opacity-80 transition-opacity"
+          onclick="toggleImageActions('${actionId}')"
+        >
+        <div id="${actionId}" class="hidden mt-3 flex gap-2">
+          <button type="button" class="flex-1 px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" onclick="window.open('${entry.url}', '_blank')">Full View</button>
+          <button type="button" class="flex-1 px-3 py-1.5 text-xs rounded bg-gray-200 text-gray-800 hover:bg-gray-300" onclick="closeApprovalImagesModal(); openApprovalDetail('${entry.itemId}', '${entry.label}')">Open Data</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  galleryGrid.insertAdjacentHTML('beforeend', newCards);
+
+  const loadMoreContainer = content.querySelector('#approvalImagesLoadMore');
+  if (approvalGalleryRenderCount < approvalGalleryEntries.length) {
+    loadMoreContainer.innerHTML = `
+      <button type="button" class="px-4 py-2 text-sm rounded border bg-white hover:bg-gray-50" onclick="renderApprovalImagesGallery()">Load more (${approvalGalleryRenderCount}/${approvalGalleryEntries.length})</button>
+    `;
+  } else {
+    loadMoreContainer.innerHTML = '<div class="text-xs text-gray-500">All images loaded.</div>';
+  }
+}
+
 /**
  * Open approval detail modal with images
  */
 /**
  * Open approval detail modal with images (UPDATED FOR OPTIMIZATION)
  */
-window.openApprovalDetail = async function(itemId) {
+window.openApprovalDetail = async function(itemId, focusLabel = null) {
     // First try to find item in current page data
     let item = filteredApprovalData.find(d => d._id === itemId);
     
@@ -8218,7 +8492,10 @@ window.openApprovalDetail = async function(itemId) {
     const counterDetails = getCounterDetails(item, currentApprovalTab);
     
     // Get images for this process type
-    const processImages = getProcessImages(item, currentApprovalTab);
+    const processImages = getProcessImages(item, currentApprovalTab, focusLabel);
+
+    lastSelectedApprovalItem = item;
+    lastSelectedApprovalItemId = item._id;
     
     // Check for date/time mismatch
     const mismatch = checkDateTimeMismatch(item);
@@ -8483,38 +8760,19 @@ function getCounterDetails(item, tabName) {
 /**
  * Get process images based on tab
  */
-function getProcessImages(item, tabName) {
-    const submittedImages = [];
-    
-    // Common images for all processes
-    if (item['初物チェック画像']) {
-        submittedImages.push(`
-            <div>
-                <label class="text-sm font-medium text-gray-700 mb-1 block">初物チェック</label>
-                <img src="${item['初物チェック画像']}" alt="初物チェック" class="w-full h-32 object-cover rounded border cursor-pointer hover:opacity-75 transition-opacity" onclick="window.open('${item['初物チェック画像']}', '_blank')" title="クリックで拡大表示">
-            </div>
-        `);
-    }
-    
-    // Process-specific images
-    if (tabName === 'pressDB') {
-        if (item['終物チェック画像']) {
-            submittedImages.push(`
-                <div>
-                    <label class="text-sm font-medium text-gray-700 mb-1 block">終物チェック</label>
-                    <img src="${item['終物チェック画像']}" alt="終物チェック" class="w-full h-32 object-cover rounded border cursor-pointer hover:opacity-75 transition-opacity" onclick="window.open('${item['終物チェック画像']}', '_blank')" title="クリックで拡大表示">
-                </div>
-            `);
-        }
-        if (item['材料ラベル画像']) {
-            submittedImages.push(`
-                <div>
-                    <label class="text-sm font-medium text-gray-700 mb-1 block">材料ラベル</label>
-                    <img src="${item['材料ラベル画像']}" alt="材料ラベル" class="w-full h-32 object-cover rounded border cursor-pointer hover:opacity-75 transition-opacity" onclick="window.open('${item['材料ラベル画像']}', '_blank')" title="クリックで拡大表示">
-                </div>
-            `);
-        }
-    }
+function getProcessImages(item, tabName, focusLabel = null) {
+  const submittedImages = [];
+
+  const entries = collectApprovalImageEntries(item, tabName);
+  entries.forEach(entry => {
+    const highlightClass = focusLabel && entry.label === focusLabel ? 'ring-2 ring-blue-500' : '';
+    submittedImages.push(`
+      <div class="rounded border p-2 ${highlightClass}">
+        <label class="text-sm font-medium text-gray-700 mb-1 block">${entry.label}</label>
+        <img src="${entry.url}" alt="${entry.label}" class="w-full h-32 object-cover rounded border cursor-pointer hover:opacity-75 transition-opacity" onclick="window.open('${entry.url}', '_blank')" title="クリックで拡大表示">
+      </div>
+    `);
+  });
     
     // Master reference image using picLINK function
     let masterImageHTML = `
