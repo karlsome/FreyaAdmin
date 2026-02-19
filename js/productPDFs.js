@@ -45,6 +45,15 @@ async function initProductPDFsPage() {
           <button onclick="switchPDFType('3点総合')" id="tab-3点総合" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
             3点照合 (3-Point Comprehensive)
           </button>
+          <button onclick="switchPDFType('ワンポイント確認票')" id="tab-ワンポイント確認票" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
+            ワンポイント確認票
+          </button>
+          <button onclick="switchPDFType('作業要領書')" id="tab-作業要領書" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
+            作業要領書
+          </button>
+          <button onclick="switchPDFType('動画')" id="tab-動画" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
+            動画 (Video)
+          </button>
         </nav>
       </div>
 
@@ -244,11 +253,43 @@ function switchPDFType(type) {
   });
   
   const activeTab = document.getElementById(`tab-${type}`);
-  activeTab.classList.remove('border-transparent', 'text-gray-500', 'dark:text-gray-400');
-  activeTab.classList.add('border-blue-500', 'text-blue-600', 'dark:text-blue-400');
-  
-  // Reload PDFs list
-  loadPDFsList();
+  if (activeTab) {
+    activeTab.classList.remove('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+    activeTab.classList.add('border-blue-500', 'text-blue-600', 'dark:text-blue-400');
+  }
+
+  // Handle 動画 tab — coming soon
+  const uploadToggleWrapper = document.getElementById('uploadToggleBtn')?.closest('.bg-white');
+
+  if (type === '動画') {
+    // Hide upload panel
+    if (uploadToggleWrapper) uploadToggleWrapper.style.display = 'none';
+    // Show coming soon in list area
+    const pdfsListEl = document.getElementById('pdfsList');
+    const pdfPaginationEl = document.getElementById('pdfPagination');
+    const pdfSearchContainer = document.getElementById('pdfSearchContainer');
+    const pdfModelFilter = document.getElementById('pdfModelFilter');
+    if (pdfsListEl) pdfsListEl.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-24 text-center">
+        <i class="ri-video-line text-6xl text-gray-300 dark:text-gray-600 mb-4"></i>
+        <h3 class="text-xl font-semibold text-gray-500 dark:text-gray-400 mb-2">動画 (Video)</h3>
+        <p class="text-gray-400 dark:text-gray-500 text-sm">この機能は現在準備中です。</p>
+        <p class="text-gray-400 dark:text-gray-500 text-xs mt-1">Coming Soon</p>
+      </div>
+    `;
+    if (pdfPaginationEl) pdfPaginationEl.innerHTML = '';
+    if (pdfSearchContainer) pdfSearchContainer.style.display = 'none';
+    if (pdfModelFilter) pdfModelFilter.style.display = 'none';
+  } else {
+    // Restore upload panel and search controls
+    if (uploadToggleWrapper) uploadToggleWrapper.style.display = '';
+    const pdfSearchContainer = document.getElementById('pdfSearchContainer');
+    const pdfModelFilter = document.getElementById('pdfModelFilter');
+    if (pdfSearchContainer) pdfSearchContainer.style.display = '';
+    if (pdfModelFilter) pdfModelFilter.style.display = '';
+    // Reload PDFs list
+    loadPDFsList();
+  }
 }
 
 // Toggle upload form visibility
