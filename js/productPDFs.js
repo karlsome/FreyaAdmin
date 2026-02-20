@@ -54,6 +54,15 @@ async function initProductPDFsPage() {
           <button onclick="switchPDFType('動画')" id="tab-動画" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
             動画 (Video)
           </button>
+          <button onclick="switchPDFType('その他1')" id="tab-その他1" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
+            その他1
+          </button>
+          <button onclick="switchPDFType('その他2')" id="tab-その他2" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
+            その他2
+          </button>
+          <button onclick="switchPDFType('その他3')" id="tab-その他3" class="pdf-type-tab border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300">
+            その他3
+          </button>
         </nav>
       </div>
 
