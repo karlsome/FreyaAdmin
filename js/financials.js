@@ -483,9 +483,79 @@ async function loadFinancialsData() {
       throw new Error(data.error || "Failed to load financials");
     }
 
-    updateFinancialsSummary(data.summary || {});
+    // Fetch recovery data
+    let recoveryData = {};
+    try {
+      const recoveryResponse = await fetch(`${baseUrl}api/get-all-recoveries?factory=${factory}&startDate=${fromDate}&endDate=${toDate}`);
+      if (recoveryResponse.ok) {
+        const recoveryResult = await recoveryResponse.json();
+        if (recoveryResult.recoveries) {
+          // Group recovery data by 背番号
+          recoveryResult.recoveries.forEach(item => {
+            const key = item.背番号;
+            if (!recoveryData[key]) {
+              recoveryData[key] = {
+                疵引不良: 0,
+                加工不良: 0,
+                その他: 0,
+                total: 0
+              };
+            }
+            item.recoveries.forEach(recovery => {
+              recoveryData[key][recovery.defectType] = (recoveryData[key][recovery.defectType] || 0) + recovery.quantity;
+              recoveryData[key].total += recovery.quantity;
+            });
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("Could not fetch recovery data:", error);
+    }
+
+    // Merge recovery data into rows and recalculate affected values
+    const rowsWithRecovery = (data.rows || []).map(row => {
+      const recoveredNg = recoveryData[row.ban]?.total || 0;
+      const pricePerPc = row.pricePerPc || 0;
+      const created = row.created || 0;
+      const ngAfterRecovery = Math.max((row.totalNg || 0) - recoveredNg, 0);
+      const adjustedFinalGood = created - ngAfterRecovery;
+      const adjustedScrapLoss = ngAfterRecovery * pricePerPc;
+      const adjustedValue = (row.cost || 0) - adjustedScrapLoss;
+      const adjustedYield = created > 0 ? (adjustedFinalGood / created) * 100 : 0;
+      const adjustedDefectRate = created > 0 ? (ngAfterRecovery / created) * 100 : 0;
+      return {
+        ...row,
+        recoveredNg,
+        ngAfterRecovery,
+        finalGood: adjustedFinalGood,
+        scrapLoss: adjustedScrapLoss,
+        value: adjustedValue,
+        yieldPercent: Math.round(adjustedYield * 100) / 100,
+        defectRate: Math.round(adjustedDefectRate * 100) / 100
+      };
+    });
+
+    // Recompute summary from adjusted rows
+    const adjustedSummary = rowsWithRecovery.reduce((acc, row) => {
+      acc.totalCreated   += row.created || 0;
+      acc.totalLoss      += row.ngAfterRecovery || 0;
+      acc.finalGood      += row.finalGood || 0;
+      acc.scrapLoss      += row.scrapLoss || 0;
+      acc.totalValue     += row.cost || 0;
+      return acc;
+    }, { totalCreated: 0, totalLoss: 0, finalGood: 0, scrapLoss: 0, totalValue: 0 });
+
+    adjustedSummary.defectRate   = adjustedSummary.totalCreated > 0
+      ? Math.round((adjustedSummary.totalLoss / adjustedSummary.totalCreated) * 10000) / 100
+      : 0;
+    adjustedSummary.yieldPercent = adjustedSummary.totalCreated > 0
+      ? Math.round((adjustedSummary.finalGood / adjustedSummary.totalCreated) * 10000) / 100
+      : 0;
+    adjustedSummary.finalGoodYen = adjustedSummary.totalValue - adjustedSummary.scrapLoss;
+
+    updateFinancialsSummary(adjustedSummary);
     updateFinancialsCharts(data.scrapByProcess || {}, data.factoryTotals || {});
-    renderFinancialsTable(data.rows || []);
+    renderFinancialsTable(rowsWithRecovery);
     financialsState.totalRows = data.totalRows || 0;
     financialsState.totalPages = data.totalPages || 0;
     financialsState.page = data.page || financialsState.page;
@@ -724,6 +794,7 @@ function initFinancialsCharts() {
 function updateFinancialsSummary(summary) {
   const totalValue = document.getElementById("financialsTotalValue");
   const scrapLoss = document.getElementById("financialsScrapLoss");
+  const finalGoodYen = document.getElementById("financialsFinalGoodYen");
   const totalCreated = document.getElementById("financialsTotalCreated");
   const totalLoss = document.getElementById("financialsTotalLoss");
   const finalGood = document.getElementById("financialsFinalGood");
@@ -735,6 +806,12 @@ function updateFinancialsSummary(summary) {
   }
   if (scrapLoss) {
     scrapLoss.textContent = `¥${formatNumber(summary.scrapLoss || 0)}`;
+  }
+  if (finalGoodYen) {
+    const fgy = summary.finalGoodYen !== undefined
+      ? summary.finalGoodYen
+      : (summary.totalValue || 0) - (summary.scrapLoss || 0);
+    finalGoodYen.textContent = `¥${formatNumber(fgy)}`;
   }
   if (totalCreated) {
     totalCreated.textContent = `${formatNumber(summary.totalCreated || 0)} pcs`;
@@ -797,7 +874,7 @@ function renderFinancialsTable(rows) {
   if (!rows.length) {
     body.innerHTML = `
       <tr>
-        <td class="px-4 py-3 text-gray-500" colspan="16" data-i18n="noDataLoaded">No data loaded.</td>
+        <td class="px-4 py-3 text-gray-500" colspan="17" data-i18n="noDataLoaded">No data loaded.</td>
       </tr>
     `;
     return;
@@ -815,6 +892,8 @@ function renderFinancialsTable(rows) {
       <td class="px-4 py-3">${formatNumber(row.srsNg || 0)}</td>
       <td class="px-4 py-3">${formatNumber(row.kensaNg || 0)}</td>
       <td class="px-4 py-3">${formatNumber(row.totalNg || 0)}</td>
+      <td class="px-4 py-3" style="background-color: #fff3cd; font-weight: 600;">${formatNumber(row.recoveredNg || 0)}</td>
+      <td class="px-4 py-3">${formatNumber((row.totalNg || 0) - (row.recoveredNg || 0))}</td>
       <td class="px-4 py-3">${formatNumber(row.finalGood || 0)}</td>
       <td class="px-4 py-3">${formatNumber(row.yieldPercent || 0)}%</td>
       <td class="px-4 py-3">¥${formatNumber(row.pricePerPc || 0)}</td>

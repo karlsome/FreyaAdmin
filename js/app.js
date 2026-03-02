@@ -650,37 +650,42 @@ function loadPage(page) {
                   <div id="financialsSelectedProductsTags" class="flex flex-wrap gap-2 min-h-[1.5rem] mb-4"></div>
                 </div>
 
-                <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="totalCost">Total Cost (¥)</p>
-                    <p class="text-2xl font-bold text-gray-900" id="financialsTotalValue">¥0</p>
+                <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2">
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="totalCost">Total Cost (¥)</p>
+                    <p class="text-base font-bold text-gray-900 truncate" id="financialsTotalValue">¥0</p>
                   </div>
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-red-600" data-i18n="scrapLoss">Scrap Loss (¥)</p>
-                    <p class="text-2xl font-bold text-red-700" id="financialsScrapLoss">¥0</p>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-red-600" data-i18n="scrapLoss">Scrap Loss (¥)</p>
+                    <p class="text-base font-bold text-red-700 truncate" id="financialsScrapLoss">¥0</p>
                   </div>
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-green-600" data-i18n="totalCreated">Total Created (pcs)</p>
-                    <p class="text-2xl font-bold text-green-700" id="financialsTotalCreated">0 pcs</p>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-green-600">Final Good (¥)</p>
+                    <p class="text-base font-bold text-green-700 truncate" id="financialsFinalGoodYen">¥0</p>
+                    <p class="text-xs text-gray-500">(Cost - Scrap Loss)</p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-green-600" data-i18n="totalCreated">Total Created (pcs)</p>
+                    <p class="text-base font-bold text-green-700 truncate" id="financialsTotalCreated">0 pcs</p>
                     <p class="text-xs text-gray-500" data-i18n="fromPress">(from Press)</p>
                   </div>
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-red-600" data-i18n="totalLoss">Total Loss (pcs)</p>
-                    <p class="text-2xl font-bold text-red-700" id="financialsTotalLoss">0 pcs</p>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-red-600" data-i18n="totalLoss">Total Loss (pcs)</p>
+                    <p class="text-base font-bold text-red-700 truncate" id="financialsTotalLoss">0 pcs</p>
                     <p class="text-xs text-gray-500" data-i18n="sumOfAllNg">(Sum of all NG)</p>
                   </div>
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-blue-600" data-i18n="finalGood">Final Good (pcs)</p>
-                    <p class="text-2xl font-bold text-blue-700" id="financialsFinalGood">0 pcs</p>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-blue-600" data-i18n="finalGood">Final Good (pcs)</p>
+                    <p class="text-base font-bold text-blue-700 truncate" id="financialsFinalGood">0 pcs</p>
                     <p class="text-xs text-gray-500" data-i18n="createdMinusTotalNg">(Created - Total NG)</p>
                   </div>
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
-                    <p class="text-2xl font-bold text-gray-900" id="financialsDefectRate">0%</p>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
+                    <p class="text-base font-bold text-gray-900" id="financialsDefectRate">0%</p>
                   </div>
-                  <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <p class="text-sm font-medium text-gray-600" data-i18n="yield">Yield %</p>
-                    <p class="text-2xl font-bold text-gray-900" id="financialsYield">0%</p>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="yield">Yield %</p>
+                    <p class="text-base font-bold text-gray-900" id="financialsYield">0%</p>
                   </div>
                 </div>
 
@@ -747,6 +752,12 @@ function loadPage(page) {
                           <th class="px-4 py-2">
                             <button class="flex items-center gap-1" onclick="toggleFinancialsSort('totalNg')">Total NG <span id="financialsSortIcon-totalNg"></span></button>
                           </th>
+                          <th class="px-4 py-2" style="background-color: #fff3cd;">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('recoveredNg')">Recovered NG <span id="financialsSortIcon-recoveredNg"></span></button>
+                          </th>
+                          <th class="px-4 py-2">
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('ngAfterRecovery')">NG After Recovery <span id="financialsSortIcon-ngAfterRecovery"></span></button>
+                          </th>
                           <th class="px-4 py-2">
                             <button class="flex items-center gap-1" onclick="toggleFinancialsSort('finalGood')">Final Good (pcs) <span id="financialsSortIcon-finalGood"></span></button>
                           </th>
@@ -769,7 +780,7 @@ function loadPage(page) {
                       </thead>
                       <tbody id="financialsDetailBody" class="divide-y divide-gray-100">
                         <tr>
-                          <td class="px-4 py-3 text-gray-500" colspan="16">No data loaded.</td>
+                          <td class="px-4 py-3 text-gray-500" colspan="18">No data loaded.</td>
                         </tr>
                       </tbody>
                     </table>
