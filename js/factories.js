@@ -5760,8 +5760,8 @@ function showSidebar(item) {
     if (isPress || isSlit) {
         ngRows = [
             { label: _lang.totalNG || "Total NG", value: totalNG.toLocaleString() },
-            { label: _lang.nonConformingInternal || "Non Conforming (Internal)", value: Number(item["疵引不良"] ?? 0).toLocaleString() },
-            { label: _lang.nonConformingSupplier || "Non Conforming (Supplier)", value: Number(item["加工不良"] ?? 0).toLocaleString() },
+            { label: _lang.nonConformingInternal || "Non Conforming (Internal)", value: Number(item["加工不良"] ?? 0).toLocaleString() },
+            { label: _lang.nonConformingSupplier || "Non Conforming (Supplier)", value: Number(item["疵引不良"] ?? 0).toLocaleString() },
             { label: _lang.others || "Others", value: Number(item["その他"] ?? 0).toLocaleString() }
         ];
     } else if (isSRS) {
