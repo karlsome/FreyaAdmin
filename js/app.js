@@ -567,6 +567,9 @@ function loadPage(page) {
                     <div class="mt-2 text-sm text-blue-600" id="financialsDateRangeDisplay">Loading...</div>
                   </div>
                   <div class="flex items-center space-x-3">
+                    <button onclick="exportFinancialsPDF()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                      <i class="ri-file-pdf-line mr-2"></i><span>PDF Export</span>
+                    </button>
                     <button id="financialsExportBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors" disabled>
                       <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
                     </button>
@@ -650,42 +653,51 @@ function loadPage(page) {
                   <div id="financialsSelectedProductsTags" class="flex flex-wrap gap-2 min-h-[1.5rem] mb-4"></div>
                 </div>
 
-                <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2">
+                <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
                     <p class="text-xs font-medium text-gray-600" data-i18n="totalCost">Total Cost (¥)</p>
                     <p class="text-base font-bold text-gray-900 truncate" id="financialsTotalValue">¥0</p>
+                    <p class="text-xs mt-1 h-4" id="financialsDelta-totalValue"></p>
                   </div>
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
                     <p class="text-xs font-medium text-red-600" data-i18n="scrapLoss">Scrap Loss (¥)</p>
                     <p class="text-base font-bold text-red-700 truncate" id="financialsScrapLoss">¥0</p>
+                    <p class="text-xs mt-1 h-4" id="financialsDelta-scrapLoss"></p>
                   </div>
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
                     <p class="text-xs font-medium text-green-600">Final Good (¥)</p>
                     <p class="text-base font-bold text-green-700 truncate" id="financialsFinalGoodYen">¥0</p>
-                    <p class="text-xs text-gray-500">(Cost - Scrap Loss)</p>
+                    <p class="text-xs text-gray-400">(Cost - Scrap Loss)</p>
                   </div>
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
-                    <p class="text-xs font-medium text-green-600" data-i18n="totalCreated">Total Created (pcs)</p>
-                    <p class="text-base font-bold text-green-700 truncate" id="financialsTotalCreated">0 pcs</p>
-                    <p class="text-xs text-gray-500" data-i18n="fromPress">(from Press)</p>
-                  </div>
-                  <div class="bg-white p-3 rounded-lg border border-gray-200">
-                    <p class="text-xs font-medium text-red-600" data-i18n="totalLoss">Total Loss (pcs)</p>
-                    <p class="text-base font-bold text-red-700 truncate" id="financialsTotalLoss">0 pcs</p>
-                    <p class="text-xs text-gray-500" data-i18n="sumOfAllNg">(Sum of all NG)</p>
-                  </div>
-                  <div class="bg-white p-3 rounded-lg border border-gray-200">
-                    <p class="text-xs font-medium text-blue-600" data-i18n="finalGood">Final Good (pcs)</p>
-                    <p class="text-base font-bold text-blue-700 truncate" id="financialsFinalGood">0 pcs</p>
-                    <p class="text-xs text-gray-500" data-i18n="createdMinusTotalNg">(Created - Total NG)</p>
-                  </div>
-                  <div class="bg-white p-3 rounded-lg border border-gray-200">
-                    <p class="text-xs font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
-                    <p class="text-base font-bold text-gray-900" id="financialsDefectRate">0%</p>
+                    <p class="text-xs font-medium text-indigo-600">Cost Recovery Rate</p>
+                    <p class="text-base font-bold text-indigo-700" id="financialsCostRecovery">0%</p>
+                    <p class="text-xs mt-1 h-4" id="financialsDelta-costRecovery"></p>
                   </div>
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
                     <p class="text-xs font-medium text-gray-600" data-i18n="yield">Yield %</p>
                     <p class="text-base font-bold text-gray-900" id="financialsYield">0%</p>
+                    <p class="text-xs mt-1 h-4" id="financialsDelta-yield"></p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-green-600" data-i18n="totalCreated">Total Created (pcs)</p>
+                    <p class="text-base font-bold text-green-700 truncate" id="financialsTotalCreated">0 pcs</p>
+                    <p class="text-xs mt-1 h-4" id="financialsDelta-totalCreated"></p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-red-600" data-i18n="totalLoss">Total Loss (pcs)</p>
+                    <p class="text-base font-bold text-red-700 truncate" id="financialsTotalLoss">0 pcs</p>
+                    <p class="text-xs mt-1 h-4" id="financialsDelta-totalLoss"></p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-blue-600" data-i18n="finalGood">Final Good (pcs)</p>
+                    <p class="text-base font-bold text-blue-700 truncate" id="financialsFinalGood">0 pcs</p>
+                    <p class="text-xs text-gray-400">(Created - Total NG)</p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
+                    <p class="text-base font-bold text-gray-900" id="financialsDefectRate">0%</p>
+                    <p class="text-xs mt-1 h-4" id="financialsDelta-defectRate"></p>
                   </div>
                 </div>
 
@@ -713,6 +725,55 @@ function loadPage(page) {
                     <div class="h-72">
                       <canvas id="financialsScrapByFactory"></canvas>
                     </div>
+                  </div>
+                </div>
+
+                <!-- Scrap Loss &amp; Cost Trend -->
+                <div class="bg-white p-4 rounded-lg border border-gray-200">
+                  <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold text-gray-700">Scrap Loss &amp; Cost Trend</h3>
+                    <span class="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded" id="financialsTrendGranularity">Daily</span>
+                  </div>
+                  <div class="h-64">
+                    <canvas id="financialsTrendChart"></canvas>
+                  </div>
+                </div>
+
+                <!-- Top 5 worst 背番号 + Factory ranking -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">Top 5 Highest Scrap Loss (背番号)</h3>
+                    <table class="min-w-full text-sm">
+                      <thead class="bg-gray-50 text-gray-600 text-xs">
+                        <tr>
+                          <th class="px-3 py-2 text-left">#</th>
+                          <th class="px-3 py-2 text-left">背番号</th>
+                          <th class="px-3 py-2 text-left">Model</th>
+                          <th class="px-3 py-2 text-right">Scrap Loss (¥)</th>
+                          <th class="px-3 py-2 text-right">Yield %</th>
+                        </tr>
+                      </thead>
+                      <tbody id="financialsTop5Body" class="divide-y divide-gray-100">
+                        <tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">Factory Scrap Loss Ranking</h3>
+                    <table class="min-w-full text-sm">
+                      <thead class="bg-gray-50 text-gray-600 text-xs">
+                        <tr>
+                          <th class="px-3 py-2 text-left">#</th>
+                          <th class="px-3 py-2 text-left">Factory</th>
+                          <th class="px-3 py-2 text-right">Created</th>
+                          <th class="px-3 py-2 text-right">Scrap Loss (¥)</th>
+                          <th class="px-3 py-2 text-right">Yield %</th>
+                        </tr>
+                      </thead>
+                      <tbody id="financialsFactoryRankingBody" class="divide-y divide-gray-100">
+                        <tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 

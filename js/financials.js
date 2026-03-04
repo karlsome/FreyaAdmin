@@ -10,7 +10,8 @@ const financialsState = {
   // Product filter state (like productPDFs.js)
   allProducts: [],
   selectedSebanggoArray: [],
-  tempSelectedSebanggo: []
+  tempSelectedSebanggo: [],
+  previousSummary: null
 };
 
 function initFinancialsPage() {
@@ -540,8 +541,12 @@ async function loadFinancialsData() {
     const summaryForCards = data.adjustedSummary || data.summary || {};
     summaryForCards.finalGoodYen = (summaryForCards.totalValue || 0) - (summaryForCards.scrapLoss || 0);
 
+    financialsState.previousSummary = data.previousSummary || null;
     updateFinancialsSummary(summaryForCards);
+    updateFinancialsTrend(data.trend);
     updateFinancialsCharts(data.scrapByProcess || {}, data.factoryTotals || {});
+    renderFinancialsTop5(data.top5 || []);
+    renderFinancialsFactoryRanking(data.factoryTotals || {});
     renderFinancialsTable(rowsWithRecovery);
     financialsState.totalRows = data.totalRows || 0;
     financialsState.totalPages = data.totalPages || 0;
@@ -776,6 +781,58 @@ function initFinancialsCharts() {
       }
     });
   }
+
+  const trendChartEl = document.getElementById("financialsTrendChart");
+  if (window.Chart && trendChartEl) {
+    if (financialsState.charts.trendChart) {
+      financialsState.charts.trendChart.destroy();
+    }
+    financialsState.charts.trendChart = new Chart(trendChartEl, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "Cost (¥)",
+            data: [],
+            borderColor: "rgb(37, 99, 235)",
+            backgroundColor: "rgba(37, 99, 235, 0.05)",
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointRadius: 3
+          },
+          {
+            label: "Scrap Loss (¥)",
+            data: [],
+            borderColor: "rgb(220, 38, 38)",
+            backgroundColor: "rgba(220, 38, 38, 0.05)",
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointRadius: 3
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ¥${ctx.raw.toLocaleString()}`
+            }
+          }
+        },
+        scales: {
+          y: {
+            ticks: { callback: (v) => '¥' + v.toLocaleString() }
+          }
+        }
+      }
+    });
+  }
 }
 
 function updateFinancialsSummary(summary) {
@@ -787,34 +844,36 @@ function updateFinancialsSummary(summary) {
   const finalGood = document.getElementById("financialsFinalGood");
   const defectRate = document.getElementById("financialsDefectRate");
   const yieldPercent = document.getElementById("financialsYield");
+  const costRecoveryEl = document.getElementById("financialsCostRecovery");
+  const prev = financialsState.previousSummary || {};
 
-  if (totalValue) {
-    totalValue.textContent = `¥${formatNumber(summary.totalValue || 0)}`;
-  }
-  if (scrapLoss) {
-    scrapLoss.textContent = `¥${formatNumber(summary.scrapLoss || 0)}`;
-  }
+  if (totalValue) totalValue.textContent = `¥${formatNumber(summary.totalValue || 0)}`;
+  if (scrapLoss)  scrapLoss.textContent  = `¥${formatNumber(summary.scrapLoss  || 0)}`;
   if (finalGoodYen) {
     const fgy = summary.finalGoodYen !== undefined
       ? summary.finalGoodYen
       : (summary.totalValue || 0) - (summary.scrapLoss || 0);
     finalGoodYen.textContent = `¥${formatNumber(fgy)}`;
   }
-  if (totalCreated) {
-    totalCreated.textContent = `${formatNumber(summary.totalCreated || 0)} pcs`;
-  }
-  if (totalLoss) {
-    totalLoss.textContent = `${formatNumber(summary.totalLoss || 0)} pcs`;
-  }
-  if (finalGood) {
-    finalGood.textContent = `${formatNumber(summary.finalGood || 0)} pcs`;
-  }
-  if (defectRate) {
-    defectRate.textContent = `${formatNumber(summary.defectRate || 0)}%`;
-  }
-  if (yieldPercent) {
-    yieldPercent.textContent = `${formatNumber(summary.yieldPercent || 0)}%`;
-  }
+  if (totalCreated) totalCreated.textContent = `${formatNumber(summary.totalCreated || 0)} pcs`;
+  if (totalLoss)    totalLoss.textContent    = `${formatNumber(summary.totalLoss    || 0)} pcs`;
+  if (finalGood)    finalGood.textContent    = `${formatNumber(summary.finalGood    || 0)} pcs`;
+  if (defectRate)   defectRate.textContent   = `${formatNumber(summary.defectRate   || 0)}%`;
+  if (yieldPercent) yieldPercent.textContent = `${formatNumber(summary.yieldPercent || 0)}%`;
+
+  const costRcvRate = (summary.totalValue || 0) > 0
+    ? Number((((summary.totalValue - (summary.scrapLoss || 0)) / summary.totalValue) * 100).toFixed(2))
+    : 0;
+  if (costRecoveryEl) costRecoveryEl.textContent = `${formatNumber(costRcvRate)}%`;
+
+  // Period-over-period delta badges
+  _financialsDelta("financialsDelta-totalValue",   summary.totalValue   || 0, prev.totalValue,       false);
+  _financialsDelta("financialsDelta-scrapLoss",    summary.scrapLoss    || 0, prev.scrapLoss,        true);
+  _financialsDelta("financialsDelta-totalCreated", summary.totalCreated || 0, prev.totalCreated,     false);
+  _financialsDelta("financialsDelta-totalLoss",    summary.totalLoss    || 0, prev.totalLoss,        true);
+  _financialsDelta("financialsDelta-yield",        summary.yieldPercent || 0, prev.yieldPercent,     false);
+  _financialsDelta("financialsDelta-defectRate",   summary.defectRate   || 0, prev.defectRate,       true);
+  _financialsDelta("financialsDelta-costRecovery", costRcvRate,               prev.costRecoveryRate, false);
 }
 
 function updateFinancialsCharts(scrapByProcess, factoryTotals) {
@@ -962,5 +1021,126 @@ function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
 
+// Helper: show period-over-period delta badge in an element
+function _financialsDelta(elId, current, previous, lowerIsBetter) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (previous === null || previous === undefined || previous === 0) { el.textContent = ''; return; }
+  const diff = current - previous;
+  if (diff === 0) { el.textContent = ''; return; }
+  const pct = Math.abs((diff / previous) * 100).toFixed(1);
+  const isGood = lowerIsBetter ? diff < 0 : diff > 0;
+  el.innerHTML = `<span class="${isGood ? 'text-green-600' : 'text-red-600'}">${diff > 0 ? '▲' : '▼'} ${pct}% vs prev</span>`;
+}
+
+// Update the trend line chart from server data
+function updateFinancialsTrend(trend) {
+  const granLabel = document.getElementById("financialsTrendGranularity");
+  if (granLabel) granLabel.textContent = (trend?.granularity === 'weekly') ? 'Weekly' : 'Daily';
+  if (financialsState.charts.trendChart && trend?.labels) {
+    // Format labels: 'yyyy-mm-dd' → 'M/D', weekly labels like '2026-W08' pass through
+    const formattedLabels = (trend.labels || []).map(l => {
+      const m = l.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
+      return l;
+    });
+    financialsState.charts.trendChart.data.labels = formattedLabels;
+    financialsState.charts.trendChart.data.datasets[0].data = trend.cost      || [];
+    financialsState.charts.trendChart.data.datasets[1].data = trend.scrapLoss || [];
+    financialsState.charts.trendChart.update();
+  }
+}
+
+// Render top 5 worst-performing 背番号 table
+function renderFinancialsTop5(top5) {
+  const body = document.getElementById("financialsTop5Body");
+  if (!body) return;
+  if (!top5 || !top5.length) {
+    body.innerHTML = '<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>';
+    return;
+  }
+  body.innerHTML = top5.map((r, i) => `
+    <tr class="${i === 0 ? 'bg-red-50' : ''}">
+      <td class="px-3 py-2 text-xs text-gray-500">${i + 1}</td>
+      <td class="px-3 py-2 font-medium text-sm">${r.ban || '-'}</td>
+      <td class="px-3 py-2 text-xs text-gray-500">${r.model || '-'}</td>
+      <td class="px-3 py-2 text-right text-sm font-semibold text-red-600">¥${formatNumber(r.scrapLoss || 0)}</td>
+      <td class="px-3 py-2 text-right text-sm">${formatNumber(r.yieldPercent || 0)}%</td>
+    </tr>
+  `).join("");
+}
+
+// Render factory scrap loss ranking table
+function renderFinancialsFactoryRanking(factoryTotals) {
+  const body = document.getElementById("financialsFactoryRankingBody");
+  if (!body) return;
+  const factories   = factoryTotals?.factories  || [];
+  const scrapLosses = factoryTotals?.scrapLoss   || [];
+  const created     = factoryTotals?.created     || [];
+  const finalGood   = factoryTotals?.finalGood   || [];
+  if (!factories.length) {
+    body.innerHTML = '<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>';
+    return;
+  }
+  const ranked = factories
+    .map((name, i) => ({ name, created: created[i] || 0, finalGood: finalGood[i] || 0, scrapLoss: scrapLosses[i] || 0 }))
+    .sort((a, b) => b.scrapLoss - a.scrapLoss);
+  body.innerHTML = ranked.map((r, i) => {
+    const yieldPct = r.created > 0 ? ((r.finalGood / r.created) * 100).toFixed(1) : '0.0';
+    return `
+      <tr>
+        <td class="px-3 py-2 text-xs text-gray-500">${i + 1}</td>
+        <td class="px-3 py-2 font-medium text-sm">${r.name}</td>
+        <td class="px-3 py-2 text-right text-sm">${formatNumber(r.created)}</td>
+        <td class="px-3 py-2 text-right text-sm font-semibold text-red-600">¥${formatNumber(r.scrapLoss)}</td>
+        <td class="px-3 py-2 text-right text-sm">${yieldPct}%</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+// PDF export — opens a print-ready window
+function exportFinancialsPDF() {
+  const fromDate     = document.getElementById("financialsFromDate")?.value  || '';
+  const toDate       = document.getElementById("financialsToDate")?.value    || '';
+  const totalValue   = document.getElementById("financialsTotalValue")?.textContent   || '¥0';
+  const scrapLoss    = document.getElementById("financialsScrapLoss")?.textContent    || '¥0';
+  const finalGoodYen = document.getElementById("financialsFinalGoodYen")?.textContent || '¥0';
+  const costRecovery = document.getElementById("financialsCostRecovery")?.textContent || '0%';
+  const totalCreated = document.getElementById("financialsTotalCreated")?.textContent || '0';
+  const totalLoss    = document.getElementById("financialsTotalLoss")?.textContent    || '0';
+  const finalGoodPcs = document.getElementById("financialsFinalGood")?.textContent   || '0';
+  const defectRate   = document.getElementById("financialsDefectRate")?.textContent  || '0%';
+  const yieldPct     = document.getElementById("financialsYield")?.textContent       || '0%';
+  const top5Rows     = document.getElementById("financialsTop5Body")?.innerHTML      || '';
+  const factoryRows  = document.getElementById("financialsFactoryRankingBody")?.innerHTML || '';
+  const printContent = `<!DOCTYPE html><html><head><title>Financials ${fromDate} to ${toDate}</title>
+<style>body{font-family:Arial,sans-serif;padding:20px;color:#333}h1{font-size:20px;margin-bottom:4px}.sub{color:#666;font-size:12px;margin-bottom:16px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.card{border:1px solid #ddd;border-radius:6px;padding:10px}.cl{font-size:10px;color:#666}.cv{font-size:16px;font-weight:bold}table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px}th{background:#f5f5f5;padding:6px 8px;text-align:left;border:1px solid #ddd}td{padding:5px 8px;border:1px solid #ddd}h2{font-size:13px;margin:16px 0 8px}@media print{body{padding:10px}input,button{display:none}}</style>
+</head><body>
+<h1>Financials Report</h1><div class="sub">${fromDate} to ${toDate}</div>
+<div class="cards">
+  <div class="card"><div class="cl">Total Cost (¥)</div><div class="cv">${totalValue}</div></div>
+  <div class="card"><div class="cl">Scrap Loss (¥)</div><div class="cv" style="color:#dc2626">${scrapLoss}</div></div>
+  <div class="card"><div class="cl">Final Good (¥)</div><div class="cv" style="color:#16a34a">${finalGoodYen}</div></div>
+  <div class="card"><div class="cl">Cost Recovery Rate</div><div class="cv" style="color:#4f46e5">${costRecovery}</div></div>
+  <div class="card"><div class="cl">Yield %</div><div class="cv">${yieldPct}</div></div>
+  <div class="card"><div class="cl">Total Created (pcs)</div><div class="cv" style="color:#16a34a">${totalCreated}</div></div>
+  <div class="card"><div class="cl">Total Loss (pcs)</div><div class="cv" style="color:#dc2626">${totalLoss}</div></div>
+  <div class="card"><div class="cl">Final Good (pcs)</div><div class="cv" style="color:#2563eb">${finalGoodPcs}</div></div>
+  <div class="card"><div class="cl">Defect Rate</div><div class="cv">${defectRate}</div></div>
+</div>
+<h2>Top 5 Highest Scrap Loss (背番号)</h2>
+<table><thead><tr><th>#</th><th>背番号</th><th>Model</th><th>Scrap Loss (¥)</th><th>Yield %</th></tr></thead><tbody>${top5Rows}</tbody></table>
+<h2>Factory Scrap Loss Ranking</h2>
+<table><thead><tr><th>#</th><th>Factory</th><th>Created</th><th>Scrap Loss (¥)</th><th>Yield %</th></tr></thead><tbody>${factoryRows}</tbody></table>
+</body></html>`;
+  const w = window.open('', '_blank');
+  w.document.write(printContent);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 500);
+}
+
 window.initFinancialsPage = initFinancialsPage;
 window.toggleFinancialsSort = toggleFinancialsSort;
+window.exportFinancialsPDF = exportFinancialsPDF;
