@@ -739,6 +739,20 @@ function loadPage(page) {
                   </div>
                 </div>
 
+                <!-- Cost vs Scrap Loss: Positive / Negative Bar -->
+                <div class="bg-white p-4 rounded-lg border border-gray-200">
+                  <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold text-gray-700">Cost vs Scrap Loss (Daily Bar)</h3>
+                    <div class="flex items-center gap-3 text-xs text-gray-500">
+                      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#16a34a"></span>Cost (¥)</span>
+                      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#dc2626"></span>Scrap Loss (¥)</span>
+                    </div>
+                  </div>
+                  <div class="h-64">
+                    <canvas id="financialsPosNegChart"></canvas>
+                  </div>
+                </div>
+
                 <!-- Top 5 worst 背番号 + Factory ranking -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div class="bg-white p-4 rounded-lg border border-gray-200">

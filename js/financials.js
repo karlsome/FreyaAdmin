@@ -808,6 +808,72 @@ function initFinancialsCharts() {
       }
     });
   }
+
+  const posNegChartEl = document.getElementById("financialsPosNegChart");
+  if (window.Chart && posNegChartEl) {
+    if (financialsState.charts.posNegChart) {
+      financialsState.charts.posNegChart.destroy();
+    }
+    financialsState.charts.posNegChart = new Chart(posNegChartEl, {
+      type: "bar",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "Cost (¥)",
+            data: [],
+            backgroundColor: "rgba(22, 163, 74, 0.75)",
+            borderColor: "rgb(22, 163, 74)",
+            borderWidth: 1,
+            borderRadius: 3,
+            stack: "stack"
+          },
+          {
+            label: "Scrap Loss (¥)",
+            // values stored as negatives so bars go below zero
+            data: [],
+            backgroundColor: "rgba(220, 38, 38, 0.75)",
+            borderColor: "rgb(220, 38, 38)",
+            borderWidth: 1,
+            borderRadius: 3,
+            stack: "stack"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }, // custom legend in HTML header
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                // Show absolute value in tooltip regardless of sign
+                const abs = Math.abs(ctx.raw || 0);
+                return `${ctx.dataset.label}: ¥${abs.toLocaleString()}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false }
+          },
+          y: {
+            ticks: {
+              maxTicksLimit: 10,
+              callback: (v) => {
+                const abs = Math.abs(v);
+                if (abs === 0) return '¥0';
+                if (abs >= 1000000) return (v < 0 ? '-' : '') + '¥' + (abs / 1000000) + 'M';
+                return (v < 0 ? '-' : '') + '¥' + (abs / 1000) + 'K';
+              }
+            }
+          }
+        }
+      }
+    });
+  }
 }
 
 function updateFinancialsSummary(summary) {
@@ -1051,17 +1117,32 @@ function _financialsDelta(elId, current, previous, lowerIsBetter) {
 function updateFinancialsTrend(trend) {
   const granLabel = document.getElementById("financialsTrendGranularity");
   if (granLabel) granLabel.textContent = (trend?.granularity === 'weekly') ? 'Weekly' : 'Daily';
-  if (financialsState.charts.trendChart && trend?.labels) {
-    // Format labels: 'yyyy-mm-dd' → 'M/D', weekly labels like '2026-W08' pass through
-    const formattedLabels = (trend.labels || []).map(l => {
-      const m = l.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      if (m) return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
-      return l;
-    });
+
+  if (!trend?.labels) return;
+
+  // Format labels: 'yyyy-mm-dd' → 'M/D', weekly labels like '2026-W08' pass through
+  const formattedLabels = (trend.labels || []).map(l => {
+    const m = l.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
+    return l;
+  });
+
+  // Line chart
+  if (financialsState.charts.trendChart) {
     financialsState.charts.trendChart.data.labels = formattedLabels;
     financialsState.charts.trendChart.data.datasets[0].data = trend.cost      || [];
     financialsState.charts.trendChart.data.datasets[1].data = trend.scrapLoss || [];
     financialsState.charts.trendChart.update();
+  }
+
+  // Positive / negative bar chart
+  // Cost is positive (green bars above zero)
+  // Scrap Loss is negated (red bars below zero)
+  if (financialsState.charts.posNegChart) {
+    financialsState.charts.posNegChart.data.labels = formattedLabels;
+    financialsState.charts.posNegChart.data.datasets[0].data = trend.cost      || [];
+    financialsState.charts.posNegChart.data.datasets[1].data = (trend.scrapLoss || []).map(v => -(v || 0));
+    financialsState.charts.posNegChart.update();
   }
 }
 
