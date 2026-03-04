@@ -449,6 +449,7 @@ function resetFinancialsPage() {
 }
 
 async function loadFinancialsData() {
+  setFinancialsTableLoading(true);
   const fromDate = document.getElementById("financialsFromDate")?.value;
   const toDate = document.getElementById("financialsToDate")?.value;
   const model = document.getElementById("financialsModelFilter")?.value || "";
@@ -528,8 +529,10 @@ async function loadFinancialsData() {
     financialsState.sortDir = data.sortDir || financialsState.sortDir;
     renderFinancialsPagination();
     updateFinancialsSortIcons();
+    setFinancialsTableLoading(false);
   } catch (error) {
     console.error("Error loading financials:", error);
+    setFinancialsTableLoading(false);
     updateFinancialsSummary({
       totalValue: 0,
       scrapLoss: 0,
@@ -880,6 +883,45 @@ function updateFinancialsCharts(scrapByProcess, factoryTotals) {
     financialsState.charts.scrapByFactory.data.labels = labels;
     financialsState.charts.scrapByFactory.data.datasets[0].data = factoryTotals.scrapLoss || [];
     financialsState.charts.scrapByFactory.update();
+  }
+}
+
+function setFinancialsTableLoading(isLoading) {
+  const section = document.getElementById("financialsDetailSection");
+  if (!section) return;
+  const existing = document.getElementById("financialsTableLoadingOverlay");
+  if (isLoading) {
+    if (existing) return; // already showing
+    const overlay = document.createElement("div");
+    overlay.id = "financialsTableLoadingOverlay";
+    overlay.style.cssText = [
+      "position: absolute",
+      "inset: 0",
+      "background: rgba(255,255,255,0.75)",
+      "display: flex",
+      "flex-direction: column",
+      "align-items: center",
+      "justify-content: center",
+      "z-index: 20",
+      "border-radius: 0.5rem",
+      "pointer-events: all"
+    ].join(";");
+    overlay.innerHTML = `
+      <svg style="width:36px;height:36px;animation:financials-spin 0.8s linear infinite;color:#3b82f6" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="40 20" stroke-linecap="round"/>
+      </svg>
+      <span style="margin-top:10px;font-size:0.8rem;color:#6b7280;font-weight:500;">Loading...</span>
+    `;
+    // Inject keyframe once
+    if (!document.getElementById("financials-spin-style")) {
+      const style = document.createElement("style");
+      style.id = "financials-spin-style";
+      style.textContent = "@keyframes financials-spin { to { transform: rotate(360deg); } }";
+      document.head.appendChild(style);
+    }
+    section.appendChild(overlay);
+  } else {
+    if (existing) existing.remove();
   }
 }
 

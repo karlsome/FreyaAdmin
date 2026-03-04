@@ -777,7 +777,7 @@ function loadPage(page) {
                   </div>
                 </div>
 
-                <div class="bg-white p-4 rounded-lg border border-gray-200">
+                <div id="financialsDetailSection" class="bg-white p-4 rounded-lg border border-gray-200" style="position: relative;">
                   <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="detailBreakdown">Detail Breakdown by 品番</h3>
                   <div class="overflow-x-auto">
                     <table class="min-w-full text-sm text-left">
