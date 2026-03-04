@@ -535,25 +535,12 @@ async function loadFinancialsData() {
       };
     });
 
-    // Recompute summary from adjusted rows
-    const adjustedSummary = rowsWithRecovery.reduce((acc, row) => {
-      acc.totalCreated   += row.created || 0;
-      acc.totalLoss      += row.ngAfterRecovery || 0;
-      acc.finalGood      += row.finalGood || 0;
-      acc.scrapLoss      += row.scrapLoss || 0;
-      acc.totalValue     += row.cost || 0;
-      return acc;
-    }, { totalCreated: 0, totalLoss: 0, finalGood: 0, scrapLoss: 0, totalValue: 0 });
+    // Use server-side adjustedSummary which is computed from ALL rows (not just current page)
+    // Fall back to data.summary if adjustedSummary is not available
+    const summaryForCards = data.adjustedSummary || data.summary || {};
+    summaryForCards.finalGoodYen = (summaryForCards.totalValue || 0) - (summaryForCards.scrapLoss || 0);
 
-    adjustedSummary.defectRate   = adjustedSummary.totalCreated > 0
-      ? Math.round((adjustedSummary.totalLoss / adjustedSummary.totalCreated) * 10000) / 100
-      : 0;
-    adjustedSummary.yieldPercent = adjustedSummary.totalCreated > 0
-      ? Math.round((adjustedSummary.finalGood / adjustedSummary.totalCreated) * 10000) / 100
-      : 0;
-    adjustedSummary.finalGoodYen = adjustedSummary.totalValue - adjustedSummary.scrapLoss;
-
-    updateFinancialsSummary(adjustedSummary);
+    updateFinancialsSummary(summaryForCards);
     updateFinancialsCharts(data.scrapByProcess || {}, data.factoryTotals || {});
     renderFinancialsTable(rowsWithRecovery);
     financialsState.totalRows = data.totalRows || 0;
