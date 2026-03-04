@@ -484,38 +484,10 @@ async function loadFinancialsData() {
       throw new Error(data.error || "Failed to load financials");
     }
 
-    // Fetch recovery data
-    let recoveryData = {};
-    try {
-      const recoveryResponse = await fetch(`${baseUrl}api/get-all-recoveries?factory=${factory}&startDate=${fromDate}&endDate=${toDate}`);
-      if (recoveryResponse.ok) {
-        const recoveryResult = await recoveryResponse.json();
-        if (recoveryResult.recoveries) {
-          // Group recovery data by 背番号
-          recoveryResult.recoveries.forEach(item => {
-            const key = item.背番号;
-            if (!recoveryData[key]) {
-              recoveryData[key] = {
-                疵引不良: 0,
-                加工不良: 0,
-                その他: 0,
-                total: 0
-              };
-            }
-            item.recoveries.forEach(recovery => {
-              recoveryData[key][recovery.defectType] = (recoveryData[key][recovery.defectType] || 0) + recovery.quantity;
-              recoveryData[key].total += recovery.quantity;
-            });
-          });
-        }
-      }
-    } catch (error) {
-      console.warn("Could not fetch recovery data:", error);
-    }
-
-    // Merge recovery data into rows and recalculate affected values
+    // Recovery is pre-applied server-side: each row already has `recoveredNg` stamped.
+    // No second HTTP call needed.
     const rowsWithRecovery = (data.rows || []).map(row => {
-      const recoveredNg = recoveryData[row.ban]?.total || 0;
+      const recoveredNg = row.recoveredNg || 0;
       const pricePerPc = row.pricePerPc || 0;
       const created = row.created || 0;
       const ngAfterRecovery = Math.max((row.totalNg || 0) - recoveredNg, 0);
