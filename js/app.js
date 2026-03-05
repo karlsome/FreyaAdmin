@@ -2853,32 +2853,116 @@ function loadPage(page) {
           let masterItemsPerPage = 25;
           let currentMasterTab = 'masterDB'; // Track current tab
 
+          // Server-side pagination state (populated by /api/masterdb/paginate response)
+          let masterTotalCount = 0;
+          let masterFilteredCount = 0;
+          let masterWithImageCount = 0;
+          let masterTotalPages = 0;
+          // Current advanced-filter query built by applyMasterAdvancedFilters()
+          let masterAdvancedFilterQuery = {};
+          let _masterDBLoading = false;
+
+          function setMasterLoading(on) {
+            _masterDBLoading = on;
+            const container = document.getElementById('masterTableContainer');
+            const prevBtn   = document.getElementById('masterPrevPageBtn');
+            const nextBtn   = document.getElementById('masterNextPageBtn');
+            const perPage   = document.getElementById('masterItemsPerPageSelect');
+
+            if (on) {
+              // Dim existing content and overlay a spinner
+              container.style.position = 'relative';
+              if (!document.getElementById('_masterLoadingOverlay')) {
+                const overlay = document.createElement('div');
+                overlay.id = '_masterLoadingOverlay';
+                overlay.style.cssText = [
+                  'position:absolute', 'inset:0', 'z-index:10',
+                  'background:rgba(255,255,255,0.65)',
+                  'display:flex', 'align-items:center', 'justify-content:center',
+                  'border-radius:inherit',
+                ].join(';');
+                overlay.innerHTML = `
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+                    <svg style="width:36px;height:36px;animation:spin 0.8s linear infinite" viewBox="0 0 24 24" fill="none">
+                      <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+                      <circle cx="12" cy="12" r="10" stroke="#d1d5db" stroke-width="3"/>
+                      <path d="M12 2a10 10 0 0 1 10 10" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+                    </svg>
+                    <span style="font-size:13px;color:#6b7280">読み込み中...</span>
+                  </div>
+                `;
+                container.appendChild(overlay);
+              }
+              if (prevBtn) prevBtn.disabled = true;
+              if (nextBtn) nextBtn.disabled = true;
+              if (perPage) perPage.disabled = true;
+            } else {
+              const overlay = document.getElementById('_masterLoadingOverlay');
+              if (overlay) overlay.remove();
+              if (perPage) perPage.disabled = false;
+              // prev/next button enabled state is managed by updateMasterPagination
+            }
+          }
+
           async function loadMasterDB() {
+            if (_masterDBLoading) return; // prevent double-fire
+            setMasterLoading(true);
             try {
-              // Map tab to actual collection name
               const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : currentMasterTab;
-              
-              // For materialDB (materialMasterDB2), filter by 工程名 = 粘着工程
-              const query = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
-              
-              const res = await fetch(BASE_URL + "queries", {
+              const baseQuery = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+
+              // Gather current UI state for server-side filtering / sorting
+              const searchTags = getMasterSearchTags ? getMasterSearchTags() : [];
+              const logicMode = document.getElementById("searchLogicMode")?.value || "OR";
+
+              // Only send string-type fields for text search
+              const searchFields = masterFieldSchemas
+                ? Object.keys(masterFieldSchemas).filter(k => {
+                    const t = masterFieldSchemas[k]?.type;
+                    return t === 'text' || t === 'select';
+                  })
+                : [];
+
+              const simpleFilters = {
+                factory: document.getElementById("filterFactory")?.value || '',
+                rl:      document.getElementById("filterRL")?.value     || '',
+                color:   document.getElementById("filterColor")?.value  || '',
+                process: document.getElementById("filterProcess")?.value || '',
+              };
+
+              const res = await fetch(BASE_URL + "api/masterdb/paginate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  dbName: "Sasaki_Coating_MasterDB",
-                  collectionName: collectionName,
-                  query: query,
-                  projection: {}
-                })
+                  collectionName,
+                  baseQuery,
+                  page:  currentMasterPage,
+                  limit: masterItemsPerPage,
+                  sort:  masterSortState,
+                  simpleFilters,
+                  advancedFilters:  masterAdvancedFilterQuery,
+                  searchTags,
+                  searchFields,
+                  searchLogicMode: logicMode,
+                }),
               });
 
-              masterData = await res.json();
-              filteredMasterData = [...masterData];
+              const result = await res.json();
+              masterData         = result.data;
+              filteredMasterData = result.data; // alias kept for compatibility
+              masterTotalCount     = result.totalCount;
+              masterFilteredCount  = result.filteredCount;
+              masterWithImageCount = result.withImageCount;
+              masterTotalPages     = result.totalPages;
+
               updateMasterStats();
               renderMasterTable();
             } catch (err) {
               console.error("Failed to load masterDB:", err);
-              document.getElementById("masterTableContainer").innerHTML = `<div class="text-center py-8"><p class="text-red-500">データの読み込みに失敗しました</p></div>`;
+              document.getElementById("masterTableContainer").innerHTML =
+                `<div class="text-center py-8"><p class="text-red-500">データの読み込みに失敗しました</p></div>`;
+            } finally {
+              setMasterLoading(false);
             }
           }
 
@@ -2902,6 +2986,8 @@ function loadPage(page) {
             window.currentMasterTab = currentMasterTab; // Update global variable
             updateMasterTabStyles();
             currentMasterPage = 1; // Reset to first page
+            masterAdvancedFilterQuery = {}; // Clear advanced filters for new tab
+            masterSortState = { column: null, direction: 1 }; // Reset sort for new tab
             
             // Clear advanced filter cache and reset fields for new tab
             masterFilterDropdownCache.clear();
@@ -2934,19 +3020,14 @@ function loadPage(page) {
           }
 
           function updateMasterStats() {
-            const total = masterData.length;
-            const withImage = masterData.filter(item => item.imageURL).length;
-            const withoutImage = total - withImage;
-            const filtered = filteredMasterData.length;
-
-            document.getElementById('totalMasterCount').textContent = total;
-            document.getElementById('withImageCount').textContent = withImage;
-            document.getElementById('withoutImageCount').textContent = withoutImage;
-            document.getElementById('filteredCount').textContent = filtered;
+            document.getElementById('totalMasterCount').textContent = masterTotalCount;
+            document.getElementById('withImageCount').textContent = masterWithImageCount;
+            document.getElementById('withoutImageCount').textContent = masterTotalCount - masterWithImageCount;
+            document.getElementById('filteredCount').textContent = masterFilteredCount;
           }
 
           function renderMasterTable() {
-            if (!filteredMasterData.length) {
+            if (!masterData.length) {
               document.getElementById("masterTableContainer").innerHTML = `
                 <div class="flex items-center justify-center h-96">
                   <div class="text-center">
@@ -2960,9 +3041,8 @@ function loadPage(page) {
               return;
             }
 
-            const startIndex = (currentMasterPage - 1) * masterItemsPerPage;
-            const endIndex = startIndex + masterItemsPerPage;
-            const pageData = filteredMasterData.slice(startIndex, endIndex);
+            // masterData is already the current page — no client-side slicing needed
+            const pageData = masterData;
 
             // Filter out any corrupted records from pageData before rendering
             const cleanPageData = pageData.filter(item => {
@@ -3015,11 +3095,11 @@ function loadPage(page) {
               dataFields = headers.filter(h => h.key !== 'imageURL').map(h => h.key);
             } else {
               // 内装品DB headers (existing logic)
-              // Use a reliable source for field structure - check the entire dataset for a good sample
+              // Use page data as the dataset to find a reference header item
               let referenceItem = null;
               
               // Try to find a record with a proper 品番 field
-              for (let item of filteredMasterData) {
+              for (let item of masterData) {
                 if (item && item.品番 && typeof item.品番 === 'string' && item.品番.trim() !== '') {
                   referenceItem = item;
                   break;
@@ -3115,7 +3195,7 @@ function loadPage(page) {
             `;
 
             document.getElementById("masterTableContainer").innerHTML = tableHTML;
-            updateMasterPagination(filteredMasterData.length);
+            updateMasterPagination(masterFilteredCount);
           }
 
           function updateMasterPagination(totalItems) {
@@ -3191,16 +3271,14 @@ function loadPage(page) {
 
           function goToMasterPage(page) {
             currentMasterPage = page;
-            renderMasterTable();
+            loadMasterDB();
           }
 
           function changeMasterPage(direction) {
-            const totalPages = Math.ceil(filteredMasterData.length / masterItemsPerPage);
             const newPage = currentMasterPage + direction;
-            
-            if (newPage >= 1 && newPage <= totalPages) {
+            if (newPage >= 1 && newPage <= masterTotalPages) {
               currentMasterPage = newPage;
-              renderMasterTable();
+              loadMasterDB();
             }
           }
 
@@ -3211,15 +3289,8 @@ function loadPage(page) {
               masterSortState.column = col;
               masterSortState.direction = 1;
             }
-
-            filteredMasterData.sort((a, b) => {
-              const valA = (a[col] || "").toString();
-              const valB = (b[col] || "").toString();
-              return valA.localeCompare(valB, "ja") * masterSortState.direction;
-            });
-
             currentMasterPage = 1;
-            renderMasterTable();
+            loadMasterDB();
           };
 
           // Store master data globally for sidebar access
@@ -3431,15 +3502,16 @@ function loadPage(page) {
 
               // Map tab to actual collection name
               const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : currentMasterTab;
+              const username = currentUser?.username || "unknown";
 
-              // Insert record to database using the existing queries endpoint
-              const insertRes = await fetch(BASE_URL + "queries", {
+              // Use submitToMasterDB (not generic /queries) so cache is properly invalidated
+              const insertRes = await fetch(BASE_URL + "submitToMasterDB", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  dbName: "Sasaki_Coating_MasterDB",
-                  collectionName: collectionName,
-                  insertData: recordData
+                  data: recordData,
+                  username,
+                  collectionName,
                 })
               });
 
@@ -3461,7 +3533,6 @@ function loadPage(page) {
                 });
                 
                 const base64 = await base64Promise;
-                const username = currentUser?.username || "unknown";
                 
                 const imageRes = await fetch(BASE_URL + "uploadMasterImage", {
                   method: "POST",
@@ -3505,7 +3576,7 @@ function loadPage(page) {
           document.getElementById('masterItemsPerPageSelect').addEventListener('change', function() {
             masterItemsPerPage = parseInt(this.value);
             currentMasterPage = 1;
-            renderMasterTable();
+            loadMasterDB();
           });
           document.getElementById('masterPrevPageBtn').addEventListener('click', () => changeMasterPage(-1));
           document.getElementById('masterNextPageBtn').addEventListener('click', () => changeMasterPage(1));
@@ -3564,73 +3635,10 @@ function loadPage(page) {
           });
 
           function applyMasterFilters() {
-            // Get search tags instead of direct input value
-            const searchTags = getMasterSearchTags();
-            const factory = document.getElementById("filterFactory").value;
-            const rl = document.getElementById("filterRL").value;
-            const color = document.getElementById("filterColor").value;
-            const process = document.getElementById("filterProcess").value;
-            
-            // Get search logic mode (OR or AND)
-            const logicMode = document.getElementById("searchLogicMode")?.value || "OR";
-
-            filteredMasterData = masterData.filter(item => {
-              // Dynamic keyword search - search through all text fields
-              const searchableFields = Object.keys(item).filter(k => 
-                k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
-              );
-              
-              // Apply search logic based on mode
-              let keywordMatch = true;
-              
-              if (searchTags.length > 0) {
-                if (logicMode === "OR") {
-                  // OR logic: Match if ANY tag is found
-                  keywordMatch = searchTags.some(tag => {
-                    const keyword = tag.toLowerCase();
-                    return searchableFields.some(key => 
-                      (item[key] || "").toLowerCase().includes(keyword)
-                    );
-                  });
-                } else {
-                  // AND logic: Match if ALL tags are found
-                  keywordMatch = searchTags.every(tag => {
-                    const keyword = tag.toLowerCase();
-                    return searchableFields.some(key => 
-                      (item[key] || "").toLowerCase().includes(keyword)
-                    );
-                  });
-                }
-              }
-
-              // Dynamic filtering based on available fields
-              let factoryMatch = true;
-              let rlMatch = true;
-              let colorMatch = true;
-              let processMatch = true;
-
-              if (factory) {
-                factoryMatch = item["工場"] === factory || item["次工程"] === factory;
-              }
-              
-              if (rl) {
-                rlMatch = item["R/L"] === rl;
-              }
-              
-              if (color) {
-                colorMatch = item["色"] === color;
-              }
-              
-              if (process) {
-                processMatch = item["加工設備"] === process || item["材料"] === process;
-              }
-
-              return keywordMatch && factoryMatch && rlMatch && colorMatch && processMatch;
-            });
-
+            // Simple dropdown filters are now passed to the server via loadMasterDB().
+            // Just reset to page 1 and re-fetch.
             currentMasterPage = 1;
-            updateMasterStats();
-            renderMasterTable();
+            loadMasterDB();
           }
 
           // ==================== ADVANCED FILTER SYSTEM FOR MASTER DB ====================
@@ -3662,104 +3670,46 @@ function loadPage(page) {
           };
 
           /**
-           * Fetch all unique field names from current collection
+           * Fetch all unique field names from current collection.
+           * Uses /api/masterdb/schema which samples 200 docs — avoids full collection scan.
            */
           async function fetchMasterFieldNames() {
             try {
               const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
-              const query = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              const baseQuery = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
               
-              console.log(`📋 Fetching sample documents to determine fields from ${collectionName}...`);
-              
-              const res = await fetch(BASE_URL + "queries", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  dbName: "Sasaki_Coating_MasterDB",
-                  collectionName: collectionName,
-                  query: query
-                })
-              });
+              console.log(`📋 Fetching schema for ${collectionName}...`);
 
-              const sampleData = await res.json();
-              
-              if (!sampleData || sampleData.length === 0) {
-                console.warn('No data found in collection');
+              const params = new URLSearchParams({
+                collection: collectionName,
+                query: JSON.stringify(baseQuery),
+              });
+              const res = await fetch(`${BASE_URL}api/masterdb/schema?${params}`);
+              const fields = await res.json(); // string[]
+
+              if (!Array.isArray(fields) || fields.length === 0) {
+                console.warn('No schema fields returned');
                 return {};
               }
 
-              // Gather all unique field names from all documents
-              const allFields = new Set();
-              sampleData.forEach(doc => {
-                Object.keys(doc).forEach(key => {
-                  if (key !== '_id' && key !== 'imageURL') {
-                    allFields.add(key);
-                  }
-                });
-              });
-
-              console.log(`✅ Found ${allFields.size} unique fields:`, Array.from(allFields));
-
-              // Determine field types from sample data
+              // Build schemas — for simplicity, classify fields by name heuristics.
+              // The server already sampled 200 docs; we just need type hints for the filter UI.
               const schemas = {};
-              Array.from(allFields).forEach(field => {
-                // Sample values to determine type
-                const sampleValues = sampleData
-                  .map(doc => doc[field])
-                  .filter(val => val !== null && val !== undefined && val !== '')
-                  .slice(0, 100); // Sample first 100 non-empty values
-
-                if (sampleValues.length === 0) {
-                  schemas[field] = { type: 'text', label: field, operators: ['equals', 'contains'] };
-                  return;
-                }
-
-                // Determine type based on values
-                const firstValue = sampleValues[0];
-                
-                // Check if it's a number
-                if (typeof firstValue === 'number' || !isNaN(Number(firstValue))) {
-                  schemas[field] = { 
-                    type: 'number', 
-                    label: field, 
-                    operators: ['equals', 'range', 'greater', 'less'] 
-                  };
-                }
-                // Check if it's a date-like field
-                else if (field.toLowerCase().includes('date') || field === 'Date') {
-                  schemas[field] = { 
-                    type: 'date', 
-                    label: field, 
-                    operators: ['equals', 'range'] 
-                  };
-                }
-                // Check if it has limited unique values (good candidate for select)
-                else {
-                  const uniqueCount = new Set(sampleValues).size;
-                  if (uniqueCount <= 50) { // If 50 or fewer unique values, use dropdown
-                    schemas[field] = { 
-                      type: 'select', 
-                      label: field, 
-                      operators: ['equals', 'in'],
-                      autoPopulate: true 
-                    };
-                  } else {
-                    schemas[field] = { 
-                      type: 'text', 
-                      label: field, 
-                      operators: ['equals', 'contains'] 
-                    };
-                  }
+              fields.forEach(field => {
+                if (field.toLowerCase().includes('date') || field === 'Date') {
+                  schemas[field] = { type: 'date', label: field, operators: ['equals', 'range'] };
+                } else {
+                  // All other fields default to select (will auto-populate via distinct).
+                  // The filter builder will show a text input for fields with many unique values.
+                  schemas[field] = { type: 'select', label: field, operators: ['equals', 'contains', 'in'], autoPopulate: true };
                 }
               });
 
               masterFieldSchemas = schemas;
-              console.log('✅ Generated field schemas:', masterFieldSchemas);
-              
+              console.log(`✅ schema loaded: ${fields.length} fields`);
               return schemas;
-
             } catch (error) {
-              console.error('❌ Error fetching field names:', error);
+              console.error('❌ Error fetching field schema:', error);
               return {};
             }
           }
@@ -4041,103 +3991,27 @@ function loadPage(page) {
            */
           window.applyMasterAdvancedFilters = async function() {
             try {
-              // Build query from advanced filters
+              // Build MongoDB query from the UI filter rows
               const advancedQuery = await buildMasterDynamicQuery();
-              
-              // Combine with basic filters
-              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
-              const baseQuery = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
-              
-              // Add basic filter values if they exist
-              const factory = document.getElementById("filterFactory").value;
-              const rl = document.getElementById("filterRL").value;
-              const color = document.getElementById("filterColor").value;
-              const process = document.getElementById("filterProcess").value;
-
-              if (factory) {
-                advancedQuery["工場"] = factory;
-              }
-              if (rl) {
-                advancedQuery["R/L"] = rl;
-              }
-              if (color) {
-                advancedQuery["色"] = color;
-              }
-              if (process) {
-                if (currentMasterTab === 'materialDB') {
-                  advancedQuery["材料"] = process;
-                } else {
-                  advancedQuery["加工設備"] = process;
-                }
-              }
-
-              const finalQuery = { ...baseQuery, ...advancedQuery };
-              
-              console.log('🔍 Applying advanced filters with query:', finalQuery);
-
-              // Fetch filtered data
-              const res = await fetch(BASE_URL + "queries", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  dbName: "Sasaki_Coating_MasterDB",
-                  collectionName: collectionName,
-                  query: finalQuery
-                })
-              });
-
-              masterData = await res.json();
-              
-              // Apply search tags filter on client side
-              const searchTags = getMasterSearchTags();
-              const logicMode = document.getElementById("searchLogicMode")?.value || "OR";
-              
-              if (searchTags.length > 0) {
-                filteredMasterData = masterData.filter(item => {
-                  const searchableFields = Object.keys(item).filter(k => 
-                    k !== "_id" && k !== "imageURL" && typeof item[k] === 'string'
-                  );
-                  
-                  if (logicMode === "OR") {
-                    // OR logic: Match if ANY tag is found
-                    return searchTags.some(tag => {
-                      const keyword = tag.toLowerCase();
-                      return searchableFields.some(key => 
-                        (item[key] || "").toLowerCase().includes(keyword)
-                      );
-                    });
-                  } else {
-                    // AND logic: Match if ALL tags are found
-                    return searchTags.every(tag => {
-                      const keyword = tag.toLowerCase();
-                      return searchableFields.some(key => 
-                        (item[key] || "").toLowerCase().includes(keyword)
-                      );
-                    });
-                  }
-                });
-              } else {
-                filteredMasterData = [...masterData];
-              }
+              masterAdvancedFilterQuery = advancedQuery;
 
               currentMasterPage = 1;
-              updateMasterStats();
-              renderMasterTable();
+              await loadMasterDB();
+
               updateMasterActiveFiltersCount();
 
-              // Show batch edit button if filters are applied and have results
+              // Show batch edit button if advanced filters are applied and have results
               const batchEditButton = document.getElementById('masterBatchEditButtonContainer');
-              const batchEditCount = document.getElementById('masterBatchEditCount');
-              
-              if (Object.keys(advancedQuery).length > 0 && filteredMasterData.length > 0) {
-                batchEditCount.textContent = filteredMasterData.length;
+              const batchEditCount  = document.getElementById('masterBatchEditCount');
+
+              if (Object.keys(advancedQuery).length > 0 && masterFilteredCount > 0) {
+                batchEditCount.textContent = masterFilteredCount;
                 batchEditButton.classList.remove('hidden');
               } else {
                 batchEditButton.classList.add('hidden');
               }
 
-              console.log(`✅ Applied filters: ${filteredMasterData.length} results`);
-
+              console.log(`✅ Applied advanced filters: ${masterFilteredCount} results`);
             } catch (error) {
               console.error('❌ Error applying advanced filters:', error);
               alert('Failed to apply filters. Please try again.');
@@ -4272,6 +4146,9 @@ function loadPage(page) {
             const container = document.getElementById('masterFilterRowsContainer');
             container.innerHTML = '';
             
+            // Reset advanced filter query state
+            masterAdvancedFilterQuery = {};
+            
             // Update display
             updateMasterActiveFiltersCount();
             
@@ -4286,6 +4163,7 @@ function loadPage(page) {
 
           // Store filtered records for batch edit
           let batchEditRecords = [];
+          let batchEditIds = []; // All matching record IDs (from /api/masterdb/ids)
           let batchEditChanges = {}; // Store {fieldName: newValue}
           let currentEditingField = null;
           let existingFactories = []; // Cache for factory validation
@@ -4293,13 +4171,33 @@ function loadPage(page) {
           /**
            * Open batch edit modal with two-panel design
            */
-          window.openMasterBatchEditModal = function() {
-            // Get filtered data
-            batchEditRecords = [...filteredMasterData];
-            
-            if (batchEditRecords.length === 0) {
+          window.openMasterBatchEditModal = async function() {
+            // Use current page data for preview cards; use server count for total
+            batchEditRecords = [...masterData];
+            const totalMatchCount = masterFilteredCount;
+
+            if (totalMatchCount === 0) {
               alert('No records to edit. Please apply filters first.');
               return;
+            }
+
+            // Fetch all matching IDs for the actual batch update
+            try {
+              const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : currentMasterTab;
+              const baseQuery = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              const fullQuery = Object.keys(masterAdvancedFilterQuery).length
+                ? { $and: [baseQuery, masterAdvancedFilterQuery] }
+                : baseQuery;
+
+              const idsRes = await fetch(BASE_URL + 'api/masterdb/ids', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ collectionName, query: fullQuery }),
+              });
+              batchEditIds = await idsRes.json(); // string[]
+            } catch (e) {
+              console.error('❌ Failed to fetch batch edit IDs:', e);
+              batchEditIds = [];
             }
 
             // Reset state
@@ -4307,11 +4205,11 @@ function loadPage(page) {
             currentEditingField = null;
 
             // Update record counts in multiple places
-            document.getElementById('batchEditRecordCount').textContent = batchEditRecords.length;
+            document.getElementById('batchEditRecordCount').textContent = totalMatchCount;
             
             // Update footer record count
             const footerCount = document.getElementById('footerRecordCount');
-            if (footerCount) footerCount.textContent = batchEditRecords.length;
+            if (footerCount) footerCount.textContent = totalMatchCount;
             
             // Update preview info
             const currentLang = localStorage.getItem("lang") || "en";
@@ -4320,7 +4218,7 @@ function loadPage(page) {
             const previewInfo = document.getElementById('batchEditPreviewInfo');
             if (previewInfo) {
               const previewCount = Math.min(5, batchEditRecords.length);
-              previewInfo.textContent = `(${t.showing || 'showing'} ${previewCount} ${t.of || 'of'} ${batchEditRecords.length} ${t.totalRecords || 'total records'})`;
+              previewInfo.textContent = `(${t.showing || 'showing'} ${previewCount} ${t.of || 'of'} ${totalMatchCount} ${t.totalRecords || 'total records'})`;
             }
             
             // Generate field tags (left panel)
@@ -4905,9 +4803,7 @@ function loadPage(page) {
             
             const updates = { ...batchEditChanges };
             const fieldCount = Object.keys(updates).length;
-            const recordCount = batchEditRecords.length;
-            
-            // Build confirmation message
+              const recordCount = batchEditIds.length || batchEditRecords.length;
             let changesSummary = Object.keys(updates).map(field => {
               const schema = masterFieldSchemas[field];
               const value = updates[field] === '' ? '(empty)' : updates[field];
@@ -4930,13 +4826,13 @@ function loadPage(page) {
               // Get collection name
               const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
               
-              // Extract record IDs
-              const recordIds = batchEditRecords.map(record => {
-                if (record._id && record._id.$oid) {
-                  return record._id.$oid;
-                }
-                return record._id;
-              }).filter(id => id);
+              // Use pre-fetched IDs (from /api/masterdb/ids) for all matching records
+              const recordIds = batchEditIds.length
+                ? batchEditIds
+                : batchEditRecords.map(record => {
+                    if (record._id && record._id.$oid) return record._id.$oid;
+                    return record._id;
+                  }).filter(id => id);
               
               console.log('🔄 Batch updating records:', {
                 count: recordIds.length,
