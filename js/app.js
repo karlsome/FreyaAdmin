@@ -6435,7 +6435,8 @@ function loadPage(page) {
 
                     <!-- Filters Section -->
                     <div class="bg-white p-6 rounded-lg border border-gray-200">
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                        <!-- Row 1: Part #, Back #, Search, Search Button -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end mb-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="partNumber">品番</label>
                                 <select id="inventoryPartNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
@@ -6456,6 +6457,22 @@ function loadPage(page) {
                                 <button onclick="applyInventoryFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
                                     <i class="ri-search-line mr-2"></i><span data-i18n="search">Search</span>
                                 </button>
+                            </div>
+                        </div>
+                        <!-- Row 2: Model Filter + Selected Products Display -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="model">モデル / Model</label>
+                                <select id="inventoryModelFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="" data-i18n="allModels">All Models</option>
+                                </select>
+                            </div>
+                            <div class="md:col-span-2">
+                                <div class="flex items-center justify-between mb-2">
+                                    <label class="block text-sm font-medium text-gray-700" data-i18n="selectedProducts">Selected Products</label>
+                                    <span id="inventorySelectedProductsDisplay" class="text-xs text-gray-500" data-i18n="noneSelected">None selected</span>
+                                </div>
+                                <div id="inventorySelectedProductsTags" class="flex flex-wrap gap-2 min-h-[2rem] p-2 border border-gray-200 rounded-md bg-gray-50"></div>
                             </div>
                         </div>
                     </div>

@@ -5,6 +5,8 @@ let inventoryItemsPerPage = 10;
 let inventoryData = [];
 let inventorySummary = {};
 let inventorySortState = { column: null, direction: 1 };
+let inventoryAllProducts = [];      // all products from masterDB (for model→sebanggo mapping)
+let inventorySelectedSebanggoArray = []; // currently active sebanggo tags
 
 /**
  * Initialize Inventory system
@@ -31,6 +33,10 @@ function initializeInventorySystem() {
     
     // Event listeners
     setupInventoryEventListeners();
+
+    // Load model options and all products for tagging
+    loadInventoryModelOptions();
+    loadInventoryAllProducts();
     
     // Load initial data
     loadInventoryData();
@@ -45,6 +51,10 @@ function setupInventoryEventListeners() {
     document.getElementById('inventoryPartNumberFilter').addEventListener('change', applyInventoryFilters);
     document.getElementById('inventoryBackNumberFilter').addEventListener('change', applyInventoryFilters);
     document.getElementById('inventorySearchInput').addEventListener('input', debounce(applyInventoryFilters, 500));
+
+    // Model filter → tag system
+    const modelFilter = document.getElementById('inventoryModelFilter');
+    if (modelFilter) modelFilter.addEventListener('change', handleInventoryModelFilter);
     
     // Pagination listeners
     document.getElementById('inventoryItemsPerPage').addEventListener('change', (e) => {
@@ -119,10 +129,15 @@ function buildInventoryQueryFilters() {
         filters['品番'] = partNumberFilter;
     }
     
-    // Back number filter
+    // Back number filter (single — only used when model tagging is NOT active)
     const backNumberFilter = document.getElementById('inventoryBackNumberFilter').value;
-    if (backNumberFilter) {
+    if (backNumberFilter && inventorySelectedSebanggoArray.length === 0) {
         filters['背番号'] = backNumberFilter;
+    }
+
+    // Model tag filter — passes array of sebanggo to backend
+    if (inventorySelectedSebanggoArray.length > 0) {
+        filters.sebanggoArray = inventorySelectedSebanggoArray;
     }
     
     // Search filter
@@ -367,6 +382,105 @@ async function loadInventoryFilterOptions() {
         console.error('Error loading filter options:', error);
     }
 }
+
+// ==================== MODEL FILTER & TAGGING ====================
+
+async function loadInventoryModelOptions() {
+    const modelSelect = document.getElementById('inventoryModelFilter');
+    if (!modelSelect) return;
+    const loadingText = (typeof t === 'function') ? t('loading') : 'Loading...';
+    modelSelect.innerHTML = `<option value="">${loadingText}</option>`;
+    modelSelect.disabled = true;
+    try {
+        const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : (window.BASE_URL || 'http://localhost:3000/');
+        const response = await fetch(`${baseUrl}api/masterdb/models`);
+        const data = await response.json();
+        const allModelsText = (typeof t === 'function') ? t('allModels') : 'All Models';
+        if (response.ok && data.success && Array.isArray(data.data)) {
+            const options = [`<option value="">${allModelsText}</option>`];
+            data.data.forEach(model => options.push(`<option value="${model}">${model}</option>`));
+            modelSelect.innerHTML = options.join('');
+        } else {
+            modelSelect.innerHTML = `<option value="">${allModelsText}</option>`;
+        }
+    } catch (error) {
+        console.error('Failed to load inventory model options:', error);
+        const allModelsText = (typeof t === 'function') ? t('allModels') : 'All Models';
+        modelSelect.innerHTML = `<option value="">${allModelsText}</option>`;
+    } finally {
+        modelSelect.disabled = false;
+    }
+}
+
+async function loadInventoryAllProducts() {
+    try {
+        const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : (window.BASE_URL || 'http://localhost:3000/');
+        const response = await fetch(`${baseUrl}api/masterdb/products`);
+        const data = await response.json();
+        inventoryAllProducts = (response.ok && data.success && Array.isArray(data.data)) ? data.data : [];
+    } catch (error) {
+        console.error('Failed to load inventory products:', error);
+        inventoryAllProducts = [];
+    }
+}
+
+function handleInventoryModelFilter() {
+    const selectedModel = document.getElementById('inventoryModelFilter').value;
+    if (selectedModel) {
+        inventorySelectedSebanggoArray = inventoryAllProducts
+            .filter(p => p.モデル === selectedModel)
+            .map(p => p.背番号)
+            .filter(Boolean);
+    } else {
+        inventorySelectedSebanggoArray = [];
+    }
+    updateInventorySelectedProductsDisplay();
+    currentInventoryPage = 1;
+    loadInventoryData();
+}
+
+function updateInventorySelectedProductsDisplay() {
+    const display = document.getElementById('inventorySelectedProductsDisplay');
+    const tags = document.getElementById('inventorySelectedProductsTags');
+    const _t = typeof t === 'function' ? t : k => k;
+
+    if (inventorySelectedSebanggoArray.length === 0) {
+        if (display) display.textContent = _t('noneSelected') || 'None selected';
+        if (tags) tags.innerHTML = '';
+        return;
+    }
+
+    if (display) display.textContent = `${inventorySelectedSebanggoArray.length} ${_t('selectedProducts') || 'products selected'}`;
+
+    if (tags) {
+        const visibleTags = inventorySelectedSebanggoArray.slice(0, 10).map(seb => `
+            <span class="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                ${seb}
+                <button onclick="removeInventorySebanggoFromSelection('${seb}')" class="hover:text-blue-600 ml-1">
+                    <i class="ri-close-line"></i>
+                </button>
+            </span>
+        `).join('');
+        const overflow = inventorySelectedSebanggoArray.length > 10
+            ? `<span class="text-xs text-gray-500">+${inventorySelectedSebanggoArray.length - 10} more</span>`
+            : '';
+        tags.innerHTML = visibleTags + overflow;
+    }
+}
+
+function removeInventorySebanggoFromSelection(sebanggo) {
+    inventorySelectedSebanggoArray = inventorySelectedSebanggoArray.filter(s => s !== sebanggo);
+    // If all tags cleared, also reset model dropdown
+    if (inventorySelectedSebanggoArray.length === 0) {
+        const modelFilter = document.getElementById('inventoryModelFilter');
+        if (modelFilter) modelFilter.value = '';
+    }
+    updateInventorySelectedProductsDisplay();
+    currentInventoryPage = 1;
+    loadInventoryData();
+}
+
+// ==================== END MODEL FILTER & TAGGING ====================
 
 /**
  * Update filter dropdown options
