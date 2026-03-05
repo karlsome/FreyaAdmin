@@ -434,6 +434,17 @@ function loadPage(page) {
                             </div>
                         </div>
                         
+                        <!-- Defect Bar Chart -->
+                        <div class="bg-white p-6 rounded-lg border border-gray-200">
+                            <div class="flex items-start justify-between mb-3">
+                              <h3 class="text-lg font-semibold text-gray-900" data-i18n="defectCountByType">Defect Count by Type</h3>
+                              <span id="defectBarChartModelBadge" class="hidden text-xs px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded"></span>
+                            </div>
+                            <div class="h-80">
+                                <canvas id="defectBarChart"></canvas>
+                            </div>
+                        </div>
+
                         <!-- Defect Distribution Chart -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
                             <div class="flex items-start justify-between mb-3">

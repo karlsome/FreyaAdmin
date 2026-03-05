@@ -383,6 +383,7 @@ function renderAnalytics() {
             renderProductionTrendChart();
             renderQualityTrendChart();
             renderFactoryComparisonChart();
+            renderDefectBarChart();
             renderDefectDistributionChart();
             renderWorkerPerformanceChart();
             renderProcessEfficiencyChart();
@@ -1219,6 +1220,121 @@ function renderDefectDistributionChart() {
  * Re-render the defect distribution chart with labels from the selected model definition.
  * Render worker performance chart
  */
+function renderDefectBarChart() {
+    const canvas = document.getElementById('defectBarChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    if (analyticsCharts.defectBar) {
+        analyticsCharts.defectBar.destroy();
+    }
+
+    // Auto-derive model from filter bar (same logic as pie chart)
+    const filterType  = document.getElementById('analyticsFilterType')?.value || '';
+    const activeModel = filterType === 'model'
+        ? (document.getElementById('analyticsModelFilter')?.value || '')
+        : '';
+
+    // Update badge
+    const badge = document.getElementById('defectBarChartModelBadge');
+    if (badge) {
+        if (activeModel) { badge.textContent = activeModel; badge.classList.remove('hidden'); }
+        else              { badge.classList.add('hidden'); }
+    }
+
+    const allDefs      = analyticsData.defectDefinitions || [];
+    const defectAnalysis = analyticsData.defectAnalysis || [];
+
+    function getBarLabels() {
+        const lang  = localStorage.getItem('lang') || 'en';
+        const useEN = lang === 'en';
+        if (activeModel) {
+            const def = allDefs.find(d => d.モデル === activeModel);
+            if (def) {
+                const src      = (useEN && def.counters_en) ? def.counters_en : def.counters;
+                const fallback = (!useEN && def.counters_en) ? def.counters_en : def.counters;
+                if (src) {
+                    return Array.from({ length: 12 }, (_, i) => {
+                        const key  = `counter-${i + 1}`;
+                        const name = src[key];
+                        if (name && name.trim()) return name.trim();
+                        const fb = fallback ? fallback[key] : null;
+                        return (fb && fb.trim()) ? fb.trim() : (useEN ? `Counter ${i + 1}` : `カウンター${i + 1}`);
+                    });
+                }
+            }
+        }
+        return useEN
+            ? ['Counter 1','Counter 2','Counter 3','Counter 4','Counter 5','Counter 6','Counter 7','Counter 8','Counter 9','Counter 10','Counter 11','Counter 12']
+            : ['カウンター1','カウンター2','カウンター3','カウンター4','カウンター5','カウンター6','カウンター7','カウンター8','カウンター9','カウンター10','カウンター11','カウンター12'];
+    }
+
+    const barLabels = getBarLabels();
+    const defectFields = ['counter1Total','counter2Total','counter3Total','counter4Total','counter5Total','counter6Total','counter7Total','counter8Total','counter9Total','counter10Total','counter11Total','counter12Total'];
+    let barData = new Array(12).fill(0);
+
+    if (defectAnalysis.length > 0) {
+        const analysis   = defectAnalysis[0];
+        const usedFields = analysis.defectFields || defectFields;
+        usedFields.forEach((field, i) => { barData[i] = analysis[field] || 0; });
+    }
+
+    const hasAny = barData.some(v => v > 0);
+    if (!hasAny) {
+        analyticsCharts.defectBar = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: barLabels, datasets: [{ label: 'Defects', data: barData, backgroundColor: '#E5E7EB' }] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: () => 'データが見つかりません' } } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+        return;
+    }
+
+    const colors = [
+        '#EF4444','#F59E0B','#10B981','#3B82F6','#8B5CF6',
+        '#EC4899','#14B8A6','#F97316','#84CC16','#6366F1',
+        '#F43F5E','#06B6D4'
+    ];
+
+    analyticsCharts.defectBar = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: barLabels,
+            datasets: [{
+                label: localStorage.getItem('lang') === 'en' ? 'Defect Count' : '不良数',
+                data: barData,
+                backgroundColor: barLabels.map((_, i) => colors[i % colors.length] + 'CC'),
+                borderColor:     barLabels.map((_, i) => colors[i % colors.length]),
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.parsed.y.toLocaleString()}`
+                    }
+                }
+            },
+            scales: {
+                x: { ticks: { maxRotation: 45, font: { size: 11 } } },
+                y: { beginAtZero: true, ticks: { precision: 0 } }
+            }
+        }
+    });
+}
+
+/**
+ * Re-render the defect distribution chart with labels from the selected model definition.
+ * Render worker performance chart
+ */
 function renderWorkerPerformanceChart() {
     const ctx = document.getElementById('workerPerformanceChart').getContext('2d');
     const workerStats = analyticsData.workerStats || [];
@@ -1398,6 +1514,7 @@ function showChartsNoDataState() {
         'productionTrendChart',
         'qualityTrendChart',
         'factoryComparisonChart',
+        'defectBarChart',
         'defectDistributionChart',
         'workerPerformanceChart',
         'processEfficiencyChart',
@@ -2878,6 +2995,7 @@ function handleAnalyticsFilterTypeChange() {
     }
     analyticsProductFilter.selectedSebanggoArray = [];
     updateAnalyticsSelectedProductsDisplay();
+    renderDefectBarChart();
     renderDefectDistributionChart();
     loadAnalyticsData();
 }
@@ -2893,6 +3011,7 @@ function handleAnalyticsModelFilter() {
         analyticsProductFilter.selectedSebanggoArray = [];
     }
     updateAnalyticsSelectedProductsDisplay();
+    renderDefectBarChart();
     renderDefectDistributionChart();
     loadAnalyticsData();
 }
