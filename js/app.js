@@ -184,48 +184,87 @@ function loadPage(page) {
 
                     <!-- Date Range Controls -->
                     <div class="bg-white p-6 rounded-lg border border-gray-200">
-                        <div class="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="periodSelection">Period Selection</label>
-                                <select id="analyticsRangeSelect" class="w-full p-2 border border-gray-300 rounded-md">
-                                    <option value="today" data-i18n="today">Today</option>
-                                    <option value="last7" data-i18n="last7Days">Last 7 Days</option>
-                                    <option value="last30" selected data-i18n="last30Days">Last 30 Days</option>
-                                    <option value="last90" data-i18n="last3Months">Last 3 Months</option>
-                                    <option value="thisMonth" data-i18n="thisMonth">This Month</option>
-                                    <option value="lastMonth" data-i18n="lastMonth">Last Month</option>
-                                    <option value="custom" data-i18n="customRange">Custom Range</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="startDate">Start Date</label>
-                                <input type="date" id="analyticsFromDate" class="w-full p-2 border border-gray-300 rounded-md">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="endDate">End Date</label>
-                                <input type="date" id="analyticsToDate" class="w-full p-2 border border-gray-300 rounded-md">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="process">Process</label>
-                                <select id="analyticsCollectionFilter" class="w-full p-2 border border-gray-300 rounded-md">
-                                    <option value="kensaDB" data-i18n="inspection">Inspection (kensaDB)</option>
-                                    <option value="pressDB" data-i18n="press">Press (pressDB)</option>
-                                    <option value="slitDB" data-i18n="slit">Slit (slitDB)</option>
-                                    <option value="SRSDB" data-i18n="srs">SRS (SRSDB)</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory Filter</label>
-                                <select id="analyticsFactoryFilter" class="w-full p-2 border border-gray-300 rounded-md">
-                                    <option value="" data-i18n="allFactories">All Factories</option>
-                                </select>
-                            </div>
-                            <div class="flex space-x-2">
-                                <div id="analyticsLoader" class="hidden">
-                                    <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                                </div>
-                            </div>
+                      <!-- Row 1: Period, Dates, Process, Factory -->
+                      <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end mb-4">
+                        <div>
+                          <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="periodSelection">Period Selection</label>
+                          <select id="analyticsRangeSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                            <option value="today" data-i18n="today">Today</option>
+                            <option value="last7" data-i18n="last7Days">Last 7 Days</option>
+                            <option value="last30" selected data-i18n="last30Days">Last 30 Days</option>
+                            <option value="last90" data-i18n="last3Months">Last 3 Months</option>
+                            <option value="thisMonth" data-i18n="thisMonth">This Month</option>
+                            <option value="lastMonth" data-i18n="lastMonth">Last Month</option>
+                            <option value="custom" data-i18n="customRange">Custom Range</option>
+                          </select>
                         </div>
+                        <div>
+                          <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="startDate">Start Date</label>
+                          <input type="date" id="analyticsFromDate" class="w-full p-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                          <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="endDate">End Date</label>
+                          <input type="date" id="analyticsToDate" class="w-full p-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div>
+                          <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="process">Process</label>
+                          <select id="analyticsCollectionFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                            <option value="kensaDB" data-i18n="inspection">Inspection (kensaDB)</option>
+                            <option value="pressDB" data-i18n="press">Press (pressDB)</option>
+                            <option value="slitDB" data-i18n="slit">Slit (slitDB)</option>
+                            <option value="SRSDB" data-i18n="srs">SRS (SRSDB)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory</label>
+                          <select id="analyticsFactoryFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                            <option value="" data-i18n="allFactories">All Factories</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <!-- Row 2: Filter Type + Model/背番号 selector -->
+                      <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end mb-4">
+                        <div>
+                          <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="filterType">Filter Type</label>
+                          <select id="analyticsFilterType" class="w-full p-2 border border-gray-300 rounded-md" onchange="handleAnalyticsFilterTypeChange()">
+                            <option value="" data-i18n="noFilter">— No Filter —</option>
+                            <option value="model" data-i18n="model">モデル (Model)</option>
+                            <option value="sebanggo">背番号 (Serial Number)</option>
+                          </select>
+                        </div>
+                        <!-- Model dropdown (visible when filterType=model) -->
+                        <div id="analyticsModelFilterContainer" class="hidden">
+                          <label class="block text-sm font-medium text-gray-700 mb-2">モデル / Model</label>
+                          <select id="analyticsModelFilter" class="w-full p-2 border border-gray-300 rounded-md" onchange="handleAnalyticsModelFilter()">
+                            <option value="">All Models</option>
+                          </select>
+                        </div>
+                        <!-- 背番号 selector button (visible when filterType=sebanggo) -->
+                        <div id="analyticsSebanggoFilterContainer" class="hidden">
+                          <label class="block text-sm font-medium text-gray-700 mb-2">背番号 / Serial Numbers</label>
+                          <button onclick="openAnalyticsSebanggoSelector()" class="w-full p-2 border border-gray-300 rounded-md bg-white text-left text-gray-700 hover:bg-gray-50">
+                            <span id="analyticsSelectedCount">Select products...</span>
+                          </button>
+                        </div>
+                        <!-- Selected Products display (span 2 cols) -->
+                        <div id="analyticsProductDisplayContainer" class="hidden md:col-span-2">
+                          <div class="flex items-center justify-between mb-2">
+                            <label class="block text-sm font-medium text-gray-700">Selected Products</label>
+                            <button onclick="openAnalyticsSebanggoSelector()" class="text-xs text-blue-600 hover:text-blue-700">Show all</button>
+                          </div>
+                          <div id="analyticsSelectedProductsDisplay" class="p-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700 h-[42px] overflow-y-auto">None selected</div>
+                        </div>
+                        <!-- Loader (always last slot) -->
+                        <div class="flex items-end pb-1">
+                          <div id="analyticsLoader" class="hidden">
+                            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Selected Products Tags -->
+                      <div id="analyticsSelectedProductsTags" class="flex flex-wrap gap-2 min-h-[1rem]"></div>
                     </div>
 
                     <!-- Summary Cards -->
@@ -399,12 +438,7 @@ function loadPage(page) {
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
                             <div class="flex items-start justify-between mb-3">
                               <h3 class="text-lg font-semibold text-gray-900" data-i18n="defectDistributionByProcess">Defect Distribution (by Process)</h3>
-                              <div class="flex items-center gap-2">
-                                <label class="text-xs text-gray-500 whitespace-nowrap">モデル:</label>
-                                <select id="defectDefModelSelector" class="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 bg-white" onchange="applyDefectLabelsFromModel()">
-                                  <option value="">汎用 (カウンター1〜12)</option>
-                                </select>
-                              </div>
+                              <span id="defectChartModelBadge" class="hidden text-xs px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded"></span>
                             </div>
                             <div class="h-72">
                                 <canvas id="defectDistributionChart"></canvas>
@@ -549,6 +583,34 @@ function loadPage(page) {
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Analytics 背番号 Selector Modal -->
+                <div id="analyticsSebanggoSelectorModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+                  <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+                    <div class="p-4 border-b">
+                      <div class="flex items-center justify-between">
+                        <h3 class="text-base font-semibold text-gray-900">Select Products (背番号)</h3>
+                        <button onclick="closeAnalyticsSebanggoSelector()" class="text-gray-500 hover:text-gray-700">
+                          <i class="ri-close-line text-2xl"></i>
+                        </button>
+                      </div>
+                      <input type="text" id="analyticsSebanggoSearch" oninput="filterAnalyticsSebanggoList()" placeholder="Search 背番号, 品番, モデル..." class="w-full mt-3 p-2 text-sm border rounded bg-white" />
+                    </div>
+                    <div class="p-3 overflow-y-auto max-h-[55vh]" id="analyticsSebanggoListContainer">
+                      <p class="text-gray-500">Loading products...</p>
+                    </div>
+                    <div class="p-4 border-t flex items-center justify-between gap-2">
+                      <div class="flex gap-2">
+                        <button onclick="checkAllAnalyticsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">Check all</button>
+                        <button onclick="uncheckAllAnalyticsSebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">Uncheck all</button>
+                      </div>
+                      <div class="flex gap-2">
+                        <button onclick="closeAnalyticsSebanggoSelector()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700">Cancel</button>
+                        <button onclick="confirmAnalyticsSebanggoSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded">Confirm Selection</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
             `;
             // Initialize analytics after DOM is ready

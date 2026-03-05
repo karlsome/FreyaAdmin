@@ -11,6 +11,13 @@ let combinedDefectRateCalculated = false; // Flag to prevent recalculation
 let lastCalculatedDateRange = null; // Track the date range for combined defect rate
 let analyticsCharts = {}; // Store chart instances
 
+// Product filter state (mirrors financials pattern)
+const analyticsProductFilter = {
+  allProducts: [],           // full masterDB product list { 背番号, 品番, モデル }
+  selectedSebanggoArray: [], // committed selection
+  tempSelectedSebanggo: []   // in-modal working copy
+};
+
 /**
  * Initialize Analytics System
  */
@@ -42,8 +49,12 @@ function initializeAnalytics() {
     // Make combined defect rate clickable to recalculate
     document.getElementById('combinedDefectRateCount')?.addEventListener('click', recalculateCombinedDefectRate);
     
-    // Load factory options first, then load data
-    loadAnalyticsFactoryOptions().then(() => {
+    // Load factory options + product list, then load data
+    Promise.all([
+        loadAnalyticsFactoryOptions(),
+        loadAnalyticsModelOptions(),
+        loadAnalyticsAllProducts()
+    ]).then(() => {
         loadAnalyticsData();
     });
 }
@@ -246,6 +257,11 @@ async function loadAnalyticsData() {
         // Add factory filter if selected
         if (selectedFactory) {
             requestBody.factoryFilter = selectedFactory;
+        }
+
+        // Add product filter (背番号 array) if any are selected
+        if (analyticsProductFilter.selectedSebanggoArray.length > 0) {
+            requestBody.bans = analyticsProductFilter.selectedSebanggoArray;
         }
         
         const response = await fetch(BASE_URL + 'api/analytics-data', {
@@ -1064,40 +1080,39 @@ function renderDefectDistributionChart() {
         analyticsCharts.defectDistribution.destroy();
     }
     
-    // Populate model selector from defect definitions
-    const allDefs = analyticsData.defectDefinitions || [];
-    const modelSelector = document.getElementById('defectDefModelSelector');
-    if (modelSelector) {
-        const prevVal = modelSelector.value;
-        modelSelector.innerHTML = '<option value="">汎用 (カウンター1〜12)</option>';
-        allDefs.forEach(def => {
-            if (!def.モデル) return;
-            const hasAny = Object.values(def.counters || {}).some(v => v && v.trim());
-            if (!hasAny) return;
-            const opt = document.createElement('option');
-            opt.value = def.モデル;
-            opt.textContent = def.モデル;
-            if (def.モデル === prevVal) opt.selected = true;
-            modelSelector.appendChild(opt);
-        });
+    // Auto-derive model from the analytics filter bar
+    const filterType    = document.getElementById('analyticsFilterType')?.value || '';
+    const activeModel   = filterType === 'model'
+        ? (document.getElementById('analyticsModelFilter')?.value || '')
+        : '';
+
+    // Update (or hide) the badge next to the chart title
+    const badge = document.getElementById('defectChartModelBadge');
+    if (badge) {
+        if (activeModel) {
+            badge.textContent = activeModel;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
     }
-    
-    // Resolve defect labels: generic or model-specific, language-aware
+
+    const allDefs = analyticsData.defectDefinitions || [];
+
+    // Resolve defect labels: auto model-specific or generic, language-aware
     function getDefectLabels() {
-        const selectedModel = modelSelector ? modelSelector.value : '';
-        const lang = localStorage.getItem('lang') || 'en';
+        const lang  = localStorage.getItem('lang') || 'en';
         const useEN = lang === 'en';
-        if (selectedModel) {
-            const def = allDefs.find(d => d.モデル === selectedModel);
+        if (activeModel) {
+            const def = allDefs.find(d => d.モデル === activeModel);
             if (def) {
-                const src = (useEN && def.counters_en) ? def.counters_en : def.counters;
+                const src      = (useEN && def.counters_en) ? def.counters_en : def.counters;
                 const fallback = (!useEN && def.counters_en) ? def.counters_en : def.counters;
                 if (src) {
                     return Array.from({ length: 12 }, (_, i) => {
-                        const key = `counter-${i + 1}`;
+                        const key  = `counter-${i + 1}`;
                         const name = src[key];
                         if (name && name.trim()) return name.trim();
-                        // Fall back to the other language if this one is empty
                         const fb = fallback ? fallback[key] : null;
                         return (fb && fb.trim()) ? fb.trim() : (useEN ? `Counter ${i + 1}` : `カウンター${i + 1}`);
                     });
@@ -1115,12 +1130,8 @@ function renderDefectDistributionChart() {
     if (defectAnalysis.length > 0) {
         const analysis = defectAnalysis[0];
         
-        // Use resolved labels (model-specific or generic)
-        const defectLabels = analysis.defectLabels ? analysis.defectLabels.map((orig, i) => {
-            // If user picked a model, override with model-specific names
-            const modelLabels = getDefectLabels();
-            return modelLabels[i] || orig;
-        }) : getDefectLabels();
+        // Always use auto-resolved labels
+        const defectLabels = getDefectLabels();
         const defectFields = analysis.defectFields || ['counter1Total', 'counter2Total', 'counter3Total', 'counter4Total', 'counter5Total', 'counter6Total', 'counter7Total', 'counter8Total', 'counter9Total', 'counter10Total', 'counter11Total', 'counter12Total'];
         
         // Build chart data using the field mappings
@@ -1206,13 +1217,6 @@ function renderDefectDistributionChart() {
 
 /**
  * Re-render the defect distribution chart with labels from the selected model definition.
- * Called when the model selector dropdown changes.
- */
-window.applyDefectLabelsFromModel = function() {
-    renderDefectDistributionChart();
-};
-
-/**
  * Render worker performance chart
  */
 function renderWorkerPerformanceChart() {
@@ -2812,6 +2816,217 @@ function renderDefectPartDetailsTable(data) {
     
     modalContent.innerHTML = html;
 }
+
+// ─── Analytics Product Filter Functions ────────────────────────────────────
+
+async function loadAnalyticsModelOptions() {
+    const modelSelect = document.getElementById('analyticsModelFilter');
+    if (!modelSelect) return;
+    try {
+        const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/';
+        const response = await fetch(`${baseUrl}api/masterdb/models`);
+        const data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.data)) {
+            const opts = ['<option value="">All Models</option>'];
+            data.data.forEach(m => opts.push(`<option value="${m}">${m}</option>`));
+            modelSelect.innerHTML = opts.join('');
+        }
+    } catch (err) {
+        console.error('Failed to load model options for analytics:', err);
+    }
+}
+
+async function loadAnalyticsAllProducts() {
+    try {
+        const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/';
+        const response = await fetch(`${baseUrl}api/masterdb/products`);
+        const data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.data)) {
+            analyticsProductFilter.allProducts = data.data;
+        }
+    } catch (err) {
+        console.error('Failed to load products for analytics:', err);
+    }
+}
+
+function handleAnalyticsFilterTypeChange() {
+    const filterType = document.getElementById('analyticsFilterType')?.value;
+    const modelCont = document.getElementById('analyticsModelFilterContainer');
+    const sebanCont = document.getElementById('analyticsSebanggoFilterContainer');
+    const displayCont = document.getElementById('analyticsProductDisplayContainer');
+
+    if (filterType === 'model') {
+        modelCont?.classList.remove('hidden');
+        sebanCont?.classList.add('hidden');
+        displayCont?.classList.remove('hidden');
+    } else if (filterType === 'sebanggo') {
+        modelCont?.classList.add('hidden');
+        sebanCont?.classList.remove('hidden');
+        displayCont?.classList.remove('hidden');
+    } else {
+        modelCont?.classList.add('hidden');
+        sebanCont?.classList.add('hidden');
+        displayCont?.classList.add('hidden');
+        // Clear selection on no-filter
+        analyticsProductFilter.selectedSebanggoArray = [];
+        updateAnalyticsSelectedProductsDisplay();
+    }
+    // Reset model dropdown when switching
+    if (filterType !== 'model') {
+        const ms = document.getElementById('analyticsModelFilter');
+        if (ms) ms.value = '';
+    }
+    analyticsProductFilter.selectedSebanggoArray = [];
+    updateAnalyticsSelectedProductsDisplay();
+    renderDefectDistributionChart();
+    loadAnalyticsData();
+}
+
+function handleAnalyticsModelFilter() {
+    const selectedModel = document.getElementById('analyticsModelFilter')?.value;
+    if (selectedModel) {
+        analyticsProductFilter.selectedSebanggoArray = analyticsProductFilter.allProducts
+            .filter(p => p.モデル === selectedModel)
+            .map(p => p.背番号)
+            .filter(Boolean);
+    } else {
+        analyticsProductFilter.selectedSebanggoArray = [];
+    }
+    updateAnalyticsSelectedProductsDisplay();
+    renderDefectDistributionChart();
+    loadAnalyticsData();
+}
+
+function openAnalyticsSebanggoSelector() {
+    analyticsProductFilter.tempSelectedSebanggo = [...analyticsProductFilter.selectedSebanggoArray];
+    document.getElementById('analyticsSebanggoSelectorModal')?.classList.remove('hidden');
+    renderAnalyticsSebanggoList();
+}
+
+function closeAnalyticsSebanggoSelector() {
+    document.getElementById('analyticsSebanggoSelectorModal')?.classList.add('hidden');
+}
+
+function confirmAnalyticsSebanggoSelection() {
+    analyticsProductFilter.selectedSebanggoArray = [...analyticsProductFilter.tempSelectedSebanggo];
+    updateAnalyticsSelectedProductsDisplay();
+    closeAnalyticsSebanggoSelector();
+    loadAnalyticsData();
+}
+
+function renderAnalyticsSebanggoList() {
+    const container = document.getElementById('analyticsSebanggoListContainer');
+    if (!container) return;
+    const searchTerm = (document.getElementById('analyticsSebanggoSearch')?.value || '').toLowerCase();
+    const filterType = document.getElementById('analyticsFilterType')?.value;
+    const selectedModel = document.getElementById('analyticsModelFilter')?.value;
+
+    const filtered = analyticsProductFilter.allProducts.filter(p => {
+        const matchesModel = !selectedModel || filterType !== 'model' || p.モデル === selectedModel;
+        const matchesSearch =
+            (p.背番号 || '').toLowerCase().includes(searchTerm) ||
+            (p.品番  || '').toLowerCase().includes(searchTerm) ||
+            (p.モデル || '').toLowerCase().includes(searchTerm);
+        return matchesModel && matchesSearch;
+    }).sort((a, b) => (a.背番号 || '').localeCompare(b.背番号 || ''));
+
+    container.innerHTML = filtered.map(p => {
+        const isSelected = analyticsProductFilter.tempSelectedSebanggo.includes(p.背番号);
+        return `
+          <label class="flex items-center gap-2 p-2 hover:bg-gray-100 rounded cursor-pointer">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleAnalyticsSebanggoSelection('${p.背番号}')" class="w-3.5 h-3.5" />
+            <div class="flex-1">
+              <div class="text-sm font-medium text-gray-900">${p.背番号}</div>
+              <div class="text-xs text-gray-500">${p.品番 || ''} • ${p.モデル || ''}</div>
+            </div>
+          </label>
+        `;
+    }).join('') || '<p class="text-gray-400 text-sm p-2">No products found.</p>';
+}
+
+function filterAnalyticsSebanggoList() {
+    renderAnalyticsSebanggoList();
+}
+
+function toggleAnalyticsSebanggoSelection(sebanggo) {
+    const idx = analyticsProductFilter.tempSelectedSebanggo.indexOf(sebanggo);
+    if (idx > -1) {
+        analyticsProductFilter.tempSelectedSebanggo.splice(idx, 1);
+    } else {
+        analyticsProductFilter.tempSelectedSebanggo.push(sebanggo);
+    }
+}
+
+function checkAllAnalyticsSebanggo() {
+    const searchTerm = (document.getElementById('analyticsSebanggoSearch')?.value || '').toLowerCase();
+    const filterType = document.getElementById('analyticsFilterType')?.value;
+    const selectedModel = document.getElementById('analyticsModelFilter')?.value;
+    analyticsProductFilter.tempSelectedSebanggo = analyticsProductFilter.allProducts
+        .filter(p => {
+            const matchesModel = !selectedModel || filterType !== 'model' || p.モデル === selectedModel;
+            const matchesSearch =
+                (p.背番号 || '').toLowerCase().includes(searchTerm) ||
+                (p.品番  || '').toLowerCase().includes(searchTerm) ||
+                (p.モデル || '').toLowerCase().includes(searchTerm);
+            return matchesModel && matchesSearch;
+        })
+        .map(p => p.背番号)
+        .filter(Boolean);
+    renderAnalyticsSebanggoList();
+}
+
+function uncheckAllAnalyticsSebanggo() {
+    analyticsProductFilter.tempSelectedSebanggo = [];
+    renderAnalyticsSebanggoList();
+}
+
+function updateAnalyticsSelectedProductsDisplay() {
+    const display = document.getElementById('analyticsSelectedProductsDisplay');
+    const tags    = document.getElementById('analyticsSelectedProductsTags');
+    const count   = document.getElementById('analyticsSelectedCount');
+    const arr = analyticsProductFilter.selectedSebanggoArray;
+
+    if (arr.length === 0) {
+        if (display) display.textContent = 'None selected';
+        if (tags) tags.innerHTML = '';
+        if (count) count.textContent = 'Select products...';
+        return;
+    }
+
+    if (display) display.textContent = `${arr.length} products selected`;
+    if (count) count.textContent = `${arr.length} selected`;
+
+    if (tags) {
+        tags.innerHTML = arr.slice(0, 10).map(s => `
+          <span class="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+            ${s}
+            <button onclick="removeAnalyticsSebanggoFromSelection('${s}')" class="hover:text-blue-600">
+              <i class="ri-close-line"></i>
+            </button>
+          </span>
+        `).join('') + (arr.length > 10 ? `
+          <button onclick="openAnalyticsSebanggoSelector()" class="text-gray-500 text-sm hover:text-gray-700">+${arr.length - 10} more (Show all)</button>
+        ` : '');
+    }
+}
+
+function removeAnalyticsSebanggoFromSelection(sebanggo) {
+    analyticsProductFilter.selectedSebanggoArray = analyticsProductFilter.selectedSebanggoArray.filter(s => s !== sebanggo);
+    updateAnalyticsSelectedProductsDisplay();
+    loadAnalyticsData();
+}
+
+// Expose to window for inline handlers
+window.handleAnalyticsFilterTypeChange = handleAnalyticsFilterTypeChange;
+window.handleAnalyticsModelFilter = handleAnalyticsModelFilter;
+window.openAnalyticsSebanggoSelector = openAnalyticsSebanggoSelector;
+window.closeAnalyticsSebanggoSelector = closeAnalyticsSebanggoSelector;
+window.confirmAnalyticsSebanggoSelection = confirmAnalyticsSebanggoSelection;
+window.filterAnalyticsSebanggoList = filterAnalyticsSebanggoList;
+window.toggleAnalyticsSebanggoSelection = toggleAnalyticsSebanggoSelection;
+window.checkAllAnalyticsSebanggo = checkAllAnalyticsSebanggo;
+window.uncheckAllAnalyticsSebanggo = uncheckAllAnalyticsSebanggo;
+window.removeAnalyticsSebanggoFromSelection = removeAnalyticsSebanggoFromSelection;
 
 // Initialize analytics when page loads
 document.addEventListener('DOMContentLoaded', function() {
