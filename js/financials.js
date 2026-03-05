@@ -581,14 +581,14 @@ function initFinancialsCharts() {
         labels: [],
         datasets: [
           {
-            label: "Created (pcs)",
+            label: (typeof t === 'function') ? t('createdPcs') : "Created (pcs)",
             data: [],
             backgroundColor: "rgba(34, 197, 94, 0.7)",
             borderColor: "rgb(34, 197, 94)",
             borderWidth: 1
           },
           {
-            label: "Final Good (pcs)",
+            label: (typeof t === 'function') ? t('finalGoodPcs') : "Final Good (pcs)",
             data: [],
             backgroundColor: "rgba(37, 99, 235, 0.7)",
             borderColor: "rgb(37, 99, 235)",
@@ -632,10 +632,15 @@ function initFinancialsCharts() {
     financialsState.charts.scrapByProcess = new Chart(scrapByProcess, {
       type: "bar",
       data: {
-        labels: ["Press", "Slit", "SRS", "Inspection"],
+        labels: [
+          (typeof t === 'function') ? t('pressProcess') : "Press",
+          (typeof t === 'function') ? t('slitProcess') : "Slit",
+          (typeof t === 'function') ? t('srsProcess') : "SRS",
+          (typeof t === 'function') ? t('inspectionProcess') : "Inspection"
+        ],
         datasets: [
           {
-            label: "Scrap Loss (¥)",
+            label: (typeof t === 'function') ? t('scrapLoss') : "Scrap Loss (¥)",
             data: [0, 0, 0, 0],
             backgroundColor: ["#f97316", "#0ea5e9", "#8b5cf6", "#22c55e"]
           }
@@ -679,7 +684,7 @@ function initFinancialsCharts() {
         labels: [],
         datasets: [
           {
-            label: "Total Value (¥)",
+            label: (typeof t === 'function') ? t('totalValueYen') : "Total Value (¥)",
             data: [],
             backgroundColor: "rgba(37, 99, 235, 0.6)"
           }
@@ -723,7 +728,7 @@ function initFinancialsCharts() {
         labels: [],
         datasets: [
           {
-            label: "Scrap Loss (¥)",
+            label: (typeof t === 'function') ? t('scrapLoss') : "Scrap Loss (¥)",
             data: [],
             backgroundColor: "rgba(220, 38, 38, 0.6)"
           }
@@ -768,7 +773,7 @@ function initFinancialsCharts() {
         labels: [],
         datasets: [
           {
-            label: "Cost (¥)",
+            label: (typeof t === 'function') ? t('cost') : "Cost (¥)",
             data: [],
             borderColor: "rgb(37, 99, 235)",
             backgroundColor: "rgba(37, 99, 235, 0.05)",
@@ -778,7 +783,7 @@ function initFinancialsCharts() {
             pointRadius: 3
           },
           {
-            label: "Scrap Loss (¥)",
+            label: (typeof t === 'function') ? t('scrapLoss') : "Scrap Loss (¥)",
             data: [],
             borderColor: "rgb(220, 38, 38)",
             backgroundColor: "rgba(220, 38, 38, 0.05)",
@@ -820,7 +825,7 @@ function initFinancialsCharts() {
         labels: [],
         datasets: [
           {
-            label: "Cost (¥)",
+            label: (typeof t === 'function') ? t('cost') : "Cost (¥)",
             data: [],
             backgroundColor: "rgba(22, 163, 74, 0.75)",
             borderColor: "rgb(22, 163, 74)",
@@ -829,7 +834,7 @@ function initFinancialsCharts() {
             stack: "stack"
           },
           {
-            label: "Scrap Loss (¥)",
+            label: (typeof t === 'function') ? t('scrapLoss') : "Scrap Loss (¥)",
             // values stored as negatives so bars go below zero
             data: [],
             backgroundColor: "rgba(220, 38, 38, 0.75)",
@@ -1110,13 +1115,13 @@ function _financialsDelta(elId, current, previous, lowerIsBetter) {
   if (diff === 0) { el.textContent = ''; return; }
   const pct = Math.abs((diff / previous) * 100).toFixed(1);
   const isGood = lowerIsBetter ? diff < 0 : diff > 0;
-  el.innerHTML = `<span class="${isGood ? 'text-green-600' : 'text-red-600'}">${diff > 0 ? '▲' : '▼'} ${pct}% vs prev</span>`;
+  el.innerHTML = `<span class="${isGood ? 'text-green-600' : 'text-red-600'}">${diff > 0 ? '▲' : '▼'} ${pct}% ${(typeof t === 'function') ? t('vsPrev') : 'vs prev'}</span>`;
 }
 
 // Update the trend line chart from server data
 function updateFinancialsTrend(trend) {
   const granLabel = document.getElementById("financialsTrendGranularity");
-  if (granLabel) granLabel.textContent = (trend?.granularity === 'weekly') ? 'Weekly' : 'Daily';
+  if (granLabel) granLabel.textContent = (trend?.granularity === 'weekly') ? ((typeof t === 'function') ? t('weekly') : 'Weekly') : ((typeof t === 'function') ? t('daily') : 'Daily');
 
   if (!trend?.labels) return;
 
@@ -1151,7 +1156,7 @@ function renderFinancialsTop5(top5) {
   const body = document.getElementById("financialsTop5Body");
   if (!body) return;
   if (!top5 || !top5.length) {
-    body.innerHTML = '<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>';
+    body.innerHTML = `<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">${(typeof t === 'function') ? t('noData') : 'No data.'}</td></tr>`;
     return;
   }
   body.innerHTML = top5.map((r, i) => `
@@ -1174,7 +1179,7 @@ function renderFinancialsFactoryRanking(factoryTotals) {
   const created     = factoryTotals?.created     || [];
   const finalGood   = factoryTotals?.finalGood   || [];
   if (!factories.length) {
-    body.innerHTML = '<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>';
+    body.innerHTML = `<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">${(typeof t === 'function') ? t('noData') : 'No data.'}</td></tr>`;
     return;
   }
   const ranked = factories
