@@ -1069,6 +1069,56 @@ function renderFactoryComparisonChart() {
 }
 
 /**
+ * Shared external HTML tooltip for defect breakdown charts.
+ */
+function _getDefectTooltipEl() {
+    let el = document.getElementById('defectChartTooltip');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'defectChartTooltip';
+        Object.assign(el.style, {
+            position: 'absolute', background: 'rgba(15,15,15,0.9)', color: '#fff',
+            borderRadius: '7px', padding: '10px 14px', pointerEvents: 'none',
+            fontSize: '12px', lineHeight: '1.55', zIndex: '99999',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.35)', transition: 'opacity 0.1s',
+            opacity: '0', maxWidth: '600px'
+        });
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function _showDefectTooltip(el, chart, tooltip, title, total, colorHex, breakdownLines) {
+    const many = breakdownLines.length > 9;
+    let html = `<div style="font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:7px;">
+        <span style="display:inline-block;width:10px;height:10px;background:${colorHex};border-radius:2px;flex-shrink:0;"></span>
+        ${title}: <span style="font-weight:700;">${total.toLocaleString()}</span>
+    </div>`;
+    if (breakdownLines.length) {
+        if (many) {
+            html += `<div style="columns:2;column-gap:22px;font-size:11px;opacity:.9;">`;
+            breakdownLines.forEach(l => { html += `<div style="break-inside:avoid;white-space:nowrap;padding:1px 0;">${l}</div>`; });
+            html += `</div>`;
+        } else {
+            html += `<div style="font-size:11px;opacity:.9;">`;
+            breakdownLines.forEach(l => { html += `<div style="padding:1px 0;white-space:nowrap;">${l}</div>`; });
+            html += `</div>`;
+        }
+    }
+    el.innerHTML = html;
+    el.style.opacity = '0';
+    el.style.left = '0'; el.style.top = '0';
+    const rect = chart.canvas.getBoundingClientRect();
+    let x = rect.left + window.scrollX + tooltip.caretX + 14;
+    let y = rect.top  + window.scrollY + tooltip.caretY - 10;
+    const tw = el.offsetWidth, th = el.offsetHeight;
+    if (x + tw > window.scrollX + window.innerWidth  - 10) x = rect.left + window.scrollX + tooltip.caretX - tw - 14;
+    if (y + th > window.scrollY + window.innerHeight - 10) y = window.scrollY + window.innerHeight - th - 10;
+    if (y < window.scrollY + 4) y = window.scrollY + 4;
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.opacity = '1';
+}
+
+/**
  * Render defect distribution chart (dynamic for all collection types)
  */
 function renderDefectDistributionChart() {
@@ -1125,8 +1175,40 @@ function renderDefectDistributionChart() {
             : ['カウンター1','カウンター2','カウンター3','カウンター4','カウンター5','カウンター6','カウンター7','カウンター8','カウンター9','カウンター10','カウンター11','カウンター12'];
     }
     
+    // Build per-model totals across all factories for breakdown tooltips
+    function buildModelBreakdown() {
+        const fmRaw = analyticsData.factoryCountersByModel || [];
+        const sebanggoToModel = {};
+        (analyticsProductFilter.allProducts || []).forEach(p => {
+            if (p.背番号 && p.モデル) sebanggoToModel[p.背番号] = p.モデル;
+        });
+        const totals = {}; // model → [c0..c11]
+        fmRaw.forEach(row => {
+            const model = (row.sebanggo && sebanggoToModel[row.sebanggo]) || row.sebanggo || '(unknown)';
+            const c = [row.c1,row.c2,row.c3,row.c4,row.c5,row.c6,
+                       row.c7,row.c8,row.c9,row.c10,row.c11,row.c12].map(v => v || 0);
+            if (!totals[model]) totals[model] = new Array(12).fill(0);
+            totals[model] = totals[model].map((v, i) => v + c[i]);
+        });
+        return totals; // { modelName: [c0..c11] }
+    }
+    const modelBreakdown = buildModelBreakdown();
+
+    function getBreakdownLines(counterIdx, grandTotal) {
+        const rows = Object.entries(modelBreakdown)
+            .map(([model, c]) => ({ model, val: c[counterIdx] || 0 }))
+            .filter(r => r.val > 0)
+            .sort((a, b) => b.val - a.val);
+        if (rows.length <= 1) return [];
+        return rows.map(r => {
+            const pct = grandTotal > 0 ? Math.round(r.val / grandTotal * 100) : 0;
+            return `  ${r.model}: ${r.val.toLocaleString()} (${pct}%)`;
+        });
+    }
+
     let counterData = [];
     let labels = [];
+    let counterIndices = []; // track original counter index for each slice
     
     if (defectAnalysis.length > 0) {
         const analysis = defectAnalysis[0];
@@ -1143,6 +1225,7 @@ function renderDefectDistributionChart() {
             if (value > 0) {
                 labels.push(defectLabels[i]);
                 counterData.push(value);
+                counterIndices.push(i);
             }
         }
     }
@@ -1204,12 +1287,20 @@ function renderDefectDistributionChart() {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                title: {
-                    display: true,
-                    text: '不良分布 (プロセス別)'
-                },
-                legend: {
-                    position: 'right'
+                title: { display: true, text: '不良分布 (プロセス別)' },
+                legend: { position: 'right' },
+                tooltip: {
+                    enabled: false,
+                    external: (context) => {
+                        const { chart, tooltip } = context;
+                        const el = _getDefectTooltipEl();
+                        if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
+                        const dp = tooltip.dataPoints?.[0]; if (!dp) return;
+                        const si  = dp.dataIndex;
+                        const ci  = counterIndices[si] ?? si;
+                        const val = counterData[si];
+                        _showDefectTooltip(el, chart, tooltip, labels[si], val, colors[si] || '#888', getBreakdownLines(ci, val));
+                    }
                 }
             }
         }
@@ -1299,6 +1390,24 @@ function renderDefectBarChart() {
         '#F43F5E','#06B6D4'
     ];
 
+    // Build per-model totals for bar chart tooltips
+    const barModelBreakdown = (() => {
+        const fmRaw = analyticsData.factoryCountersByModel || [];
+        const sebanggoToModel = {};
+        (analyticsProductFilter.allProducts || []).forEach(p => {
+            if (p.背番号 && p.モデル) sebanggoToModel[p.背番号] = p.モデル;
+        });
+        const totals = {};
+        fmRaw.forEach(row => {
+            const model = (row.sebanggo && sebanggoToModel[row.sebanggo]) || row.sebanggo || '(unknown)';
+            const c = [row.c1,row.c2,row.c3,row.c4,row.c5,row.c6,
+                       row.c7,row.c8,row.c9,row.c10,row.c11,row.c12].map(v => v || 0);
+            if (!totals[model]) totals[model] = new Array(12).fill(0);
+            totals[model] = totals[model].map((v, i) => v + c[i]);
+        });
+        return totals;
+    })();
+
     analyticsCharts.defectBar = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -1318,8 +1427,21 @@ function renderDefectBarChart() {
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    callbacks: {
-                        label: ctx => ` ${ctx.parsed.y.toLocaleString()}`
+                    enabled: false,
+                    external: (context) => {
+                        const { chart, tooltip } = context;
+                        const el = _getDefectTooltipEl();
+                        if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
+                        const dp = tooltip.dataPoints?.[0]; if (!dp) return;
+                        const ci  = dp.dataIndex;
+                        const val = dp.parsed.y;
+                        const breakdown = Object.entries(barModelBreakdown)
+                            .map(([model, c]) => ({ model, v: c[ci] || 0 }))
+                            .filter(r => r.v > 0).sort((a, b) => b.v - a.v);
+                        const lines = breakdown.length > 1
+                            ? breakdown.map(r => `${r.model}: ${r.v.toLocaleString()} (${val > 0 ? Math.round(r.v / val * 100) : 0}%)`)
+                            : [];
+                        _showDefectTooltip(el, chart, tooltip, barLabels[ci], val, colors[ci % colors.length], lines);
                     }
                 }
             },
@@ -2171,60 +2293,141 @@ function renderFactoryTop5DefectsChart() {
         analyticsCharts.factoryTop5Defects.destroy();
     }
 
-    const factoryStats = analyticsData.factoryStats || [];
-    const defectAnalysis = analyticsData.defectAnalysis && analyticsData.defectAnalysis[0] ? analyticsData.defectAnalysis[0] : {};
-    
-    // Get defect labels and fields from the analysis
-    const defectLabels = defectAnalysis.defectLabels || [];
-    const defectFields = defectAnalysis.defectFields || [];
-    
-    // Get top 5 defect types
-    const defectTotals = defectFields.map(field => defectAnalysis[field] || 0);
-    const top5Indices = defectTotals
-        .map((val, idx) => ({val, idx}))
+    const factoryStats  = analyticsData.factoryStats || [];
+    const defectAnalysis = analyticsData.defectAnalysis?.[0] || {};
+    const allDefs        = analyticsData.defectDefinitions || [];
+    const fmRaw          = analyticsData.factoryCountersByModel || [];
+
+    // Build lookup: factory → model → [c1..c12]
+    // Server groups by 背番号; map to モデル using allProducts
+    const sebanggoToModel = {};
+    (analyticsProductFilter.allProducts || []).forEach(p => {
+        if (p.背番号 && p.モデル) sebanggoToModel[p.背番号] = p.モデル;
+    });
+
+    const fmLookup = {};
+    fmRaw.forEach(row => {
+        if (!row.factory) return;
+        const model = (row.sebanggo && sebanggoToModel[row.sebanggo]) || row.sebanggo || '(unknown)';
+        if (!fmLookup[row.factory]) fmLookup[row.factory] = {};
+        const counters = [row.c1, row.c2, row.c3, row.c4, row.c5, row.c6,
+                          row.c7, row.c8, row.c9, row.c10, row.c11, row.c12].map(v => v || 0);
+        // Merge under model name (multiple 背番号 may share a モデル)
+        if (!fmLookup[row.factory][model]) {
+            fmLookup[row.factory][model] = counters;
+        } else {
+            fmLookup[row.factory][model] = fmLookup[row.factory][model].map((v, i) => v + counters[i]);
+        }
+    });
+
+    // Resolve per-counter display labels (respects active model filter if set)
+    const lang       = localStorage.getItem('lang') || 'en';
+    const useEN      = lang === 'en';
+    const filterType = document.getElementById('analyticsFilterType')?.value || '';
+    const activeModel = filterType === 'model'
+        ? (document.getElementById('analyticsModelFilter')?.value || '')
+        : '';
+
+    function getTop5Labels() {
+        if (activeModel) {
+            const def = allDefs.find(d => d.モデル === activeModel);
+            if (def) {
+                const src = (useEN && def.counters_en) ? def.counters_en : def.counters;
+                const fb  = (!useEN && def.counters_en) ? def.counters_en : def.counters;
+                if (src) {
+                    return Array.from({ length: 12 }, (_, i) => {
+                        const key  = `counter-${i + 1}`;
+                        const name = src[key];
+                        if (name && name.trim()) return name.trim();
+                        const f = fb?.[key];
+                        return (f && f.trim()) ? f.trim() : (useEN ? `Counter ${i + 1}` : `カウンター${i + 1}`);
+                    });
+                }
+            }
+        }
+        return useEN
+            ? Array.from({ length: 12 }, (_, i) => `Counter ${i + 1}`)
+            : Array.from({ length: 12 }, (_, i) => `カウンター${i + 1}`);
+    }
+
+    const allLabels = getTop5Labels();
+
+    // Determine top 5 counter indices by global total
+    const defectFields = defectAnalysis.defectFields ||
+        ['counter1Total','counter2Total','counter3Total','counter4Total','counter5Total','counter6Total',
+         'counter7Total','counter8Total','counter9Total','counter10Total','counter11Total','counter12Total'];
+    const defectTotals = defectFields.map(f => defectAnalysis[f] || 0);
+    const top5Indices  = defectTotals
+        .map((val, idx) => ({ val, idx }))
         .sort((a, b) => b.val - a.val)
         .slice(0, 5)
         .map(item => item.idx);
-    
-    const datasets = top5Indices.map((idx, colorIdx) => ({
-        label: defectLabels[idx] || `Defect ${idx + 1}`,
-        data: factoryStats.map(() => Math.random() * 100 + 20), // Simulate per-factory data
-        backgroundColor: [
-            'rgba(239, 68, 68, 0.7)',
-            'rgba(249, 115, 22, 0.7)',
-            'rgba(245, 158, 11, 0.7)',
-            'rgba(34, 197, 94, 0.7)',
-            'rgba(59, 130, 246, 0.7)'
-        ][colorIdx]
-    }));
 
-    const config = {
+    // Build per-factory totals for each top5 counter from real data
+    const factoryNames  = factoryStats.map(f => f.factory || 'Unknown');
+    const paletteColors = [
+        'rgba(239, 68, 68, 0.75)',
+        'rgba(249, 115, 22, 0.75)',
+        'rgba(245, 158, 11, 0.75)',
+        'rgba(34, 197, 94, 0.75)',
+        'rgba(59, 130, 246, 0.75)'
+    ];
+
+    const datasets = top5Indices.map((counterIdx, colorIdx) => {
+        const data = factoryNames.map(factory => {
+            const models = fmLookup[factory] || {};
+            return Object.values(models).reduce((sum, counters) => sum + (counters[counterIdx] || 0), 0);
+        });
+        return {
+            label: allLabels[counterIdx] || `Counter ${counterIdx + 1}`,
+            data,
+            backgroundColor: paletteColors[colorIdx]
+        };
+    });
+
+    // Tooltip: on hover show per-model breakdown for that counter × factory
+    const customTooltip = {
+        enabled: false,
+        external: (context) => {
+            const { chart, tooltip } = context;
+            const el = _getDefectTooltipEl();
+            if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
+            const dp = tooltip.dataPoints?.[0]; if (!dp) return;
+            const factory     = factoryNames[dp.dataIndex];
+            const dsIdx       = dp.datasetIndex;
+            const counterIdx  = top5Indices[dsIdx];
+            const counterName = allLabels[counterIdx] || `Counter ${counterIdx + 1}`;
+            const val         = dp.parsed.y;
+            const colorRaw    = paletteColors[dsIdx] || 'rgba(99,102,241,0.75)';
+            const colorSolid  = colorRaw.replace(/[\d.]+\)$/, '1)');
+            const models      = fmLookup[factory] || {};
+            const breakdown   = Object.entries(models)
+                .map(([model, counters]) => ({ model, val: counters[counterIdx] || 0 }))
+                .filter(m => m.val > 0).sort((a, b) => b.val - a.val);
+            const grand = breakdown.reduce((s, m) => s + m.val, 0);
+            const lines = breakdown.length > 1
+                ? breakdown.map(m => `${m.model}: ${m.val.toLocaleString()} (${grand > 0 ? Math.round(m.val / grand * 100) : 0}%)`)
+                : (breakdown.length === 1 ? [breakdown[0].model] : []);
+            _showDefectTooltip(el, chart, tooltip, `${factory} — ${counterName}`, val, colorSolid, lines);
+        }
+    };
+
+    analyticsCharts.factoryTop5Defects = new Chart(ctx, {
         type: 'bar',
-        data: {
-            labels: factoryStats.map(f => f.factory || 'Unknown'),
-            datasets: datasets
-        },
+        data: { labels: factoryNames, datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: { position: 'top' }
+                legend: { position: 'top' },
+                tooltip: customTooltip
             },
             scales: {
-                x: {
-                    stacked: true,
-                    title: { display: true, text: 'Factory' }
-                },
-                y: {
-                    stacked: true,
-                    beginAtZero: true,
-                    title: { display: true, text: 'Defect Count' }
-                }
+                x: { stacked: true, title: { display: true, text: useEN ? 'Factory' : '工場' } },
+                y: { stacked: true, beginAtZero: true, title: { display: true, text: useEN ? 'Defect Count' : '不良数' }, ticks: { precision: 0 } }
             }
         }
-    };
-
-    analyticsCharts.factoryTop5Defects = new Chart(ctx, config);
+    });
 }
 
 /**
