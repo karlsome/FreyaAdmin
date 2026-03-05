@@ -1096,12 +1096,20 @@ function _showDefectTooltip(el, chart, tooltip, title, total, colorHex, breakdow
     </div>`;
     if (breakdownLines.length) {
         if (many) {
-            html += `<div style="columns:2;column-gap:22px;font-size:11px;opacity:.9;">`;
-            breakdownLines.forEach(l => { html += `<div style="break-inside:avoid;white-space:nowrap;padding:1px 0;">${l}</div>`; });
+            // First item full-width (may have long defined counter name), rest in 2 columns
+            html += `<div style="font-size:11px;opacity:.9;">`;
+            html += `<div style="padding:1px 0 3px 0;word-break:break-word;">${breakdownLines[0]}</div>`;
+            if (breakdownLines.length > 1) {
+                html += `<div style="columns:2;column-gap:18px;">`;
+                breakdownLines.slice(1).forEach(l => {
+                    html += `<div style="break-inside:avoid;white-space:nowrap;padding:1px 0;">${l}</div>`;
+                });
+                html += `</div>`;
+            }
             html += `</div>`;
         } else {
             html += `<div style="font-size:11px;opacity:.9;">`;
-            breakdownLines.forEach(l => { html += `<div style="padding:1px 0;white-space:nowrap;">${l}</div>`; });
+            breakdownLines.forEach(l => { html += `<div style="padding:1px 0;word-break:break-word;">${l}</div>`; });
             html += `</div>`;
         }
     }
@@ -1116,6 +1124,23 @@ function _showDefectTooltip(el, chart, tooltip, title, total, colorHex, breakdow
     if (y + th > window.scrollY + window.innerHeight - 10) y = window.scrollY + window.innerHeight - th - 10;
     if (y < window.scrollY + 4) y = window.scrollY + 4;
     el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.opacity = '1';
+}
+
+/**
+ * Resolve a counter's defined name for a specific model, if available.
+ * Returns "CounterName (ModelName)" when defined, or just "ModelName" when not.
+ */
+function _getCounterLabel(modelName, counterIdx, allDefs) {
+    if (!allDefs || !modelName) return modelName;
+    const lang  = localStorage.getItem('lang') || 'en';
+    const useEN = lang === 'en';
+    const def   = allDefs.find(d => d.モデル === modelName);
+    if (!def) return modelName;
+    const src = (useEN && def.counters_en) ? def.counters_en : def.counters;
+    const fb  = src === def.counters ? def.counters_en : def.counters;
+    const key  = `counter-${counterIdx + 1}`;
+    const name = src?.[key]?.trim() || fb?.[key]?.trim();
+    return name ? `${name} (${modelName})` : modelName;
 }
 
 /**
@@ -1201,8 +1226,8 @@ function renderDefectDistributionChart() {
             .sort((a, b) => b.val - a.val);
         if (rows.length <= 1) return [];
         return rows.map(r => {
-            const pct = grandTotal > 0 ? Math.round(r.val / grandTotal * 100) : 0;
-            return `  ${r.model}: ${r.val.toLocaleString()} (${pct}%)`;
+            const pct   = grandTotal > 0 ? Math.round(r.val / grandTotal * 100) : 0;
+            return `${r.model}: ${r.val.toLocaleString()} (${pct}%)`;
         });
     }
 
@@ -1438,8 +1463,12 @@ function renderDefectBarChart() {
                         const breakdown = Object.entries(barModelBreakdown)
                             .map(([model, c]) => ({ model, v: c[ci] || 0 }))
                             .filter(r => r.v > 0).sort((a, b) => b.v - a.v);
+                        const allDefsBar = analyticsData.defectDefinitions || [];
                         const lines = breakdown.length > 1
-                            ? breakdown.map(r => `${r.model}: ${r.v.toLocaleString()} (${val > 0 ? Math.round(r.v / val * 100) : 0}%)`)
+                            ? breakdown.map(r => {
+                                const pct = val > 0 ? Math.round(r.v / val * 100) : 0;
+                                return `${r.model}: ${r.v.toLocaleString()} (${pct}%)`;
+                            })
                             : [];
                         _showDefectTooltip(el, chart, tooltip, barLabels[ci], val, colors[ci % colors.length], lines);
                     }
@@ -2405,8 +2434,12 @@ function renderFactoryTop5DefectsChart() {
                 .map(([model, counters]) => ({ model, val: counters[counterIdx] || 0 }))
                 .filter(m => m.val > 0).sort((a, b) => b.val - a.val);
             const grand = breakdown.reduce((s, m) => s + m.val, 0);
+            const allDefsT = analyticsData.defectDefinitions || [];
             const lines = breakdown.length > 1
-                ? breakdown.map(m => `${m.model}: ${m.val.toLocaleString()} (${grand > 0 ? Math.round(m.val / grand * 100) : 0}%)`)
+                ? breakdown.map(m => {
+                    const pct = grand > 0 ? Math.round(m.val / grand * 100) : 0;
+                    return `${m.model}: ${m.val.toLocaleString()} (${pct}%)`;
+                })
                 : (breakdown.length === 1 ? [breakdown[0].model] : []);
             _showDefectTooltip(el, chart, tooltip, `${factory} — ${counterName}`, val, colorSolid, lines);
         }
