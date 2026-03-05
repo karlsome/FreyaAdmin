@@ -3064,8 +3064,9 @@ function loadPage(page) {
 
           // ==================== 不良管理 DEFECT MANAGEMENT ====================
 
-          let _furyoModels = [];        // distinct モデル values from masterDB
-          let _furyoDefinitions = {};   // { モデル: { 'counter-1': 'シワ', ... } }
+          let _furyoModels = [];           // distinct モデル values from masterDB
+          let _furyoDefinitions = {};      // { モデル: { 'counter-1': 'シワ', ... } }  (Japanese)
+          let _furyoDefinitionsEN = {};    // { モデル: { 'counter-1': 'Wrinkle', ... } } (English)
           let _furyoSelectedModel = null;
           let _furyoHasChanges = false;
 
@@ -3113,8 +3114,12 @@ function loadPage(page) {
 
               // Index definitions by model
               _furyoDefinitions = {};
+              _furyoDefinitionsEN = {};
               (defsData || []).forEach(def => {
-                if (def.モデル) _furyoDefinitions[def.モデル] = def.counters || {};
+                if (def.モデル) {
+                  _furyoDefinitions[def.モデル]   = def.counters    || {};
+                  _furyoDefinitionsEN[def.モデル] = def.counters_en || {};
+                }
               });
 
               renderFuryoKanriUI();
@@ -3132,10 +3137,10 @@ function loadPage(page) {
             const canEdit = FURYO_EDIT_ROLES.includes(currentUser?.role || '');
 
             container.innerHTML = `
-              <div class="flex gap-4 min-h-[600px]">
+              <div class="flex gap-4" style="height: calc(100vh - 180px);">
                 <!-- Left: Model List -->
-                <div class="w-72 shrink-0 bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col">
-                  <div class="p-4 border-b border-gray-200">
+                <div class="w-72 shrink-0 bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col h-full">
+                  <div class="p-4 border-b border-gray-200 shrink-0">
                     <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                       <i class="ri-list-unordered text-blue-600"></i> モデル一覧
                     </h3>
@@ -3153,13 +3158,13 @@ function loadPage(page) {
                       : _furyoModels.map(m => renderFuryoModelItem(m)).join('')
                     }
                   </ul>
-                  <div class="p-3 border-t border-gray-100 text-xs text-gray-400 text-center">
+                  <div class="p-3 border-t border-gray-100 text-xs text-gray-400 text-center shrink-0">
                     ${_furyoModels.length}モデル
                   </div>
                 </div>
 
                 <!-- Right: Counter Definition Panel -->
-                <div class="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm">
+                <div class="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm h-full overflow-hidden">
                   <div id="furyoDetailPanel" class="h-full flex items-center justify-center">
                     <div class="text-center text-gray-400">
                       <i class="ri-arrow-left-line text-4xl mb-3 block"></i>
@@ -3218,38 +3223,65 @@ function loadPage(page) {
             const panel = document.getElementById('furyoDetailPanel');
             if (!panel) return;
 
+            // Switch from centered placeholder layout to full-height flex layout
+            panel.className = 'h-full flex flex-col overflow-hidden';
+
             const canEdit = FURYO_EDIT_ROLES.includes(currentUser?.role || '');
-            const existingDef = _furyoDefinitions[modelName] || {};
-            const lastDef = Object.values(_furyoDefinitions[modelName] || {}).some(v => v && v.trim());
+            const existingDef   = _furyoDefinitions[modelName]   || {};
+            const existingDefEN = _furyoDefinitionsEN[modelName] || {};
+            const isDefined = Object.keys(existingDef).length > 0;
+
+            const inputCls = canEdit
+              ? 'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors'
+              : 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed';
 
             const countersHTML = Array.from({ length: 12 }, (_, i) => {
-              const key = `counter-${i + 1}`;
-              const value = existingDef[key] || '';
+              const key   = `counter-${i + 1}`;
+              const valJP = existingDef[key]   || '';
+              const valEN = existingDefEN[key] || '';
+              const blurHandler = canEdit
+                ? `onblur="furyoAutoTranslate(${i + 1})"`
+                : '';
               return `
-                <div class="flex items-center gap-3">
-                  <label class="w-28 shrink-0 text-sm font-medium text-gray-600">カウンター${i + 1}</label>
+                <div class="grid items-center gap-3" style="grid-template-columns: 6rem 1fr 1fr;">
+                  <label class="text-sm font-medium text-gray-600">カウンター${i + 1}</label>
                   <input
                     type="text"
                     id="furyoCounter_${i + 1}"
-                    value="${value}"
+                    value="${valJP.replace(/"/g, '&quot;')}"
                     ${canEdit ? '' : 'disabled'}
-                    placeholder="${canEdit ? '不良名を入力...' : '権限なし'}"
-                    class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg ${canEdit ? 'focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none' : 'bg-gray-100 text-gray-500 cursor-not-allowed'} transition-colors"
-                    oninput="_furyoHasChanges = true; document.getElementById('furyoSaveBtn')?.classList.remove('opacity-40')"
+                    placeholder="${canEdit ? '日本語で入力...' : '権限なし'}"
+                    class="${inputCls}"
+                    oninput="_furyoHasChanges = true;"
+                    ${blurHandler}
                   />
+                  <div class="relative">
+                    <input
+                      type="text"
+                      id="furyoCounterEN_${i + 1}"
+                      value="${valEN.replace(/"/g, '&quot;')}"
+                      ${canEdit ? '' : 'disabled'}
+                      placeholder="${canEdit ? 'English...' : 'No permission'}"
+                      class="${inputCls} pr-7"
+                      oninput="_furyoHasChanges = true;"
+                    />
+                    <span id="furyoTranslating_${i + 1}" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-blue-400">
+                      <i class="ri-loader-4-line animate-spin text-xs"></i>
+                    </span>
+                  </div>
                 </div>
               `;
             }).join('');
 
             panel.innerHTML = `
-              <div class="p-6 h-full flex flex-col">
+              <div class="p-6 flex flex-col h-full">
                 <!-- Header -->
-                <div class="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+                <div class="flex items-center justify-between mb-4 pb-4 border-b border-gray-200 shrink-0">
                   <div>
                     <h3 class="text-lg font-bold text-gray-900">${modelName}</h3>
                     <p class="text-sm text-gray-500 mt-0.5">カウンター不良名定義</p>
                   </div>
-                  ${Object.keys(existingDef).length > 0
+                  ${isDefined
                     ? `<span class="px-3 py-1 bg-green-100 text-green-700 text-sm rounded-full font-medium flex items-center gap-1">
                         <i class="ri-checkbox-circle-line"></i> 定義済み
                        </span>`
@@ -3259,13 +3291,25 @@ function loadPage(page) {
                   }
                 </div>
 
+                <!-- Column Headers -->
+                <div class="grid gap-3 mb-2 shrink-0" style="grid-template-columns: 6rem 1fr 1fr;">
+                  <div></div>
+                  <div class="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <span>🇯🇵</span> 日本語
+                  </div>
+                  <div class="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    <span>🇬🇧</span> English
+                    <span class="ml-1 text-gray-400 font-normal normal-case tracking-normal">(日本語入力後に自動提案)</span>
+                  </div>
+                </div>
+
                 <!-- Counter Fields -->
-                <div class="flex-1 overflow-y-auto space-y-3 pr-1">
+                <div class="flex-1 overflow-y-auto space-y-2.5 pr-1">
                   ${countersHTML}
                 </div>
 
                 <!-- Action Buttons -->
-                <div class="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">
+                <div class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between shrink-0">
                   <p class="text-xs text-gray-400">
                     ${canEdit ? '空欄のカウンターは「カウンターN」として表示されます' : '表示専用 — 編集権限がありません'}
                   </p>
@@ -3291,20 +3335,55 @@ function loadPage(page) {
             `;
           }
 
+          // Auto-translate a Japanese counter value into the English field using MyMemory
+          window.furyoAutoTranslate = async function(idx) {
+            const jpInput = document.getElementById(`furyoCounter_${idx}`);
+            const enInput = document.getElementById(`furyoCounterEN_${idx}`);
+            const spinner = document.getElementById(`furyoTranslating_${idx}`);
+            if (!jpInput || !enInput) return;
+
+            const jpText = jpInput.value.trim();
+            // Only auto-suggest when there is JP text AND EN field is empty
+            if (!jpText || enInput.value.trim() !== '') return;
+
+            try {
+              if (spinner) spinner.classList.remove('hidden');
+              const res = await fetch(
+                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(jpText)}&langpair=ja|en`
+              );
+              const data = await res.json();
+              const translated = data?.responseData?.translatedText;
+              // Only fill if EN field is still empty (user may have typed while waiting)
+              if (translated && enInput.value.trim() === '') {
+                enInput.value = translated;
+                _furyoHasChanges = true;
+              }
+            } catch (err) {
+              console.warn('Auto-translate failed:', err);
+            } finally {
+              if (spinner) spinner.classList.add('hidden');
+            }
+          };
+
           function clearFuryoCounters() {
             for (let i = 1; i <= 12; i++) {
-              const input = document.getElementById(`furyoCounter_${i}`);
-              if (input) input.value = '';
+              const jp = document.getElementById(`furyoCounter_${i}`);
+              const en = document.getElementById(`furyoCounterEN_${i}`);
+              if (jp) jp.value = '';
+              if (en) en.value = '';
             }
           }
           window.clearFuryoCounters = clearFuryoCounters;
           window.filterFuryoModels = filterFuryoModels;
 
           async function saveFuryoDefinition(modelName) {
-            const counters = {};
+            const counters    = {};
+            const counters_en = {};
             for (let i = 1; i <= 12; i++) {
-              const input = document.getElementById(`furyoCounter_${i}`);
-              counters[`counter-${i}`] = input ? input.value.trim() : '';
+              const jp = document.getElementById(`furyoCounter_${i}`);
+              const en = document.getElementById(`furyoCounterEN_${i}`);
+              counters[`counter-${i}`]    = jp ? jp.value.trim() : '';
+              counters_en[`counter-${i}`] = en ? en.value.trim() : '';
             }
 
             const btn = document.getElementById('furyoSaveBtn');
@@ -3317,6 +3396,7 @@ function loadPage(page) {
                 body: JSON.stringify({
                   model: modelName,
                   counters,
+                  counters_en,
                   username: currentUser?.username || 'unknown'
                 })
               });
@@ -3324,7 +3404,8 @@ function loadPage(page) {
               if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
 
               // Update local cache
-              _furyoDefinitions[modelName] = counters;
+              _furyoDefinitions[modelName]   = counters;
+              _furyoDefinitionsEN[modelName] = counters_en;
               _furyoHasChanges = false;
 
               // Restore button with success flash

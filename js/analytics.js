@@ -1082,19 +1082,31 @@ function renderDefectDistributionChart() {
         });
     }
     
-    // Resolve defect labels: generic or model-specific
+    // Resolve defect labels: generic or model-specific, language-aware
     function getDefectLabels() {
         const selectedModel = modelSelector ? modelSelector.value : '';
+        const lang = localStorage.getItem('lang') || 'en';
+        const useEN = lang === 'en';
         if (selectedModel) {
             const def = allDefs.find(d => d.モデル === selectedModel);
-            if (def && def.counters) {
-                return Array.from({ length: 12 }, (_, i) => {
-                    const name = def.counters[`counter-${i + 1}`];
-                    return (name && name.trim()) ? name.trim() : `カウンター${i + 1}`;
-                });
+            if (def) {
+                const src = (useEN && def.counters_en) ? def.counters_en : def.counters;
+                const fallback = (!useEN && def.counters_en) ? def.counters_en : def.counters;
+                if (src) {
+                    return Array.from({ length: 12 }, (_, i) => {
+                        const key = `counter-${i + 1}`;
+                        const name = src[key];
+                        if (name && name.trim()) return name.trim();
+                        // Fall back to the other language if this one is empty
+                        const fb = fallback ? fallback[key] : null;
+                        return (fb && fb.trim()) ? fb.trim() : (useEN ? `Counter ${i + 1}` : `カウンター${i + 1}`);
+                    });
+                }
             }
         }
-        return ['カウンター1', 'カウンター2', 'カウンター3', 'カウンター4', 'カウンター5', 'カウンター6', 'カウンター7', 'カウンター8', 'カウンター9', 'カウンター10', 'カウンター11', 'カウンター12'];
+        return useEN
+            ? ['Counter 1','Counter 2','Counter 3','Counter 4','Counter 5','Counter 6','Counter 7','Counter 8','Counter 9','Counter 10','Counter 11','Counter 12']
+            : ['カウンター1','カウンター2','カウンター3','カウンター4','カウンター5','カウンター6','カウンター7','カウンター8','カウンター9','カウンター10','カウンター11','カウンター12'];
     }
     
     let counterData = [];
