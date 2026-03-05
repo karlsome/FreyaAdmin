@@ -11,6 +11,13 @@ let combinedDefectRateCalculated = false; // Flag to prevent recalculation
 let lastCalculatedDateRange = null; // Track the date range for combined defect rate
 let analyticsCharts = {}; // Store chart instances
 
+// Product filter state (mirrors financials pattern)
+const analyticsProductFilter = {
+  allProducts: [],           // full masterDB product list { 背番号, 品番, モデル }
+  selectedSebanggoArray: [], // committed selection
+  tempSelectedSebanggo: []   // in-modal working copy
+};
+
 /**
  * Initialize Analytics System
  */
@@ -42,8 +49,12 @@ function initializeAnalytics() {
     // Make combined defect rate clickable to recalculate
     document.getElementById('combinedDefectRateCount')?.addEventListener('click', recalculateCombinedDefectRate);
     
-    // Load factory options first, then load data
-    loadAnalyticsFactoryOptions().then(() => {
+    // Load factory options + product list, then load data
+    Promise.all([
+        loadAnalyticsFactoryOptions(),
+        loadAnalyticsModelOptions(),
+        loadAnalyticsAllProducts()
+    ]).then(() => {
         loadAnalyticsData();
     });
 }
@@ -247,6 +258,11 @@ async function loadAnalyticsData() {
         if (selectedFactory) {
             requestBody.factoryFilter = selectedFactory;
         }
+
+        // Add product filter (背番号 array) if any are selected
+        if (analyticsProductFilter.selectedSebanggoArray.length > 0) {
+            requestBody.bans = analyticsProductFilter.selectedSebanggoArray;
+        }
         
         const response = await fetch(BASE_URL + 'api/analytics-data', {
             method: "POST",
@@ -367,6 +383,7 @@ function renderAnalytics() {
             renderProductionTrendChart();
             renderQualityTrendChart();
             renderFactoryComparisonChart();
+            renderDefectBarChart();
             renderDefectDistributionChart();
             renderWorkerPerformanceChart();
             renderProcessEfficiencyChart();
@@ -1052,6 +1069,81 @@ function renderFactoryComparisonChart() {
 }
 
 /**
+ * Shared external HTML tooltip for defect breakdown charts.
+ */
+function _getDefectTooltipEl() {
+    let el = document.getElementById('defectChartTooltip');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'defectChartTooltip';
+        Object.assign(el.style, {
+            position: 'absolute', background: 'rgba(15,15,15,0.9)', color: '#fff',
+            borderRadius: '7px', padding: '10px 14px', pointerEvents: 'none',
+            fontSize: '12px', lineHeight: '1.55', zIndex: '99999',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.35)', transition: 'opacity 0.1s',
+            opacity: '0', maxWidth: '600px'
+        });
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function _showDefectTooltip(el, chart, tooltip, title, total, colorHex, breakdownLines) {
+    const many = breakdownLines.length > 9;
+    let html = `<div style="font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:7px;">
+        <span style="display:inline-block;width:10px;height:10px;background:${colorHex};border-radius:2px;flex-shrink:0;"></span>
+        ${title}: <span style="font-weight:700;">${total.toLocaleString()}</span>
+    </div>`;
+    if (breakdownLines.length) {
+        if (many) {
+            // First item full-width (may have long defined counter name), rest in 2 columns
+            html += `<div style="font-size:11px;opacity:.9;">`;
+            html += `<div style="padding:1px 0 3px 0;word-break:break-word;">${breakdownLines[0]}</div>`;
+            if (breakdownLines.length > 1) {
+                html += `<div style="columns:2;column-gap:18px;">`;
+                breakdownLines.slice(1).forEach(l => {
+                    html += `<div style="break-inside:avoid;white-space:nowrap;padding:1px 0;">${l}</div>`;
+                });
+                html += `</div>`;
+            }
+            html += `</div>`;
+        } else {
+            html += `<div style="font-size:11px;opacity:.9;">`;
+            breakdownLines.forEach(l => { html += `<div style="padding:1px 0;word-break:break-word;">${l}</div>`; });
+            html += `</div>`;
+        }
+    }
+    el.innerHTML = html;
+    el.style.opacity = '0';
+    el.style.left = '0'; el.style.top = '0';
+    const rect = chart.canvas.getBoundingClientRect();
+    let x = rect.left + window.scrollX + tooltip.caretX + 14;
+    let y = rect.top  + window.scrollY + tooltip.caretY - 10;
+    const tw = el.offsetWidth, th = el.offsetHeight;
+    if (x + tw > window.scrollX + window.innerWidth  - 10) x = rect.left + window.scrollX + tooltip.caretX - tw - 14;
+    if (y + th > window.scrollY + window.innerHeight - 10) y = window.scrollY + window.innerHeight - th - 10;
+    if (y < window.scrollY + 4) y = window.scrollY + 4;
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.opacity = '1';
+}
+
+/**
+ * Resolve a counter's defined name for a specific model, if available.
+ * Returns "CounterName (ModelName)" when defined, or just "ModelName" when not.
+ */
+function _getCounterLabel(modelName, counterIdx, allDefs) {
+    if (!allDefs || !modelName) return modelName;
+    const lang  = localStorage.getItem('lang') || 'en';
+    const useEN = lang === 'en';
+    const def   = allDefs.find(d => d.モデル === modelName);
+    if (!def) return modelName;
+    const src = (useEN && def.counters_en) ? def.counters_en : def.counters;
+    const fb  = src === def.counters ? def.counters_en : def.counters;
+    const key  = `counter-${counterIdx + 1}`;
+    const name = src?.[key]?.trim() || fb?.[key]?.trim();
+    return name ? `${name} (${modelName})` : modelName;
+}
+
+/**
  * Render defect distribution chart (dynamic for all collection types)
  */
 function renderDefectDistributionChart() {
@@ -1064,14 +1156,90 @@ function renderDefectDistributionChart() {
         analyticsCharts.defectDistribution.destroy();
     }
     
+    // Auto-derive model from the analytics filter bar
+    const filterType    = document.getElementById('analyticsFilterType')?.value || '';
+    const activeModel   = filterType === 'model'
+        ? (document.getElementById('analyticsModelFilter')?.value || '')
+        : '';
+
+    // Update (or hide) the badge next to the chart title
+    const badge = document.getElementById('defectChartModelBadge');
+    if (badge) {
+        if (activeModel) {
+            badge.textContent = activeModel;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+
+    const allDefs = analyticsData.defectDefinitions || [];
+
+    // Resolve defect labels: auto model-specific or generic, language-aware
+    function getDefectLabels() {
+        const lang  = localStorage.getItem('lang') || 'en';
+        const useEN = lang === 'en';
+        if (activeModel) {
+            const def = allDefs.find(d => d.モデル === activeModel);
+            if (def) {
+                const src      = (useEN && def.counters_en) ? def.counters_en : def.counters;
+                const fallback = (!useEN && def.counters_en) ? def.counters_en : def.counters;
+                if (src) {
+                    return Array.from({ length: 12 }, (_, i) => {
+                        const key  = `counter-${i + 1}`;
+                        const name = src[key];
+                        if (name && name.trim()) return name.trim();
+                        const fb = fallback ? fallback[key] : null;
+                        return (fb && fb.trim()) ? fb.trim() : (useEN ? `Counter ${i + 1}` : `カウンター${i + 1}`);
+                    });
+                }
+            }
+        }
+        return useEN
+            ? ['Counter 1','Counter 2','Counter 3','Counter 4','Counter 5','Counter 6','Counter 7','Counter 8','Counter 9','Counter 10','Counter 11','Counter 12']
+            : ['カウンター1','カウンター2','カウンター3','カウンター4','カウンター5','カウンター6','カウンター7','カウンター8','カウンター9','カウンター10','カウンター11','カウンター12'];
+    }
+    
+    // Build per-model totals across all factories for breakdown tooltips
+    function buildModelBreakdown() {
+        const fmRaw = analyticsData.factoryCountersByModel || [];
+        const sebanggoToModel = {};
+        (analyticsProductFilter.allProducts || []).forEach(p => {
+            if (p.背番号 && p.モデル) sebanggoToModel[p.背番号] = p.モデル;
+        });
+        const totals = {}; // model → [c0..c11]
+        fmRaw.forEach(row => {
+            const model = (row.sebanggo && sebanggoToModel[row.sebanggo]) || row.sebanggo || '(unknown)';
+            const c = [row.c1,row.c2,row.c3,row.c4,row.c5,row.c6,
+                       row.c7,row.c8,row.c9,row.c10,row.c11,row.c12].map(v => v || 0);
+            if (!totals[model]) totals[model] = new Array(12).fill(0);
+            totals[model] = totals[model].map((v, i) => v + c[i]);
+        });
+        return totals; // { modelName: [c0..c11] }
+    }
+    const modelBreakdown = buildModelBreakdown();
+
+    function getBreakdownLines(counterIdx, grandTotal) {
+        const rows = Object.entries(modelBreakdown)
+            .map(([model, c]) => ({ model, val: c[counterIdx] || 0 }))
+            .filter(r => r.val > 0)
+            .sort((a, b) => b.val - a.val);
+        if (rows.length <= 1) return [];
+        return rows.map(r => {
+            const pct   = grandTotal > 0 ? Math.round(r.val / grandTotal * 100) : 0;
+            return `${r.model}: ${r.val.toLocaleString()} (${pct}%)`;
+        });
+    }
+
     let counterData = [];
     let labels = [];
+    let counterIndices = []; // track original counter index for each slice
     
     if (defectAnalysis.length > 0) {
         const analysis = defectAnalysis[0];
         
-        // Use metadata from server if available, otherwise fallback to counter-based
-        const defectLabels = analysis.defectLabels || ['カウンター1', 'カウンター2', 'カウンター3', 'カウンター4', 'カウンター5', 'カウンター6', 'カウンター7', 'カウンター8', 'カウンター9', 'カウンター10', 'カウンター11', 'カウンター12'];
+        // Always use auto-resolved labels
+        const defectLabels = getDefectLabels();
         const defectFields = analysis.defectFields || ['counter1Total', 'counter2Total', 'counter3Total', 'counter4Total', 'counter5Total', 'counter6Total', 'counter7Total', 'counter8Total', 'counter9Total', 'counter10Total', 'counter11Total', 'counter12Total'];
         
         // Build chart data using the field mappings
@@ -1082,6 +1250,7 @@ function renderDefectDistributionChart() {
             if (value > 0) {
                 labels.push(defectLabels[i]);
                 counterData.push(value);
+                counterIndices.push(i);
             }
         }
     }
@@ -1143,12 +1312,20 @@ function renderDefectDistributionChart() {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                title: {
-                    display: true,
-                    text: '不良分布 (プロセス別)'
-                },
-                legend: {
-                    position: 'right'
+                title: { display: true, text: '不良分布 (プロセス別)' },
+                legend: { position: 'right' },
+                tooltip: {
+                    enabled: false,
+                    external: (context) => {
+                        const { chart, tooltip } = context;
+                        const el = _getDefectTooltipEl();
+                        if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
+                        const dp = tooltip.dataPoints?.[0]; if (!dp) return;
+                        const si  = dp.dataIndex;
+                        const ci  = counterIndices[si] ?? si;
+                        const val = counterData[si];
+                        _showDefectTooltip(el, chart, tooltip, labels[si], val, colors[si] || '#888', getBreakdownLines(ci, val));
+                    }
                 }
             }
         }
@@ -1156,6 +1333,157 @@ function renderDefectDistributionChart() {
 }
 
 /**
+ * Re-render the defect distribution chart with labels from the selected model definition.
+ * Render worker performance chart
+ */
+function renderDefectBarChart() {
+    const canvas = document.getElementById('defectBarChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    if (analyticsCharts.defectBar) {
+        analyticsCharts.defectBar.destroy();
+    }
+
+    // Auto-derive model from filter bar (same logic as pie chart)
+    const filterType  = document.getElementById('analyticsFilterType')?.value || '';
+    const activeModel = filterType === 'model'
+        ? (document.getElementById('analyticsModelFilter')?.value || '')
+        : '';
+
+    // Update badge
+    const badge = document.getElementById('defectBarChartModelBadge');
+    if (badge) {
+        if (activeModel) { badge.textContent = activeModel; badge.classList.remove('hidden'); }
+        else              { badge.classList.add('hidden'); }
+    }
+
+    const allDefs      = analyticsData.defectDefinitions || [];
+    const defectAnalysis = analyticsData.defectAnalysis || [];
+
+    function getBarLabels() {
+        const lang  = localStorage.getItem('lang') || 'en';
+        const useEN = lang === 'en';
+        if (activeModel) {
+            const def = allDefs.find(d => d.モデル === activeModel);
+            if (def) {
+                const src      = (useEN && def.counters_en) ? def.counters_en : def.counters;
+                const fallback = (!useEN && def.counters_en) ? def.counters_en : def.counters;
+                if (src) {
+                    return Array.from({ length: 12 }, (_, i) => {
+                        const key  = `counter-${i + 1}`;
+                        const name = src[key];
+                        if (name && name.trim()) return name.trim();
+                        const fb = fallback ? fallback[key] : null;
+                        return (fb && fb.trim()) ? fb.trim() : (useEN ? `Counter ${i + 1}` : `カウンター${i + 1}`);
+                    });
+                }
+            }
+        }
+        return useEN
+            ? ['Counter 1','Counter 2','Counter 3','Counter 4','Counter 5','Counter 6','Counter 7','Counter 8','Counter 9','Counter 10','Counter 11','Counter 12']
+            : ['カウンター1','カウンター2','カウンター3','カウンター4','カウンター5','カウンター6','カウンター7','カウンター8','カウンター9','カウンター10','カウンター11','カウンター12'];
+    }
+
+    const barLabels = getBarLabels();
+    const defectFields = ['counter1Total','counter2Total','counter3Total','counter4Total','counter5Total','counter6Total','counter7Total','counter8Total','counter9Total','counter10Total','counter11Total','counter12Total'];
+    let barData = new Array(12).fill(0);
+
+    if (defectAnalysis.length > 0) {
+        const analysis   = defectAnalysis[0];
+        const usedFields = analysis.defectFields || defectFields;
+        usedFields.forEach((field, i) => { barData[i] = analysis[field] || 0; });
+    }
+
+    const hasAny = barData.some(v => v > 0);
+    if (!hasAny) {
+        analyticsCharts.defectBar = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: barLabels, datasets: [{ label: 'Defects', data: barData, backgroundColor: '#E5E7EB' }] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: () => 'データが見つかりません' } } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+        return;
+    }
+
+    const colors = [
+        '#EF4444','#F59E0B','#10B981','#3B82F6','#8B5CF6',
+        '#EC4899','#14B8A6','#F97316','#84CC16','#6366F1',
+        '#F43F5E','#06B6D4'
+    ];
+
+    // Build per-model totals for bar chart tooltips
+    const barModelBreakdown = (() => {
+        const fmRaw = analyticsData.factoryCountersByModel || [];
+        const sebanggoToModel = {};
+        (analyticsProductFilter.allProducts || []).forEach(p => {
+            if (p.背番号 && p.モデル) sebanggoToModel[p.背番号] = p.モデル;
+        });
+        const totals = {};
+        fmRaw.forEach(row => {
+            const model = (row.sebanggo && sebanggoToModel[row.sebanggo]) || row.sebanggo || '(unknown)';
+            const c = [row.c1,row.c2,row.c3,row.c4,row.c5,row.c6,
+                       row.c7,row.c8,row.c9,row.c10,row.c11,row.c12].map(v => v || 0);
+            if (!totals[model]) totals[model] = new Array(12).fill(0);
+            totals[model] = totals[model].map((v, i) => v + c[i]);
+        });
+        return totals;
+    })();
+
+    analyticsCharts.defectBar = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: barLabels,
+            datasets: [{
+                label: localStorage.getItem('lang') === 'en' ? 'Defect Count' : '不良数',
+                data: barData,
+                backgroundColor: barLabels.map((_, i) => colors[i % colors.length] + 'CC'),
+                borderColor:     barLabels.map((_, i) => colors[i % colors.length]),
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    enabled: false,
+                    external: (context) => {
+                        const { chart, tooltip } = context;
+                        const el = _getDefectTooltipEl();
+                        if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
+                        const dp = tooltip.dataPoints?.[0]; if (!dp) return;
+                        const ci  = dp.dataIndex;
+                        const val = dp.parsed.y;
+                        const breakdown = Object.entries(barModelBreakdown)
+                            .map(([model, c]) => ({ model, v: c[ci] || 0 }))
+                            .filter(r => r.v > 0).sort((a, b) => b.v - a.v);
+                        const allDefsBar = analyticsData.defectDefinitions || [];
+                        const lines = breakdown.length > 1
+                            ? breakdown.map(r => {
+                                const pct = val > 0 ? Math.round(r.v / val * 100) : 0;
+                                return `${r.model}: ${r.v.toLocaleString()} (${pct}%)`;
+                            })
+                            : [];
+                        _showDefectTooltip(el, chart, tooltip, barLabels[ci], val, colors[ci % colors.length], lines);
+                    }
+                }
+            },
+            scales: {
+                x: { ticks: { maxRotation: 45, font: { size: 11 } } },
+                y: { beginAtZero: true, ticks: { precision: 0 } }
+            }
+        }
+    });
+}
+
+/**
+ * Re-render the defect distribution chart with labels from the selected model definition.
  * Render worker performance chart
  */
 function renderWorkerPerformanceChart() {
@@ -1337,6 +1665,7 @@ function showChartsNoDataState() {
         'productionTrendChart',
         'qualityTrendChart',
         'factoryComparisonChart',
+        'defectBarChart',
         'defectDistributionChart',
         'workerPerformanceChart',
         'processEfficiencyChart',
@@ -1993,60 +2322,145 @@ function renderFactoryTop5DefectsChart() {
         analyticsCharts.factoryTop5Defects.destroy();
     }
 
-    const factoryStats = analyticsData.factoryStats || [];
-    const defectAnalysis = analyticsData.defectAnalysis && analyticsData.defectAnalysis[0] ? analyticsData.defectAnalysis[0] : {};
-    
-    // Get defect labels and fields from the analysis
-    const defectLabels = defectAnalysis.defectLabels || [];
-    const defectFields = defectAnalysis.defectFields || [];
-    
-    // Get top 5 defect types
-    const defectTotals = defectFields.map(field => defectAnalysis[field] || 0);
-    const top5Indices = defectTotals
-        .map((val, idx) => ({val, idx}))
+    const factoryStats  = analyticsData.factoryStats || [];
+    const defectAnalysis = analyticsData.defectAnalysis?.[0] || {};
+    const allDefs        = analyticsData.defectDefinitions || [];
+    const fmRaw          = analyticsData.factoryCountersByModel || [];
+
+    // Build lookup: factory → model → [c1..c12]
+    // Server groups by 背番号; map to モデル using allProducts
+    const sebanggoToModel = {};
+    (analyticsProductFilter.allProducts || []).forEach(p => {
+        if (p.背番号 && p.モデル) sebanggoToModel[p.背番号] = p.モデル;
+    });
+
+    const fmLookup = {};
+    fmRaw.forEach(row => {
+        if (!row.factory) return;
+        const model = (row.sebanggo && sebanggoToModel[row.sebanggo]) || row.sebanggo || '(unknown)';
+        if (!fmLookup[row.factory]) fmLookup[row.factory] = {};
+        const counters = [row.c1, row.c2, row.c3, row.c4, row.c5, row.c6,
+                          row.c7, row.c8, row.c9, row.c10, row.c11, row.c12].map(v => v || 0);
+        // Merge under model name (multiple 背番号 may share a モデル)
+        if (!fmLookup[row.factory][model]) {
+            fmLookup[row.factory][model] = counters;
+        } else {
+            fmLookup[row.factory][model] = fmLookup[row.factory][model].map((v, i) => v + counters[i]);
+        }
+    });
+
+    // Resolve per-counter display labels (respects active model filter if set)
+    const lang       = localStorage.getItem('lang') || 'en';
+    const useEN      = lang === 'en';
+    const filterType = document.getElementById('analyticsFilterType')?.value || '';
+    const activeModel = filterType === 'model'
+        ? (document.getElementById('analyticsModelFilter')?.value || '')
+        : '';
+
+    function getTop5Labels() {
+        if (activeModel) {
+            const def = allDefs.find(d => d.モデル === activeModel);
+            if (def) {
+                const src = (useEN && def.counters_en) ? def.counters_en : def.counters;
+                const fb  = (!useEN && def.counters_en) ? def.counters_en : def.counters;
+                if (src) {
+                    return Array.from({ length: 12 }, (_, i) => {
+                        const key  = `counter-${i + 1}`;
+                        const name = src[key];
+                        if (name && name.trim()) return name.trim();
+                        const f = fb?.[key];
+                        return (f && f.trim()) ? f.trim() : (useEN ? `Counter ${i + 1}` : `カウンター${i + 1}`);
+                    });
+                }
+            }
+        }
+        return useEN
+            ? Array.from({ length: 12 }, (_, i) => `Counter ${i + 1}`)
+            : Array.from({ length: 12 }, (_, i) => `カウンター${i + 1}`);
+    }
+
+    const allLabels = getTop5Labels();
+
+    // Determine top 5 counter indices by global total
+    const defectFields = defectAnalysis.defectFields ||
+        ['counter1Total','counter2Total','counter3Total','counter4Total','counter5Total','counter6Total',
+         'counter7Total','counter8Total','counter9Total','counter10Total','counter11Total','counter12Total'];
+    const defectTotals = defectFields.map(f => defectAnalysis[f] || 0);
+    const top5Indices  = defectTotals
+        .map((val, idx) => ({ val, idx }))
         .sort((a, b) => b.val - a.val)
         .slice(0, 5)
         .map(item => item.idx);
-    
-    const datasets = top5Indices.map((idx, colorIdx) => ({
-        label: defectLabels[idx] || `Defect ${idx + 1}`,
-        data: factoryStats.map(() => Math.random() * 100 + 20), // Simulate per-factory data
-        backgroundColor: [
-            'rgba(239, 68, 68, 0.7)',
-            'rgba(249, 115, 22, 0.7)',
-            'rgba(245, 158, 11, 0.7)',
-            'rgba(34, 197, 94, 0.7)',
-            'rgba(59, 130, 246, 0.7)'
-        ][colorIdx]
-    }));
 
-    const config = {
+    // Build per-factory totals for each top5 counter from real data
+    const factoryNames  = factoryStats.map(f => f.factory || 'Unknown');
+    const paletteColors = [
+        'rgba(239, 68, 68, 0.75)',
+        'rgba(249, 115, 22, 0.75)',
+        'rgba(245, 158, 11, 0.75)',
+        'rgba(34, 197, 94, 0.75)',
+        'rgba(59, 130, 246, 0.75)'
+    ];
+
+    const datasets = top5Indices.map((counterIdx, colorIdx) => {
+        const data = factoryNames.map(factory => {
+            const models = fmLookup[factory] || {};
+            return Object.values(models).reduce((sum, counters) => sum + (counters[counterIdx] || 0), 0);
+        });
+        return {
+            label: allLabels[counterIdx] || `Counter ${counterIdx + 1}`,
+            data,
+            backgroundColor: paletteColors[colorIdx]
+        };
+    });
+
+    // Tooltip: on hover show per-model breakdown for that counter × factory
+    const customTooltip = {
+        enabled: false,
+        external: (context) => {
+            const { chart, tooltip } = context;
+            const el = _getDefectTooltipEl();
+            if (tooltip.opacity === 0) { el.style.opacity = '0'; return; }
+            const dp = tooltip.dataPoints?.[0]; if (!dp) return;
+            const factory     = factoryNames[dp.dataIndex];
+            const dsIdx       = dp.datasetIndex;
+            const counterIdx  = top5Indices[dsIdx];
+            const counterName = allLabels[counterIdx] || `Counter ${counterIdx + 1}`;
+            const val         = dp.parsed.y;
+            const colorRaw    = paletteColors[dsIdx] || 'rgba(99,102,241,0.75)';
+            const colorSolid  = colorRaw.replace(/[\d.]+\)$/, '1)');
+            const models      = fmLookup[factory] || {};
+            const breakdown   = Object.entries(models)
+                .map(([model, counters]) => ({ model, val: counters[counterIdx] || 0 }))
+                .filter(m => m.val > 0).sort((a, b) => b.val - a.val);
+            const grand = breakdown.reduce((s, m) => s + m.val, 0);
+            const allDefsT = analyticsData.defectDefinitions || [];
+            const lines = breakdown.length > 1
+                ? breakdown.map(m => {
+                    const pct = grand > 0 ? Math.round(m.val / grand * 100) : 0;
+                    return `${m.model}: ${m.val.toLocaleString()} (${pct}%)`;
+                })
+                : (breakdown.length === 1 ? [breakdown[0].model] : []);
+            _showDefectTooltip(el, chart, tooltip, `${factory} — ${counterName}`, val, colorSolid, lines);
+        }
+    };
+
+    analyticsCharts.factoryTop5Defects = new Chart(ctx, {
         type: 'bar',
-        data: {
-            labels: factoryStats.map(f => f.factory || 'Unknown'),
-            datasets: datasets
-        },
+        data: { labels: factoryNames, datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: { position: 'top' }
+                legend: { position: 'top' },
+                tooltip: customTooltip
             },
             scales: {
-                x: {
-                    stacked: true,
-                    title: { display: true, text: 'Factory' }
-                },
-                y: {
-                    stacked: true,
-                    beginAtZero: true,
-                    title: { display: true, text: 'Defect Count' }
-                }
+                x: { stacked: true, title: { display: true, text: useEN ? 'Factory' : '工場' } },
+                y: { stacked: true, beginAtZero: true, title: { display: true, text: useEN ? 'Defect Count' : '不良数' }, ticks: { precision: 0 } }
             }
         }
-    };
-
-    analyticsCharts.factoryTop5Defects = new Chart(ctx, config);
+    });
 }
 
 /**
@@ -2755,6 +3169,219 @@ function renderDefectPartDetailsTable(data) {
     
     modalContent.innerHTML = html;
 }
+
+// ─── Analytics Product Filter Functions ────────────────────────────────────
+
+async function loadAnalyticsModelOptions() {
+    const modelSelect = document.getElementById('analyticsModelFilter');
+    if (!modelSelect) return;
+    try {
+        const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/';
+        const response = await fetch(`${baseUrl}api/masterdb/models`);
+        const data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.data)) {
+            const opts = ['<option value="">All Models</option>'];
+            data.data.forEach(m => opts.push(`<option value="${m}">${m}</option>`));
+            modelSelect.innerHTML = opts.join('');
+        }
+    } catch (err) {
+        console.error('Failed to load model options for analytics:', err);
+    }
+}
+
+async function loadAnalyticsAllProducts() {
+    try {
+        const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/';
+        const response = await fetch(`${baseUrl}api/masterdb/products`);
+        const data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.data)) {
+            analyticsProductFilter.allProducts = data.data;
+        }
+    } catch (err) {
+        console.error('Failed to load products for analytics:', err);
+    }
+}
+
+function handleAnalyticsFilterTypeChange() {
+    const filterType = document.getElementById('analyticsFilterType')?.value;
+    const modelCont = document.getElementById('analyticsModelFilterContainer');
+    const sebanCont = document.getElementById('analyticsSebanggoFilterContainer');
+    const displayCont = document.getElementById('analyticsProductDisplayContainer');
+
+    if (filterType === 'model') {
+        modelCont?.classList.remove('hidden');
+        sebanCont?.classList.add('hidden');
+        displayCont?.classList.remove('hidden');
+    } else if (filterType === 'sebanggo') {
+        modelCont?.classList.add('hidden');
+        sebanCont?.classList.remove('hidden');
+        displayCont?.classList.remove('hidden');
+    } else {
+        modelCont?.classList.add('hidden');
+        sebanCont?.classList.add('hidden');
+        displayCont?.classList.add('hidden');
+        // Clear selection on no-filter
+        analyticsProductFilter.selectedSebanggoArray = [];
+        updateAnalyticsSelectedProductsDisplay();
+    }
+    // Reset model dropdown when switching
+    if (filterType !== 'model') {
+        const ms = document.getElementById('analyticsModelFilter');
+        if (ms) ms.value = '';
+    }
+    analyticsProductFilter.selectedSebanggoArray = [];
+    updateAnalyticsSelectedProductsDisplay();
+    renderDefectBarChart();
+    renderDefectDistributionChart();
+    loadAnalyticsData();
+}
+
+function handleAnalyticsModelFilter() {
+    const selectedModel = document.getElementById('analyticsModelFilter')?.value;
+    if (selectedModel) {
+        analyticsProductFilter.selectedSebanggoArray = analyticsProductFilter.allProducts
+            .filter(p => p.モデル === selectedModel)
+            .map(p => p.背番号)
+            .filter(Boolean);
+    } else {
+        analyticsProductFilter.selectedSebanggoArray = [];
+    }
+    updateAnalyticsSelectedProductsDisplay();
+    renderDefectBarChart();
+    renderDefectDistributionChart();
+    loadAnalyticsData();
+}
+
+function openAnalyticsSebanggoSelector() {
+    analyticsProductFilter.tempSelectedSebanggo = [...analyticsProductFilter.selectedSebanggoArray];
+    document.getElementById('analyticsSebanggoSelectorModal')?.classList.remove('hidden');
+    renderAnalyticsSebanggoList();
+}
+
+function closeAnalyticsSebanggoSelector() {
+    document.getElementById('analyticsSebanggoSelectorModal')?.classList.add('hidden');
+}
+
+function confirmAnalyticsSebanggoSelection() {
+    analyticsProductFilter.selectedSebanggoArray = [...analyticsProductFilter.tempSelectedSebanggo];
+    updateAnalyticsSelectedProductsDisplay();
+    closeAnalyticsSebanggoSelector();
+    loadAnalyticsData();
+}
+
+function renderAnalyticsSebanggoList() {
+    const container = document.getElementById('analyticsSebanggoListContainer');
+    if (!container) return;
+    const searchTerm = (document.getElementById('analyticsSebanggoSearch')?.value || '').toLowerCase();
+    const filterType = document.getElementById('analyticsFilterType')?.value;
+    const selectedModel = document.getElementById('analyticsModelFilter')?.value;
+
+    const filtered = analyticsProductFilter.allProducts.filter(p => {
+        const matchesModel = !selectedModel || filterType !== 'model' || p.モデル === selectedModel;
+        const matchesSearch =
+            (p.背番号 || '').toLowerCase().includes(searchTerm) ||
+            (p.品番  || '').toLowerCase().includes(searchTerm) ||
+            (p.モデル || '').toLowerCase().includes(searchTerm);
+        return matchesModel && matchesSearch;
+    }).sort((a, b) => (a.背番号 || '').localeCompare(b.背番号 || ''));
+
+    container.innerHTML = filtered.map(p => {
+        const isSelected = analyticsProductFilter.tempSelectedSebanggo.includes(p.背番号);
+        return `
+          <label class="flex items-center gap-2 p-2 hover:bg-gray-100 rounded cursor-pointer">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleAnalyticsSebanggoSelection('${p.背番号}')" class="w-3.5 h-3.5" />
+            <div class="flex-1">
+              <div class="text-sm font-medium text-gray-900">${p.背番号}</div>
+              <div class="text-xs text-gray-500">${p.品番 || ''} • ${p.モデル || ''}</div>
+            </div>
+          </label>
+        `;
+    }).join('') || '<p class="text-gray-400 text-sm p-2">No products found.</p>';
+}
+
+function filterAnalyticsSebanggoList() {
+    renderAnalyticsSebanggoList();
+}
+
+function toggleAnalyticsSebanggoSelection(sebanggo) {
+    const idx = analyticsProductFilter.tempSelectedSebanggo.indexOf(sebanggo);
+    if (idx > -1) {
+        analyticsProductFilter.tempSelectedSebanggo.splice(idx, 1);
+    } else {
+        analyticsProductFilter.tempSelectedSebanggo.push(sebanggo);
+    }
+}
+
+function checkAllAnalyticsSebanggo() {
+    const searchTerm = (document.getElementById('analyticsSebanggoSearch')?.value || '').toLowerCase();
+    const filterType = document.getElementById('analyticsFilterType')?.value;
+    const selectedModel = document.getElementById('analyticsModelFilter')?.value;
+    analyticsProductFilter.tempSelectedSebanggo = analyticsProductFilter.allProducts
+        .filter(p => {
+            const matchesModel = !selectedModel || filterType !== 'model' || p.モデル === selectedModel;
+            const matchesSearch =
+                (p.背番号 || '').toLowerCase().includes(searchTerm) ||
+                (p.品番  || '').toLowerCase().includes(searchTerm) ||
+                (p.モデル || '').toLowerCase().includes(searchTerm);
+            return matchesModel && matchesSearch;
+        })
+        .map(p => p.背番号)
+        .filter(Boolean);
+    renderAnalyticsSebanggoList();
+}
+
+function uncheckAllAnalyticsSebanggo() {
+    analyticsProductFilter.tempSelectedSebanggo = [];
+    renderAnalyticsSebanggoList();
+}
+
+function updateAnalyticsSelectedProductsDisplay() {
+    const display = document.getElementById('analyticsSelectedProductsDisplay');
+    const tags    = document.getElementById('analyticsSelectedProductsTags');
+    const count   = document.getElementById('analyticsSelectedCount');
+    const arr = analyticsProductFilter.selectedSebanggoArray;
+
+    if (arr.length === 0) {
+        if (display) display.textContent = 'None selected';
+        if (tags) tags.innerHTML = '';
+        if (count) count.textContent = 'Select products...';
+        return;
+    }
+
+    if (display) display.textContent = `${arr.length} products selected`;
+    if (count) count.textContent = `${arr.length} selected`;
+
+    if (tags) {
+        tags.innerHTML = arr.slice(0, 10).map(s => `
+          <span class="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+            ${s}
+            <button onclick="removeAnalyticsSebanggoFromSelection('${s}')" class="hover:text-blue-600">
+              <i class="ri-close-line"></i>
+            </button>
+          </span>
+        `).join('') + (arr.length > 10 ? `
+          <button onclick="openAnalyticsSebanggoSelector()" class="text-gray-500 text-sm hover:text-gray-700">+${arr.length - 10} more (Show all)</button>
+        ` : '');
+    }
+}
+
+function removeAnalyticsSebanggoFromSelection(sebanggo) {
+    analyticsProductFilter.selectedSebanggoArray = analyticsProductFilter.selectedSebanggoArray.filter(s => s !== sebanggo);
+    updateAnalyticsSelectedProductsDisplay();
+    loadAnalyticsData();
+}
+
+// Expose to window for inline handlers
+window.handleAnalyticsFilterTypeChange = handleAnalyticsFilterTypeChange;
+window.handleAnalyticsModelFilter = handleAnalyticsModelFilter;
+window.openAnalyticsSebanggoSelector = openAnalyticsSebanggoSelector;
+window.closeAnalyticsSebanggoSelector = closeAnalyticsSebanggoSelector;
+window.confirmAnalyticsSebanggoSelection = confirmAnalyticsSebanggoSelection;
+window.filterAnalyticsSebanggoList = filterAnalyticsSebanggoList;
+window.toggleAnalyticsSebanggoSelection = toggleAnalyticsSebanggoSelection;
+window.checkAllAnalyticsSebanggo = checkAllAnalyticsSebanggo;
+window.uncheckAllAnalyticsSebanggo = uncheckAllAnalyticsSebanggo;
+window.removeAnalyticsSebanggoFromSelection = removeAnalyticsSebanggoFromSelection;
 
 // Initialize analytics when page loads
 document.addEventListener('DOMContentLoaded', function() {
