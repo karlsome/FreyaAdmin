@@ -665,12 +665,12 @@ function loadPage(page) {
                     <p class="text-xs mt-1 h-4" id="financialsDelta-scrapLoss"></p>
                   </div>
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
-                    <p class="text-xs font-medium text-green-600">Final Good (¥)</p>
+                    <p class="text-xs font-medium text-green-600" data-i18n="finalGoodYen">Final Good (¥)</p>
                     <p class="text-base font-bold text-green-700 truncate" id="financialsFinalGoodYen">¥0</p>
-                    <p class="text-xs text-gray-400">(Cost - Scrap Loss)</p>
+                    <p class="text-xs text-gray-400" data-i18n="costMinusScrap">(Cost - Scrap Loss)</p>
                   </div>
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
-                    <p class="text-xs font-medium text-indigo-600">Cost Recovery Rate</p>
+                    <p class="text-xs font-medium text-indigo-600" data-i18n="costRecoveryRate">Cost Recovery Rate</p>
                     <p class="text-base font-bold text-indigo-700" id="financialsCostRecovery">0%</p>
                     <p class="text-xs mt-1 h-4" id="financialsDelta-costRecovery"></p>
                   </div>
@@ -692,7 +692,7 @@ function loadPage(page) {
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
                     <p class="text-xs font-medium text-blue-600" data-i18n="finalGood">Final Good (pcs)</p>
                     <p class="text-base font-bold text-blue-700 truncate" id="financialsFinalGood">0 pcs</p>
-                    <p class="text-xs text-gray-400">(Created - Total NG)</p>
+                    <p class="text-xs text-gray-400" data-i18n="createdMinusTotalNg">(Created - Total NG)</p>
                   </div>
                   <div class="bg-white p-3 rounded-lg border border-gray-200">
                     <p class="text-xs font-medium text-gray-600" data-i18n="defectRate">Defect Rate</p>
@@ -731,8 +731,8 @@ function loadPage(page) {
                 <!-- Scrap Loss &amp; Cost Trend -->
                 <div class="bg-white p-4 rounded-lg border border-gray-200">
                   <div class="flex items-center justify-between mb-3">
-                    <h3 class="text-sm font-semibold text-gray-700">Scrap Loss &amp; Cost Trend</h3>
-                    <span class="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded" id="financialsTrendGranularity">Daily</span>
+                    <h3 class="text-sm font-semibold text-gray-700" data-i18n="scrapLossCostTrend">Scrap Loss &amp; Cost Trend</h3>
+                    <span class="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded" id="financialsTrendGranularity" data-i18n="daily">Daily</span>
                   </div>
                   <div class="h-64">
                     <canvas id="financialsTrendChart"></canvas>
@@ -742,10 +742,10 @@ function loadPage(page) {
                 <!-- Cost vs Scrap Loss: Positive / Negative Bar -->
                 <div class="bg-white p-4 rounded-lg border border-gray-200">
                   <div class="flex items-center justify-between mb-3">
-                    <h3 class="text-sm font-semibold text-gray-700">Cost vs Scrap Loss (Daily Bar)</h3>
+                    <h3 class="text-sm font-semibold text-gray-700" data-i18n="costVsScrapDailyBar">Cost vs Scrap Loss (Daily Bar)</h3>
                     <div class="flex items-center gap-3 text-xs text-gray-500">
-                      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#16a34a"></span>Cost (¥)</span>
-                      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#dc2626"></span>Scrap Loss (¥)</span>
+                      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#16a34a"></span><span data-i18n="cost">Cost (¥)</span></span>
+                      <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm" style="background:#dc2626"></span><span data-i18n="scrapLoss">Scrap Loss (¥)</span></span>
                     </div>
                   </div>
                   <div class="h-64">
@@ -756,15 +756,15 @@ function loadPage(page) {
                 <!-- Top 5 worst 背番号 + Factory ranking -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <h3 class="text-sm font-semibold text-gray-700 mb-3">Top 5 Highest Scrap Loss (背番号)</h3>
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="top5HighestScrapLoss">Top 5 Highest Scrap Loss (背番号)</h3>
                     <table class="min-w-full text-sm">
                       <thead class="bg-gray-50 text-gray-600 text-xs">
                         <tr>
                           <th class="px-3 py-2 text-left">#</th>
                           <th class="px-3 py-2 text-left">背番号</th>
-                          <th class="px-3 py-2 text-left">Model</th>
-                          <th class="px-3 py-2 text-right">Scrap Loss (¥)</th>
-                          <th class="px-3 py-2 text-right">Yield %</th>
+                          <th class="px-3 py-2 text-left" data-i18n="model">Model</th>
+                          <th class="px-3 py-2 text-right" data-i18n="scrapLoss">Scrap Loss (¥)</th>
+                          <th class="px-3 py-2 text-right" data-i18n="yieldPercent">Yield %</th>
                         </tr>
                       </thead>
                       <tbody id="financialsTop5Body" class="divide-y divide-gray-100">
@@ -773,15 +773,15 @@ function loadPage(page) {
                     </table>
                   </div>
                   <div class="bg-white p-4 rounded-lg border border-gray-200">
-                    <h3 class="text-sm font-semibold text-gray-700 mb-3">Factory Scrap Loss Ranking</h3>
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="factoryScrapLossRanking">Factory Scrap Loss Ranking</h3>
                     <table class="min-w-full text-sm">
                       <thead class="bg-gray-50 text-gray-600 text-xs">
                         <tr>
                           <th class="px-3 py-2 text-left">#</th>
-                          <th class="px-3 py-2 text-left">Factory</th>
-                          <th class="px-3 py-2 text-right">Created</th>
-                          <th class="px-3 py-2 text-right">Scrap Loss (¥)</th>
-                          <th class="px-3 py-2 text-right">Yield %</th>
+                          <th class="px-3 py-2 text-left" data-i18n="factory">Factory</th>
+                          <th class="px-3 py-2 text-right" data-i18n="created">Created</th>
+                          <th class="px-3 py-2 text-right" data-i18n="scrapLoss">Scrap Loss (¥)</th>
+                          <th class="px-3 py-2 text-right" data-i18n="yieldPercent">Yield %</th>
                         </tr>
                       </thead>
                       <tbody id="financialsFactoryRankingBody" class="divide-y divide-gray-100">
@@ -804,52 +804,52 @@ function loadPage(page) {
                             <button class="flex items-center gap-1" onclick="toggleFinancialsSort('ban')">背番号 <span id="financialsSortIcon-ban"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('model')">Model <span id="financialsSortIcon-model"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('model')"><span data-i18n="model">Model</span> <span id="financialsSortIcon-model"></span></button>
                           </th>
                           <th class="px-4 py-2">
                             <button class="flex items-center gap-1" onclick="toggleFinancialsSort('factory')">工場 <span id="financialsSortIcon-factory"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('created')">Created (pcs) <span id="financialsSortIcon-created"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('created')"><span data-i18n="createdPcs">Created (pcs)</span> <span id="financialsSortIcon-created"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pressNg')">Press NG <span id="financialsSortIcon-pressNg"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pressNg')"><span data-i18n="pressNg">Press NG</span> <span id="financialsSortIcon-pressNg"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('slitNg')">Slit NG <span id="financialsSortIcon-slitNg"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('slitNg')"><span data-i18n="slitNg">Slit NG</span> <span id="financialsSortIcon-slitNg"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('srsNg')">SRS NG <span id="financialsSortIcon-srsNg"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('srsNg')"><span data-i18n="srsNg">SRS NG</span> <span id="financialsSortIcon-srsNg"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('kensaNg')">Kensa NG <span id="financialsSortIcon-kensaNg"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('kensaNg')"><span data-i18n="kensaNg">Kensa NG</span> <span id="financialsSortIcon-kensaNg"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('totalNg')">Total NG <span id="financialsSortIcon-totalNg"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('totalNg')"><span data-i18n="totalNg">Total NG</span> <span id="financialsSortIcon-totalNg"></span></button>
                           </th>
                           <th class="px-4 py-2" style="background-color: #fff3cd;">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('recoveredNg')">Recovered NG <span id="financialsSortIcon-recoveredNg"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('recoveredNg')"><span data-i18n="recoveredNg">Recovered NG</span> <span id="financialsSortIcon-recoveredNg"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('ngAfterRecovery')">NG After Recovery <span id="financialsSortIcon-ngAfterRecovery"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('ngAfterRecovery')"><span data-i18n="ngAfterRecovery">NG After Recovery</span> <span id="financialsSortIcon-ngAfterRecovery"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('finalGood')">Final Good (pcs) <span id="financialsSortIcon-finalGood"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('finalGood')"><span data-i18n="finalGoodPcs">Final Good (pcs)</span> <span id="financialsSortIcon-finalGood"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('yieldPercent')">Yield % <span id="financialsSortIcon-yieldPercent"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('yieldPercent')"><span data-i18n="yieldPercent">Yield %</span> <span id="financialsSortIcon-yieldPercent"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pricePerPc')">pricePerPiece (¥) <span id="financialsSortIcon-pricePerPc"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('pricePerPc')"><span data-i18n="pricePerPiece">pricePerPiece (¥)</span> <span id="financialsSortIcon-pricePerPc"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('cost')">Cost (¥) <span id="financialsSortIcon-cost"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('cost')"><span data-i18n="cost">Cost (¥)</span> <span id="financialsSortIcon-cost"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('scrapLoss')">Scrap Loss (¥) <span id="financialsSortIcon-scrapLoss"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('scrapLoss')"><span data-i18n="scrapLoss">Scrap Loss (¥)</span> <span id="financialsSortIcon-scrapLoss"></span></button>
                           </th>
                           <th class="px-4 py-2">
-                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('value')">Value (¥) <span id="financialsSortIcon-value"></span></button>
+                            <button class="flex items-center gap-1" onclick="toggleFinancialsSort('value')"><span data-i18n="value">Value (¥)</span> <span id="financialsSortIcon-value"></span></button>
                           </th>
                         </tr>
                       </thead>
