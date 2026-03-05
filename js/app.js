@@ -3069,6 +3069,9 @@ function loadPage(page) {
           let _furyoDefinitionsEN = {};    // { モデル: { 'counter-1': 'Wrinkle', ... } } (English)
           let _furyoSelectedModel = null;
           let _furyoHasChanges = false;
+          let _furyoEditMode = false;      // true when user has pressed 編集
+          let _furyoOriginalDef   = {};   // snapshot before edit (JP) — used by cancel
+          let _furyoOriginalDefEN = {};   // snapshot before edit (EN) — used by cancel
 
           // Roles allowed to edit defect definitions
           const FURYO_EDIT_ROLES = ['admin', '部長', '課長', '係長'];
@@ -3183,19 +3186,25 @@ function loadPage(page) {
               ? Object.values(_furyoDefinitions[modelName]).filter(v => v && v.trim()).length
               : 0;
             const isSelected = _furyoSelectedModel === modelName;
+            const safeName = modelName.replace(/'/g, "\\'");
 
             return `
               <li
-                class="furyo-model-item px-4 py-3 cursor-pointer hover:bg-blue-50 transition-colors ${isSelected ? 'bg-blue-50 border-l-4 border-blue-500' : 'border-l-4 border-transparent'}"
+                class="furyo-model-item px-3 py-3 cursor-pointer hover:bg-blue-50 transition-colors ${isSelected ? 'bg-blue-50 border-l-4 border-blue-500' : 'border-l-4 border-transparent'}"
                 data-model="${modelName}"
-                onclick="selectFuryoModel('${modelName.replace(/'/g, "\\'")}')"
+                onclick="selectFuryoModel('${safeName}')"
               >
-                <div class="flex items-center justify-between">
-                  <span class="text-sm font-medium text-gray-800 truncate">${modelName}</span>
+                <div class="flex items-center gap-1">
+                  <span class="text-sm font-medium text-gray-800 truncate flex-1">${modelName}</span>
                   ${hasDef && definedCount > 0
-                    ? `<span class="ml-2 shrink-0 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">${definedCount}/12</span>`
-                    : `<span class="ml-2 shrink-0 px-2 py-0.5 bg-gray-100 text-gray-400 text-xs rounded-full">未定義</span>`
+                    ? `<span class="shrink-0 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">${definedCount}/12</span>`
+                    : `<span class="shrink-0 px-2 py-0.5 bg-gray-100 text-gray-400 text-xs rounded-full">未定義</span>`
                   }
+                  <button
+                    class="shrink-0 p-1 text-gray-400 hover:text-blue-500 rounded transition-colors"
+                    title="製品一覧を見る"
+                    onclick="event.stopPropagation(); showFuryoModelInfo('${safeName}')"
+                  ><i class="ri-information-line text-sm"></i></button>
                 </div>
               </li>
             `;
@@ -3212,6 +3221,12 @@ function loadPage(page) {
           }
 
           function selectFuryoModel(modelName) {
+            // Warn if switching away while in edit mode with unsaved changes
+            if (_furyoEditMode && _furyoHasChanges) {
+              if (!confirm('編集中の変更が失われます。続けますか？')) return;
+            }
+            _furyoEditMode = false;
+            _furyoHasChanges = false;
             _furyoSelectedModel = modelName;
             // Refresh model list to update selection highlight
             filterFuryoModels(document.getElementById('furyoModelSearch')?.value || '');
@@ -3231,17 +3246,21 @@ function loadPage(page) {
             const existingDefEN = _furyoDefinitionsEN[modelName] || {};
             const isDefined = Object.keys(existingDef).length > 0;
 
-            const inputCls = canEdit
-              ? 'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors'
-              : 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed';
+            // Save originals for cancel — deep copy
+            _furyoOriginalDef   = JSON.parse(JSON.stringify(existingDef));
+            _furyoOriginalDefEN = JSON.parse(JSON.stringify(existingDefEN));
+            _furyoEditMode  = false;
+            _furyoHasChanges = false;
+
+            // Readonly style (default view mode)
+            const readonlyCls = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700 cursor-default outline-none';
+            // Disabled style (no permission)
+            const disabledCls = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-100 text-gray-400 cursor-not-allowed outline-none';
 
             const countersHTML = Array.from({ length: 12 }, (_, i) => {
               const key   = `counter-${i + 1}`;
               const valJP = existingDef[key]   || '';
               const valEN = existingDefEN[key] || '';
-              const blurHandler = canEdit
-                ? `onblur="furyoAutoTranslate(${i + 1})"`
-                : '';
               return `
                 <div class="grid items-center gap-3" style="grid-template-columns: 6rem 1fr 1fr;">
                   <label class="text-sm font-medium text-gray-600">カウンター${i + 1}</label>
@@ -3249,21 +3268,22 @@ function loadPage(page) {
                     type="text"
                     id="furyoCounter_${i + 1}"
                     value="${valJP.replace(/"/g, '&quot;')}"
+                    readonly
                     ${canEdit ? '' : 'disabled'}
                     placeholder="${canEdit ? '日本語で入力...' : '権限なし'}"
-                    class="${inputCls}"
-                    oninput="_furyoHasChanges = true;"
-                    ${blurHandler}
+                    class="furyo-counter-input ${canEdit ? readonlyCls : disabledCls}"
+                    oninput="onFuryoCounterChange()"
                   />
                   <div class="relative">
                     <input
                       type="text"
                       id="furyoCounterEN_${i + 1}"
                       value="${valEN.replace(/"/g, '&quot;')}"
+                      readonly
                       ${canEdit ? '' : 'disabled'}
                       placeholder="${canEdit ? 'English...' : 'No permission'}"
-                      class="${inputCls} pr-7"
-                      oninput="_furyoHasChanges = true;"
+                      class="furyo-counter-input ${canEdit ? readonlyCls : disabledCls} pr-7"
+                      oninput="onFuryoCounterChange()"
                     />
                     <span id="furyoTranslating_${i + 1}" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-blue-400">
                       <i class="ri-loader-4-line animate-spin text-xs"></i>
@@ -3308,26 +3328,41 @@ function loadPage(page) {
                   ${countersHTML}
                 </div>
 
-                <!-- Action Buttons -->
+                <!-- Action Bar -->
                 <div class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between shrink-0">
-                  <p class="text-xs text-gray-400">
+                  <p id="furyoActionHint" class="text-xs text-gray-400">
                     ${canEdit ? '空欄のカウンターは「カウンターN」として表示されます' : '表示専用 — 編集権限がありません'}
                   </p>
                   ${canEdit ? `
-                    <div class="flex gap-3">
+                    <div class="flex items-center gap-2">
+                      <!-- Clear — only visible in edit mode -->
                       <button
+                        id="furyoClearBtn"
                         onclick="clearFuryoCounters()"
-                        class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-                      >
-                        クリア
-                      </button>
+                        class="hidden px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                      >クリア</button>
+
+                      <!-- Cancel — only visible in edit mode -->
+                      <button
+                        id="furyoCancelBtn"
+                        onclick="cancelFuryoEdit()"
+                        class="hidden px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                      >キャンセル</button>
+
+                      <!-- Edit — only visible in view mode -->
+                      <button
+                        id="furyoEditBtn"
+                        onclick="startFuryoEdit()"
+                        class="px-4 py-2 border border-blue-400 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors flex items-center gap-2"
+                      ><i class="ri-edit-line"></i> 編集</button>
+
+                      <!-- Save — always present, greyed until there are changes -->
                       <button
                         id="furyoSaveBtn"
                         onclick="saveFuryoDefinition('${modelName.replace(/'/g, "\\'")}')"
-                        class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
-                      >
-                        <i class="ri-save-line"></i> 保存
-                      </button>
+                        disabled
+                        class="px-5 py-2 bg-gray-300 text-gray-400 rounded-lg text-sm font-medium cursor-not-allowed transition-colors flex items-center gap-2"
+                      ><i class="ri-save-line"></i> 保存</button>
                     </div>
                   ` : ''}
                 </div>
@@ -3356,7 +3391,7 @@ function loadPage(page) {
               // Only fill if EN field is still empty (user may have typed while waiting)
               if (translated && enInput.value.trim() === '') {
                 enInput.value = translated;
-                _furyoHasChanges = true;
+                onFuryoCounterChange(); // re-check change state after fill
               }
             } catch (err) {
               console.warn('Auto-translate failed:', err);
@@ -3372,9 +3407,103 @@ function loadPage(page) {
               if (jp) jp.value = '';
               if (en) en.value = '';
             }
+            onFuryoCounterChange();
           }
           window.clearFuryoCounters = clearFuryoCounters;
           window.filterFuryoModels = filterFuryoModels;
+
+          // ── Edit-mode helpers ──────────────────────────────────────────────
+
+          const _FURYO_EDIT_CLS = 'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors';
+          const _FURYO_READONLY_CLS = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700 cursor-default outline-none';
+
+          window.startFuryoEdit = function() {
+            _furyoEditMode = true;
+            _furyoHasChanges = false;
+
+            // Make all counter inputs editable
+            for (let i = 1; i <= 12; i++) {
+              const jp = document.getElementById(`furyoCounter_${i}`);
+              const en = document.getElementById(`furyoCounterEN_${i}`);
+              if (jp) {
+                jp.removeAttribute('readonly');
+                jp.className = `furyo-counter-input ${_FURYO_EDIT_CLS}`;
+                jp.setAttribute('onblur', `furyoAutoTranslate(${i})`);
+              }
+              if (en) {
+                en.removeAttribute('readonly');
+                en.className = `furyo-counter-input ${_FURYO_EDIT_CLS} pr-7`;
+              }
+            }
+
+            // Swap button visibility
+            document.getElementById('furyoClearBtn')?.classList.remove('hidden');
+            document.getElementById('furyoCancelBtn')?.classList.remove('hidden');
+            document.getElementById('furyoEditBtn')?.classList.add('hidden');
+          };
+
+          window.cancelFuryoEdit = function() {
+            _furyoEditMode = false;
+            _furyoHasChanges = false;
+
+            // Restore original values
+            for (let i = 1; i <= 12; i++) {
+              const key = `counter-${i}`;
+              const jp = document.getElementById(`furyoCounter_${i}`);
+              const en = document.getElementById(`furyoCounterEN_${i}`);
+              if (jp) {
+                jp.value = _furyoOriginalDef[key] || '';
+                jp.setAttribute('readonly', '');
+                jp.className = `furyo-counter-input ${_FURYO_READONLY_CLS}`;
+                jp.removeAttribute('onblur');
+              }
+              if (en) {
+                en.value = _furyoOriginalDefEN[key] || '';
+                en.setAttribute('readonly', '');
+                en.className = `furyo-counter-input ${_FURYO_READONLY_CLS} pr-7`;
+              }
+            }
+
+            // Swap button visibility
+            document.getElementById('furyoClearBtn')?.classList.add('hidden');
+            document.getElementById('furyoCancelBtn')?.classList.add('hidden');
+            document.getElementById('furyoEditBtn')?.classList.remove('hidden');
+
+            // Grey out save
+            const saveBtn = document.getElementById('furyoSaveBtn');
+            if (saveBtn) {
+              saveBtn.disabled = true;
+              saveBtn.className = 'px-5 py-2 bg-gray-300 text-gray-400 rounded-lg text-sm font-medium cursor-not-allowed transition-colors flex items-center gap-2';
+              saveBtn.innerHTML = '<i class="ri-save-line"></i> 保存';
+            }
+          };
+
+          function onFuryoCounterChange() {
+            if (!_furyoEditMode) return;
+
+            // Check whether any value differs from the original snapshot
+            let changed = false;
+            for (let i = 1; i <= 12; i++) {
+              const key = `counter-${i}`;
+              const jp = document.getElementById(`furyoCounter_${i}`);
+              const en = document.getElementById(`furyoCounterEN_${i}`);
+              if (jp && jp.value.trim() !== (_furyoOriginalDef[key]   || '')) { changed = true; break; }
+              if (en && en.value.trim() !== (_furyoOriginalDefEN[key] || '')) { changed = true; break; }
+            }
+
+            _furyoHasChanges = changed;
+            const saveBtn = document.getElementById('furyoSaveBtn');
+            if (saveBtn) {
+              if (changed) {
+                saveBtn.disabled = false;
+                saveBtn.className = 'px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2';
+              } else {
+                saveBtn.disabled = true;
+                saveBtn.className = 'px-5 py-2 bg-gray-300 text-gray-400 rounded-lg text-sm font-medium cursor-not-allowed transition-colors flex items-center gap-2';
+              }
+            }
+          }
+          window.onFuryoCounterChange = onFuryoCounterChange;
 
           async function saveFuryoDefinition(modelName) {
             const counters    = {};
@@ -3406,16 +3535,30 @@ function loadPage(page) {
               // Update local cache
               _furyoDefinitions[modelName]   = counters;
               _furyoDefinitionsEN[modelName] = counters_en;
+              _furyoOriginalDef   = JSON.parse(JSON.stringify(counters));
+              _furyoOriginalDefEN = JSON.parse(JSON.stringify(counters_en));
               _furyoHasChanges = false;
 
-              // Restore button with success flash
+              // Exit edit mode (inputs back to readonly)
+              _furyoEditMode = false;
+              for (let i = 1; i <= 12; i++) {
+                const jp = document.getElementById(`furyoCounter_${i}`);
+                const en = document.getElementById(`furyoCounterEN_${i}`);
+                if (jp) { jp.setAttribute('readonly', ''); jp.className = `furyo-counter-input ${_FURYO_READONLY_CLS}`; jp.removeAttribute('onblur'); }
+                if (en) { en.setAttribute('readonly', ''); en.className = `furyo-counter-input ${_FURYO_READONLY_CLS} pr-7`; }
+              }
+              document.getElementById('furyoClearBtn')?.classList.add('hidden');
+              document.getElementById('furyoCancelBtn')?.classList.add('hidden');
+              document.getElementById('furyoEditBtn')?.classList.remove('hidden');
+
+              // Success flash on save button
               if (btn) {
-                btn.disabled = false;
+                btn.disabled = true;
                 btn.innerHTML = '<i class="ri-checkbox-circle-line"></i> 保存しました';
-                btn.className = btn.className.replace('bg-blue-600 hover:bg-blue-700', 'bg-green-600 hover:bg-green-700');
+                btn.className = 'px-5 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2';
                 setTimeout(() => {
                   btn.innerHTML = '<i class="ri-save-line"></i> 保存';
-                  btn.className = btn.className.replace('bg-green-600 hover:bg-green-700', 'bg-blue-600 hover:bg-blue-700');
+                  btn.className = 'px-5 py-2 bg-gray-300 text-gray-400 rounded-lg text-sm font-medium cursor-not-allowed transition-colors flex items-center gap-2';
                 }, 2000);
               }
 
@@ -3424,11 +3567,101 @@ function loadPage(page) {
 
             } catch (err) {
               console.error('saveFuryoDefinition error:', err);
-              if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ri-save-line"></i> 保存'; }
+              if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ri-save-line"></i> 保存';
+                btn.className = 'px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2';
+              }
               alert('保存に失敗しました: ' + err.message);
             }
           }
           window.saveFuryoDefinition = saveFuryoDefinition;
+
+          // ── Model Info Modal ───────────────────────────────────────────────
+
+          window.showFuryoModelInfo = async function(modelName) {
+            // Remove existing overlay if any
+            document.getElementById('furyoModelInfoOverlay')?.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'furyoModelInfoOverlay';
+            overlay.className = 'fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4';
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+            overlay.innerHTML = `
+              <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col" style="max-height:80vh;">
+                <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+                  <div>
+                    <h3 class="text-lg font-bold text-gray-900">${modelName}</h3>
+                    <p id="furyoModelInfoCount" class="text-sm text-gray-500 mt-0.5">読み込み中...</p>
+                  </div>
+                  <button
+                    onclick="document.getElementById('furyoModelInfoOverlay').remove()"
+                    class="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  ><i class="ri-close-line text-xl"></i></button>
+                </div>
+                <div id="furyoModelInfoBody" class="flex-1 overflow-y-auto p-6">
+                  <div class="flex items-center justify-center h-32">
+                    <div class="text-center">
+                      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                      <p class="text-gray-400 text-sm">読み込み中...</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+
+            document.body.appendChild(overlay);
+
+            try {
+              const res = await fetch(BASE_URL + 'queries', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  dbName: 'Sasaki_Coating_MasterDB',
+                  collectionName: 'masterDB',
+                  query: { 'モデル': modelName },
+                  projection: { 背番号: 1, 品番: 1, 品名: 1, imageURL: 1, _id: 0 }
+                })
+              });
+              const products = await res.json();
+
+              const countEl = document.getElementById('furyoModelInfoCount');
+              if (countEl) countEl.textContent = `${(products || []).length} 品番`;
+
+              const body = document.getElementById('furyoModelInfoBody');
+              if (!body) return;
+
+              if (!products || products.length === 0) {
+                body.innerHTML = '<p class="text-center text-gray-400 py-10">この機種に対応する製品が見つかりません</p>';
+                return;
+              }
+
+              body.innerHTML = `
+                <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));">
+                  ${products.map(p => `
+                    <div class="border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                      <div class="bg-gray-100 flex items-center justify-center overflow-hidden" style="height:110px;">
+                        ${p.imageURL
+                          ? `<img src="${p.imageURL}" alt="${p.品番 || ''}" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<span class=\\'text-gray-300 text-xs\\'>画像なし</span>'">`
+                          : '<span class="text-gray-300 text-xs">画像なし</span>'
+                        }
+                      </div>
+                      <div class="p-2.5 space-y-0.5">
+                        <p class="text-xs font-semibold text-gray-800 truncate" title="${p.背番号 || ''}">背番号: ${p.背番号 || '—'}</p>
+                        <p class="text-xs text-gray-500 truncate" title="${p.品番 || ''}">品番: ${p.品番 || '—'}</p>
+                        ${p.品名 ? `<p class="text-xs text-gray-400 truncate" title="${p.品名}">${p.品名}</p>` : ''}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `;
+            } catch (err) {
+              const body = document.getElementById('furyoModelInfoBody');
+              if (body) body.innerHTML = `<p class="text-center text-red-500 py-10">読み込み失敗: ${err.message}</p>`;
+            }
+          };
+
           window.loadFuryoKanri = loadFuryoKanri;
 
           // ==================== END 不良管理 ====================
