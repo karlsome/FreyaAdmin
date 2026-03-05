@@ -397,8 +397,16 @@ function loadPage(page) {
                         
                         <!-- Defect Distribution Chart -->
                         <div class="bg-white p-6 rounded-lg border border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900 mb-4" data-i18n="defectDistributionByProcess">Defect Distribution (by Process)</h3>
-                            <div class="h-80">
+                            <div class="flex items-start justify-between mb-3">
+                              <h3 class="text-lg font-semibold text-gray-900" data-i18n="defectDistributionByProcess">Defect Distribution (by Process)</h3>
+                              <div class="flex items-center gap-2">
+                                <label class="text-xs text-gray-500 whitespace-nowrap">モデル:</label>
+                                <select id="defectDefModelSelector" class="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 bg-white" onchange="applyDefectLabelsFromModel()">
+                                  <option value="">汎用 (カウンター1〜12)</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div class="h-72">
                                 <canvas id="defectDistributionChart"></canvas>
                             </div>
                         </div>
@@ -2469,10 +2477,14 @@ function loadPage(page) {
                   <button id="productPDFsTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('productPDFs')">
                     梱包 / 検査基準 / 3点照合
                   </button>
+                  <button id="furyoKanriTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('furyoKanri')">
+                    不良管理
+                  </button>
                 </nav>
               </div>
             </div>
 
+            <div id="masterNormalContentWrapper">
             <!-- CSV Upload Section -->
             <div class="bg-white p-4 rounded-lg shadow-sm mb-4 border">
               <div class="flex items-center space-x-4">
@@ -2794,6 +2806,10 @@ function loadPage(page) {
                 </div>
               </div>
             </div>
+            </div><!-- end masterNormalContentWrapper -->
+
+            <!-- Defect Management Container -->
+            <div id="furyoKanriContainer" class="hidden"></div>
 
             <!-- Add New Record Modal -->
             <div id="addRecordModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
@@ -2971,6 +2987,33 @@ function loadPage(page) {
 
           // Tab switching function
           window.switchMasterTab = function(tabName) {
+            // Helper: show/hide normal DB sections vs furyoKanri
+            function showNormalSections() {
+              const wrapper = document.getElementById('masterNormalContentWrapper');
+              const fc = document.getElementById('furyoKanriContainer');
+              if (wrapper) wrapper.style.display = '';
+              if (fc) fc.classList.add('hidden');
+            }
+            function showFuryoKanriSection() {
+              const wrapper = document.getElementById('masterNormalContentWrapper');
+              const fc = document.getElementById('furyoKanriContainer');
+              if (wrapper) wrapper.style.display = 'none';
+              if (fc) fc.classList.remove('hidden');
+            }
+
+            // If switching to 不良管理 tab
+            if (tabName === 'furyoKanri') {
+              currentMasterTab = 'furyoKanri';
+              window.currentMasterTab = currentMasterTab;
+              updateMasterTabStyles();
+              showFuryoKanriSection();
+              loadFuryoKanri();
+              return;
+            }
+
+            // Make sure normal sections are visible when switching away from furyoKanri
+            showNormalSections();
+
             // If switching to Product PDFs tab, load that page instead
             if (tabName === 'productPDFs') {
               if (typeof initProductPDFsPage === 'function') {
@@ -3018,6 +3061,296 @@ function loadPage(page) {
               }
             });
           }
+
+          // ==================== 不良管理 DEFECT MANAGEMENT ====================
+
+          let _furyoModels = [];        // distinct モデル values from masterDB
+          let _furyoDefinitions = {};   // { モデル: { 'counter-1': 'シワ', ... } }
+          let _furyoSelectedModel = null;
+          let _furyoHasChanges = false;
+
+          // Roles allowed to edit defect definitions
+          const FURYO_EDIT_ROLES = ['admin', '部長', '課長', '係長'];
+
+          async function loadFuryoKanri() {
+            const container = document.getElementById('furyoKanriContainer');
+            if (!container) return;
+
+            // Show loading
+            container.innerHTML = `
+              <div class="flex items-center justify-center h-64">
+                <div class="text-center">
+                  <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-3"></div>
+                  <p class="text-gray-500">読み込み中...</p>
+                </div>
+              </div>`;
+
+            try {
+              // Fetch distinct モデル values from masterDB + existing definitions in parallel
+              const [modelsRes, defsRes] = await Promise.all([
+                fetch(BASE_URL + 'queries', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    dbName: 'Sasaki_Coating_MasterDB',
+                    collectionName: 'masterDB',
+                    aggregation: [
+                      { $group: { _id: '$モデル' } },
+                      { $sort: { _id: 1 } }
+                    ]
+                  })
+                }),
+                fetch(BASE_URL + 'defectDefinitions')
+              ]);
+
+              const modelsData = await modelsRes.json();
+              const defsData = await defsRes.json();
+
+              _furyoModels = (modelsData || [])
+                .map(d => d._id)
+                .filter(m => m && m.trim() !== '')
+                .sort();
+
+              // Index definitions by model
+              _furyoDefinitions = {};
+              (defsData || []).forEach(def => {
+                if (def.モデル) _furyoDefinitions[def.モデル] = def.counters || {};
+              });
+
+              renderFuryoKanriUI();
+
+            } catch (err) {
+              console.error('loadFuryoKanri error:', err);
+              container.innerHTML = `<div class="p-6 text-red-500">データの読み込みに失敗しました: ${err.message}</div>`;
+            }
+          }
+
+          function renderFuryoKanriUI() {
+            const container = document.getElementById('furyoKanriContainer');
+            if (!container) return;
+
+            const canEdit = FURYO_EDIT_ROLES.includes(currentUser?.role || '');
+
+            container.innerHTML = `
+              <div class="flex gap-4 min-h-[600px]">
+                <!-- Left: Model List -->
+                <div class="w-72 shrink-0 bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col">
+                  <div class="p-4 border-b border-gray-200">
+                    <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                      <i class="ri-list-unordered text-blue-600"></i> モデル一覧
+                    </h3>
+                    <input
+                      type="text"
+                      id="furyoModelSearch"
+                      placeholder="モデルを検索..."
+                      class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      oninput="filterFuryoModels(this.value)"
+                    />
+                  </div>
+                  <ul id="furyoModelList" class="flex-1 overflow-y-auto divide-y divide-gray-100">
+                    ${_furyoModels.length === 0
+                      ? `<li class="px-4 py-6 text-center text-gray-400 text-sm">モデルが見つかりません</li>`
+                      : _furyoModels.map(m => renderFuryoModelItem(m)).join('')
+                    }
+                  </ul>
+                  <div class="p-3 border-t border-gray-100 text-xs text-gray-400 text-center">
+                    ${_furyoModels.length}モデル
+                  </div>
+                </div>
+
+                <!-- Right: Counter Definition Panel -->
+                <div class="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm">
+                  <div id="furyoDetailPanel" class="h-full flex items-center justify-center">
+                    <div class="text-center text-gray-400">
+                      <i class="ri-arrow-left-line text-4xl mb-3 block"></i>
+                      <p class="text-lg font-medium">左からモデルを選択してください</p>
+                      <p class="text-sm mt-1">各カウンターの不良名を定義します</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+
+          function renderFuryoModelItem(modelName) {
+            const hasDef = !!_furyoDefinitions[modelName];
+            const definedCount = hasDef
+              ? Object.values(_furyoDefinitions[modelName]).filter(v => v && v.trim()).length
+              : 0;
+            const isSelected = _furyoSelectedModel === modelName;
+
+            return `
+              <li
+                class="furyo-model-item px-4 py-3 cursor-pointer hover:bg-blue-50 transition-colors ${isSelected ? 'bg-blue-50 border-l-4 border-blue-500' : 'border-l-4 border-transparent'}"
+                data-model="${modelName}"
+                onclick="selectFuryoModel('${modelName.replace(/'/g, "\\'")}')"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium text-gray-800 truncate">${modelName}</span>
+                  ${hasDef && definedCount > 0
+                    ? `<span class="ml-2 shrink-0 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">${definedCount}/12</span>`
+                    : `<span class="ml-2 shrink-0 px-2 py-0.5 bg-gray-100 text-gray-400 text-xs rounded-full">未定義</span>`
+                  }
+                </div>
+              </li>
+            `;
+          }
+
+          function filterFuryoModels(query) {
+            const list = document.getElementById('furyoModelList');
+            if (!list) return;
+            const q = query.toLowerCase().trim();
+            const filtered = q ? _furyoModels.filter(m => m.toLowerCase().includes(q)) : _furyoModels;
+            list.innerHTML = filtered.length === 0
+              ? `<li class="px-4 py-6 text-center text-gray-400 text-sm">一致するモデルがありません</li>`
+              : filtered.map(m => renderFuryoModelItem(m)).join('');
+          }
+
+          function selectFuryoModel(modelName) {
+            _furyoSelectedModel = modelName;
+            // Refresh model list to update selection highlight
+            filterFuryoModels(document.getElementById('furyoModelSearch')?.value || '');
+            renderFuryoDetailPanel(modelName);
+          }
+          window.selectFuryoModel = selectFuryoModel;
+
+          function renderFuryoDetailPanel(modelName) {
+            const panel = document.getElementById('furyoDetailPanel');
+            if (!panel) return;
+
+            const canEdit = FURYO_EDIT_ROLES.includes(currentUser?.role || '');
+            const existingDef = _furyoDefinitions[modelName] || {};
+            const lastDef = Object.values(_furyoDefinitions[modelName] || {}).some(v => v && v.trim());
+
+            const countersHTML = Array.from({ length: 12 }, (_, i) => {
+              const key = `counter-${i + 1}`;
+              const value = existingDef[key] || '';
+              return `
+                <div class="flex items-center gap-3">
+                  <label class="w-28 shrink-0 text-sm font-medium text-gray-600">カウンター${i + 1}</label>
+                  <input
+                    type="text"
+                    id="furyoCounter_${i + 1}"
+                    value="${value}"
+                    ${canEdit ? '' : 'disabled'}
+                    placeholder="${canEdit ? '不良名を入力...' : '権限なし'}"
+                    class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg ${canEdit ? 'focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none' : 'bg-gray-100 text-gray-500 cursor-not-allowed'} transition-colors"
+                    oninput="_furyoHasChanges = true; document.getElementById('furyoSaveBtn')?.classList.remove('opacity-40')"
+                  />
+                </div>
+              `;
+            }).join('');
+
+            panel.innerHTML = `
+              <div class="p-6 h-full flex flex-col">
+                <!-- Header -->
+                <div class="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+                  <div>
+                    <h3 class="text-lg font-bold text-gray-900">${modelName}</h3>
+                    <p class="text-sm text-gray-500 mt-0.5">カウンター不良名定義</p>
+                  </div>
+                  ${Object.keys(existingDef).length > 0
+                    ? `<span class="px-3 py-1 bg-green-100 text-green-700 text-sm rounded-full font-medium flex items-center gap-1">
+                        <i class="ri-checkbox-circle-line"></i> 定義済み
+                       </span>`
+                    : `<span class="px-3 py-1 bg-yellow-100 text-yellow-700 text-sm rounded-full font-medium flex items-center gap-1">
+                        <i class="ri-information-line"></i> 未定義
+                       </span>`
+                  }
+                </div>
+
+                <!-- Counter Fields -->
+                <div class="flex-1 overflow-y-auto space-y-3 pr-1">
+                  ${countersHTML}
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="mt-6 pt-4 border-t border-gray-200 flex items-center justify-between">
+                  <p class="text-xs text-gray-400">
+                    ${canEdit ? '空欄のカウンターは「カウンターN」として表示されます' : '表示専用 — 編集権限がありません'}
+                  </p>
+                  ${canEdit ? `
+                    <div class="flex gap-3">
+                      <button
+                        onclick="clearFuryoCounters()"
+                        class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                      >
+                        クリア
+                      </button>
+                      <button
+                        id="furyoSaveBtn"
+                        onclick="saveFuryoDefinition('${modelName.replace(/'/g, "\\'")}')"
+                        class="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+                      >
+                        <i class="ri-save-line"></i> 保存
+                      </button>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }
+
+          function clearFuryoCounters() {
+            for (let i = 1; i <= 12; i++) {
+              const input = document.getElementById(`furyoCounter_${i}`);
+              if (input) input.value = '';
+            }
+          }
+          window.clearFuryoCounters = clearFuryoCounters;
+          window.filterFuryoModels = filterFuryoModels;
+
+          async function saveFuryoDefinition(modelName) {
+            const counters = {};
+            for (let i = 1; i <= 12; i++) {
+              const input = document.getElementById(`furyoCounter_${i}`);
+              counters[`counter-${i}`] = input ? input.value.trim() : '';
+            }
+
+            const btn = document.getElementById('furyoSaveBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ri-loader-4-line animate-spin"></i> 保存中...'; }
+
+            try {
+              const res = await fetch(BASE_URL + 'defectDefinitions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: modelName,
+                  counters,
+                  username: currentUser?.username || 'unknown'
+                })
+              });
+
+              if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+
+              // Update local cache
+              _furyoDefinitions[modelName] = counters;
+              _furyoHasChanges = false;
+
+              // Restore button with success flash
+              if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ri-checkbox-circle-line"></i> 保存しました';
+                btn.className = btn.className.replace('bg-blue-600 hover:bg-blue-700', 'bg-green-600 hover:bg-green-700');
+                setTimeout(() => {
+                  btn.innerHTML = '<i class="ri-save-line"></i> 保存';
+                  btn.className = btn.className.replace('bg-green-600 hover:bg-green-700', 'bg-blue-600 hover:bg-blue-700');
+                }, 2000);
+              }
+
+              // Refresh model list badges
+              filterFuryoModels(document.getElementById('furyoModelSearch')?.value || '');
+
+            } catch (err) {
+              console.error('saveFuryoDefinition error:', err);
+              if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ri-save-line"></i> 保存'; }
+              alert('保存に失敗しました: ' + err.message);
+            }
+          }
+          window.saveFuryoDefinition = saveFuryoDefinition;
+          window.loadFuryoKanri = loadFuryoKanri;
+
+          // ==================== END 不良管理 ====================
 
           function updateMasterStats() {
             document.getElementById('totalMasterCount').textContent = masterTotalCount;

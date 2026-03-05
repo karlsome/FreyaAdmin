@@ -1064,14 +1064,51 @@ function renderDefectDistributionChart() {
         analyticsCharts.defectDistribution.destroy();
     }
     
+    // Populate model selector from defect definitions
+    const allDefs = analyticsData.defectDefinitions || [];
+    const modelSelector = document.getElementById('defectDefModelSelector');
+    if (modelSelector) {
+        const prevVal = modelSelector.value;
+        modelSelector.innerHTML = '<option value="">汎用 (カウンター1〜12)</option>';
+        allDefs.forEach(def => {
+            if (!def.モデル) return;
+            const hasAny = Object.values(def.counters || {}).some(v => v && v.trim());
+            if (!hasAny) return;
+            const opt = document.createElement('option');
+            opt.value = def.モデル;
+            opt.textContent = def.モデル;
+            if (def.モデル === prevVal) opt.selected = true;
+            modelSelector.appendChild(opt);
+        });
+    }
+    
+    // Resolve defect labels: generic or model-specific
+    function getDefectLabels() {
+        const selectedModel = modelSelector ? modelSelector.value : '';
+        if (selectedModel) {
+            const def = allDefs.find(d => d.モデル === selectedModel);
+            if (def && def.counters) {
+                return Array.from({ length: 12 }, (_, i) => {
+                    const name = def.counters[`counter-${i + 1}`];
+                    return (name && name.trim()) ? name.trim() : `カウンター${i + 1}`;
+                });
+            }
+        }
+        return ['カウンター1', 'カウンター2', 'カウンター3', 'カウンター4', 'カウンター5', 'カウンター6', 'カウンター7', 'カウンター8', 'カウンター9', 'カウンター10', 'カウンター11', 'カウンター12'];
+    }
+    
     let counterData = [];
     let labels = [];
     
     if (defectAnalysis.length > 0) {
         const analysis = defectAnalysis[0];
         
-        // Use metadata from server if available, otherwise fallback to counter-based
-        const defectLabels = analysis.defectLabels || ['カウンター1', 'カウンター2', 'カウンター3', 'カウンター4', 'カウンター5', 'カウンター6', 'カウンター7', 'カウンター8', 'カウンター9', 'カウンター10', 'カウンター11', 'カウンター12'];
+        // Use resolved labels (model-specific or generic)
+        const defectLabels = analysis.defectLabels ? analysis.defectLabels.map((orig, i) => {
+            // If user picked a model, override with model-specific names
+            const modelLabels = getDefectLabels();
+            return modelLabels[i] || orig;
+        }) : getDefectLabels();
         const defectFields = analysis.defectFields || ['counter1Total', 'counter2Total', 'counter3Total', 'counter4Total', 'counter5Total', 'counter6Total', 'counter7Total', 'counter8Total', 'counter9Total', 'counter10Total', 'counter11Total', 'counter12Total'];
         
         // Build chart data using the field mappings
@@ -1154,6 +1191,14 @@ function renderDefectDistributionChart() {
         }
     });
 }
+
+/**
+ * Re-render the defect distribution chart with labels from the selected model definition.
+ * Called when the model selector dropdown changes.
+ */
+window.applyDefectLabelsFromModel = function() {
+    renderDefectDistributionChart();
+};
 
 /**
  * Render worker performance chart
