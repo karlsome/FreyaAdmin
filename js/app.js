@@ -9676,12 +9676,17 @@ function getApprovalStatusHTML(item) {
             </span>
         `;
         
-        // 班長 can edit data and re-approve
+        // 班長 can edit data and re-approve, or forward correction to factory
         if (currentUser.role === '班長') {
             statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    修正完了・再承認
-                </button>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                        修正完了・再承認
+                    </button>
+                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                        修正要求（工場へ）
+                    </button>
+                </div>
             `;
         }
         
@@ -9928,6 +9933,10 @@ window.requestCorrection = async function(itemId) {
         // Determine correction logic based on current status and user role
         if (currentUser.role === '班長' && (!item.approvalStatus || item.approvalStatus === 'pending')) {
             // Scenario 2: 班長 requests correction - goes back to submitter (original logic)
+            newStatus = 'correction_needed';
+            targetRole = 'submitter';
+        } else if (currentUser.role === '班長' && item.approvalStatus === 'correction_needed_from_kacho') {
+            // Scenario 3: 班長 forwards kacho's correction down to factory/submitter
             newStatus = 'correction_needed';
             targetRole = 'submitter';
         } else if (['課長', 'admin', '部長'].includes(currentUser.role) && item.approvalStatus === 'hancho_approved') {
