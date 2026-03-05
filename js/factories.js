@@ -4750,28 +4750,38 @@ async function renderFactoryCards() {
   
     try {
       // ==================== OPTIMIZED: Batch API calls ====================
-      // Fetch ALL factory data in 2 API calls instead of 32 (8 factories × 4 queries each)
+      // Fetch ALL factory data in 3 dedicated API calls (stats + sensors + env)
+      // instead of 32+ /queries calls (8 factories × 4 queries each + 8 weather calls)
       
-      const [factoryStatsRes, sensorDataRes, envDataArray] = await Promise.all([
-        // 1. Batch production stats for ALL factories (replaces 8 kensaDB queries)
+      const [factoryStatsRes, sensorDataRes, envDataRes] = await Promise.all([
+        // 1. Batch production stats for ALL factories (kensaDB — cached + write-invalidated)
         fetch(BASE_URL + "api/factory-overview/stats?date=" + today),
-        // 2. Batch sensor data for ALL factories (replaces 8+8 tempHumidityDB queries)
+        // 2. Batch sensor data for ALL factories (tempHumidityDB — cached 15 min)
         fetch(BASE_URL + "api/factory-overview/sensors?date=" + today),
-        // 3. Environmental data (weather) - still per factory but cached
-        Promise.all(factoryNames.map(factory => getEnvironmentalData(factory)))
+        // 3. Batch env/weather data for ALL factories (factoryDB + Open-Meteo — cached 15 min)
+        fetch(BASE_URL + "api/factory-overview/env?date=" + today)
       ]);
       
-      const factoryStats = await factoryStatsRes.json();
+      const factoryStats  = await factoryStatsRes.json();
       const sensorDataBatch = await sensorDataRes.json();
+      const envDataBatch  = await envDataRes.json();
       
       console.log('📊 Factory stats loaded:', Object.keys(factoryStats.data || {}).length, 'factories');
       console.log('🌡️ Sensor data loaded:', Object.keys(sensorDataBatch.data || {}).length, 'factories');
+      console.log('🌤️ Env data loaded:', Object.keys(envDataBatch.data || {}).length, 'factories');
       
-      // Map env data to factory names
+      // Map env data to factory names (fall back to getEnvironmentalData if batch failed)
       const envDataMap = {};
-      factoryNames.forEach((factory, idx) => {
-        envDataMap[factory] = envDataArray[idx];
-      });
+      if (envDataBatch.success && envDataBatch.data) {
+        factoryNames.forEach(factory => {
+          envDataMap[factory] = envDataBatch.data[factory] || getDefaultEnvironmentalData();
+        });
+      } else {
+        // Fallback: individual client-side calls (uses its own 10-min cache)
+        console.warn('⚠️ Batch env fetch failed, falling back to individual calls');
+        const envFallback = await Promise.all(factoryNames.map(f => getEnvironmentalData(f)));
+        factoryNames.forEach((factory, idx) => { envDataMap[factory] = envFallback[idx]; });
+      }
       
       const cards = factoryNames.map((factory, idx) => {
         // Get production data from batch result
