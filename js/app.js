@@ -1116,7 +1116,7 @@ function loadPage(page) {
                     </div>
 
                     <!-- Controls -->
-                    <div class="flex flex-wrap gap-4 mb-6">
+                    <div id="approvalFilterBar" class="flex flex-wrap gap-4 mb-6">
                         <button id="refreshBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600" data-i18n="dataUpdate">
                             🔄 データ更新
                         </button>
@@ -7425,11 +7425,17 @@ window.switchApprovalTab = function(tabName) {
     updateTabStyles();
   updateShowAllImagesButtonVisibility();
 
+    const filterBar = document.getElementById('approvalFilterBar');
     if (tabName === 'recycleBin') {
+        // Hide filters — they don't apply to the bin
+        if (filterBar) filterBar.classList.add('hidden');
         // RecycleBin has its own rendering; skip normal data pipeline
         renderRecycleBinTab();
         return;
     }
+
+    // Restore filters for normal tabs
+    if (filterBar) filterBar.classList.remove('hidden');
 
     // Update factory dropdown for the new tab
     if (typeof updateFactoryDropdownForTab === 'function') {
@@ -8205,6 +8211,9 @@ window.filterByStatus = function(status) {
  * Apply filters to approval data (OPTIMIZED)
  */
 function applyApprovalFilters() {
+    // Filters don't apply to the recycle bin tab
+    if (currentApprovalTab === 'recycleBin') return;
+
     console.log('🔍 Applying filters and reloading data...');
     currentApprovalPage = 1; // Reset to first page
     
