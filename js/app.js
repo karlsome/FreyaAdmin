@@ -9346,38 +9346,17 @@ window.openApprovalDetail = async function(itemId, focusLabel = null) {
                 </div>
                 ` : ''}
                 
-                <!-- Complete MongoDB Data -->
+                <!-- Edit Button (replaces old inline editor) -->
                 <div class="bg-gray-50 p-4 rounded-lg">
-                    <h4 class="font-semibold text-gray-900 mb-3">完全データ (MongoDB) - 編集可能</h4>
-                    <div class="grid grid-cols-1 gap-3 max-h-60 overflow-y-auto p-2">
-                        ${countersObject ? `
-                            <div class="bg-white p-2 rounded border">
-                                <label class="block text-xs font-medium text-gray-600 mb-2">Counters (個別設定)</label>
-                                <div class="grid grid-cols-2 gap-2">
-                                    ${Object.entries(countersObject).map(([counterKey, counterValue]) => `
-                                        <div class="flex items-center space-x-2">
-                                            <label class="text-xs text-gray-600 min-w-0 flex-shrink-0">${counterKey}:</label>
-                                            <input type="number" 
-                                                   value="${counterValue}" 
-                                                   class="flex-1 p-1 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                   data-field="Counters.${counterKey}"
-                                                   data-item-id="${item._id}"
-                                                   min="0">
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-                        ${allFields.map(([key, value]) => `
-                            <div class="bg-white p-2 rounded border">
-                                <label class="block text-xs font-medium text-gray-600 mb-1">${key}</label>
-                                <input type="text" 
-                                       value="${typeof value === 'object' ? JSON.stringify(value) : value}" 
-                                       class="w-full p-1 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                       data-field="${key}"
-                                       data-item-id="${item._id}">
-                            </div>
-                        `).join('')}
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h4 class="font-semibold text-gray-900">完全データ</h4>
+                            <p class="text-xs text-gray-500 mt-0.5">編集ボタンを押すと全フィールドを編集できます</p>
+                        </div>
+                        <button onclick="openDocEditModal('${item._id}', '${currentApprovalTab}')"
+                            class="flex items-center gap-1 px-3 py-2 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors">
+                            <i class="ri-edit-line"></i>編集
+                        </button>
                     </div>
                 </div>
                 
@@ -9415,11 +9394,6 @@ window.openApprovalDetail = async function(itemId, focusLabel = null) {
     `;
     
     modal.classList.remove('hidden');
-    
-    // Add input change listeners for editable fields
-    setTimeout(() => {
-        addInputChangeListeners();
-    }, 100);
 };
 
 /**
@@ -12366,3 +12340,891 @@ window.permanentlyDeleteFromBin = async function(binDocId) {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DOCUMENT EDIT MODAL
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Edit state — one active edit session at a time */
+window._editState = { docId: null, collection: null, doc: null, working: null, pendingImages: [] };
+
+// Fields that are NEVER shown as editable inputs (system metadata)
+const _EDIT_READONLY_FIELDS = new Set([
+    '_id', 'approvalStatus', 'approvalHistory', 'editHistory',
+    'approvedBy', 'approvedAt', 'correctionBy', 'correctionAt', 'correctionComment',
+    'hanchoApprovedAt', 'hanchoApprovedBy', 'deleteRequestStatus', 'deleteRequestedBy',
+    'deleteRequestReason', 'deleteRequestAt', 'createdAt',
+    'correctionTarget', 'correctionResponseBy', 'correctionResponseAt',
+    'correctionAppliedAt', 'correctionAppliedVia'
+]);
+// Fields whose values are automatically recalculated — shown but not directly typed
+const _EDIT_AUTO_FIELDS = new Set([
+    'Total', 'Total_NG', 'SRS_Total_NG',
+    'Total_Break_Minutes', 'Total_Break_Hours', 'Total_Work_Hours', 'Cycle_Time',
+    'materialLabelImageCount'
+]);
+// Integer-only fields
+const _EDIT_INT_FIELDS = new Set([
+    'Process_Quantity', 'Total', 'Total_NG', 'SRS_Total_NG', 'Spare', 'ショット数',
+    'Remaining_Quantity', 'Total_Break_Minutes', 'Total_Trouble_Minutes',
+    '疵引不良', '加工不良', 'その他', 'くっつき・めくれ', 'シワ',
+    '転写位置ズレ', '転写不良', '文字欠け'
+]);
+// Image array fields (Type B — allow add/replace/delete)
+const _EDIT_IMG_ARRAY_FIELDS = new Set(['materialLabelImages']);
+// Image single-string fields (Type A — view only)
+const _EDIT_IMG_VIEW_FIELDS  = new Set(['初物チェック画像', '終物チェック画像', '材料ラベル画像']);
+
+/**
+ * Ensure the edit modal DOM element exists in the page (lazy injection).
+ */
+function _ensureEditModalDOM() {
+    if (document.getElementById('docEditModal')) return;
+    const el = document.createElement('div');
+    el.id = 'docEditModal';
+    el.className = 'fixed inset-0 bg-black bg-opacity-60 hidden overflow-y-auto';
+    el.style.zIndex = '9999';
+    el.innerHTML = `
+        <div class="min-h-screen flex items-start justify-center py-8 px-4">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl">
+                <div class="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl z-10">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900"><i class="ri-edit-line mr-2 text-indigo-500"></i>データ編集</h2>
+                        <p id="docEditModalSubtitle" class="text-xs text-gray-500 mt-0.5"></p>
+                    </div>
+                    <button onclick="closeDocEditModal()" class="text-gray-400 hover:text-gray-600 text-xl p-1">✕</button>
+                </div>
+                <div id="docEditModalBody" class="p-6 space-y-6"></div>
+                <div class="p-4 border-t bg-gray-50 rounded-b-xl">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="flex-1 min-w-48">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">編集メモ（任意）</label>
+                            <input id="docEditNote" type="text" placeholder="変更理由を入力..." class="w-full px-3 py-1.5 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        </div>
+                        <button onclick="saveDocumentEdits()" class="px-5 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium text-sm">
+                            <i class="ri-save-line mr-1"></i>保存
+                        </button>
+                        <button onclick="closeDocEditModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm">キャンセル</button>
+                    </div>
+                </div>
+                <!-- Edit history section -->
+                <div class="p-6 border-t">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3"><i class="ri-history-line mr-1"></i>編集履歴</h3>
+                    <div id="docEditHistory" class="text-xs text-gray-400">読み込み中...</div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(el);
+}
+
+/** Open the edit modal for a document */
+window.openDocEditModal = async function(docId, collection) {
+    _ensureEditModalDOM();
+
+    // Use cached data (full doc is already in lastSelectedApprovalItem when the approval modal is open)
+    const doc = (filteredApprovalData || []).find(d => d._id && d._id.toString() === docId.toString())
+        || lastSelectedApprovalItem;
+    if (!doc) { alert('データが見つかりませんでした。'); return; }
+
+    window._editState = {
+        docId: docId.toString(),
+        collection,
+        doc:     JSON.parse(JSON.stringify(doc)),
+        working: JSON.parse(JSON.stringify(doc)),
+        pendingImages: []
+    };
+
+    const subtitle = document.getElementById('docEditModalSubtitle');
+    if (subtitle) subtitle.textContent = `${collection} / ${doc.品番 || ''} / ${doc.背番号 || ''} / ${doc.Date || ''}`;
+
+    _renderEditModalBody();
+    document.getElementById('docEditModal').classList.remove('hidden');
+    document.getElementById('docEditNote').value = '';
+
+    _loadEditHistory(docId.toString(), collection);
+};
+
+/** Close edit modal */
+window.closeDocEditModal = function() {
+    const m = document.getElementById('docEditModal');
+    if (m) m.classList.add('hidden');
+    window._editState = { docId: null, collection: null, doc: null, working: null, pendingImages: [] };
+};
+
+/** Build and inject the form into modal body */
+function _renderEditModalBody() {
+    const { working, collection } = window._editState;
+    const body = document.getElementById('docEditModalBody');
+    if (!body || !working) return;
+
+    // Collect all known field keys processed in groups so we can catch unknowns
+    const processedKeys = new Set();
+
+    // ── Group helpers ─────────────────────────────────────────────────────────
+    const group = (title, html) => `
+        <div class="bg-gray-50 rounded-lg p-4 border">
+            <h4 class="font-semibold text-gray-700 text-sm mb-3 flex items-center gap-2">${title}</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${html}</div>
+        </div>`;
+
+    const fieldHtml = (key, label, type, opts = {}) => {
+        processedKeys.add(key);
+        const val = key.split('.').reduce((o, k) => (o != null ? o[k] : ''), working);
+        const isAuto = _EDIT_AUTO_FIELDS.has(key);
+        const isRO   = _EDIT_READONLY_FIELDS.has(key);
+
+        if (isRO) {
+            return `<div><label class="block text-xs text-gray-500 mb-1">${label} <span class="text-gray-400 text-xs">（読み取り専用）</span></label>
+                <div class="px-2 py-1 bg-gray-100 rounded text-xs text-gray-600 break-all">${val !== null && val !== undefined ? val : '-'}</div></div>`;
+        }
+        if (isAuto) {
+            return `<div><label class="block text-xs text-gray-500 mb-1">${label} <span class="text-indigo-400 text-xs">（自動計算）</span></label>
+                <div class="px-2 py-1 bg-indigo-50 border border-indigo-200 rounded text-xs font-medium text-indigo-700" id="autoField_${key}">${val !== null && val !== undefined ? val : '0'}</div></div>`;
+        }
+        if (type === 'textarea') {
+            return `<div class="sm:col-span-2"><label class="block text-xs text-gray-500 mb-1">${label}</label>
+                <textarea rows="3" class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400" oninput="_editOnInput('${key}',this.value)">${val || ''}</textarea></div>`;
+        }
+        if (type === 'integer') {
+            return `<div><label class="block text-xs text-gray-500 mb-1">${label}</label>
+                <input type="number" min="0" step="1" value="${val ?? 0}"
+                    class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                    oninput="_editValidateInt(this);_editOnInput('${key}',this._intVal);_editAutoCalc()"
+                    onblur="_editValidateInt(this);_editOnInput('${key}',this._intVal);_editAutoCalc()"></div>`;
+        }
+        if (type === 'number') {
+            return `<div><label class="block text-xs text-gray-500 mb-1">${label}</label>
+                <input type="number" step="0.01" min="0" value="${val ?? 0}"
+                    class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                    oninput="_editOnInput('${key}',parseFloat(this.value)||0)"></div>`;
+        }
+        if (type === 'time') {
+            return `<div><label class="block text-xs text-gray-500 mb-1">${label}</label>
+                <input type="time" value="${val || ''}"
+                    class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                    oninput="_editOnInput('${key}',this.value);_editAutoCalc()"></div>`;
+        }
+        if (type === 'date') {
+            return `<div><label class="block text-xs text-gray-500 mb-1">${label}</label>
+                <input type="date" value="${val || ''}"
+                    class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                    oninput="_editOnInput('${key}',this.value)"></div>`;
+        }
+        return `<div><label class="block text-xs text-gray-500 mb-1">${label}</label>
+            <input type="text" value="${(val || '').toString().replace(/"/g,'&quot;')}"
+                class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                oninput="_editOnInput('${key}',this.value)"></div>`;
+    };
+
+    // ── Build sections ────────────────────────────────────────────────────────
+    const sections = [];
+
+    // 1. 基本情報
+    let basic = '';
+    // 品番 / 背番号 — picker buttons (linked via masterDB)
+    const hinbanVal  = working['品番']  || '';
+    const bangouVal  = working['背番号'] || '';
+    processedKeys.add('品番'); processedKeys.add('背番号');
+    basic += `
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">品番</label>
+            <div class="flex gap-1 items-center">
+                <div id="editPickerDisplay_品番" class="flex-1 px-2 py-1 bg-white border rounded text-xs text-gray-800 min-h-[26px] truncate">${hinbanVal}</div>
+                <button type="button" onclick="_openMasterPicker('品番')" class="flex-shrink-0 px-2 py-1 bg-indigo-500 text-white text-xs rounded hover:bg-indigo-600">変更</button>
+            </div>
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">背番号</label>
+            <div class="flex gap-1 items-center">
+                <div id="editPickerDisplay_背番号" class="flex-1 px-2 py-1 bg-white border rounded text-xs text-gray-800 min-h-[26px] truncate">${bangouVal}</div>
+                <button type="button" onclick="_openMasterPicker('背番号')" class="flex-shrink-0 px-2 py-1 bg-indigo-500 text-white text-xs rounded hover:bg-indigo-600">変更</button>
+            </div>
+        </div>`;
+    basic += fieldHtml('工場',       '工場',       'text');
+    basic += fieldHtml('設備',       '設備',       'text');
+    basic += fieldHtml('Worker_Name','作業者',     'text');
+    basic += fieldHtml('Date',       '日付',       'date');
+    if (collection === 'SRSDB' && working.SRSコード !== undefined) {
+        basic += fieldHtml('SRSコード', 'SRSコード', 'text');
+    }
+    sections.push(group('<i class="ri-information-line text-blue-500"></i>基本情報', basic));
+
+    // 2. 時間
+    let time = '';
+    time += fieldHtml('Time_start', '開始時刻', 'time');
+    time += fieldHtml('Time_end',   '終了時刻', 'time');
+    // Break_Time_Data — render each break pair
+    processedKeys.add('Break_Time_Data');
+    if (working.Break_Time_Data) {
+        const bKeys = Object.keys(working.Break_Time_Data);
+        bKeys.forEach(bk => {
+            const bs = working.Break_Time_Data[bk];
+            const bkLabel = bk.replace('break', '休憩 ');
+            time += `<div><label class="block text-xs text-gray-500 mb-1">${bkLabel} 開始</label>
+                <input type="time" value="${bs.start || ''}" class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                    oninput="_editOnInput('Break_Time_Data.${bk}.start',this.value);_editAutoCalc()"></div>`;
+            time += `<div><label class="block text-xs text-gray-500 mb-1">${bkLabel} 終了</label>
+                <input type="time" value="${bs.end || ''}" class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                    oninput="_editOnInput('Break_Time_Data.${bk}.end',this.value);_editAutoCalc()"></div>`;
+            processedKeys.add(`Break_Time_Data.${bk}.start`);
+            processedKeys.add(`Break_Time_Data.${bk}.end`);
+        });
+    }
+    time += fieldHtml('Total_Break_Minutes','合計休憩（分）','auto');
+    time += fieldHtml('Total_Break_Hours',  '合計休憩（時間）','auto');
+    time += fieldHtml('Total_Trouble_Minutes','故障時間（分）','number');
+    time += fieldHtml('Total_Trouble_Hours', '故障時間（時間）','number');
+    time += fieldHtml('Total_Work_Hours',   '稼働時間',  'auto');
+    time += fieldHtml('Cycle_Time',         'サイクルタイム（秒）','auto');
+    // Maintenance_Data — read-only view
+    if (working.Maintenance_Data !== undefined) {
+        processedKeys.add('Maintenance_Data');
+        time += `<div class="sm:col-span-2"><label class="block text-xs text-gray-500 mb-1">Maintenance_Data <span class="text-gray-400 text-xs">（読み取り専用）</span></label>
+            <pre class="px-2 py-1 bg-gray-100 rounded text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap max-h-32">${JSON.stringify(working.Maintenance_Data, null, 2)}</pre></div>`;
+    }
+    sections.push(group('<i class="ri-time-line text-emerald-500"></i>時間・稼働', time));
+
+    // 3. 数量・不良
+    let qty = '';
+    qty += fieldHtml('Process_Quantity', '処理数量', 'integer');
+    qty += fieldHtml('Spare', '予備', 'integer');
+    if (collection === 'pressDB')  qty += fieldHtml('ショット数', 'ショット数', 'integer');
+    if (collection === 'kensaDB')  qty += fieldHtml('Remaining_Quantity', '残数量', 'integer');
+    // Defect counters per collection
+    if (collection === 'pressDB' || collection === 'slitDB') {
+        qty += fieldHtml('疵引不良', '疵引不良', 'integer');
+        qty += fieldHtml('加工不良', '加工不良', 'integer');
+        qty += fieldHtml('その他',   'その他不良', 'integer');
+        qty += fieldHtml('Total_NG', '合計不良（自動）', 'auto');
+    }
+    if (collection === 'SRSDB') {
+        qty += fieldHtml('くっつき・めくれ', 'くっつき・めくれ', 'integer');
+        qty += fieldHtml('シワ',             'シワ',             'integer');
+        qty += fieldHtml('転写位置ズレ',     '転写位置ズレ',     'integer');
+        qty += fieldHtml('転写不良',         '転写不良',         'integer');
+        qty += fieldHtml('文字欠け',         '文字欠け',         'integer');
+        qty += fieldHtml('その他',           'その他不良',       'integer');
+        qty += fieldHtml('SRS_Total_NG',     '合計不良（自動）', 'auto');
+    }
+    if (collection === 'kensaDB') {
+        // Render each counter
+        processedKeys.add('Counters');
+        if (working.Counters && typeof working.Counters === 'object') {
+            Object.keys(working.Counters).forEach(ck => {
+                const label = ck;
+                const val = working.Counters[ck] ?? 0;
+                qty += `<div><label class="block text-xs text-gray-500 mb-1">${label}</label>
+                    <input type="number" min="0" step="1" value="${val}"
+                        class="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-indigo-400"
+                        oninput="_editValidateInt(this);_editOnInput('Counters.${ck}',this._intVal);_editAutoCalc()"></div>`;
+                processedKeys.add(`Counters.${ck}`);
+            });
+        }
+        qty += fieldHtml('Total_NG', '合計不良（自動）', 'auto');
+    }
+    qty += fieldHtml('Total', '合計数量 = 処理数 − 不良（自動）', 'auto');
+    sections.push(group('<i class="ri-bar-chart-line text-orange-500"></i>数量・不良', qty));
+
+    // 4. その他
+    let other = '';
+    if (working.材料ロット  !== undefined) other += fieldHtml('材料ロット',  '材料ロット',  'text');
+    if (working.製造ロット  !== undefined) other += fieldHtml('製造ロット',  '製造ロット',  'text');
+    other += fieldHtml('Comment', 'コメント', 'textarea');
+    sections.push(group('<i class="ri-chat-3-line text-purple-500"></i>その他', other));
+
+    // 5. 画像
+    let imgHtml = '';
+    // Type B array images
+    _EDIT_IMG_ARRAY_FIELDS.forEach(field => {
+        if (!Array.isArray(working[field])) return;
+        processedKeys.add(field);
+        imgHtml += `<div class="sm:col-span-2"><label class="block text-xs font-medium text-gray-600 mb-2">${field}</label>
+            <div id="editImgArray_${field}" class="space-y-2">
+                ${working[field].map((url, idx) => _editImgArrayItemHTML(field, idx, url)).join('')}
+            </div>
+            <button onclick="_editAddImage('${field}')" class="mt-2 px-3 py-1 bg-gray-100 hover:bg-gray-200 text-xs rounded border">
+                <i class="ri-add-line mr-1"></i>画像を追加
+            </button>
+        </div>`;
+    });
+    // Type A view-only images
+    _EDIT_IMG_VIEW_FIELDS.forEach(field => {
+        if (!working[field]) return;
+        processedKeys.add(field);
+        imgHtml += `<div class="sm:col-span-2"><label class="block text-xs text-gray-500 mb-1">${field} <span class="text-gray-400 text-xs">（閲覧のみ）</span></label>
+            <img src="${working[field]}" alt="${field}" class="max-h-40 rounded border object-contain bg-gray-50">
+        </div>`;
+    });
+    if (imgHtml) sections.push(group('<i class="ri-image-line text-pink-500"></i>画像', imgHtml));
+
+    // 6. システム（読み取り専用）
+    let sys = '';
+    _EDIT_READONLY_FIELDS.forEach(key => {
+        if (working[key] === undefined || working[key] === null) return;
+        processedKeys.add(key);
+        if (key === '_id') return; // skip
+        const val = typeof working[key] === 'object' ? JSON.stringify(working[key]) : working[key];
+        sys += `<div><label class="block text-xs text-gray-500 mb-1">${key} <span class="text-gray-400 text-xs">（読み取り専用）</span></label>
+            <div class="px-2 py-1 bg-gray-100 rounded text-xs text-gray-600 break-all overflow-hidden">${val}</div></div>`;
+    });
+    if (sys) sections.push(`
+            <div class="bg-gray-50 rounded-lg border">
+                <button type="button" onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('i.arrow').classList.toggle('ri-arrow-right-s-line');this.querySelector('i.arrow').classList.toggle('ri-arrow-down-s-line')"
+                    class="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-500 hover:bg-gray-100 rounded-lg">
+                    <span><i class="ri-shield-line mr-2"></i>システム情報 <span class="text-xs font-normal text-gray-400">（読み取り専用）</span></span>
+                    <i class="arrow ri-arrow-right-s-line text-gray-400"></i>
+                </button>
+                <div class="hidden px-4 pb-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">${sys}</div>
+                </div>
+            </div>`);
+
+    // 7. 未分類フィールド (catch-all — read-only, collapsed by default)
+    let uncategorized = '';
+    for (const [key, val] of Object.entries(working)) {
+        if (processedKeys.has(key)) continue;
+        if (key === '_id') continue;
+        if (_EDIT_IMG_ARRAY_FIELDS.has(key) || _EDIT_IMG_VIEW_FIELDS.has(key)) continue;
+        processedKeys.add(key);
+        if (typeof val === 'object' && val !== null) {
+            uncategorized += `<div class="sm:col-span-2"><label class="block text-xs text-gray-500 mb-1">${key}</label>
+                <pre class="px-2 py-1 bg-gray-100 rounded text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap max-h-24">${JSON.stringify(val, null, 2)}</pre></div>`;
+        } else {
+            const display = val ?? '-';
+            uncategorized += `<div><label class="block text-xs text-gray-500 mb-1">${key}</label>
+                <div class="px-2 py-1 bg-gray-100 rounded text-xs text-gray-600 break-all">${display}</div></div>`;
+        }
+    }
+    if (uncategorized) {
+        sections.push(`
+            <div class="bg-gray-50 rounded-lg border">
+                <button type="button" onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('i').classList.toggle('ri-arrow-right-s-line');this.querySelector('i').classList.toggle('ri-arrow-down-s-line')"
+                    class="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-gray-500 hover:bg-gray-100 rounded-lg">
+                    <span><i class="ri-list-unordered mr-2"></i>その他フィールド <span class="text-xs font-normal text-gray-400">（読み取り専用）</span></span>
+                    <i class="ri-arrow-right-s-line text-gray-400"></i>
+                </button>
+                <div class="hidden px-4 pb-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">${uncategorized}</div>
+                </div>
+            </div>`);
+    }
+
+    body.innerHTML = sections.join('');
+}
+
+/** HTML for one item in a materialLabelImages array */
+function _editImgArrayItemHTML(field, idx, url) {
+    // Check if pending delete
+    const pendingDel = (window._editState.pendingImages || []).some(
+        op => op.type === 'delete' && op.field === field && op.index === idx
+    );
+    return `<div id="editImgItem_${field}_${idx}" class="flex items-center gap-2 p-2 bg-white border rounded ${pendingDel ? 'opacity-40 line-through' : ''}">
+        <img src="${url}" alt="image ${idx}" class="h-12 w-12 object-contain rounded border bg-gray-50 flex-shrink-0">
+        <div class="flex-1 text-xs text-gray-500 truncate" title="${url}">${url.split('/').pop().split('?')[0]}</div>
+        <div class="flex gap-1 flex-shrink-0">
+            ${pendingDel
+                ? `<button onclick="_editUndoDeleteImage('${field}',${idx})" class="px-2 py-0.5 bg-blue-500 text-white text-xs rounded">元に戻す</button>`
+                : `<button onclick="_editReplaceImage('${field}',${idx})" class="px-2 py-0.5 bg-yellow-500 text-white text-xs rounded">置換</button>
+                   <button onclick="_editDeleteImage('${field}',${idx})" class="px-2 py-0.5 bg-red-500 text-white text-xs rounded">削除</button>`
+            }
+        </div>
+    </div>`;
+}
+
+/** Called on every editable field input — update working copy */
+window._editOnInput = function(field, value) {
+    if (!window._editState.working) return;
+    const parts = field.split('.');
+    let obj = window._editState.working;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if (typeof obj[parts[i]] !== 'object' || obj[parts[i]] === null) obj[parts[i]] = {};
+        obj = obj[parts[i]];
+    }
+    obj[parts[parts.length - 1]] = value;
+};
+
+/** Validate integer inputs — reject 全角 and non-integer characters */
+window._editValidateInt = function(el) {
+    // Normalize 全角 digits to ASCII, then strip non-numeric
+    let v = el.value.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+    v = v.replace(/[^0-9]/g, '');
+    el.value = v;
+    el._intVal = v === '' ? 0 : parseInt(v, 10);
+};
+
+/** Run the full auto-calculation chain from current working state */
+window._editAutoCalc = function() {
+    const { working, collection } = window._editState;
+    if (!working) return;
+
+    // ── Step 1: Defect counters → Total_NG / SRS_Total_NG ──────────────────
+    let ngTotal = 0;
+    if (collection === 'kensaDB' && working.Counters) {
+        ngTotal = Object.values(working.Counters).reduce((s, v) => s + (parseInt(v) || 0), 0);
+        working.Total_NG = ngTotal;
+    } else if (collection === 'SRSDB') {
+        ngTotal = ['くっつき・めくれ','シワ','転写位置ズレ','転写不良','文字欠け','その他']
+            .reduce((s, k) => s + (parseInt(working[k]) || 0), 0);
+        working.SRS_Total_NG = ngTotal;
+    } else {
+        ngTotal = ['疵引不良','加工不良','その他']
+            .reduce((s, k) => s + (parseInt(working[k]) || 0), 0);
+        working.Total_NG = ngTotal;
+    }
+
+    // ── Step 2: Total = Process_Quantity − Total_NG ──────────────────────────
+    const pq = parseInt(working.Process_Quantity) || 0;
+    working.Total = Math.max(0, pq - ngTotal);
+
+    // ── Step 3: Break time from Break_Time_Data ──────────────────────────────
+    if (working.Break_Time_Data) {
+        let breakMinutes = 0;
+        Object.values(working.Break_Time_Data).forEach(b => {
+            if (b.start && b.end) {
+                const diff = _editParseTime(b.end) - _editParseTime(b.start);
+                if (diff > 0) breakMinutes += diff;
+            }
+        });
+        working.Total_Break_Minutes = breakMinutes;
+        working.Total_Break_Hours   = Math.round(breakMinutes / 60 * 100) / 100;
+    }
+
+    // ── Step 4: Total_Work_Hours ─────────────────────────────────────────────
+    const startMin  = _editParseTime(working.Time_start || '');
+    const endMin    = _editParseTime(working.Time_end   || '');
+    const breakH    = parseFloat(working.Total_Break_Hours)   || 0;
+    const troubleH  = parseFloat(working.Total_Trouble_Hours) || 0;
+    if (startMin >= 0 && endMin > startMin) {
+        const workedH = (endMin - startMin) / 60 - breakH - troubleH;
+        working.Total_Work_Hours = Math.round(Math.max(0, workedH) * 100) / 100;
+    }
+
+    // ── Step 5: Cycle_Time = (Total_Work_Hours × 3600) / Process_Quantity ───
+    const twh = parseFloat(working.Total_Work_Hours) || 0;
+    const pqq = parseInt(working.Process_Quantity)   || 0;
+    if (pqq > 0) {
+        working.Cycle_Time = Math.round((twh * 3600 / pqq) * 100) / 100;
+    }
+
+    // ── Update displayed auto-calc fields ───────────────────────────────────
+    const autoMap = {
+        Total_NG:            collection === 'kensaDB' || collection === 'pressDB' || collection === 'slitDB' ? working.Total_NG : null,
+        SRS_Total_NG:        working.SRS_Total_NG,
+        Total:               working.Total,
+        Total_Break_Minutes: working.Total_Break_Minutes,
+        Total_Break_Hours:   working.Total_Break_Hours,
+        Total_Work_Hours:    working.Total_Work_Hours,
+        Cycle_Time:          working.Cycle_Time
+    };
+    for (const [k, v] of Object.entries(autoMap)) {
+        if (v === null || v === undefined) continue;
+        const el = document.getElementById(`autoField_${k}`);
+        if (el) el.textContent = v;
+    }
+};
+
+/** Parse "HH:MM" → total minutes */
+function _editParseTime(t) {
+    if (!t || !t.includes(':')) return -1;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+}
+
+/** Get the Firebase storage path from a download URL */
+function _editFirebasePath(url) {
+    const match = url.match(/\/o\/(.+?)(?:\?|$)/);
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
+/** Build correction filename from original path */
+function _editCorrectionPath(originalUrl) {
+    const path = _editFirebasePath(originalUrl);
+    if (!path) return null;
+    const lastSlash = path.lastIndexOf('/');
+    const folder    = path.substring(0, lastSlash);
+    const filename  = path.substring(lastSlash + 1);
+    const dotIdx    = filename.lastIndexOf('.');
+    const base      = dotIdx >= 0 ? filename.substring(0, dotIdx) : filename;
+    const ext       = dotIdx >= 0 ? filename.substring(dotIdx)    : '';
+    const corrN     = (window._editState.pendingImages.filter(op => op.field && op.oldUrl === originalUrl).length) + 1;
+    return `${folder}/${base}_Correction${corrN}${ext}`;
+}
+
+/** Replace an image in a materialLabelImages array */
+window._editReplaceImage = function(field, index) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const arr   = window._editState.working[field];
+        const oldUrl = arr[index];
+        const newPath = _editCorrectionPath(oldUrl);
+        if (!newPath) { alert('Firebase パスの解析に失敗しました。'); return; }
+
+        // Mark pending (so the undo button renders in array item)
+        window._editState.pendingImages.push({ type: 'replace', field, index, file, oldUrl, newPath });
+        // Preview optimistic update
+        const row = document.getElementById(`editImgItem_${field}_${index}`);
+        if (row) {
+            const reader = new FileReader();
+            reader.onload = e => { const img = row.querySelector('img'); if (img) img.src = e.target.result; };
+            reader.readAsDataURL(file);
+            const fname = row.querySelector('.flex-1');
+            if (fname) fname.textContent = `⏳ ${file.name} → ${newPath.split('/').pop()}`;
+        }
+    };
+    input.click();
+};
+
+/** Add a new image to a materialLabelImages array */
+window._editAddImage = function(field) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+        const file = input.files[0];
+        if (!file) return;
+        const arr = window._editState.working[field] || [];
+        const existingPaths = arr.map(u => _editFirebasePath(u)).filter(Boolean);
+        // Use same folder as first image, with unique timestamp
+        const firstUrl = arr[0];
+        let newPath = `editCorrections/${field}_${Date.now()}_${file.name}`;
+        if (firstUrl) {
+            const fp = _editFirebasePath(firstUrl);
+            if (fp) {
+                const folder = fp.substring(0, fp.lastIndexOf('/'));
+                newPath = `${folder}/${Date.now()}_added_${file.name}`;
+            }
+        }
+        const newIndex = arr.length;
+        window._editState.pendingImages.push({ type: 'add', field, index: newIndex, file, oldUrl: null, newPath });
+        // Add placeholder row
+        const container = document.getElementById(`editImgArray_${field}`);
+        if (container) {
+            container.insertAdjacentHTML('beforeend', `
+                <div id="editImgItem_${field}_${newIndex}" class="flex items-center gap-2 p-2 bg-white border rounded">
+                    <div class="h-12 w-12 flex items-center justify-center bg-gray-100 rounded border flex-shrink-0 text-xs text-gray-400">⏳</div>
+                    <div class="flex-1 text-xs text-gray-500 truncate">${file.name} （未保存）</div>
+                    <button onclick="_editCancelAddImage('${field}',${newIndex})" class="px-2 py-0.5 bg-gray-400 text-white text-xs rounded">取消</button>
+                </div>`);
+        }
+    };
+    input.click();
+};
+
+/** Cancel a pending add */
+window._editCancelAddImage = function(field, index) {
+    window._editState.pendingImages = window._editState.pendingImages.filter(
+        op => !(op.type === 'add' && op.field === field && op.index === index)
+    );
+    const row = document.getElementById(`editImgItem_${field}_${index}`);
+    if (row) row.remove();
+};
+
+/** Mark image for deletion */
+window._editDeleteImage = function(field, index) {
+    window._editState.pendingImages.push({ type: 'delete', field, index });
+    const row = document.getElementById(`editImgItem_${field}_${index}`);
+    if (row) {
+        row.classList.add('opacity-40');
+        const btns = row.querySelectorAll('button');
+        btns.forEach(b => b.remove());
+        row.insertAdjacentHTML('beforeend', `<button onclick="_editUndoDeleteImage('${field}',${index})" class="px-2 py-0.5 bg-blue-500 text-white text-xs rounded flex-shrink-0">元に戻す</button>`);
+    }
+};
+
+/** Undo delete mark */
+window._editUndoDeleteImage = function(field, index) {
+    window._editState.pendingImages = window._editState.pendingImages.filter(
+        op => !(op.type === 'delete' && op.field === field && op.index === index)
+    );
+    const row = document.getElementById(`editImgItem_${field}_${index}`);
+    if (row) {
+        row.classList.remove('opacity-40');
+        const undoBtn = row.querySelector('button');
+        if (undoBtn) undoBtn.remove();
+        row.insertAdjacentHTML('beforeend', `
+            <button onclick="_editReplaceImage('${field}',${index})" class="px-2 py-0.5 bg-yellow-500 text-white text-xs rounded">置換</button>
+            <button onclick="_editDeleteImage('${field}',${index})" class="px-2 py-0.5 bg-red-500 text-white text-xs rounded">削除</button>`);
+    }
+};
+
+/** Convert a File object to base64 string (data portion only, no prefix) */
+function _editFileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+/** Save all pending edits to backend (images uploaded server-side via Firebase Admin) */
+window.saveDocumentEdits = async function() {
+    const { working, collection, docId } = window._editState;
+    if (!working || !docId) return;
+
+    const saveBtn = document.querySelector('#docEditModal button[onclick="saveDocumentEdits()"]');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中...'; }
+
+    try {
+        // ── Step 1: Serialize pending image ops to base64 (no client Firebase) ─
+        const { pendingImages } = window._editState;
+        const pendingImageOps = [];
+        for (const op of pendingImages) {
+            if (op.type === 'delete') {
+                pendingImageOps.push({ type: 'delete', field: op.field, index: op.index });
+            } else if (op.file) {
+                const base64 = await _editFileToBase64(op.file);
+                pendingImageOps.push({
+                    type:     op.type,   // 'replace' or 'add'
+                    field:    op.field,
+                    index:    op.index,
+                    base64,
+                    mimeType: op.file.type || 'image/jpeg',
+                    oldUrl:   op.oldUrl || null
+                });
+            }
+        }
+
+        // ── Step 2: Collect all editable field changes ──────────────────────
+        const changes = {};
+        for (const [key, val] of Object.entries(working)) {
+            if (key === '_id') continue;
+            if (_EDIT_READONLY_FIELDS.has(key)) continue;
+            if (typeof val === 'object' && !Array.isArray(val) && val !== null) {
+                for (const [sk, sv] of Object.entries(val)) {
+                    if (typeof sv === 'object' && !Array.isArray(sv) && sv !== null) {
+                        for (const [ssk, ssv] of Object.entries(sv)) {
+                            changes[`${key}.${sk}.${ssk}`] = ssv;
+                        }
+                    } else {
+                        changes[`${key}.${sk}`] = sv;
+                    }
+                }
+            } else {
+                changes[key] = val;
+            }
+        }
+
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        let editorName;
+        try { editorName = await getUserFullName(currentUser.username); } catch(_) { editorName = currentUser.username; }
+
+        const editNote = document.getElementById('docEditNote')?.value || '';
+
+        const resp = await fetch(`${BASE_URL}api/approvals/edit-document`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                collection,
+                docId,
+                changes,
+                pendingImageOps,
+                editedBy: editorName,
+                editedByUsername: currentUser.username,
+                editNote
+            })
+        });
+        const result = await resp.json();
+
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert('保存しました。');
+        closeDocEditModal();
+        loadApprovalData();
+
+    } catch (err) {
+        console.error('saveDocumentEdits error:', err);
+        alert(`保存に失敗しました: ${err.message}`);
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存'; }
+    }
+};
+
+/** Load and render edit history for the current document */
+async function _loadEditHistory(docId, collection) {
+    const el = document.getElementById('docEditHistory');
+    if (!el) return;
+    try {
+        const resp = await fetch(`${BASE_URL}api/approvals/edit-history/${collection}/${docId}`);
+        const data = await resp.json();
+        if (!data.success || !data.data.length) {
+            el.innerHTML = '<span class="text-gray-400">編集履歴はありません</span>';
+            return;
+        }
+        el.innerHTML = data.data.map(log => {
+            const ts = new Date(log.timestamp).toLocaleString('ja-JP');
+            const isRevert = log.type === 'revert';
+            const changedList = (log.changedFields || []).map(cf =>
+                `<span class="inline-block bg-gray-100 rounded px-1 mr-1 mb-1">${cf.field}: <span class="text-red-500">${JSON.stringify(cf.before)}</span> → <span class="text-green-600">${JSON.stringify(cf.after)}</span></span>`
+            ).join('');
+            return `<div class="border rounded p-3 mb-2 bg-white ${isRevert ? 'border-blue-200' : 'border-gray-200'}">
+                <div class="flex items-center justify-between mb-1">
+                    <div class="font-medium text-gray-700">
+                        ${isRevert ? '<span class="text-blue-600">↩ 復元</span>' : '<span class="text-indigo-600">✏ 編集</span>'}
+                        <span class="ml-2">${log.editedBy || log.revertedBy}</span>
+                        <span class="ml-2 text-gray-400 font-normal">${ts}</span>
+                    </div>
+                    ${!isRevert ? `<button onclick="revertToEditSnapshot('${log._id}')"
+                        class="px-2 py-0.5 bg-yellow-500 hover:bg-yellow-600 text-white text-xs rounded">この時点に戻す</button>` : ''}
+                </div>
+                ${log.editNote ? `<div class="text-xs text-gray-500 mb-1">📝 ${log.editNote}</div>` : ''}
+                <div class="text-xs flex flex-wrap">${changedList || '<span class="text-gray-400">詳細なし</span>'}</div>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        el.innerHTML = `<span class="text-red-400">読み込みに失敗しました: ${err.message}</span>`;
+    }
+}
+
+/** Revert document to a specific edit snapshot */
+window.revertToEditSnapshot = async function(logId) {
+    const { docId, collection } = window._editState;
+    if (!confirm('この時点の状態に戻しますか？現在の値は上書きされます。')) return;
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        let revertorName;
+        try { revertorName = await getUserFullName(currentUser.username); } catch(_) { revertorName = currentUser.username; }
+
+        const resp = await fetch(`${BASE_URL}api/approvals/revert-document`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ collection, docId, logId, revertedBy: revertorName, revertedByUsername: currentUser.username })
+        });
+        const result = await resp.json();
+        if (!result.success) throw new Error(result.error);
+
+        alert('復元しました。');
+        closeDocEditModal();
+        loadApprovalData();
+    } catch (err) {
+        alert(`復元に失敗しました: ${err.message}`);
+    }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MASTER DB PICKER MODAL  (品番 / 背番号)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _masterPickerFocusField = null; // which field was clicked ('品番' or '背番号')
+let _masterPickerDebounce   = null;
+
+/** Lazy-inject the picker modal DOM */
+function _ensureMasterPickerDOM() {
+    if (document.getElementById('masterPickerModal')) return;
+    const el = document.createElement('div');
+    el.id = 'masterPickerModal';
+    el.className = 'fixed inset-0 bg-black bg-opacity-50 hidden overflow-y-auto';
+    el.style.zIndex = '10001';
+    el.innerHTML = `
+        <div class="min-h-screen flex items-start justify-center py-12 px-4">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
+                <div class="flex items-center justify-between p-4 border-b">
+                    <h3 class="font-semibold text-gray-800 text-sm"><i class="ri-search-line mr-1 text-indigo-500"></i><span id="masterPickerTitle">品番 / 背番号検索</span></h3>
+                    <button onclick="_closeMasterPicker()" class="text-gray-400 hover:text-gray-600">✕</button>
+                </div>
+                <div class="p-4">
+                    <input id="masterPickerSearch" type="text" placeholder="品番または背番号で検索..."
+                        class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                        oninput="_masterPickerOnSearch(this.value)">
+                    <div class="mt-1 text-xs text-gray-400" id="masterPickerCount"></div>
+                </div>
+                <div id="masterPickerResults" class="overflow-y-auto max-h-80 border-t">
+                    <div class="p-4 text-xs text-gray-400 text-center">検索してください</div>
+                </div>
+                <div class="p-3 border-t bg-gray-50 rounded-b-xl text-xs text-gray-400">
+                    行をクリックすると品番と背番号が同時に更新されます
+                </div>
+            </div>
+        </div>`;
+    // Close on backdrop click
+    el.addEventListener('click', e => { if (e.target === el) _closeMasterPicker(); });
+    document.body.appendChild(el);
+}
+
+/** Open the picker, pre-populate search with current value */
+window._openMasterPicker = function(field) {
+    _ensureMasterPickerDOM();
+    _masterPickerFocusField = field;
+    const titleEl = document.getElementById('masterPickerTitle');
+    if (titleEl) titleEl.textContent = field === '品番' ? '品番検索' : '背番号検索';
+
+    // Pre-fill search with current value
+    const currentVal = (window._editState.working || {})[field] || '';
+    const searchEl = document.getElementById('masterPickerSearch');
+    if (searchEl) { searchEl.value = currentVal; searchEl.focus(); }
+
+    document.getElementById('masterPickerModal').classList.remove('hidden');
+    _masterPickerDoSearch(currentVal);
+};
+
+/** Close the picker */
+window._closeMasterPicker = function() {
+    const m = document.getElementById('masterPickerModal');
+    if (m) m.classList.add('hidden');
+    _masterPickerFocusField = null;
+};
+
+/** Input handler with debounce */
+window._masterPickerOnSearch = function(val) {
+    clearTimeout(_masterPickerDebounce);
+    _masterPickerDebounce = setTimeout(() => _masterPickerDoSearch(val), 250);
+};
+
+/** Fetch results and render */
+async function _masterPickerDoSearch(q) {
+    const resultsEl = document.getElementById('masterPickerResults');
+    const countEl   = document.getElementById('masterPickerCount');
+    if (!resultsEl) return;
+    resultsEl.innerHTML = '<div class="p-4 text-xs text-gray-400 text-center">検索中...</div>';
+    try {
+        const resp = await fetch(`${BASE_URL}api/approvals/masterdb-products?q=${encodeURIComponent(q)}`);
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error);
+        const rows = data.data || [];
+        if (countEl) countEl.textContent = `${rows.length}件表示`;
+        if (rows.length === 0) {
+            resultsEl.innerHTML = '<div class="p-4 text-xs text-gray-400 text-center">該当なし</div>';
+            return;
+        }
+        resultsEl.innerHTML = `
+            <table class="w-full text-xs">
+                <thead class="bg-gray-50 sticky top-0">
+                    <tr>
+                        <th class="px-3 py-2 text-left text-gray-500 font-medium w-1/2">背番号</th>
+                        <th class="px-3 py-2 text-left text-gray-500 font-medium w-1/2">品番</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map((r, i) => `
+                        <tr class="border-t hover:bg-indigo-50 cursor-pointer ${i % 2 === 0 ? '' : 'bg-gray-50'}"
+                            onclick="_masterPickerSelect(${JSON.stringify(r['背番号'] || '').replace(/"/g,'&quot;')}, ${JSON.stringify(r['品番'] || '').replace(/"/g,'&quot;')})">
+                            <td class="px-3 py-2 font-medium text-gray-800">${r['背番号'] || ''}</td>
+                            <td class="px-3 py-2 text-gray-600">${r['品番'] || ''}</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>`;
+    } catch (err) {
+        resultsEl.innerHTML = `<div class="p-4 text-xs text-red-400 text-center">読み込み失敗: ${err.message}</div>`;
+    }
+}
+
+/** Called when user clicks a result row */
+window._masterPickerSelect = function(bangou, hinban) {
+    // Update working state
+    if (window._editState.working) {
+        window._editState.working['品番']  = hinban;
+        window._editState.working['背番号'] = bangou;
+    }
+    // Update display divs (no full re-render needed)
+    const hinbanDisp = document.getElementById('editPickerDisplay_品番');
+    const bangouDisp = document.getElementById('editPickerDisplay_背番号');
+    if (hinbanDisp) hinbanDisp.textContent = hinban;
+    if (bangouDisp) bangouDisp.textContent = bangou;
+    _closeMasterPicker();
+};
