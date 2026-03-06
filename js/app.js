@@ -13,9 +13,9 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda"],
-  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda"], // Same as 部長
+  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda", "videoManual"],
+  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda", "videoManual"], // Same as admin but no customerManagement
+  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda", "videoManual"], // Same as 部長
   係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"], // Same as 班長 but factory-limited
   班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"],
   member: ["dashboard", "noda"]
@@ -37,6 +37,7 @@ const navItemsConfig = {
   equipment: { icon: "ri-tools-line", label: "equipment" },
   scna: { icon: "ri-folder-line", label: "scna" },
   noda: { icon: "ri-store-line", label: "noda" },
+  videoManual: { icon: "ri-clapperboard-line", label: "videoManual" },
 };
 
 // Navigation functions are now handled in navbar.js to avoid duplicates
@@ -6643,6 +6644,14 @@ function loadPage(page) {
                 applyLanguageEnhanced();
             } else if (typeof applyLanguage === 'function') {
                 applyLanguage();
+            }
+            break;
+
+        case 'videoManual':
+            if (typeof loadVideoManualPage === 'function') {
+                loadVideoManualPage();
+            } else {
+                mainContent.innerHTML = '<h2 class="text-xl font-semibold">Video Manual (not loaded)</h2>';
             }
             break;
 
