@@ -11874,7 +11874,6 @@ window.renderRecycleBinTab = async function() {
                     <span id="binBulkCount" class="text-xs font-medium text-blue-800"></span>
                     ${window._binCanRestore ? `<button onclick="bulkRestoreFromBin()" class="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"><i class="ri-arrow-go-back-line mr-1"></i>まとめて復元</button>` : ''}
                     ${window._binIsAdmin ? `<button onclick="bulkPermanentDeleteFromBin()" class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"><i class="ri-delete-bin-2-line mr-1"></i>まとめて完全削除</button>` : ''}
-                    <button onclick="onBinClearSelection()" class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300"><i class="ri-close-line mr-1"></i>選択解除</button>
                 </div>
 
                 ${window._binAllItems.length === 0
