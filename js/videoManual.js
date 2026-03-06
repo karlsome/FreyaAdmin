@@ -1379,93 +1379,95 @@ async function vmPollRender(renderId, subEl) {
 }
 
 // ── BUILD CREATOMATE SOURCE JSON ──────────────────────────────────────────────
+// Creatomate render script uses snake_case for ALL property names.
 function vmBuildCreatomateSource() {
   const elements = [];
-  let   cumulativeTime = 0;   // in seconds, tracking output timeline position
+  let cumulativeTime = 0; // seconds into the output timeline
 
-  vmProject.steps.forEach((step, stepIdx) => {
+  vmProject.steps.forEach((step) => {
     const stepDuration = step.trimEnd - step.trimStart;
 
-    // ── Video clip element ────────────────────────────────────
+    // ── Video clip ────────────────────────────────────────────
     elements.push({
-      type: 'video',
-      track: 1,
-      source: vmProject.videoUrl,
-      'trim-start': step.trimStart + ' s',
-      'trim-duration': stepDuration + ' s',
+      type:          'video',
+      track:         1,
+      time:          cumulativeTime,   // explicit output start time (seconds)
+      source:        vmProject.videoUrl,
+      trim_start:    step.trimStart,   // number (seconds), no 's' suffix needed
+      trim_duration: stepDuration,
     });
 
     // ── Overlays for this step ────────────────────────────────
-    // Each overlay gets its own track to avoid conflicts
     let ovTrack = 2;
     step.overlays.forEach(ov => {
+      // Base properties shared by all overlay types
       const el = {
-        track: ovTrack++,
-        time: cumulativeTime + ' s',
-        duration: stepDuration + ' s',
-        'x-anchor': '0%',
-        'y-anchor': '0%',
+        track:    ovTrack++,
+        time:     cumulativeTime,      // same output start as its video clip
+        duration: stepDuration,
+        x_anchor: '0%',
+        y_anchor: '0%',
       };
 
       if (ov.type === 'text') {
-        // Convert relative % to Creatomate %
         el.type        = 'text';
         el.text        = ov.text || '';
         el.x           = ov.x + '%';
         el.y           = ov.y + '%';
         el.width       = '80%';
         el.height      = '20%';
-        el['fill-color'] = ov.color || '#ffffff';
-        el.font        = {
-          size: (ov.fontSize || 3) + '%',  // % of composition height
-          weight: '700',
-          family: 'Open Sans',
-        };
-        // Drop shadow for readability
-        el['shadow-color']   = 'rgba(0,0,0,0.6)';
-        el['shadow-blur']    = '2%';
-        el['shadow-x-offset']= '0.3%';
-        el['shadow-y-offset']= '0.3%';
+        el.fill_color  = ov.color || '#ffffff';
+        el.font_weight = 700;
+        el.font_size   = (ov.fontSize || 5) + ' vmin';
+        el.shadow_color = '#000000';
+        el.shadow_blur  = '3 vmin';
+        el.shadow_x     = '2 vmin';
+        el.shadow_y     = '2 vmin';
       }
 
       else if (ov.type === 'rect') {
-        el.type           = 'shape';
-        el.shape          = 'rectangle';
-        el.x              = ov.x + '%';
-        el.y              = ov.y + '%';
-        el.width          = ov.w + '%';
-        el.height         = ov.h + '%';
-        el['fill-color']  = null;
-        el['stroke-color']= ov.color || '#ff4444';
-        el['stroke-width']= (ov.strokeWidth || 3) + 'px';
+        el.type         = 'shape';
+        // Use center-anchored positioning (convert from top-left)
+        el.x            = (ov.x + ov.w / 2) + '%';
+        el.y            = (ov.y + ov.h / 2) + '%';
+        el.width        = ov.w + '%';
+        el.height       = ov.h + '%';
+        el.x_anchor     = '50%';
+        el.y_anchor     = '50%';
+        // SVG path for rectangle (boxed coords 0-100)
+        el.path         = 'M 0 0 L 100 0 L 100 100 L 0 100 Z';
+        el.stroke_color = ov.color || '#ff4444';
+        el.stroke_width = (ov.strokeWidth || 3) + ' vmin';
       }
 
       else if (ov.type === 'circle') {
-        el.type           = 'shape';
-        el.shape          = 'ellipse';
-        el.x              = ov.x + '%';
-        el.y              = ov.y + '%';
-        el.width          = ov.w + '%';
-        el.height         = ov.h + '%';
-        el['fill-color']  = null;
-        el['stroke-color']= ov.color || '#ff4444';
-        el['stroke-width']= (ov.strokeWidth || 3) + 'px';
+        el.type         = 'shape';
+        // Use center-anchored positioning (convert from top-left)
+        el.x            = (ov.x + ov.w / 2) + '%';
+        el.y            = (ov.y + ov.h / 2) + '%';
+        el.width        = ov.w + '%';
+        el.height       = ov.h + '%';
+        el.x_anchor     = '50%';
+        el.y_anchor     = '50%';
+        // SVG path for ellipse using cubic bezier curves (boxed coords 0-100)
+        el.path         = 'M 50 0 C 77.6 0 100 22.4 100 50 C 100 77.6 77.6 100 50 100 C 22.4 100 0 77.6 0 50 C 0 22.4 22.4 0 50 0 Z';
+        el.stroke_color = ov.color || '#ff4444';
+        el.stroke_width = (ov.strokeWidth || 3) + ' vmin';
       }
 
       else if (ov.type === 'arrow') {
-        // Creatomate doesn't have native arrows; render as a line + triangle using SVG element
-        // We approximate with a shape path
-        const x1Pct = ov.x,  y1Pct = ov.y;
-        const x2Pct = ov.x2, y2Pct = ov.y2;
-        el.type = 'text';
-        // Fallback: just add a text pointer — SVG path requires Creatomate Pro
-        el.text = '→';
-        el.x    = ((ov.x + ov.x2) / 2) + '%';
-        el.y    = ((ov.y + ov.y2) / 2) + '%';
-        el['fill-color'] = ov.color || '#ff4444';
-        el.font = { size: '5%', weight: '900' };
-        el.width  = '10%';
-        el.height = '10%';
+        // Approximate arrow with a bold → text symbol centred on the line midpoint
+        el.type        = 'text';
+        el.text        = '➜';
+        el.x           = ((ov.x + ov.x2) / 2) + '%';
+        el.y           = ((ov.y + ov.y2) / 2) + '%';
+        el.width       = '10%';
+        el.height      = '10%';
+        el.fill_color  = ov.color || '#ff4444';
+        el.font_size   = '6 vmin';
+        el.font_weight = 900;
+        el.x_anchor    = '50%';
+        el.y_anchor    = '50%';
       }
 
       elements.push(el);
@@ -1476,9 +1478,9 @@ function vmBuildCreatomateSource() {
 
   return {
     output_format: 'mp4',
-    width:  vmProject.videoWidth  || 1920,
-    height: vmProject.videoHeight || 1080,
-    'frame-rate': 30,
+    width:         vmProject.videoWidth  || 1920,
+    height:        vmProject.videoHeight || 1080,
+    frame_rate:    30,
     elements,
   };
 }
