@@ -1045,7 +1045,7 @@ function loadPage(page) {
                 <div id="approvalTabContent">
                     <!-- Stats Cards -->
                     <!-- Data Range Toggle -->
-                    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
+                    <div id="approvalDateRangeBar" class="mb-4 flex flex-wrap items-center justify-between gap-4">
                         <div class="flex items-center space-x-4">
                             <div class="bg-white rounded-lg border border-gray-200 p-1 flex items-center">
                                 <button 
@@ -1080,7 +1080,7 @@ function loadPage(page) {
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 md:grid-cols-${role === '班長' ? '6' : '5'} gap-3 mb-6">
+                    <div id="approvalStatCards" class="grid grid-cols-2 md:grid-cols-${role === '班長' ? '6' : '5'} gap-3 mb-6">
                         <div class="bg-yellow-50 px-4 py-3 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
                             <h3 class="text-xs font-medium text-yellow-800" data-i18n="pending">Pending</h3>
                             <p class="text-xl font-bold text-yellow-900" id="pendingCount">0</p>
@@ -7425,17 +7425,27 @@ window.switchApprovalTab = function(tabName) {
     updateTabStyles();
   updateShowAllImagesButtonVisibility();
 
-    const filterBar = document.getElementById('approvalFilterBar');
+    const filterBar      = document.getElementById('approvalFilterBar');
+    const dateRangeBar   = document.getElementById('approvalDateRangeBar');
+    const statCards      = document.getElementById('approvalStatCards');
+    const listViewCtrls  = document.getElementById('listViewControls');
+    const summaryReport  = document.getElementById('summaryReport');
     if (tabName === 'recycleBin') {
-        // Hide filters — they don't apply to the bin
-        if (filterBar) filterBar.classList.add('hidden');
+        // Hide all controls — they don't apply to the bin
+        if (filterBar)     filterBar.classList.add('hidden');
+        if (dateRangeBar)  dateRangeBar.classList.add('hidden');
+        if (statCards)     statCards.classList.add('hidden');
+        if (listViewCtrls) listViewCtrls.classList.add('hidden');
+        if (summaryReport) summaryReport.classList.add('hidden');
         // RecycleBin has its own rendering; skip normal data pipeline
         renderRecycleBinTab();
         return;
     }
 
-    // Restore filters for normal tabs
-    if (filterBar) filterBar.classList.remove('hidden');
+    // Restore controls for normal tabs (summaryReport stays hidden until a card is selected — don't force-show it)
+    if (filterBar)    filterBar.classList.remove('hidden');
+    if (dateRangeBar) dateRangeBar.classList.remove('hidden');
+    if (statCards)    statCards.classList.remove('hidden');
 
     // Update factory dropdown for the new tab
     if (typeof updateFactoryDropdownForTab === 'function') {
@@ -11781,6 +11791,30 @@ window.cancelDeleteRequest = async function(itemId) {
  */
 // Cache for bin items keyed by _id, used by openBinItemDetail
 window._binItemCache = {};
+window._binAllItems  = [];   // full fetched list for client-side search/sort
+window._binSort      = { col: 'deletedAt', dir: 'desc' }; // current sort state
+
+// Helper: get quantity/NG field names per collection
+function _binQtyField(coll) { return coll === 'kensaDB' ? 'Process_Quantity' : 'Total'; }
+function _binNGField(coll)  { return coll === 'SRSDB' ? 'SRS_Total_NG' : 'Total_NG'; }
+
+// Column definitions: { key, label, getValue }
+const _BIN_COLS = [
+    { key: 'originalCollection', label: 'コレクション', getValue: it => it.originalCollection || '' },
+    { key: 'bango',              label: '背番号',        getValue: it => (it.originalDoc || {})['背番号'] || '' },
+    { key: 'hinban',             label: '品番',          getValue: it => (it.originalDoc || {})['品番'] || '' },
+    { key: 'factory',            label: '工場',          getValue: it => (it.originalDoc || {})['工場'] || '' },
+    { key: 'worker',             label: '作業者',        getValue: it => (it.originalDoc || {})['Worker_Name'] || '' },
+    { key: 'date',               label: '日付',          getValue: it => (it.originalDoc || {})['Date'] || '' },
+    { key: 'quantity',           label: '数量',          getValue: it => Number((it.originalDoc || {})[_binQtyField(it.originalCollection)] || 0) },
+    { key: 'ngCount',            label: 'NG',            getValue: it => Number((it.originalDoc || {})[_binNGField(it.originalCollection)] || 0) },
+    { key: 'deletedBy',          label: '削除者',        getValue: it => it.deletedBy || '' },
+    { key: 'deleteReason',       label: '削除理由',      getValue: it => it.deleteReason || '' },
+    { key: 'deletedVia',         label: '削除方法',      getValue: it => it.deletedVia || '' },
+    { key: 'requestedBy',        label: '要求者',        getValue: it => it.requestedBy || '' },
+    { key: 'deletedAt',          label: '削除日',        getValue: it => it.deletedAt || '' },
+    { key: 'daysLeft',           label: '残り日数',      getValue: it => it.expiresAt ? new Date(it.expiresAt).getTime() : 0 },
+];
 
 window.renderRecycleBinTab = async function() {
     const container = document.getElementById('approvalsListContainer');
@@ -11793,104 +11827,294 @@ window.renderRecycleBinTab = async function() {
         const result = await response.json();
         if (!result.success) throw new Error(result.error || 'Unknown error');
 
-        const items = result.data;
-        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
-        const isAdmin = currentUser.role === 'admin';
-        const now = Date.now();
-
-        const collectionLabels = {
-            kensaDB: '検査 (Kensa)',
-            pressDB: 'プレス (Press)',
-            slitDB: 'スリット (Slit)',
-            SRSDB: 'SRS'
-        };
-
-        // Cache all bin items for the detail modal
+        window._binAllItems = result.data;
         window._binItemCache = {};
-        items.forEach(it => { window._binItemCache[it._id] = it; });
+        window._binAllItems.forEach(it => { window._binItemCache[it._id] = it; });
 
-        const tableRows = items.map(item => {
-            const expiresAt = new Date(item.expiresAt);
-            const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
-            const daysLeftClass = daysLeft <= 30
-                ? 'text-red-600 font-bold'
-                : daysLeft <= 90
-                    ? 'text-orange-600 font-semibold'
-                    : 'text-gray-600';
-            const originalDoc = item.originalDoc || {};
-            const collLabel = collectionLabels[item.originalCollection] || item.originalCollection;
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        window._binIsAdmin = currentUser.role === 'admin';
+        window._binCanRestore = ['admin', '課長', '係長', '部長'].includes(currentUser.role);
+        window._binPurgedCount = result.purgedCount || 0;
 
-            return `
-                <tr class="hover:bg-red-50 border-b cursor-pointer" onclick="openBinItemDetail('${item._id}')">
-                    <td class="border p-2 text-xs">${collLabel}</td>
-                    <td class="border p-2 text-xs font-medium">${originalDoc['背番号'] || originalDoc['品番'] || '-'}</td>
-                    <td class="border p-2 text-xs">${originalDoc['Date'] || '-'}</td>
-                    <td class="border p-2 text-xs">${item.deletedBy || '-'}</td>
-                    <td class="border p-2 text-xs max-w-xs truncate" title="${item.deleteReason || ''}">${item.deleteReason || '-'}</td>
-                    <td class="border p-2 text-xs">${item.deletedVia === 'direct' ? '直接削除' : '要求承認'}</td>
-                    <td class="border p-2 text-xs">${item.requestedBy || '-'}</td>
-                    <td class="border p-2 text-xs">${new Date(item.deletedAt).toLocaleDateString('ja-JP')}</td>
-                    <td class="border p-2 text-xs ${daysLeftClass}">${daysLeft}日</td>
-                    <td class="border p-2 text-xs" onclick="event.stopPropagation()">
-                        <div class="flex gap-1 flex-wrap">
-                            <button onclick="restoreFromBin('${item._id}')"
-                                class="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
-                                <i class="ri-arrow-go-back-line mr-1"></i>復元
-                            </button>
-                            ${isAdmin ? `<button onclick="permanentlyDeleteFromBin('${item._id}')"
-                                class="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
-                                <i class="ri-delete-bin-2-line mr-1"></i>完全削除
-                            </button>` : ''}
-                        </div>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+        const buildHeaderCols = () =>
+            `<th class="border p-2 w-8"><input type="checkbox" id="binSelectAll" onchange="onBinSelectAll(this)" class="cursor-pointer"></th>` +
+            _BIN_COLS.map(col => {
+                const isActive = window._binSort.col === col.key;
+                const icon = isActive
+                    ? (window._binSort.dir === 'asc' ? '<i class="ri-arrow-up-s-line ml-1"></i>' : '<i class="ri-arrow-down-s-line ml-1"></i>')
+                    : '<i class="ri-expand-up-down-line ml-1 opacity-30"></i>';
+                return `<th class="border p-2 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-200 select-none whitespace-nowrap" onclick="sortBinBy('${col.key}')" data-bin-col="${col.key}">${col.label}${icon}</th>`;
+            }).join('') + '<th class="border p-2 text-left font-medium text-gray-700">操作</th>';
 
         container.innerHTML = `
             <div class="bg-white border rounded-lg overflow-hidden">
-                <div class="bg-red-50 border-b p-3 flex items-center justify-between">
+                <div class="bg-red-50 border-b p-3 flex items-center justify-between gap-3 flex-wrap">
                     <div class="text-sm text-red-800">
                         <i class="ri-delete-bin-line mr-1"></i>
-                        <strong>ゴミ箱</strong> — ソフト削除された承認記録 (${items.length}件)
-                        ${result.purgedCount > 0
-                            ? `<span class="ml-3 text-xs text-gray-500">※ ${result.purgedCount}件が1年経過により自動完全削除されました</span>`
+                        <strong>ゴミ箱</strong> — ソフト削除された承認記録 (<span id="binCountLabel">${window._binAllItems.length}</span>件)
+                        ${window._binPurgedCount > 0
+                            ? `<span class="ml-3 text-xs text-gray-500">※ ${window._binPurgedCount}件が1年経過により自動完全削除されました</span>`
                             : ''}
                     </div>
-                    <button onclick="renderRecycleBinTab()" class="text-xs text-gray-500 hover:text-gray-700">
-                        <i class="ri-refresh-line mr-1"></i>更新
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <div class="relative">
+                            <i class="ri-search-line absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                            <input id="binSearchInput" type="text" placeholder="背番号、削除者、理由などで検索..."
+                                class="pl-7 pr-3 py-1.5 text-xs border rounded w-60 focus:outline-none focus:ring-1 focus:ring-red-400"
+                                oninput="refreshBinTable()">
+                        </div>
+                        <button onclick="renderRecycleBinTab()" class="text-xs text-gray-500 hover:text-gray-700">
+                            <i class="ri-refresh-line mr-1"></i>更新
+                        </button>
+                    </div>
                 </div>
-                ${items.length === 0
+
+                <!-- Multi-action bar (hidden until rows are selected) -->
+                <div id="binBulkBar" class="hidden bg-blue-50 border-b px-3 py-2 flex items-center gap-3 flex-wrap">
+                    <span id="binBulkCount" class="text-xs font-medium text-blue-800"></span>
+                    ${window._binCanRestore ? `<button onclick="bulkRestoreFromBin()" class="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"><i class="ri-arrow-go-back-line mr-1"></i>まとめて復元</button>` : ''}
+                    ${window._binIsAdmin ? `<button onclick="bulkPermanentDeleteFromBin()" class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"><i class="ri-delete-bin-2-line mr-1"></i>まとめて完全削除</button>` : ''}
+                    <button onclick="onBinClearSelection()" class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300"><i class="ri-close-line mr-1"></i>選択解除</button>
+                </div>
+
+                ${window._binAllItems.length === 0
                     ? '<div class="p-8 text-center text-gray-500"><i class="ri-inbox-line text-2xl mr-2"></i>ゴミ箱は空です</div>'
                     : `<div class="overflow-x-auto">
                         <table class="w-full text-xs border-collapse">
-                            <thead class="bg-gray-100 sticky top-0 z-10">
-                                <tr>
-                                    <th class="border p-2 text-left font-medium text-gray-700">コレクション</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">背番号</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">日付</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">削除者</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">削除理由</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">削除方法</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">要求者</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">削除日</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">残り日数</th>
-                                    <th class="border p-2 text-left font-medium text-gray-700">操作</th>
-                                </tr>
+                            <thead id="binTableHead" class="bg-gray-100 sticky top-0 z-10">
+                                <tr>${buildHeaderCols()}</tr>
                             </thead>
-                            <tbody>
-                                ${tableRows}
-                            </tbody>
+                            <tbody id="binTableBody"></tbody>
                         </table>
                     </div>`
                 }
             </div>
         `;
+
+        refreshBinTable();
     } catch (err) {
         console.error('renderRecycleBinTab error:', err);
         container.innerHTML = `<div class="p-8 text-center text-red-500"><i class="ri-error-warning-line mr-2"></i>読み込みに失敗しました: ${err.message}</div>`;
     }
+};
+
+/** Toggle sort column / direction and re-render table rows */
+window.sortBinBy = function(col) {
+    if (window._binSort.col === col) {
+        window._binSort.dir = window._binSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        window._binSort.col = col;
+        window._binSort.dir = 'asc';
+    }
+    // Update header icons
+    const thead = document.getElementById('binTableHead');
+    if (thead) {
+        thead.querySelectorAll('th[data-bin-col]').forEach(th => {
+            const key = th.dataset.binCol;
+            const isActive = key === window._binSort.col;
+            const colDef = _BIN_COLS.find(c => c.key === key);
+            const icon = isActive
+                ? (window._binSort.dir === 'asc' ? '<i class="ri-arrow-up-s-line ml-1"></i>' : '<i class="ri-arrow-down-s-line ml-1"></i>')
+                : '<i class="ri-expand-up-down-line ml-1 opacity-30"></i>';
+            th.innerHTML = (colDef ? colDef.label : key) + icon;
+        });
+    }
+    refreshBinTable();
+};
+
+/** Filter + sort _binAllItems and re-render tbody */
+window.refreshBinTable = function() {
+    const tbody = document.getElementById('binTableBody');
+    const countLabel = document.getElementById('binCountLabel');
+    if (!tbody) return;
+
+    const searchTerm = (document.getElementById('binSearchInput')?.value || '').toLowerCase().trim();
+    const collectionLabels = {
+        kensaDB: '検査 (Kensa)',
+        pressDB: 'プレス (Press)',
+        slitDB: 'スリット (Slit)',
+        SRSDB: 'SRS'
+    };
+    const now = Date.now();
+
+    // Filter
+    let items = window._binAllItems.filter(item => {
+        if (!searchTerm) return true;
+        const originalDoc = item.originalDoc || {};
+        const haystack = [
+            collectionLabels[item.originalCollection] || item.originalCollection,
+            originalDoc['背番号'] || '',
+            originalDoc['品番'] || '',
+            originalDoc['工場'] || '',
+            originalDoc['Worker_Name'] || '',
+            originalDoc['Date'] || '',
+            item.deletedBy || '',
+            item.deleteReason || '',
+            item.deletedVia === 'direct' ? '直接削除' : '要求承認',
+            item.requestedBy || '',
+        ].join(' ').toLowerCase();
+        return haystack.includes(searchTerm);
+    });
+
+    // Sort
+    const colDef = _BIN_COLS.find(c => c.key === window._binSort.col);
+    if (colDef) {
+        items = [...items].sort((a, b) => {
+            const va = colDef.getValue(a);
+            const vb = colDef.getValue(b);
+            let cmp = 0;
+            if (typeof va === 'number' && typeof vb === 'number') {
+                cmp = va - vb;
+            } else {
+                cmp = String(va).localeCompare(String(vb), 'ja');
+            }
+            return window._binSort.dir === 'asc' ? cmp : -cmp;
+        });
+    }
+
+    if (countLabel) countLabel.textContent = items.length;
+
+    if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${_BIN_COLS.length + 2}" class="p-6 text-center text-gray-400 text-xs">該当するデータがありません</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+        const expiresAt = new Date(item.expiresAt);
+        const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
+        const daysLeftClass = daysLeft <= 30 ? 'text-red-600 font-bold' : daysLeft <= 90 ? 'text-orange-600 font-semibold' : 'text-gray-600';
+        const originalDoc = item.originalDoc || {};
+        const collLabel = collectionLabels[item.originalCollection] || item.originalCollection;
+        const qtyField = _binQtyField(item.originalCollection);
+        const ngField  = _binNGField(item.originalCollection);
+
+        return `
+            <tr class="hover:bg-red-50 border-b cursor-pointer" onclick="openBinItemDetail('${item._id}')">
+                <td class="border p-2 w-8" onclick="event.stopPropagation()">
+                    <input type="checkbox" class="bin-row-cb cursor-pointer" data-id="${item._id}" onchange="onBinCheckboxChange()">
+                </td>
+                <td class="border p-2 text-xs">${collLabel}</td>
+                <td class="border p-2 text-xs font-medium">${originalDoc['背番号'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['品番'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['工場'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['Worker_Name'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['Date'] || '-'}</td>
+                <td class="border p-2 text-xs text-right">${(originalDoc[qtyField] ?? '-').toLocaleString()}</td>
+                <td class="border p-2 text-xs text-right ${Number(originalDoc[ngField] || 0) > 0 ? 'text-red-600 font-semibold' : ''}">${originalDoc[ngField] ?? '-'}</td>
+                <td class="border p-2 text-xs">${item.deletedBy || '-'}</td>
+                <td class="border p-2 text-xs max-w-xs truncate" title="${item.deleteReason || ''}">${item.deleteReason || '-'}</td>
+                <td class="border p-2 text-xs">${item.deletedVia === 'direct' ? '直接削除' : '要求承認'}</td>
+                <td class="border p-2 text-xs">${item.requestedBy || '-'}</td>
+                <td class="border p-2 text-xs">${new Date(item.deletedAt).toLocaleDateString('ja-JP')}</td>
+                <td class="border p-2 text-xs ${daysLeftClass}">${daysLeft}日</td>
+                <td class="border p-2 text-xs" onclick="event.stopPropagation()">
+                    <div class="flex gap-1 flex-wrap">
+                        <button onclick="restoreFromBin('${item._id}')"
+                            class="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                            <i class="ri-arrow-go-back-line mr-1"></i>復元
+                        </button>
+                        ${window._binIsAdmin ? `<button onclick="permanentlyDeleteFromBin('${item._id}')"
+                            class="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                            <i class="ri-delete-bin-2-line mr-1"></i>完全削除
+                        </button>` : ''}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+};
+
+/** Select-all checkbox handler */
+window.onBinSelectAll = function(cb) {
+    document.querySelectorAll('.bin-row-cb').forEach(el => { el.checked = cb.checked; });
+    onBinCheckboxChange();
+};
+
+/** Clear all checkbox selections */
+window.onBinClearSelection = function() {
+    document.querySelectorAll('.bin-row-cb').forEach(el => { el.checked = false; });
+    const sa = document.getElementById('binSelectAll');
+    if (sa) sa.checked = false;
+    onBinCheckboxChange();
+};
+
+/** Update bulk-action bar when checkboxes change */
+window.onBinCheckboxChange = function() {
+    const ids = getBinSelectedIds();
+    const bar = document.getElementById('binBulkBar');
+    const countEl = document.getElementById('binBulkCount');
+    const sa = document.getElementById('binSelectAll');
+    const allCbs = document.querySelectorAll('.bin-row-cb');
+    if (!bar) return;
+    if (ids.length === 0) {
+        bar.classList.add('hidden');
+    } else {
+        bar.classList.remove('hidden');
+        if (countEl) countEl.textContent = `${ids.length}件選択中`;
+    }
+    // Update select-all indeterminate state
+    if (sa) {
+        sa.indeterminate = ids.length > 0 && ids.length < allCbs.length;
+        sa.checked = ids.length === allCbs.length && allCbs.length > 0;
+    }
+};
+
+/** Get IDs of all currently checked rows */
+function getBinSelectedIds() {
+    return Array.from(document.querySelectorAll('.bin-row-cb:checked')).map(el => el.dataset.id);
+}
+
+/** Bulk restore selected bin items */
+window.bulkRestoreFromBin = async function() {
+    const ids = getBinSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`選択した ${ids.length} 件を復元しますか？`)) return;
+
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    let userFullName;
+    try { userFullName = await getUserFullName(currentUser.username); } catch(e) { userFullName = currentUser.username; }
+
+    let success = 0, failed = 0;
+    for (const binDocId of ids) {
+        try {
+            const res = await fetch(BASE_URL + 'api/approvals/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ binDocId, restoredBy: userFullName, restoredByUsername: currentUser.username })
+            });
+            const data = await res.json();
+            if (data.success) success++; else failed++;
+        } catch(e) { failed++; }
+    }
+    alert(`復元完了: ${success}件成功${failed > 0 ? `、${failed}件失敗` : ''}`);
+    renderRecycleBinTab();
+};
+
+/** Bulk permanent delete selected bin items (admin only) */
+window.bulkPermanentDeleteFromBin = async function() {
+    const ids = getBinSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`選択した ${ids.length} 件を完全削除します。この操作は取り消せません。\n本当によろしいですか？`)) return;
+    if (!confirm(`最終確認: ${ids.length} 件を永久に削除します。`)) return;
+
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    let userFullName;
+    try { userFullName = await getUserFullName(currentUser.username); } catch(e) { userFullName = currentUser.username; }
+
+    let success = 0, failed = 0;
+    for (const binDocId of ids) {
+        try {
+            const res = await fetch(BASE_URL + 'api/approvals/permanent-delete', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ binDocId, deletedBy: userFullName })
+            });
+            const data = await res.json();
+            if (data.success) success++; else failed++;
+        } catch(e) { failed++; }
+    }
+    alert(`完全削除完了: ${success}件成功${failed > 0 ? `、${failed}件失敗` : ''}`);
+    renderRecycleBinTab();
 };
 
 /**
