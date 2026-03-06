@@ -405,44 +405,40 @@ async function vmUploadToCreatomate(file) {
   const detail = vmGet('vm-upload-detail');
 
   modal.classList.remove('hidden');
-  msg.textContent    = 'Uploading to Creatomate…';
+  msg.textContent    = 'Uploading video…';
   detail.textContent = file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)';
   bar.style.width    = '5%';
 
   try {
-    // Creatomate expects raw binary upload (not multipart/form-data)
-    // Pass the filename as a URL query param
-    const encodedName = encodeURIComponent(file.name);
-    const uploadUrl = `${CREATOMATE_BASE}/assets?name=${encodedName}`;
-
-    // Use XHR so we get upload progress
+    // Upload raw binary to our own server; server uses Firebase Admin to store it
+    // and returns a public Firebase Storage download URL for Creatomate to fetch.
     const url = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', uploadUrl);
-      xhr.setRequestHeader('Authorization', `Bearer ${CREATOMATE_API_KEY}`);
-      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.open('POST', BASE_URL + 'api/upload-video-manual');
+      xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+      xhr.setRequestHeader('X-File-Name', file.name);
 
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 90);
-          bar.style.width = pct + '%';
-          detail.textContent = `${Math.round(e.loaded/1024/1024*10)/10} / ${Math.round(e.total/1024/1024*10)/10} MB`;
+          const pct = Math.round((e.loaded / e.total) * 90) + 5;
+          bar.style.width = Math.min(pct, 95) + '%';
+          detail.textContent =
+            `${(e.loaded / 1024 / 1024).toFixed(1)} / ${(e.total / 1024 / 1024).toFixed(1)} MB`;
         }
       });
 
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           const res = JSON.parse(xhr.responseText);
-          // Creatomate returns the asset object (or array)
-          const asset = Array.isArray(res) ? res[0] : res;
-          resolve(asset.url);
+          resolve(res.url);
         } else {
-          reject(new Error(`Upload failed: ${xhr.status} ${xhr.responseText}`));
+          let msg = xhr.status + ' ' + xhr.statusText;
+          try { msg = JSON.parse(xhr.responseText).error || msg; } catch (_) {}
+          reject(new Error(msg));
         }
       };
       xhr.onerror = () => reject(new Error('Network error during upload'));
-      // Send raw file binary
-      xhr.send(file);
+      xhr.send(file); // send raw binary
     });
 
     bar.style.width        = '100%';
@@ -1151,40 +1147,23 @@ async function vmSaveProject() {
   const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/';
 
   try {
-    if (vmProject._id) {
-      // Update — use the server's update format (query + update.$set)
-      const { history, ...projectWithoutHistory } = vmProject;
-      await fetch(`${baseUrl}queries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dbName: VM_DB,
-          collectionName: VM_COLLECTION,
-          query: { _id: vmProject._id },
-          update: { $set: { ...vmProject } },
-        }),
-      });
-    } else {
-      // Insert — use the server's insert format
-      const res = await fetch(`${baseUrl}queries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dbName: VM_DB,
-          collectionName: VM_COLLECTION,
-          query: {},
-          insert: vmProject,
-        }),
-      });
-      const data = await res.json();
-      if (data.insertedId) vmProject._id = data.insertedId;
+    const res = await fetch(`${baseUrl}api/video-manuals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(vmProject),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || res.status);
     }
+    const data = await res.json();
+    // Store the new _id on first insert
+    if (data.insertedId && !vmProject._id) vmProject._id = data.insertedId;
 
-    // Brief success toast
     vmToast('Project saved ✓', 'green');
   } catch (e) {
     console.error('[VM] Save error', e);
-    vmToast('Save failed — check server connection', 'red');
+    vmToast('Save failed: ' + e.message, 'red');
   }
 }
 
@@ -1235,18 +1214,8 @@ window.vmRevertToSnapshot = function(idx) {
 async function vmLoadExistingProject() {
   const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/';
   try {
-    const res = await fetch(`${baseUrl}queries`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dbName: VM_DB,
-        collectionName: VM_COLLECTION,
-        query: {},
-        projection: { title: 1, createdBy: 1, createdAt: 1, steps: 1, videoUrl: 1 },
-        sort: { createdAt: -1 },
-        limit: 50,
-      }),
-    });
+    const res  = await fetch(`${baseUrl}api/video-manuals`);
+    if (!res.ok) throw new Error(res.status);
     const docs = await res.json();
     vmShowOpenModal(Array.isArray(docs) ? docs : []);
   } catch (e) {
@@ -1287,18 +1256,9 @@ window.vmFilterOpenList = function(q) {
 window.vmOpenProject = async function(id) {
   const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/';
   try {
-    const res = await fetch(`${baseUrl}queries`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dbName: VM_DB,
-        collectionName: VM_COLLECTION,
-        query: { _id: id },
-      }),
-    });
-    const docs = await res.json();
-    if (!docs || docs.length === 0) { alert('Project not found.'); return; }
-    const doc = docs[0];
+    const res = await fetch(`${baseUrl}api/video-manuals/${id}`);
+    if (!res.ok) { alert('Project not found.'); return; }
+    const doc = await res.json();
     vmProject = doc;
     vmGet('vm-title').value    = doc.title || 'Untitled Manual';
     vmCurrentStepIdx           = 0;
@@ -1515,7 +1475,7 @@ function vmBuildCreatomateSource() {
   });
 
   return {
-    outputFormat: 'mp4',
+    output_format: 'mp4',
     width:  vmProject.videoWidth  || 1920,
     height: vmProject.videoHeight || 1080,
     'frame-rate': 30,
