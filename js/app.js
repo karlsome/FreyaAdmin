@@ -1034,6 +1034,10 @@ function loadPage(page) {
                                 data-tab="slitDB" onclick="switchApprovalTab('slitDB')" data-i18n="slit">
                             Slit
                         </button>
+                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap hidden" 
+                                id="recycleBinTabBtn" data-tab="recycleBin" onclick="switchApprovalTab('recycleBin')">
+                            <i class="ri-delete-bin-line mr-1"></i>ゴミ箱
+                        </button>
                     </nav>
                 </div>
 
@@ -1041,7 +1045,7 @@ function loadPage(page) {
                 <div id="approvalTabContent">
                     <!-- Stats Cards -->
                     <!-- Data Range Toggle -->
-                    <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
+                    <div id="approvalDateRangeBar" class="mb-4 flex flex-wrap items-center justify-between gap-4">
                         <div class="flex items-center space-x-4">
                             <div class="bg-white rounded-lg border border-gray-200 p-1 flex items-center">
                                 <button 
@@ -1076,7 +1080,7 @@ function loadPage(page) {
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 md:grid-cols-${role === '班長' ? '6' : '5'} gap-3 mb-6">
+                    <div id="approvalStatCards" class="grid grid-cols-2 md:grid-cols-${role === '班長' ? '6' : '5'} gap-3 mb-6">
                         <div class="bg-yellow-50 px-4 py-3 rounded-lg border border-yellow-200 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="filterByStatus('pending')">
                             <h3 class="text-xs font-medium text-yellow-800" data-i18n="pending">Pending</h3>
                             <p class="text-xl font-bold text-yellow-900" id="pendingCount">0</p>
@@ -1112,7 +1116,7 @@ function loadPage(page) {
                     </div>
 
                     <!-- Controls -->
-                    <div class="flex flex-wrap gap-4 mb-6">
+                    <div id="approvalFilterBar" class="flex flex-wrap gap-4 mb-6">
                         <button id="refreshBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600" data-i18n="dataUpdate">
                             🔄 データ更新
                         </button>
@@ -7408,6 +7412,9 @@ function initializeApprovalSystem() {
     
     // Load initial data efficiently
     loadApprovalData();
+
+    // Show recycle bin tab for 係長 and above
+    showRecycleBinTabIfAllowed();
 }
 
 /**
@@ -7417,7 +7424,29 @@ window.switchApprovalTab = function(tabName) {
     currentApprovalTab = tabName;
     updateTabStyles();
   updateShowAllImagesButtonVisibility();
-    
+
+    const filterBar      = document.getElementById('approvalFilterBar');
+    const dateRangeBar   = document.getElementById('approvalDateRangeBar');
+    const statCards      = document.getElementById('approvalStatCards');
+    const listViewCtrls  = document.getElementById('listViewControls');
+    const summaryReport  = document.getElementById('summaryReport');
+    if (tabName === 'recycleBin') {
+        // Hide all controls — they don't apply to the bin
+        if (filterBar)     filterBar.classList.add('hidden');
+        if (dateRangeBar)  dateRangeBar.classList.add('hidden');
+        if (statCards)     statCards.classList.add('hidden');
+        if (listViewCtrls) listViewCtrls.classList.add('hidden');
+        if (summaryReport) summaryReport.classList.add('hidden');
+        // RecycleBin has its own rendering; skip normal data pipeline
+        renderRecycleBinTab();
+        return;
+    }
+
+    // Restore controls for normal tabs (summaryReport stays hidden until a card is selected — don't force-show it)
+    if (filterBar)    filterBar.classList.remove('hidden');
+    if (dateRangeBar) dateRangeBar.classList.remove('hidden');
+    if (statCards)    statCards.classList.remove('hidden');
+
     // Update factory dropdown for the new tab
     if (typeof updateFactoryDropdownForTab === 'function') {
         updateFactoryDropdownForTab(tabName);
@@ -7443,6 +7472,12 @@ function updateTabStyles() {
  * Load approval data efficiently (OPTIMIZED)
  */
 async function loadApprovalData() {
+    // RecycleBin tab has its own renderer
+    if (currentApprovalTab === 'recycleBin') {
+        renderRecycleBinTab();
+        return;
+    }
+
     try {
         console.log('🔄 Loading approval data optimized for tab:', currentApprovalTab);
         
@@ -8186,6 +8221,9 @@ window.filterByStatus = function(status) {
  * Apply filters to approval data (OPTIMIZED)
  */
 function applyApprovalFilters() {
+    // Filters don't apply to the recycle bin tab
+    if (currentApprovalTab === 'recycleBin') return;
+
     console.log('🔍 Applying filters and reloading data...');
     currentApprovalPage = 1; // Reset to first page
     
@@ -8573,6 +8611,10 @@ function getSortArrow(column) {
  * Get status information for display
  */
 function getStatusInfo(item) {
+    // Always check pending_delete FIRST — overrides whatever approvalStatus is set
+    if (item.deleteRequestStatus === 'pending_delete') {
+        return { text: '削除待ち', icon: 'ri-delete-bin-line', badgeClass: 'bg-red-200 text-red-900', rowClass: 'bg-red-50 opacity-75' };
+    }
     if (!item.approvalStatus || item.approvalStatus === 'pending') {
         return { text: '保留中', icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: 'bg-yellow-50' };
     } else if (item.approvalStatus === 'hancho_approved') {
@@ -9591,10 +9633,21 @@ async function loadMasterImage(品番, 背番号, containerId) {
 /**
  * Get approval status HTML
  */
-function getApprovalStatusHTML(item) {
+function getApprovalStatusHTML(item, readOnly = false) {
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    const _isPendingDel = item.deleteRequestStatus === 'pending_delete';
     
     let statusHTML = `<div class="space-y-3">`;
+
+    // If a delete request is pending, show a warning banner
+    if (_isPendingDel) {
+        statusHTML += `
+            <div class="flex items-center gap-2 px-2.5 py-1.5 rounded bg-red-100 border border-red-300 text-xs text-red-800">
+                <i class="ri-delete-bin-line"></i>
+                <span><strong>削除要求中</strong> — 上長の承認待ちです。承認・修正操作は無効です。</span>
+            </div>
+        `;
+    }
     
     // Current status display
     statusHTML += `<div class="flex items-center space-x-2">`;
@@ -9608,14 +9661,25 @@ function getApprovalStatusHTML(item) {
         
         // 班長 can approve in first step
         if (currentUser.role === '班長') {
-            statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    班長承認
-                </button>
-                <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                    修正要求
-                </button>
-            `;
+            if (_isPendingDel) {
+                statusHTML += `
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        班長承認
+                    </button>
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        修正要求
+                    </button>
+                `;
+            } else {
+                statusHTML += `
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                        班長承認
+                    </button>
+                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                        修正要求
+                    </button>
+                `;
+            }
         }
     } else if (item.approvalStatus === 'hancho_approved') {
         statusHTML += `
@@ -9626,14 +9690,25 @@ function getApprovalStatusHTML(item) {
         
         // 課長, admin, 部長 can approve in second step
         if (['課長', 'admin', '部長'].includes(currentUser.role)) {
-            statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    課長承認
-                </button>
-                <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                    修正要求
-                </button>
-            `;
+            if (_isPendingDel) {
+                statusHTML += `
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        課長承認
+                    </button>
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        修正要求
+                    </button>
+                `;
+            } else {
+                statusHTML += `
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                        課長承認
+                    </button>
+                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                        修正要求
+                    </button>
+                `;
+            }
         }
         
         if (item.hanchoApprovedBy) {
@@ -9678,16 +9753,29 @@ function getApprovalStatusHTML(item) {
         
         // 班長 can edit data and re-approve, or forward correction to factory
         if (currentUser.role === '班長') {
-            statusHTML += `
-                <div class="flex gap-2 flex-wrap">
-                    <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                        修正完了・再承認
-                    </button>
-                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                        修正要求（工場へ）
-                    </button>
-                </div>
-            `;
+            if (_isPendingDel) {
+                statusHTML += `
+                    <div class="flex gap-2 flex-wrap">
+                        <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                            修正完了・再承認
+                        </button>
+                        <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                            修正要求（工場へ）
+                        </button>
+                    </div>
+                `;
+            } else {
+                statusHTML += `
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                            修正完了・再承認
+                        </button>
+                        <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                            修正要求（工場へ）
+                        </button>
+                    </div>
+                `;
+            }
         }
         
         if (item.correctionBy) {
@@ -9696,9 +9784,66 @@ function getApprovalStatusHTML(item) {
         if (item.correctionComment) {
             statusHTML += `<div class="mt-2 text-xs text-gray-600 bg-orange-50 p-2 rounded">${item.correctionComment}</div>`;
         }
+    } else if (item.deleteRequestStatus === 'pending_delete') {
+        statusHTML += `
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-200 text-red-900">
+                <i class="ri-delete-bin-line mr-1"></i>削除待ち（上長承認待ち）
+            </span>
+        `;
+        if (item.deleteRequestedBy) {
+            statusHTML += `<div class="text-xs text-gray-600">削除要求者: ${item.deleteRequestedBy}</div>`;
+        }
+        if (item.deleteRequestReason) {
+            statusHTML += `<div class="mt-2 text-xs text-gray-600 bg-red-50 p-2 rounded">${item.deleteRequestReason}</div>`;
+        }
     }
     
+    // Universal pending_delete action buttons — shown regardless of approvalStatus branch
+    if (_isPendingDel) {
+        if (currentUser.role === '班長') {
+            statusHTML += `
+                <div class="flex gap-2 flex-wrap mt-2">
+                    <button onclick="cancelDeleteRequest('${item._id}')" class="px-3 py-1 bg-yellow-400 text-yellow-900 text-xs rounded hover:bg-yellow-500">
+                        <i class="ri-arrow-go-back-line mr-1"></i>削除要求を取り消す
+                    </button>
+                </div>
+            `;
+        } else if (['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+            statusHTML += `
+                <div class="flex gap-2 flex-wrap mt-2">
+                    <button onclick="approveDeleteRequest('${item._id}')" class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                        <i class="ri-check-line mr-1"></i>削除承認
+                    </button>
+                    <button onclick="rejectDeleteRequest('${item._id}')" class="px-3 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600">
+                        <i class="ri-close-line mr-1"></i>削除却下
+                    </button>
+                </div>
+            `;
+        }
+    }
+
     statusHTML += `</div>`;
+
+    // Delete action section — shown based on role (not for pending_delete items, not in readOnly/bin view)
+    const _canDirectDelete = ['admin', '課長', '係長', '部長'].includes(currentUser.role);
+    const _canRequestDelete = currentUser.role === '班長';
+    if (!readOnly && !_isPendingDel && _canDirectDelete) {
+        statusHTML += `
+            <div class="mt-2 pt-2 border-t border-gray-200">
+                <button onclick="softDeleteItem('${item._id}')" class="px-3 py-1 bg-gray-50 text-red-600 text-xs rounded hover:bg-red-50 border border-red-200">
+                    <i class="ri-delete-bin-line mr-1"></i>ソフト削除
+                </button>
+            </div>
+        `;
+    } else if (!readOnly && !_isPendingDel && _canRequestDelete) {
+        statusHTML += `
+            <div class="mt-2 pt-2 border-t border-gray-200">
+                <button onclick="requestDeletion('${item._id}')" class="px-3 py-1 bg-gray-50 text-red-600 text-xs rounded hover:bg-red-50 border border-red-200">
+                    <i class="ri-delete-bin-line mr-1"></i>削除要求
+                </button>
+            </div>
+        `;
+    }
     
     // Version history
     if (item.approvalHistory && item.approvalHistory.length > 0) {
@@ -10790,6 +10935,9 @@ function shouldDisableCheckbox(item, userRole) {
     const status = item.approvalStatus;
     
     // If user is 班長 (hancho)
+    // Always disable for pending_delete items (they are in delete workflow)
+    if (item.deleteRequestStatus === 'pending_delete') return true;
+
     if (userRole === '班長') {
         // Disable if already hancho approved, fully approved, or rejected
         if (status === 'hancho_approved' || 
@@ -11387,3 +11535,834 @@ function generateSummaryReport() {
 
     document.getElementById('summaryStats').innerHTML = summaryHTML;
 }
+
+
+// ─── RECYCLE BIN / SOFT DELETE FUNCTIONS ─────────────────────────────────────
+
+/**
+ * Show or hide the ゴミ箱 tab based on the current user's role (係長 and above)
+ */
+window.showRecycleBinTabIfAllowed = function() {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    const canSeeRecycleBin = ['admin', '課長', '係長', '部長'].includes(currentUser.role);
+    const tabBtn = document.getElementById('recycleBinTabBtn');
+    if (tabBtn) {
+        tabBtn.classList.toggle('hidden', !canSeeRecycleBin);
+    }
+};
+
+/**
+ * Senior roles (admin/課長/係長/部長) directly soft-delete an approval record
+ */
+window.softDeleteItem = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+        alert("権限がありません");
+        return;
+    }
+    const reason = prompt("削除理由を入力してください:");
+    if (!reason || reason.trim() === "") {
+        alert("削除理由を入力してください");
+        return;
+    }
+    if (!confirm(`この記録をソフト削除しますか？\n理由: ${reason}\n\n削除後はゴミ箱から復元できます。`)) return;
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/soft-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                reason,
+                deletedBy: userFullName,
+                deletedByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("ソフト削除しました。ゴミ箱から復元できます。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('softDeleteItem error:', err);
+        alert('削除に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * 班長 requests deletion — flags the doc with pending_delete for senior approval
+ */
+window.requestDeletion = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (currentUser.role !== '班長') {
+        alert("権限がありません");
+        return;
+    }
+    const reason = prompt("削除要求の理由を入力してください:");
+    if (!reason || reason.trim() === "") {
+        alert("削除理由を入力してください");
+        return;
+    }
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/request-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                reason,
+                requestedBy: userFullName,
+                requestedByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を送信しました。上長の承認をお待ちください。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('requestDeletion error:', err);
+        alert('削除要求の送信に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Senior approves a 班長 delete request — moves doc to recycleBin
+ */
+window.approveDeleteRequest = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+        alert("権限がありません");
+        return;
+    }
+    if (!confirm("削除要求を承認しますか？記録はゴミ箱に移動されます。")) return;
+
+    try {
+        // Re-fetch the doc to confirm it is still pending_delete (guard against stale DOM)
+        const checkRes = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: currentApprovalTab,
+                query: { _id: itemId },
+                projection: { deleteRequestStatus: 1 }
+            })
+        });
+        const checkData = await checkRes.json();
+        if (!checkData || checkData.length === 0) {
+            alert('記録が見つかりません。ページを更新してください。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+        if (checkData[0].deleteRequestStatus !== 'pending_delete') {
+            alert('削除要求はすでに取り消されています。画面を更新します。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/approve-delete-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                approvedBy: userFullName,
+                approvedByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を承認しました。記録はゴミ箱に移動されました。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('approveDeleteRequest error:', err);
+        alert('承認に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Senior rejects a 班長 delete request — clears pending_delete flags
+ */
+window.rejectDeleteRequest = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+        alert("権限がありません");
+        return;
+    }
+    const rejectReason = prompt("却下理由を入力してください (任意):");
+    if (!confirm("削除要求を却下しますか？")) return;
+
+    try {
+        // Re-fetch to confirm still pending_delete
+        const checkRes = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: currentApprovalTab,
+                query: { _id: itemId },
+                projection: { deleteRequestStatus: 1 }
+            })
+        });
+        const checkData = await checkRes.json();
+        if (!checkData || checkData.length === 0) {
+            alert('記録が見つかりません。ページを更新してください。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+        if (checkData[0].deleteRequestStatus !== 'pending_delete') {
+            alert('削除要求はすでに取り消されています。画面を更新します。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/reject-delete-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                rejectedBy: userFullName,
+                rejectedByUsername: currentUser.username,
+                rejectReason: rejectReason || ''
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を却下しました。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('rejectDeleteRequest error:', err);
+        alert('却下に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * 班長 cancels their own pending delete request
+ */
+window.cancelDeleteRequest = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!confirm("削除要求を取り消しますか？")) return;
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/cancel-delete-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                canceledBy: userFullName,
+                canceledByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を取り消しました。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('cancelDeleteRequest error:', err);
+        alert('取り消しに失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Render the ゴミ箱 RecycleBin tab — fetches all soft-deleted docs and displays
+ * days remaining before permanent 1-year auto-purge
+ */
+// Cache for bin items keyed by _id, used by openBinItemDetail
+window._binItemCache = {};
+window._binAllItems  = [];   // full fetched list for client-side search/sort
+window._binSort      = { col: 'deletedAt', dir: 'desc' }; // current sort state
+
+// Helper: get quantity/NG field names per collection
+function _binQtyField(coll) { return coll === 'kensaDB' ? 'Process_Quantity' : 'Total'; }
+function _binNGField(coll)  { return coll === 'SRSDB' ? 'SRS_Total_NG' : 'Total_NG'; }
+
+// Column definitions: { key, label, getValue }
+const _BIN_COLS = [
+    { key: 'originalCollection', label: 'コレクション', getValue: it => it.originalCollection || '' },
+    { key: 'bango',              label: '背番号',        getValue: it => (it.originalDoc || {})['背番号'] || '' },
+    { key: 'hinban',             label: '品番',          getValue: it => (it.originalDoc || {})['品番'] || '' },
+    { key: 'factory',            label: '工場',          getValue: it => (it.originalDoc || {})['工場'] || '' },
+    { key: 'worker',             label: '作業者',        getValue: it => (it.originalDoc || {})['Worker_Name'] || '' },
+    { key: 'date',               label: '日付',          getValue: it => (it.originalDoc || {})['Date'] || '' },
+    { key: 'quantity',           label: '数量',          getValue: it => Number((it.originalDoc || {})[_binQtyField(it.originalCollection)] || 0) },
+    { key: 'ngCount',            label: 'NG',            getValue: it => Number((it.originalDoc || {})[_binNGField(it.originalCollection)] || 0) },
+    { key: 'deletedBy',          label: '削除者',        getValue: it => it.deletedBy || '' },
+    { key: 'deleteReason',       label: '削除理由',      getValue: it => it.deleteReason || '' },
+    { key: 'deletedVia',         label: '削除方法',      getValue: it => it.deletedVia || '' },
+    { key: 'requestedBy',        label: '要求者',        getValue: it => it.requestedBy || '' },
+    { key: 'deletedAt',          label: '削除日',        getValue: it => it.deletedAt || '' },
+    { key: 'daysLeft',           label: '残り日数',      getValue: it => it.expiresAt ? new Date(it.expiresAt).getTime() : 0 },
+];
+
+window.renderRecycleBinTab = async function() {
+    const container = document.getElementById('approvalsListContainer');
+    if (!container) return;
+
+    container.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-xl mr-2"></i>ゴミ箱を読み込み中...</div>';
+
+    try {
+        const response = await fetch(BASE_URL + 'api/approvals/recycle-bin');
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        window._binAllItems = result.data;
+        window._binItemCache = {};
+        window._binAllItems.forEach(it => { window._binItemCache[it._id] = it; });
+
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        window._binIsAdmin = currentUser.role === 'admin';
+        window._binCanRestore = ['admin', '課長', '係長', '部長'].includes(currentUser.role);
+        window._binPurgedCount = result.purgedCount || 0;
+
+        const buildHeaderCols = () =>
+            `<th class="border p-2 w-8"><input type="checkbox" id="binSelectAll" onchange="onBinSelectAll(this)" class="cursor-pointer"></th>` +
+            _BIN_COLS.map(col => {
+                const isActive = window._binSort.col === col.key;
+                const icon = isActive
+                    ? (window._binSort.dir === 'asc' ? '<i class="ri-arrow-up-s-line ml-1"></i>' : '<i class="ri-arrow-down-s-line ml-1"></i>')
+                    : '<i class="ri-expand-up-down-line ml-1 opacity-30"></i>';
+                return `<th class="border p-2 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-200 select-none whitespace-nowrap" onclick="sortBinBy('${col.key}')" data-bin-col="${col.key}">${col.label}${icon}</th>`;
+            }).join('') + '<th class="border p-2 text-left font-medium text-gray-700">操作</th>';
+
+        container.innerHTML = `
+            <div class="bg-white border rounded-lg overflow-hidden">
+                <div class="bg-red-50 border-b p-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div class="text-sm text-red-800">
+                        <i class="ri-delete-bin-line mr-1"></i>
+                        <strong>ゴミ箱</strong> — ソフト削除された承認記録 (<span id="binCountLabel">${window._binAllItems.length}</span>件)
+                        ${window._binPurgedCount > 0
+                            ? `<span class="ml-3 text-xs text-gray-500">※ ${window._binPurgedCount}件が1年経過により自動完全削除されました</span>`
+                            : ''}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="relative">
+                            <i class="ri-search-line absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                            <input id="binSearchInput" type="text" placeholder="背番号、削除者、理由などで検索..."
+                                class="pl-7 pr-3 py-1.5 text-xs border rounded w-60 focus:outline-none focus:ring-1 focus:ring-red-400"
+                                oninput="refreshBinTable()">
+                        </div>
+                        <button onclick="renderRecycleBinTab()" class="text-xs text-gray-500 hover:text-gray-700">
+                            <i class="ri-refresh-line mr-1"></i>更新
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Multi-action bar (hidden until rows are selected) -->
+                <div id="binBulkBar" class="hidden bg-blue-50 border-b px-3 py-2 flex items-center gap-3 flex-wrap">
+                    <span id="binBulkCount" class="text-xs font-medium text-blue-800"></span>
+                    ${window._binCanRestore ? `<button onclick="bulkRestoreFromBin()" class="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"><i class="ri-arrow-go-back-line mr-1"></i>まとめて復元</button>` : ''}
+                    ${window._binIsAdmin ? `<button onclick="bulkPermanentDeleteFromBin()" class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"><i class="ri-delete-bin-2-line mr-1"></i>まとめて完全削除</button>` : ''}
+                </div>
+
+                ${window._binAllItems.length === 0
+                    ? '<div class="p-8 text-center text-gray-500"><i class="ri-inbox-line text-2xl mr-2"></i>ゴミ箱は空です</div>'
+                    : `<div class="overflow-x-auto">
+                        <table class="w-full text-xs border-collapse">
+                            <thead id="binTableHead" class="bg-gray-100 sticky top-0 z-10">
+                                <tr>${buildHeaderCols()}</tr>
+                            </thead>
+                            <tbody id="binTableBody"></tbody>
+                        </table>
+                    </div>`
+                }
+            </div>
+        `;
+
+        refreshBinTable();
+    } catch (err) {
+        console.error('renderRecycleBinTab error:', err);
+        container.innerHTML = `<div class="p-8 text-center text-red-500"><i class="ri-error-warning-line mr-2"></i>読み込みに失敗しました: ${err.message}</div>`;
+    }
+};
+
+/** Toggle sort column / direction and re-render table rows */
+window.sortBinBy = function(col) {
+    if (window._binSort.col === col) {
+        window._binSort.dir = window._binSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        window._binSort.col = col;
+        window._binSort.dir = 'asc';
+    }
+    // Update header icons
+    const thead = document.getElementById('binTableHead');
+    if (thead) {
+        thead.querySelectorAll('th[data-bin-col]').forEach(th => {
+            const key = th.dataset.binCol;
+            const isActive = key === window._binSort.col;
+            const colDef = _BIN_COLS.find(c => c.key === key);
+            const icon = isActive
+                ? (window._binSort.dir === 'asc' ? '<i class="ri-arrow-up-s-line ml-1"></i>' : '<i class="ri-arrow-down-s-line ml-1"></i>')
+                : '<i class="ri-expand-up-down-line ml-1 opacity-30"></i>';
+            th.innerHTML = (colDef ? colDef.label : key) + icon;
+        });
+    }
+    refreshBinTable();
+};
+
+/** Filter + sort _binAllItems and re-render tbody */
+window.refreshBinTable = function() {
+    const tbody = document.getElementById('binTableBody');
+    const countLabel = document.getElementById('binCountLabel');
+    if (!tbody) return;
+
+    const searchTerm = (document.getElementById('binSearchInput')?.value || '').toLowerCase().trim();
+    const collectionLabels = {
+        kensaDB: '検査 (Kensa)',
+        pressDB: 'プレス (Press)',
+        slitDB: 'スリット (Slit)',
+        SRSDB: 'SRS'
+    };
+    const now = Date.now();
+
+    // Filter
+    let items = window._binAllItems.filter(item => {
+        if (!searchTerm) return true;
+        const originalDoc = item.originalDoc || {};
+        const haystack = [
+            collectionLabels[item.originalCollection] || item.originalCollection,
+            originalDoc['背番号'] || '',
+            originalDoc['品番'] || '',
+            originalDoc['工場'] || '',
+            originalDoc['Worker_Name'] || '',
+            originalDoc['Date'] || '',
+            item.deletedBy || '',
+            item.deleteReason || '',
+            item.deletedVia === 'direct' ? '直接削除' : '要求承認',
+            item.requestedBy || '',
+        ].join(' ').toLowerCase();
+        return haystack.includes(searchTerm);
+    });
+
+    // Sort
+    const colDef = _BIN_COLS.find(c => c.key === window._binSort.col);
+    if (colDef) {
+        items = [...items].sort((a, b) => {
+            const va = colDef.getValue(a);
+            const vb = colDef.getValue(b);
+            let cmp = 0;
+            if (typeof va === 'number' && typeof vb === 'number') {
+                cmp = va - vb;
+            } else {
+                cmp = String(va).localeCompare(String(vb), 'ja');
+            }
+            return window._binSort.dir === 'asc' ? cmp : -cmp;
+        });
+    }
+
+    if (countLabel) countLabel.textContent = items.length;
+
+    if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${_BIN_COLS.length + 2}" class="p-6 text-center text-gray-400 text-xs">該当するデータがありません</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = items.map(item => {
+        const expiresAt = new Date(item.expiresAt);
+        const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
+        const daysLeftClass = daysLeft <= 30 ? 'text-red-600 font-bold' : daysLeft <= 90 ? 'text-orange-600 font-semibold' : 'text-gray-600';
+        const originalDoc = item.originalDoc || {};
+        const collLabel = collectionLabels[item.originalCollection] || item.originalCollection;
+        const qtyField = _binQtyField(item.originalCollection);
+        const ngField  = _binNGField(item.originalCollection);
+
+        return `
+            <tr class="hover:bg-red-50 border-b cursor-pointer" onclick="openBinItemDetail('${item._id}')">
+                <td class="border p-2 w-8" onclick="event.stopPropagation()">
+                    <input type="checkbox" class="bin-row-cb cursor-pointer" data-id="${item._id}" onchange="onBinCheckboxChange()">
+                </td>
+                <td class="border p-2 text-xs">${collLabel}</td>
+                <td class="border p-2 text-xs font-medium">${originalDoc['背番号'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['品番'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['工場'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['Worker_Name'] || '-'}</td>
+                <td class="border p-2 text-xs">${originalDoc['Date'] || '-'}</td>
+                <td class="border p-2 text-xs text-right">${(originalDoc[qtyField] ?? '-').toLocaleString()}</td>
+                <td class="border p-2 text-xs text-right ${Number(originalDoc[ngField] || 0) > 0 ? 'text-red-600 font-semibold' : ''}">${originalDoc[ngField] ?? '-'}</td>
+                <td class="border p-2 text-xs">${item.deletedBy || '-'}</td>
+                <td class="border p-2 text-xs max-w-xs truncate" title="${item.deleteReason || ''}">${item.deleteReason || '-'}</td>
+                <td class="border p-2 text-xs">${item.deletedVia === 'direct' ? '直接削除' : '要求承認'}</td>
+                <td class="border p-2 text-xs">${item.requestedBy || '-'}</td>
+                <td class="border p-2 text-xs">${new Date(item.deletedAt).toLocaleDateString('ja-JP')}</td>
+                <td class="border p-2 text-xs ${daysLeftClass}">${daysLeft}日</td>
+                <td class="border p-2 text-xs" onclick="event.stopPropagation()">
+                    <div class="flex gap-1 flex-wrap">
+                        <button onclick="restoreFromBin('${item._id}')"
+                            class="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                            <i class="ri-arrow-go-back-line mr-1"></i>復元
+                        </button>
+                        ${window._binIsAdmin ? `<button onclick="permanentlyDeleteFromBin('${item._id}')"
+                            class="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                            <i class="ri-delete-bin-2-line mr-1"></i>完全削除
+                        </button>` : ''}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+};
+
+/** Select-all checkbox handler */
+window.onBinSelectAll = function(cb) {
+    document.querySelectorAll('.bin-row-cb').forEach(el => { el.checked = cb.checked; });
+    onBinCheckboxChange();
+};
+
+/** Clear all checkbox selections */
+window.onBinClearSelection = function() {
+    document.querySelectorAll('.bin-row-cb').forEach(el => { el.checked = false; });
+    const sa = document.getElementById('binSelectAll');
+    if (sa) sa.checked = false;
+    onBinCheckboxChange();
+};
+
+/** Update bulk-action bar when checkboxes change */
+window.onBinCheckboxChange = function() {
+    const ids = getBinSelectedIds();
+    const bar = document.getElementById('binBulkBar');
+    const countEl = document.getElementById('binBulkCount');
+    const sa = document.getElementById('binSelectAll');
+    const allCbs = document.querySelectorAll('.bin-row-cb');
+    if (!bar) return;
+    if (ids.length === 0) {
+        bar.classList.add('hidden');
+    } else {
+        bar.classList.remove('hidden');
+        if (countEl) countEl.textContent = `${ids.length}件選択中`;
+    }
+    // Update select-all indeterminate state
+    if (sa) {
+        sa.indeterminate = ids.length > 0 && ids.length < allCbs.length;
+        sa.checked = ids.length === allCbs.length && allCbs.length > 0;
+    }
+};
+
+/** Get IDs of all currently checked rows */
+function getBinSelectedIds() {
+    return Array.from(document.querySelectorAll('.bin-row-cb:checked')).map(el => el.dataset.id);
+}
+
+/** Bulk restore selected bin items */
+window.bulkRestoreFromBin = async function() {
+    const ids = getBinSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`選択した ${ids.length} 件を復元しますか？`)) return;
+
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    let userFullName;
+    try { userFullName = await getUserFullName(currentUser.username); } catch(e) { userFullName = currentUser.username; }
+
+    let success = 0, failed = 0;
+    for (const binDocId of ids) {
+        try {
+            const res = await fetch(BASE_URL + 'api/approvals/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ binDocId, restoredBy: userFullName, restoredByUsername: currentUser.username })
+            });
+            const data = await res.json();
+            if (data.success) success++; else failed++;
+        } catch(e) { failed++; }
+    }
+    alert(`復元完了: ${success}件成功${failed > 0 ? `、${failed}件失敗` : ''}`);
+    renderRecycleBinTab();
+};
+
+/** Bulk permanent delete selected bin items (admin only) */
+window.bulkPermanentDeleteFromBin = async function() {
+    const ids = getBinSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`選択した ${ids.length} 件を完全削除します。この操作は取り消せません。\n本当によろしいですか？`)) return;
+    if (!confirm(`最終確認: ${ids.length} 件を永久に削除します。`)) return;
+
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    let userFullName;
+    try { userFullName = await getUserFullName(currentUser.username); } catch(e) { userFullName = currentUser.username; }
+
+    let success = 0, failed = 0;
+    for (const binDocId of ids) {
+        try {
+            const res = await fetch(BASE_URL + 'api/approvals/permanent-delete', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ binDocId, deletedBy: userFullName })
+            });
+            const data = await res.json();
+            if (data.success) success++; else failed++;
+        } catch(e) { failed++; }
+    }
+    alert(`完全削除完了: ${success}件成功${failed > 0 ? `、${failed}件失敗` : ''}`);
+    renderRecycleBinTab();
+};
+
+/**
+ * Open the approval detail modal for a bin (soft-deleted) item
+ * Uses originalDoc + originalCollection from the cached bin record
+ */
+window.openBinItemDetail = async function(binDocId) {
+    const binItem = window._binItemCache[binDocId];
+    if (!binItem) {
+        alert('データが見つかりません。画面を更新してください。');
+        return;
+    }
+
+    const item = binItem.originalDoc || {};
+    const tabName = binItem.originalCollection;
+    const collectionLabels = {
+        kensaDB: '検査 (Kensa)',
+        pressDB: 'プレス (Press)',
+        slitDB: 'スリット (Slit)',
+        SRSDB: 'SRS'
+    };
+
+    const modal = document.getElementById('approvalModal');
+    const content = document.getElementById('approvalModalContent');
+
+    const quantityField = getQuantityField(tabName);
+    const ngField = getNGField(tabName);
+    const quantity = item[quantityField] || 0;
+    const ngCount = item[ngField] || 0;
+    const defectRate = quantity > 0 ? ((ngCount / quantity) * 100).toFixed(2) : '0.00';
+
+    const counterDetails = getCounterDetails(item, tabName);
+    const processImages = getProcessImages(item, tabName);
+    const mismatch = checkDateTimeMismatch(item);
+    const dateWarningClass = mismatch.dateMismatch ? 'text-red-600 font-bold' : 'font-medium';
+    const timeWarningClass = mismatch.timeMismatch ? 'text-orange-600 font-semibold' : 'font-medium';
+    const dateWarningIcon = mismatch.dateMismatch ? `<i class="ri-alert-fill text-red-600 ml-1" title="入力日付が正しくありません"></i>` : '';
+    const timeWarningIcon = mismatch.timeMismatch ? `<i class="ri-time-line text-orange-600 ml-1" title="終了時刻がずれています"></i>` : '';
+
+    const excludeFields = ['_id', 'approvalStatus', 'approvedBy', 'approvedAt', 'approvalComment', 'correctionBy', 'correctionAt', 'correctionComment', 'approvalHistory'];
+    const allFields = Object.entries(item)
+        .filter(([key, value]) => !excludeFields.includes(key) && value !== null && value !== undefined && value !== '')
+        .sort(([a], [b]) => a.localeCompare(b));
+
+    const countersIndex = allFields.findIndex(([key]) => key === 'Counters');
+    let countersObject = null;
+    if (countersIndex !== -1) {
+        countersObject = allFields[countersIndex][1];
+        allFields.splice(countersIndex, 1);
+    }
+
+    const deletedAtStr = binItem.deletedAt ? new Date(binItem.deletedAt).toLocaleString('ja-JP') : '-';
+    const expiresAtStr = binItem.expiresAt ? new Date(binItem.expiresAt).toLocaleDateString('ja-JP') : '-';
+    const isAdmin = (JSON.parse(localStorage.getItem('authUser') || '{}')).role === 'admin';
+
+    content.innerHTML = `
+        <div class="mb-4 bg-red-50 border border-red-300 rounded-lg p-3 flex items-start gap-3">
+            <i class="ri-delete-bin-line text-red-500 text-lg mt-0.5"></i>
+            <div class="text-sm text-red-800">
+                <div class="font-semibold mb-1">ゴミ箱 — ソフト削除済みデータ (${collectionLabels[tabName] || tabName})</div>
+                <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                    <div><span class="text-red-600">削除者:</span> ${binItem.deletedBy || '-'}</div>
+                    <div><span class="text-red-600">削除日時:</span> ${deletedAtStr}</div>
+                    <div><span class="text-red-600">削除方法:</span> ${binItem.deletedVia === 'direct' ? '直接削除' : '要求承認'}</div>
+                    <div><span class="text-red-600">要求者:</span> ${binItem.requestedBy || '-'}</div>
+                    <div class="col-span-2"><span class="text-red-600">削除理由:</span> ${binItem.deleteReason || '-'}</div>
+                    <div><span class="text-red-600">自動削除日:</span> ${expiresAtStr}</div>
+                </div>
+                <div class="mt-2 flex gap-2">
+                    <button onclick="restoreFromBin('${binItem._id}'); closeApprovalModal();" class="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                        <i class="ri-arrow-go-back-line mr-1"></i>復元
+                    </button>
+                    ${isAdmin ? `<button onclick="permanentlyDeleteFromBin('${binItem._id}'); closeApprovalModal();" class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                        <i class="ri-delete-bin-2-line mr-1"></i>完全削除
+                    </button>` : ''}
+                </div>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 space-y-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">基本情報</h4>
+                    ${mismatch.dateMismatch ? `
+                        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 mb-3 text-xs rounded">
+                            <div class="flex items-center">
+                                <i class="ri-error-warning-line text-lg mr-2"></i>
+                                <div>
+                                    <p class="font-semibold">日付エラー検出</p>
+                                    <p>入力日付: <strong>${item.Date}</strong> → 実際の送信: <strong>${mismatch.objectIdDate}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${mismatch.timeMismatch ? `
+                        <div class="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-3 mb-3 text-xs rounded">
+                            <div class="flex items-center">
+                                <i class="ri-time-line text-lg mr-2"></i>
+                                <div>
+                                    <p class="font-semibold">時刻のずれ検出</p>
+                                    <p>終了時刻: <strong>${item.Time_end}</strong> → 実際の送信: <strong>${mismatch.objectIdTime}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div><span class="text-gray-600">品番:</span> <span class="font-medium">${item.品番 || '-'}</span></div>
+                        <div><span class="text-gray-600">背番号:</span> <span class="font-medium">${item.背番号 || '-'}</span></div>
+                        <div><span class="text-gray-600">工場:</span> <span class="font-medium">${item.工場 || '-'}</span></div>
+                        <div><span class="text-gray-600">設備:</span> <span class="font-medium">${item.設備 || '-'}</span></div>
+                        <div><span class="text-gray-600">作業者:</span> <span class="font-medium">${item.Worker_Name || '-'}</span></div>
+                        <div><span class="text-gray-600">日付:</span> <span class="${dateWarningClass}">${item.Date || '-'} ${dateWarningIcon}</span></div>
+                        <div><span class="text-gray-600">開始:</span> <span class="font-medium">${item.Time_start || '-'}</span></div>
+                        <div><span class="text-gray-600">終了:</span> <span class="${timeWarningClass}">${item.Time_end || '-'} ${timeWarningIcon}</span></div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">生産実績</h4>
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div><span class="text-gray-600">処理数量:</span> <span class="font-medium">${quantity.toLocaleString()}</span></div>
+                        <div><span class="text-gray-600">不良数:</span> <span class="font-medium text-red-600">${ngCount}</span></div>
+                        <div><span class="text-gray-600">不良率:</span> <span class="font-medium ${parseFloat(defectRate) > 0 ? 'text-red-600' : 'text-green-600'}">${defectRate}%</span></div>
+                        <div><span class="text-gray-600">サイクルタイム:</span> <span class="font-medium">${item.Cycle_Time || '-'}秒</span></div>
+                        ${item.製造ロット ? `<div class="col-span-2"><span class="text-gray-600">製造ロット:</span> <span class="font-medium">${item.製造ロット}</span></div>` : ''}
+                        ${item.材料ロット ? `<div class="col-span-2"><span class="text-gray-600">材料ロット:</span> <span class="font-medium">${item.材料ロット}</span></div>` : ''}
+                        ${item.SRSコード ? `<div class="col-span-2"><span class="text-gray-600">SRSコード:</span> <span class="font-medium">${item.SRSコード}</span></div>` : ''}
+                        ${item.ショット数 ? `<div><span class="text-gray-600">ショット数:</span> <span class="font-medium">${item.ショット数}</span></div>` : ''}
+                        ${item.Spare ? `<div><span class="text-gray-600">予備:</span> <span class="font-medium">${item.Spare}</span></div>` : ''}
+                    </div>
+                </div>
+
+                ${counterDetails ? `
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">不良詳細</h4>
+                    <div class="text-sm space-y-1">${counterDetails}</div>
+                </div>` : ''}
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">完全データ (MongoDB)</h4>
+                    <div class="grid grid-cols-1 gap-3 max-h-60 overflow-y-auto p-2">
+                        ${countersObject ? `
+                            <div class="bg-white p-2 rounded border">
+                                <label class="block text-xs font-medium text-gray-600 mb-2">Counters</label>
+                                <div class="grid grid-cols-2 gap-2">
+                                    ${Object.entries(countersObject).map(([k, v]) => `
+                                        <div class="flex items-center space-x-2">
+                                            <span class="text-xs text-gray-600">${k}:</span>
+                                            <span class="text-xs font-medium">${v}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>` : ''}
+                        ${allFields.map(([key, value]) => `
+                            <div class="bg-white p-2 rounded border">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">${key}</label>
+                                <div class="w-full p-1 text-xs text-gray-800">${typeof value === 'object' ? JSON.stringify(value) : value}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                ${item.Comment ? `
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">コメント</h4>
+                    <div class="text-sm">${item.Comment}</div>
+                </div>` : ''}
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">承認状況 (削除前)</h4>
+                    ${getApprovalStatusHTML(Object.assign({}, item, { deleteRequestStatus: null, deleteRequestedBy: null, deleteRequestReason: null }), true)}
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">提出画像</h4>
+                    <div class="space-y-3">${processImages.submitted}</div>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">マスター参考画像</h4>
+                    <div class="space-y-3">${processImages.master}</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+};
+
+/**
+ * Restore a doc from recycleBin back to its original submittedDB collection
+ */
+window.restoreFromBin = async function(binDocId) {
+    if (!confirm("この記録を元のコレクションに復元しますか？")) return;
+
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                binDocId,
+                restoredBy: userFullName,
+                restoredByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("復元しました。");
+        renderRecycleBinTab();
+    } catch (err) {
+        console.error('restoreFromBin error:', err);
+        alert('復元に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Admin only — instantly and permanently delete a doc from recycleBin
+ */
+window.permanentlyDeleteFromBin = async function(binDocId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (currentUser.role !== 'admin') {
+        alert("この操作はadminのみ実行できます");
+        return;
+    }
+    if (!confirm("この記録を完全に削除しますか？\n⚠️ この操作は絶対に元に戻せません。")) return;
+    if (!confirm("再確認: 本当に完全削除しますか？")) return;
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/permanent-delete', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                binDocId,
+                deletedBy: userFullName
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("完全削除しました。");
+        renderRecycleBinTab();
+    } catch (err) {
+        console.error('permanentlyDeleteFromBin error:', err);
+        alert('削除に失敗しました: ' + err.message);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
