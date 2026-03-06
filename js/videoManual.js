@@ -1413,16 +1413,18 @@ function vmBuildCreatomateSource() {
         el.type        = 'text';
         el.text        = ov.text || '';
         el.x           = ov.x + '%';
-        el.y           = ov.y + '%';
-        el.width       = '80%';
-        el.height      = '20%';
+        // Offset Y up by roughly the font size to match canvas positioning
+        el.y           = (ov.y - (ov.fontSize || 14)) + '%';
+        // Let text auto-size (null = fit to content)
+        el.width       = null;
+        el.height      = null;
         el.fill_color  = ov.color || '#ffffff';
         el.font_weight = 700;
-        el.font_size   = (ov.fontSize || 5) + ' vmin';
+        el.font_size   = (ov.fontSize || 14) + ' vmin';
         el.shadow_color = '#000000';
-        el.shadow_blur  = '3 vmin';
-        el.shadow_x     = '2 vmin';
-        el.shadow_y     = '2 vmin';
+        el.shadow_blur  = '1 vmin';
+        el.shadow_x     = '0.5 vmin';
+        el.shadow_y     = '0.5 vmin';
       }
 
       else if (ov.type === 'rect') {
@@ -1437,7 +1439,8 @@ function vmBuildCreatomateSource() {
         // SVG path for rectangle (boxed coords 0-100)
         el.path         = 'M 0 0 L 100 0 L 100 100 L 0 100 Z';
         el.stroke_color = ov.color || '#ff4444';
-        el.stroke_width = (ov.strokeWidth || 3) + ' vmin';
+        // Convert canvas stroke to vmin (editor 3 ≈ 0.5 vmin)
+        el.stroke_width = ((ov.strokeWidth || 3) / 6).toFixed(1) + ' vmin';
       }
 
       else if (ov.type === 'circle') {
@@ -1452,7 +1455,8 @@ function vmBuildCreatomateSource() {
         // SVG path for ellipse using cubic bezier curves (boxed coords 0-100)
         el.path         = 'M 50 0 C 77.6 0 100 22.4 100 50 C 100 77.6 77.6 100 50 100 C 22.4 100 0 77.6 0 50 C 0 22.4 22.4 0 50 0 Z';
         el.stroke_color = ov.color || '#ff4444';
-        el.stroke_width = (ov.strokeWidth || 3) + ' vmin';
+        // Convert canvas stroke to vmin (editor 3 ≈ 0.5 vmin)
+        el.stroke_width = ((ov.strokeWidth || 3) / 6).toFixed(1) + ' vmin';
       }
 
       else if (ov.type === 'arrow') {
