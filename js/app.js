@@ -9614,7 +9614,7 @@ async function loadMasterImage(品番, 背番号, containerId) {
 /**
  * Get approval status HTML
  */
-function getApprovalStatusHTML(item) {
+function getApprovalStatusHTML(item, readOnly = false) {
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
     const _isPendingDel = item.deleteRequestStatus === 'pending_delete';
     
@@ -9805,10 +9805,10 @@ function getApprovalStatusHTML(item) {
 
     statusHTML += `</div>`;
 
-    // Delete action section — shown based on role (not for pending_delete items)
+    // Delete action section — shown based on role (not for pending_delete items, not in readOnly/bin view)
     const _canDirectDelete = ['admin', '課長', '係長', '部長'].includes(currentUser.role);
     const _canRequestDelete = currentUser.role === '班長';
-    if (!_isPendingDel && _canDirectDelete) {
+    if (!readOnly && !_isPendingDel && _canDirectDelete) {
         statusHTML += `
             <div class="mt-2 pt-2 border-t border-gray-200">
                 <button onclick="softDeleteItem('${item._id}')" class="px-3 py-1 bg-gray-50 text-red-600 text-xs rounded hover:bg-red-50 border border-red-200">
@@ -9816,7 +9816,7 @@ function getApprovalStatusHTML(item) {
                 </button>
             </div>
         `;
-    } else if (!_isPendingDel && _canRequestDelete) {
+    } else if (!readOnly && !_isPendingDel && _canRequestDelete) {
         statusHTML += `
             <div class="mt-2 pt-2 border-t border-gray-200">
                 <button onclick="requestDeletion('${item._id}')" class="px-3 py-1 bg-gray-50 text-red-600 text-xs rounded hover:bg-red-50 border border-red-200">
@@ -11812,7 +11812,7 @@ window.renderRecycleBinTab = async function() {
             const collLabel = collectionLabels[item.originalCollection] || item.originalCollection;
 
             return `
-                <tr class="hover:bg-gray-50 border-b">
+                <tr class="hover:bg-red-50 border-b cursor-pointer" onclick="openBinItemDetail('${item._id}')">
                     <td class="border p-2 text-xs">${collLabel}</td>
                     <td class="border p-2 text-xs font-medium">${originalDoc['背番号'] || originalDoc['品番'] || '-'}</td>
                     <td class="border p-2 text-xs">${originalDoc['Date'] || '-'}</td>
@@ -11822,12 +11822,8 @@ window.renderRecycleBinTab = async function() {
                     <td class="border p-2 text-xs">${item.requestedBy || '-'}</td>
                     <td class="border p-2 text-xs">${new Date(item.deletedAt).toLocaleDateString('ja-JP')}</td>
                     <td class="border p-2 text-xs ${daysLeftClass}">${daysLeft}日</td>
-                    <td class="border p-2 text-xs">
+                    <td class="border p-2 text-xs" onclick="event.stopPropagation()">
                         <div class="flex gap-1 flex-wrap">
-                            <button onclick="openBinItemDetail('${item._id}')"
-                                class="px-2 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700">
-                                <i class="ri-eye-line mr-1"></i>詳細
-                            </button>
                             <button onclick="restoreFromBin('${item._id}')"
                                 class="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
                                 <i class="ri-arrow-go-back-line mr-1"></i>復元
@@ -12055,7 +12051,7 @@ window.openBinItemDetail = async function(binDocId) {
 
                 <div class="bg-gray-50 p-4 rounded-lg">
                     <h4 class="font-semibold text-gray-900 mb-3">承認状況 (削除前)</h4>
-                    ${getApprovalStatusHTML(item)}
+                    ${getApprovalStatusHTML(Object.assign({}, item, { deleteRequestStatus: null, deleteRequestedBy: null, deleteRequestReason: null }), true)}
                 </div>
             </div>
 
