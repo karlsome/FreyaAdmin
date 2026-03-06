@@ -2173,22 +2173,11 @@ window.closePressDetailModal = function() {
 
 window.showSensorModalForFactory = async function(factoryName) {
     try {
-        // Use dedicated optimized endpoint instead of /queries
-        const today = new Date().toISOString().split('T')[0];
-        const res = await fetch(`${BASE_URL}api/sensor-details?factory=${encodeURIComponent(factoryName)}&date=${encodeURIComponent(today)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const sensorData = await res.json();
+        const sensorData = await getSensorData(factoryName);
         showSensorModal(factoryName, sensorData);
     } catch (error) {
         console.error('Error showing sensor modal:', error);
-        // Fallback to getSensorData if dedicated endpoint fails
-        try {
-            const sensorData = await getSensorData(factoryName);
-            showSensorModal(factoryName, sensorData);
-        } catch (fallbackError) {
-            console.error('Fallback sensor modal also failed:', fallbackError);
-            alert('センサーデータの取得に失敗しました');
-        }
+        alert('センサーデータの取得に失敗しました');
     }
 };
 
@@ -2250,7 +2239,7 @@ function showSensorModal(factoryName, sensorData) {
                         </div>
                         <div class="bg-red-50 p-3 sm:p-4 rounded-lg text-center">
                             <div class="text-xl sm:text-2xl font-bold text-red-600">
-                                ${(sensorData.highestTempToday ?? sensorData.highestTemp) ? (sensorData.highestTempToday ?? sensorData.highestTemp) + '°C' : 'N/A'}
+                                ${sensorData.highestTemp ? sensorData.highestTemp + '°C' : 'N/A'}
                             </div>
                             <div class="text-xs sm:text-sm text-red-600" data-i18n="highestTemp">最高温度</div>
                         </div>
@@ -4808,7 +4797,6 @@ async function renderFactoryCards() {
         const batchSensor = sensorDataBatch.data?.[factory] || {};
         const sensorData = {
           highestTemp: batchSensor.highestTemp ?? null,
-          highestTempToday: batchSensor.highestTempToday ?? null,
           averageHumidity: batchSensor.avgHumidity ?? null,
           wbgt: batchSensor.wbgt ?? null,
           sensorCount: batchSensor.sensorCount || 0,
@@ -4938,7 +4926,7 @@ async function renderFactoryCards() {
                         <div class="font-semibold ${sensorTempStatus ? sensorTempStatus.color : 'text-gray-600'} text-xs sm:text-sm">
                           ${sensorData.highestTemp !== null ? sensorData.highestTemp + '°C' : 'N/A'}
                         </div>
-                        <div class="text-gray-500 text-[10px] sm:text-xs" data-i18n="currentTemp">現在温度</div>
+                        <div class="text-gray-500 text-[10px] sm:text-xs" data-i18n="highestTemp">最高温度</div>
                       </div>
 
                       <div class="text-center p-1.5 sm:p-2 rounded bg-blue-50">

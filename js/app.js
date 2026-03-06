@@ -1034,6 +1034,10 @@ function loadPage(page) {
                                 data-tab="slitDB" onclick="switchApprovalTab('slitDB')" data-i18n="slit">
                             Slit
                         </button>
+                        <button class="approval-tab-btn py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap hidden" 
+                                id="recycleBinTabBtn" data-tab="recycleBin" onclick="switchApprovalTab('recycleBin')">
+                            <i class="ri-delete-bin-line mr-1"></i>ゴミ箱
+                        </button>
                     </nav>
                 </div>
 
@@ -7408,6 +7412,9 @@ function initializeApprovalSystem() {
     
     // Load initial data efficiently
     loadApprovalData();
+
+    // Show recycle bin tab for 係長 and above
+    showRecycleBinTabIfAllowed();
 }
 
 /**
@@ -7417,7 +7424,13 @@ window.switchApprovalTab = function(tabName) {
     currentApprovalTab = tabName;
     updateTabStyles();
   updateShowAllImagesButtonVisibility();
-    
+
+    if (tabName === 'recycleBin') {
+        // RecycleBin has its own rendering; skip normal data pipeline
+        renderRecycleBinTab();
+        return;
+    }
+
     // Update factory dropdown for the new tab
     if (typeof updateFactoryDropdownForTab === 'function') {
         updateFactoryDropdownForTab(tabName);
@@ -7443,6 +7456,12 @@ function updateTabStyles() {
  * Load approval data efficiently (OPTIMIZED)
  */
 async function loadApprovalData() {
+    // RecycleBin tab has its own renderer
+    if (currentApprovalTab === 'recycleBin') {
+        renderRecycleBinTab();
+        return;
+    }
+
     try {
         console.log('🔄 Loading approval data optimized for tab:', currentApprovalTab);
         
@@ -8573,6 +8592,10 @@ function getSortArrow(column) {
  * Get status information for display
  */
 function getStatusInfo(item) {
+    // Always check pending_delete FIRST — overrides whatever approvalStatus is set
+    if (item.deleteRequestStatus === 'pending_delete') {
+        return { text: '削除待ち', icon: 'ri-delete-bin-line', badgeClass: 'bg-red-200 text-red-900', rowClass: 'bg-red-50 opacity-75' };
+    }
     if (!item.approvalStatus || item.approvalStatus === 'pending') {
         return { text: '保留中', icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: 'bg-yellow-50' };
     } else if (item.approvalStatus === 'hancho_approved') {
@@ -9593,8 +9616,19 @@ async function loadMasterImage(品番, 背番号, containerId) {
  */
 function getApprovalStatusHTML(item) {
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    const _isPendingDel = item.deleteRequestStatus === 'pending_delete';
     
     let statusHTML = `<div class="space-y-3">`;
+
+    // If a delete request is pending, show a warning banner
+    if (_isPendingDel) {
+        statusHTML += `
+            <div class="flex items-center gap-2 px-2.5 py-1.5 rounded bg-red-100 border border-red-300 text-xs text-red-800">
+                <i class="ri-delete-bin-line"></i>
+                <span><strong>削除要求中</strong> — 上長の承認待ちです。承認・修正操作は無効です。</span>
+            </div>
+        `;
+    }
     
     // Current status display
     statusHTML += `<div class="flex items-center space-x-2">`;
@@ -9608,14 +9642,25 @@ function getApprovalStatusHTML(item) {
         
         // 班長 can approve in first step
         if (currentUser.role === '班長') {
-            statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    班長承認
-                </button>
-                <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                    修正要求
-                </button>
-            `;
+            if (_isPendingDel) {
+                statusHTML += `
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        班長承認
+                    </button>
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        修正要求
+                    </button>
+                `;
+            } else {
+                statusHTML += `
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                        班長承認
+                    </button>
+                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                        修正要求
+                    </button>
+                `;
+            }
         }
     } else if (item.approvalStatus === 'hancho_approved') {
         statusHTML += `
@@ -9626,14 +9671,25 @@ function getApprovalStatusHTML(item) {
         
         // 課長, admin, 部長 can approve in second step
         if (['課長', 'admin', '部長'].includes(currentUser.role)) {
-            statusHTML += `
-                <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                    課長承認
-                </button>
-                <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                    修正要求
-                </button>
-            `;
+            if (_isPendingDel) {
+                statusHTML += `
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        課長承認
+                    </button>
+                    <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                        修正要求
+                    </button>
+                `;
+            } else {
+                statusHTML += `
+                    <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                        課長承認
+                    </button>
+                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                        修正要求
+                    </button>
+                `;
+            }
         }
         
         if (item.hanchoApprovedBy) {
@@ -9678,16 +9734,29 @@ function getApprovalStatusHTML(item) {
         
         // 班長 can edit data and re-approve, or forward correction to factory
         if (currentUser.role === '班長') {
-            statusHTML += `
-                <div class="flex gap-2 flex-wrap">
-                    <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
-                        修正完了・再承認
-                    </button>
-                    <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
-                        修正要求（工場へ）
-                    </button>
-                </div>
-            `;
+            if (_isPendingDel) {
+                statusHTML += `
+                    <div class="flex gap-2 flex-wrap">
+                        <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                            修正完了・再承認
+                        </button>
+                        <button disabled class="px-3 py-1 bg-gray-300 text-gray-500 text-xs rounded cursor-not-allowed" title="削除要求中のため操作できません">
+                            修正要求（工場へ）
+                        </button>
+                    </div>
+                `;
+            } else {
+                statusHTML += `
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="approveItem('${item._id}')" class="px-3 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                            修正完了・再承認
+                        </button>
+                        <button onclick="requestCorrection('${item._id}')" class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600">
+                            修正要求（工場へ）
+                        </button>
+                    </div>
+                `;
+            }
         }
         
         if (item.correctionBy) {
@@ -9696,9 +9765,66 @@ function getApprovalStatusHTML(item) {
         if (item.correctionComment) {
             statusHTML += `<div class="mt-2 text-xs text-gray-600 bg-orange-50 p-2 rounded">${item.correctionComment}</div>`;
         }
+    } else if (item.deleteRequestStatus === 'pending_delete') {
+        statusHTML += `
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-200 text-red-900">
+                <i class="ri-delete-bin-line mr-1"></i>削除待ち（上長承認待ち）
+            </span>
+        `;
+        if (item.deleteRequestedBy) {
+            statusHTML += `<div class="text-xs text-gray-600">削除要求者: ${item.deleteRequestedBy}</div>`;
+        }
+        if (item.deleteRequestReason) {
+            statusHTML += `<div class="mt-2 text-xs text-gray-600 bg-red-50 p-2 rounded">${item.deleteRequestReason}</div>`;
+        }
     }
     
+    // Universal pending_delete action buttons — shown regardless of approvalStatus branch
+    if (_isPendingDel) {
+        if (currentUser.role === '班長') {
+            statusHTML += `
+                <div class="flex gap-2 flex-wrap mt-2">
+                    <button onclick="cancelDeleteRequest('${item._id}')" class="px-3 py-1 bg-yellow-400 text-yellow-900 text-xs rounded hover:bg-yellow-500">
+                        <i class="ri-arrow-go-back-line mr-1"></i>削除要求を取り消す
+                    </button>
+                </div>
+            `;
+        } else if (['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+            statusHTML += `
+                <div class="flex gap-2 flex-wrap mt-2">
+                    <button onclick="approveDeleteRequest('${item._id}')" class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                        <i class="ri-check-line mr-1"></i>削除承認
+                    </button>
+                    <button onclick="rejectDeleteRequest('${item._id}')" class="px-3 py-1 bg-gray-500 text-white text-xs rounded hover:bg-gray-600">
+                        <i class="ri-close-line mr-1"></i>削除却下
+                    </button>
+                </div>
+            `;
+        }
+    }
+
     statusHTML += `</div>`;
+
+    // Delete action section — shown based on role (not for pending_delete items)
+    const _canDirectDelete = ['admin', '課長', '係長', '部長'].includes(currentUser.role);
+    const _canRequestDelete = currentUser.role === '班長';
+    if (!_isPendingDel && _canDirectDelete) {
+        statusHTML += `
+            <div class="mt-2 pt-2 border-t border-gray-200">
+                <button onclick="softDeleteItem('${item._id}')" class="px-3 py-1 bg-gray-50 text-red-600 text-xs rounded hover:bg-red-50 border border-red-200">
+                    <i class="ri-delete-bin-line mr-1"></i>ソフト削除
+                </button>
+            </div>
+        `;
+    } else if (!_isPendingDel && _canRequestDelete) {
+        statusHTML += `
+            <div class="mt-2 pt-2 border-t border-gray-200">
+                <button onclick="requestDeletion('${item._id}')" class="px-3 py-1 bg-gray-50 text-red-600 text-xs rounded hover:bg-red-50 border border-red-200">
+                    <i class="ri-delete-bin-line mr-1"></i>削除要求
+                </button>
+            </div>
+        `;
+    }
     
     // Version history
     if (item.approvalHistory && item.approvalHistory.length > 0) {
@@ -10790,6 +10916,9 @@ function shouldDisableCheckbox(item, userRole) {
     const status = item.approvalStatus;
     
     // If user is 班長 (hancho)
+    // Always disable for pending_delete items (they are in delete workflow)
+    if (item.deleteRequestStatus === 'pending_delete') return true;
+
     if (userRole === '班長') {
         // Disable if already hancho approved, fully approved, or rejected
         if (status === 'hancho_approved' || 
@@ -11387,3 +11516,625 @@ function generateSummaryReport() {
 
     document.getElementById('summaryStats').innerHTML = summaryHTML;
 }
+
+
+// ─── RECYCLE BIN / SOFT DELETE FUNCTIONS ─────────────────────────────────────
+
+/**
+ * Show or hide the ゴミ箱 tab based on the current user's role (係長 and above)
+ */
+window.showRecycleBinTabIfAllowed = function() {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    const canSeeRecycleBin = ['admin', '課長', '係長', '部長'].includes(currentUser.role);
+    const tabBtn = document.getElementById('recycleBinTabBtn');
+    if (tabBtn) {
+        tabBtn.classList.toggle('hidden', !canSeeRecycleBin);
+    }
+};
+
+/**
+ * Senior roles (admin/課長/係長/部長) directly soft-delete an approval record
+ */
+window.softDeleteItem = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+        alert("権限がありません");
+        return;
+    }
+    const reason = prompt("削除理由を入力してください:");
+    if (!reason || reason.trim() === "") {
+        alert("削除理由を入力してください");
+        return;
+    }
+    if (!confirm(`この記録をソフト削除しますか？\n理由: ${reason}\n\n削除後はゴミ箱から復元できます。`)) return;
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/soft-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                reason,
+                deletedBy: userFullName,
+                deletedByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("ソフト削除しました。ゴミ箱から復元できます。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('softDeleteItem error:', err);
+        alert('削除に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * 班長 requests deletion — flags the doc with pending_delete for senior approval
+ */
+window.requestDeletion = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (currentUser.role !== '班長') {
+        alert("権限がありません");
+        return;
+    }
+    const reason = prompt("削除要求の理由を入力してください:");
+    if (!reason || reason.trim() === "") {
+        alert("削除理由を入力してください");
+        return;
+    }
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/request-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                reason,
+                requestedBy: userFullName,
+                requestedByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を送信しました。上長の承認をお待ちください。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('requestDeletion error:', err);
+        alert('削除要求の送信に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Senior approves a 班長 delete request — moves doc to recycleBin
+ */
+window.approveDeleteRequest = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+        alert("権限がありません");
+        return;
+    }
+    if (!confirm("削除要求を承認しますか？記録はゴミ箱に移動されます。")) return;
+
+    try {
+        // Re-fetch the doc to confirm it is still pending_delete (guard against stale DOM)
+        const checkRes = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: currentApprovalTab,
+                query: { _id: itemId },
+                projection: { deleteRequestStatus: 1 }
+            })
+        });
+        const checkData = await checkRes.json();
+        if (!checkData || checkData.length === 0) {
+            alert('記録が見つかりません。ページを更新してください。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+        if (checkData[0].deleteRequestStatus !== 'pending_delete') {
+            alert('削除要求はすでに取り消されています。画面を更新します。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/approve-delete-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                approvedBy: userFullName,
+                approvedByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を承認しました。記録はゴミ箱に移動されました。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('approveDeleteRequest error:', err);
+        alert('承認に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Senior rejects a 班長 delete request — clears pending_delete flags
+ */
+window.rejectDeleteRequest = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!['admin', '課長', '係長', '部長'].includes(currentUser.role)) {
+        alert("権限がありません");
+        return;
+    }
+    const rejectReason = prompt("却下理由を入力してください (任意):");
+    if (!confirm("削除要求を却下しますか？")) return;
+
+    try {
+        // Re-fetch to confirm still pending_delete
+        const checkRes = await fetch(BASE_URL + 'queries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dbName: 'submittedDB',
+                collectionName: currentApprovalTab,
+                query: { _id: itemId },
+                projection: { deleteRequestStatus: 1 }
+            })
+        });
+        const checkData = await checkRes.json();
+        if (!checkData || checkData.length === 0) {
+            alert('記録が見つかりません。ページを更新してください。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+        if (checkData[0].deleteRequestStatus !== 'pending_delete') {
+            alert('削除要求はすでに取り消されています。画面を更新します。');
+            closeApprovalModal();
+            await renderApprovalList();
+            return;
+        }
+
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/reject-delete-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                rejectedBy: userFullName,
+                rejectedByUsername: currentUser.username,
+                rejectReason: rejectReason || ''
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を却下しました。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('rejectDeleteRequest error:', err);
+        alert('却下に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * 班長 cancels their own pending delete request
+ */
+window.cancelDeleteRequest = async function(itemId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (!confirm("削除要求を取り消しますか？")) return;
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/cancel-delete-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                itemId,
+                collectionName: currentApprovalTab,
+                canceledBy: userFullName,
+                canceledByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("削除要求を取り消しました。");
+        closeApprovalModal();
+        await renderApprovalList();
+    } catch (err) {
+        console.error('cancelDeleteRequest error:', err);
+        alert('取り消しに失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Render the ゴミ箱 RecycleBin tab — fetches all soft-deleted docs and displays
+ * days remaining before permanent 1-year auto-purge
+ */
+// Cache for bin items keyed by _id, used by openBinItemDetail
+window._binItemCache = {};
+
+window.renderRecycleBinTab = async function() {
+    const container = document.getElementById('approvalsListContainer');
+    if (!container) return;
+
+    container.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-xl mr-2"></i>ゴミ箱を読み込み中...</div>';
+
+    try {
+        const response = await fetch(BASE_URL + 'api/approvals/recycle-bin');
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        const items = result.data;
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const isAdmin = currentUser.role === 'admin';
+        const now = Date.now();
+
+        const collectionLabels = {
+            kensaDB: '検査 (Kensa)',
+            pressDB: 'プレス (Press)',
+            slitDB: 'スリット (Slit)',
+            SRSDB: 'SRS'
+        };
+
+        // Cache all bin items for the detail modal
+        window._binItemCache = {};
+        items.forEach(it => { window._binItemCache[it._id] = it; });
+
+        const tableRows = items.map(item => {
+            const expiresAt = new Date(item.expiresAt);
+            const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
+            const daysLeftClass = daysLeft <= 30
+                ? 'text-red-600 font-bold'
+                : daysLeft <= 90
+                    ? 'text-orange-600 font-semibold'
+                    : 'text-gray-600';
+            const originalDoc = item.originalDoc || {};
+            const collLabel = collectionLabels[item.originalCollection] || item.originalCollection;
+
+            return `
+                <tr class="hover:bg-gray-50 border-b">
+                    <td class="border p-2 text-xs">${collLabel}</td>
+                    <td class="border p-2 text-xs font-medium">${originalDoc['背番号'] || originalDoc['品番'] || '-'}</td>
+                    <td class="border p-2 text-xs">${originalDoc['Date'] || '-'}</td>
+                    <td class="border p-2 text-xs">${item.deletedBy || '-'}</td>
+                    <td class="border p-2 text-xs max-w-xs truncate" title="${item.deleteReason || ''}">${item.deleteReason || '-'}</td>
+                    <td class="border p-2 text-xs">${item.deletedVia === 'direct' ? '直接削除' : '要求承認'}</td>
+                    <td class="border p-2 text-xs">${item.requestedBy || '-'}</td>
+                    <td class="border p-2 text-xs">${new Date(item.deletedAt).toLocaleDateString('ja-JP')}</td>
+                    <td class="border p-2 text-xs ${daysLeftClass}">${daysLeft}日</td>
+                    <td class="border p-2 text-xs">
+                        <div class="flex gap-1 flex-wrap">
+                            <button onclick="openBinItemDetail('${item._id}')"
+                                class="px-2 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700">
+                                <i class="ri-eye-line mr-1"></i>詳細
+                            </button>
+                            <button onclick="restoreFromBin('${item._id}')"
+                                class="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                                <i class="ri-arrow-go-back-line mr-1"></i>復元
+                            </button>
+                            ${isAdmin ? `<button onclick="permanentlyDeleteFromBin('${item._id}')"
+                                class="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                                <i class="ri-delete-bin-2-line mr-1"></i>完全削除
+                            </button>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="bg-white border rounded-lg overflow-hidden">
+                <div class="bg-red-50 border-b p-3 flex items-center justify-between">
+                    <div class="text-sm text-red-800">
+                        <i class="ri-delete-bin-line mr-1"></i>
+                        <strong>ゴミ箱</strong> — ソフト削除された承認記録 (${items.length}件)
+                        ${result.purgedCount > 0
+                            ? `<span class="ml-3 text-xs text-gray-500">※ ${result.purgedCount}件が1年経過により自動完全削除されました</span>`
+                            : ''}
+                    </div>
+                    <button onclick="renderRecycleBinTab()" class="text-xs text-gray-500 hover:text-gray-700">
+                        <i class="ri-refresh-line mr-1"></i>更新
+                    </button>
+                </div>
+                ${items.length === 0
+                    ? '<div class="p-8 text-center text-gray-500"><i class="ri-inbox-line text-2xl mr-2"></i>ゴミ箱は空です</div>'
+                    : `<div class="overflow-x-auto">
+                        <table class="w-full text-xs border-collapse">
+                            <thead class="bg-gray-100 sticky top-0 z-10">
+                                <tr>
+                                    <th class="border p-2 text-left font-medium text-gray-700">コレクション</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">背番号</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">日付</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">削除者</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">削除理由</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">削除方法</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">要求者</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">削除日</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">残り日数</th>
+                                    <th class="border p-2 text-left font-medium text-gray-700">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableRows}
+                            </tbody>
+                        </table>
+                    </div>`
+                }
+            </div>
+        `;
+    } catch (err) {
+        console.error('renderRecycleBinTab error:', err);
+        container.innerHTML = `<div class="p-8 text-center text-red-500"><i class="ri-error-warning-line mr-2"></i>読み込みに失敗しました: ${err.message}</div>`;
+    }
+};
+
+/**
+ * Open the approval detail modal for a bin (soft-deleted) item
+ * Uses originalDoc + originalCollection from the cached bin record
+ */
+window.openBinItemDetail = async function(binDocId) {
+    const binItem = window._binItemCache[binDocId];
+    if (!binItem) {
+        alert('データが見つかりません。画面を更新してください。');
+        return;
+    }
+
+    const item = binItem.originalDoc || {};
+    const tabName = binItem.originalCollection;
+    const collectionLabels = {
+        kensaDB: '検査 (Kensa)',
+        pressDB: 'プレス (Press)',
+        slitDB: 'スリット (Slit)',
+        SRSDB: 'SRS'
+    };
+
+    const modal = document.getElementById('approvalModal');
+    const content = document.getElementById('approvalModalContent');
+
+    const quantityField = getQuantityField(tabName);
+    const ngField = getNGField(tabName);
+    const quantity = item[quantityField] || 0;
+    const ngCount = item[ngField] || 0;
+    const defectRate = quantity > 0 ? ((ngCount / quantity) * 100).toFixed(2) : '0.00';
+
+    const counterDetails = getCounterDetails(item, tabName);
+    const processImages = getProcessImages(item, tabName);
+    const mismatch = checkDateTimeMismatch(item);
+    const dateWarningClass = mismatch.dateMismatch ? 'text-red-600 font-bold' : 'font-medium';
+    const timeWarningClass = mismatch.timeMismatch ? 'text-orange-600 font-semibold' : 'font-medium';
+    const dateWarningIcon = mismatch.dateMismatch ? `<i class="ri-alert-fill text-red-600 ml-1" title="入力日付が正しくありません"></i>` : '';
+    const timeWarningIcon = mismatch.timeMismatch ? `<i class="ri-time-line text-orange-600 ml-1" title="終了時刻がずれています"></i>` : '';
+
+    const excludeFields = ['_id', 'approvalStatus', 'approvedBy', 'approvedAt', 'approvalComment', 'correctionBy', 'correctionAt', 'correctionComment', 'approvalHistory'];
+    const allFields = Object.entries(item)
+        .filter(([key, value]) => !excludeFields.includes(key) && value !== null && value !== undefined && value !== '')
+        .sort(([a], [b]) => a.localeCompare(b));
+
+    const countersIndex = allFields.findIndex(([key]) => key === 'Counters');
+    let countersObject = null;
+    if (countersIndex !== -1) {
+        countersObject = allFields[countersIndex][1];
+        allFields.splice(countersIndex, 1);
+    }
+
+    const deletedAtStr = binItem.deletedAt ? new Date(binItem.deletedAt).toLocaleString('ja-JP') : '-';
+    const expiresAtStr = binItem.expiresAt ? new Date(binItem.expiresAt).toLocaleDateString('ja-JP') : '-';
+    const isAdmin = (JSON.parse(localStorage.getItem('authUser') || '{}')).role === 'admin';
+
+    content.innerHTML = `
+        <div class="mb-4 bg-red-50 border border-red-300 rounded-lg p-3 flex items-start gap-3">
+            <i class="ri-delete-bin-line text-red-500 text-lg mt-0.5"></i>
+            <div class="text-sm text-red-800">
+                <div class="font-semibold mb-1">ゴミ箱 — ソフト削除済みデータ (${collectionLabels[tabName] || tabName})</div>
+                <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                    <div><span class="text-red-600">削除者:</span> ${binItem.deletedBy || '-'}</div>
+                    <div><span class="text-red-600">削除日時:</span> ${deletedAtStr}</div>
+                    <div><span class="text-red-600">削除方法:</span> ${binItem.deletedVia === 'direct' ? '直接削除' : '要求承認'}</div>
+                    <div><span class="text-red-600">要求者:</span> ${binItem.requestedBy || '-'}</div>
+                    <div class="col-span-2"><span class="text-red-600">削除理由:</span> ${binItem.deleteReason || '-'}</div>
+                    <div><span class="text-red-600">自動削除日:</span> ${expiresAtStr}</div>
+                </div>
+                <div class="mt-2 flex gap-2">
+                    <button onclick="restoreFromBin('${binItem._id}'); closeApprovalModal();" class="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                        <i class="ri-arrow-go-back-line mr-1"></i>復元
+                    </button>
+                    ${isAdmin ? `<button onclick="permanentlyDeleteFromBin('${binItem._id}'); closeApprovalModal();" class="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700">
+                        <i class="ri-delete-bin-2-line mr-1"></i>完全削除
+                    </button>` : ''}
+                </div>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 space-y-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">基本情報</h4>
+                    ${mismatch.dateMismatch ? `
+                        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 mb-3 text-xs rounded">
+                            <div class="flex items-center">
+                                <i class="ri-error-warning-line text-lg mr-2"></i>
+                                <div>
+                                    <p class="font-semibold">日付エラー検出</p>
+                                    <p>入力日付: <strong>${item.Date}</strong> → 実際の送信: <strong>${mismatch.objectIdDate}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${mismatch.timeMismatch ? `
+                        <div class="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-3 mb-3 text-xs rounded">
+                            <div class="flex items-center">
+                                <i class="ri-time-line text-lg mr-2"></i>
+                                <div>
+                                    <p class="font-semibold">時刻のずれ検出</p>
+                                    <p>終了時刻: <strong>${item.Time_end}</strong> → 実際の送信: <strong>${mismatch.objectIdTime}</strong></p>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div><span class="text-gray-600">品番:</span> <span class="font-medium">${item.品番 || '-'}</span></div>
+                        <div><span class="text-gray-600">背番号:</span> <span class="font-medium">${item.背番号 || '-'}</span></div>
+                        <div><span class="text-gray-600">工場:</span> <span class="font-medium">${item.工場 || '-'}</span></div>
+                        <div><span class="text-gray-600">設備:</span> <span class="font-medium">${item.設備 || '-'}</span></div>
+                        <div><span class="text-gray-600">作業者:</span> <span class="font-medium">${item.Worker_Name || '-'}</span></div>
+                        <div><span class="text-gray-600">日付:</span> <span class="${dateWarningClass}">${item.Date || '-'} ${dateWarningIcon}</span></div>
+                        <div><span class="text-gray-600">開始:</span> <span class="font-medium">${item.Time_start || '-'}</span></div>
+                        <div><span class="text-gray-600">終了:</span> <span class="${timeWarningClass}">${item.Time_end || '-'} ${timeWarningIcon}</span></div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">生産実績</h4>
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div><span class="text-gray-600">処理数量:</span> <span class="font-medium">${quantity.toLocaleString()}</span></div>
+                        <div><span class="text-gray-600">不良数:</span> <span class="font-medium text-red-600">${ngCount}</span></div>
+                        <div><span class="text-gray-600">不良率:</span> <span class="font-medium ${parseFloat(defectRate) > 0 ? 'text-red-600' : 'text-green-600'}">${defectRate}%</span></div>
+                        <div><span class="text-gray-600">サイクルタイム:</span> <span class="font-medium">${item.Cycle_Time || '-'}秒</span></div>
+                        ${item.製造ロット ? `<div class="col-span-2"><span class="text-gray-600">製造ロット:</span> <span class="font-medium">${item.製造ロット}</span></div>` : ''}
+                        ${item.材料ロット ? `<div class="col-span-2"><span class="text-gray-600">材料ロット:</span> <span class="font-medium">${item.材料ロット}</span></div>` : ''}
+                        ${item.SRSコード ? `<div class="col-span-2"><span class="text-gray-600">SRSコード:</span> <span class="font-medium">${item.SRSコード}</span></div>` : ''}
+                        ${item.ショット数 ? `<div><span class="text-gray-600">ショット数:</span> <span class="font-medium">${item.ショット数}</span></div>` : ''}
+                        ${item.Spare ? `<div><span class="text-gray-600">予備:</span> <span class="font-medium">${item.Spare}</span></div>` : ''}
+                    </div>
+                </div>
+
+                ${counterDetails ? `
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">不良詳細</h4>
+                    <div class="text-sm space-y-1">${counterDetails}</div>
+                </div>` : ''}
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">完全データ (MongoDB)</h4>
+                    <div class="grid grid-cols-1 gap-3 max-h-60 overflow-y-auto p-2">
+                        ${countersObject ? `
+                            <div class="bg-white p-2 rounded border">
+                                <label class="block text-xs font-medium text-gray-600 mb-2">Counters</label>
+                                <div class="grid grid-cols-2 gap-2">
+                                    ${Object.entries(countersObject).map(([k, v]) => `
+                                        <div class="flex items-center space-x-2">
+                                            <span class="text-xs text-gray-600">${k}:</span>
+                                            <span class="text-xs font-medium">${v}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>` : ''}
+                        ${allFields.map(([key, value]) => `
+                            <div class="bg-white p-2 rounded border">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">${key}</label>
+                                <div class="w-full p-1 text-xs text-gray-800">${typeof value === 'object' ? JSON.stringify(value) : value}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                ${item.Comment ? `
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">コメント</h4>
+                    <div class="text-sm">${item.Comment}</div>
+                </div>` : ''}
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">承認状況 (削除前)</h4>
+                    ${getApprovalStatusHTML(item)}
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">提出画像</h4>
+                    <div class="space-y-3">${processImages.submitted}</div>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-gray-900 mb-3">マスター参考画像</h4>
+                    <div class="space-y-3">${processImages.master}</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+};
+
+/**
+ * Restore a doc from recycleBin back to its original submittedDB collection
+ */
+window.restoreFromBin = async function(binDocId) {
+    if (!confirm("この記録を元のコレクションに復元しますか？")) return;
+
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                binDocId,
+                restoredBy: userFullName,
+                restoredByUsername: currentUser.username
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("復元しました。");
+        renderRecycleBinTab();
+    } catch (err) {
+        console.error('restoreFromBin error:', err);
+        alert('復元に失敗しました: ' + err.message);
+    }
+};
+
+/**
+ * Admin only — instantly and permanently delete a doc from recycleBin
+ */
+window.permanentlyDeleteFromBin = async function(binDocId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (currentUser.role !== 'admin') {
+        alert("この操作はadminのみ実行できます");
+        return;
+    }
+    if (!confirm("この記録を完全に削除しますか？\n⚠️ この操作は絶対に元に戻せません。")) return;
+    if (!confirm("再確認: 本当に完全削除しますか？")) return;
+
+    try {
+        const userFullName = await getUserFullName(currentUser.username);
+        const response = await fetch(BASE_URL + 'api/approvals/permanent-delete', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                binDocId,
+                deletedBy: userFullName
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+
+        alert("完全削除しました。");
+        renderRecycleBinTab();
+    } catch (err) {
+        console.error('permanentlyDeleteFromBin error:', err);
+        alert('削除に失敗しました: ' + err.message);
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
