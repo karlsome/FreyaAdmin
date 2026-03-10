@@ -821,19 +821,12 @@ function vm2CutAtPlayhead() {
     elements: [],
   };
 
-  // Move elements that start after or at 't' to the new step
+  // Move elements that start after or at 't' to the new step without cutting them
   const remainingElements = [];
   step.elements.forEach(el => {
     if (el.startTime >= t) {
       newStep.elements.push(el);
     } else {
-      // Elements that straddle the cut point
-      if (el.endTime > t) {
-        // Clone for the new step
-        const cloned = { ...el, id: vm2Id(), startTime: t };
-        newStep.elements.push(cloned);
-        el.endTime = t;
-      }
       remainingElements.push(el);
     }
   });
@@ -843,9 +836,9 @@ function vm2CutAtPlayhead() {
   step.sourceEnd = (step.sourceStart ?? step.startTime) + (t - step.startTime);
   vm2.project.steps.splice(vm2.currentStepIdx + 1, 0, newStep);
 
-  // Renumber only default labels
+  // Renumber only if empty
   vm2.project.steps.forEach((s, i) => {
-    if (!s.label || /^Step \d+$/.test(s.label)) {
+    if (!s.label) {
       s.label = `Step ${i + 1}`;
     }
   });
@@ -870,7 +863,7 @@ function vm2UpdateTimelinePositions() {
       });
     }
 
-    if (!s.label || /^Step \d+$/.test(s.label)) {
+    if (!s.label) {
       s.label = `Step ${i + 1}`;
     }
     time += srcDuration;
@@ -904,7 +897,14 @@ function vm2DeleteStep(idx) {
   }
   if (!confirm(`Delete "${vm2.project.steps[idx].label}"?`)) return;
 
+  // Rescue elements so they don't get deleted when a video clip is removed
+  const elementsToRescue = vm2.project.steps[idx].elements;
   vm2.project.steps.splice(idx, 1);
+  
+  if (vm2.project.steps.length > 0 && elementsToRescue && elementsToRescue.length > 0) {
+    const parentStep = idx > 0 ? vm2.project.steps[idx - 1] : vm2.project.steps[0];
+    parentStep.elements.push(...elementsToRescue);
+  }
 
   vm2UpdateTimelinePositions();
 
@@ -965,22 +965,8 @@ function vm2StepResizeStart(event, idx, side) {
 }
 
 function vm2ConstrainElementsToStep(step) {
-  if (!step || !step.elements) return;
-  
-  step.elements.forEach(el => {
-    // Constrain element start time to be within step bounds
-    if (el.startTime < step.startTime) {
-      el.startTime = step.startTime;
-    }
-    // Constrain element end time to be within step bounds
-    if (el.endTime > step.endTime) {
-      el.endTime = step.endTime;
-    }
-    // Ensure minimum duration
-    if (el.endTime - el.startTime < 0.1) {
-      el.endTime = Math.min(el.startTime + 0.5, step.endTime);
-    }
-  });
+  // Elements are completely independent now globally, so we no longer crop them to step bounds.
+  return;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -999,13 +985,19 @@ function vm2AddElement(type, subtype) {
   const centerY = vm2.project.height / 2;
 
   // Default 4-second duration, starting at current playhead position
-  const elementStart = Math.max(step.startTime, Math.min(vm2.currentTime, step.endTime - 4));
-  const elementEnd = Math.min(elementStart + 4, step.endTime);
+  const elementStart = Math.max(0, Math.min(vm2.currentTime, vm2.duration - 4));
+  const elementEnd = Math.min(elementStart + 4, vm2.duration);
+
+  let nextLayer = 0;
+  vm2.project.steps.forEach(s => s.elements?.forEach(e => {
+    if ((e.layer || 0) >= nextLayer) nextLayer = (e.layer || 0) + 1;
+  }));
 
   let element = {
     id,
     type,
     subtype,
+    layer: nextLayer,
     x: centerX - 100,
     y: centerY - 50,
     width: 200,
@@ -1039,10 +1031,20 @@ function vm2AddElement(type, subtype) {
       element.width = 150;
       element.height = 100;
       element.fill = false;
+      element.x = centerX - 75;
+      element.y = centerY - 50;
     }
     if (subtype === 'circle') {
       element.width = 100;
       element.height = 100;
+      element.x = centerX - 50;
+      element.y = centerY - 50;
+    }
+    if (subtype === 'rect') {
+      element.width = 200;
+      element.height = 100;
+      element.x = centerX - 100;
+      element.y = centerY - 50;
     }
   }
 
@@ -1156,10 +1158,17 @@ function vm2RenderElements() {
 
   container.innerHTML = '';
   
-  const step = vm2Step();
-  if (!step) return;
+  if (!vm2.project) return;
+  const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
 
-  step.elements.forEach(el => {
+  allElements.forEach(el => {
+    if (el.layer === undefined) el.layer = 0;
+  });
+  
+  // Highest layer renders first (behind), layer 0 renders last (on top)
+  allElements.sort((a, b) => b.layer - a.layer);
+
+  allElements.forEach(el => {
     if (el.type === 'audio') return; // Audio has no visual
 
     const div = document.createElement('div');
@@ -1245,10 +1254,10 @@ function vm2RenderSelectionHandles() {
 
   if (!vm2.selectedElementId) return;
 
-  const step = vm2Step();
-  if (!step) return;
+  if (!vm2.project) return;
+  const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
 
-  const el = step.elements.find(e => e.id === vm2.selectedElementId);
+  const el = allElements.find(e => e.id === vm2.selectedElementId);
   if (!el || el.type === 'audio') return;
 
   const box = document.createElement('div');
@@ -1279,10 +1288,10 @@ function vm2RenderSelectionHandles() {
 }
 
 function vm2UpdateVisibleElements() {
-  const step = vm2Step();
-  if (!step) return;
+  if (!vm2.project) return;
+  const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
 
-  step.elements.forEach(el => {
+  allElements.forEach(el => {
     const div = vm2Get('vm2-el-' + el.id);
     if (!div) return;
 
@@ -1295,13 +1304,21 @@ function vm2RenderElementsList() {
   const list = vm2Get('vm2-elements-list');
   if (!list) return;
 
-  const step = vm2Step();
-  if (!step || step.elements.length === 0) {
+  if (!vm2.project) return;
+  const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
+
+  if (allElements.length === 0) {
     list.innerHTML = '<p class="text-gray-400 italic text-center py-2">No elements</p>';
     return;
   }
 
-  list.innerHTML = step.elements.map(el => `
+  allElements.forEach(el => {
+    if (el.layer === undefined) el.layer = 0;
+  });
+  // Top layer (0) first in list
+  allElements.sort((a, b) => a.layer - b.layer);
+
+  list.innerHTML = allElements.map(el => `
     <div class="flex items-center gap-2 p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer ${vm2.selectedElementId === el.id ? 'bg-blue-50 dark:bg-blue-900/30' : ''}"
          onclick="vm2SelectElement('${el.id}')">
       <i class="${vm2GetElementIcon(el)} text-gray-500"></i>
@@ -1343,8 +1360,9 @@ function vm2SelectElement(id) {
 }
 
 function vm2DeleteElement(id) {
-  const step = vm2Step();
-  if (!step) return;
+  const result = vm2FindElementWithStep(id);
+  if (!result) return;
+  const { el, step } = result;
 
   const idx = step.elements.findIndex(e => e.id === id);
   if (idx >= 0) {
@@ -1440,7 +1458,7 @@ function vm2RenderProps() {
     return;
   }
 
-  const el = step.elements.find(e => e.id === vm2.selectedElementId);
+  const el = vm2FindElement(vm2.selectedElementId);
   if (!el) {
     vm2.selectedElementId = null;
     return vm2RenderProps();
@@ -1659,10 +1677,7 @@ function vm2RenderProps() {
 }
 
 function vm2UpdateProp(prop, value) {
-  const step = vm2Step();
-  if (!step) return;
-
-  const el = step.elements.find(e => e.id === vm2.selectedElementId);
+  const el = vm2FindElement(vm2.selectedElementId);
   if (!el) return;
 
   el[prop] = value;
@@ -1673,10 +1688,7 @@ function vm2UpdateProp(prop, value) {
 }
 
 function vm2AlignElement(alignment) {
-  const step = vm2Step();
-  if (!step) return;
-
-  const el = step.elements.find(e => e.id === vm2.selectedElementId);
+  const el = vm2FindElement(vm2.selectedElementId);
   if (!el) return;
 
   switch (alignment) {
@@ -1693,29 +1705,40 @@ function vm2AlignElement(alignment) {
 }
 
 function vm2LayerElement(action) {
-  const step = vm2Step();
-  if (!step) return;
+  const result = vm2FindElementWithStep(vm2.selectedElementId);
+  if (!result) return;
+  const { el } = result;
 
-  const idx = step.elements.findIndex(e => e.id === vm2.selectedElementId);
-  if (idx < 0) return;
-
-  const el = step.elements[idx];
+  const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
+  allElements.forEach(e => { if (e.layer === undefined) e.layer = 0; });
   
-  if (action === 'up' && idx < step.elements.length - 1) {
-    step.elements.splice(idx, 1);
-    step.elements.splice(idx + 1, 0, el);
-  } else if (action === 'down' && idx > 0) {
-    step.elements.splice(idx, 1);
-    step.elements.splice(idx - 1, 0, el);
-  } else if (action === 'front' && idx < step.elements.length - 1) {
-    step.elements.splice(idx, 1);
-    step.elements.push(el);
-  } else if (action === 'back' && idx > 0) {
-    step.elements.splice(idx, 1);
-    step.elements.unshift(el);
+  const maxLayer = Math.max(0, ...allElements.map(e => e.layer));
+  
+  if (action === 'up' && el.layer > 0) { // Bring Forward (visually higher track, lower layer num)
+    const swap = allElements.find(e => e.layer === el.layer - 1);
+    if (swap) swap.layer++;
+    el.layer--;
+  } 
+  else if (action === 'down' && el.layer < maxLayer) { // Send Backward (visually lower track, higher layer num)
+    const swap = allElements.find(e => e.layer === el.layer + 1);
+    if (swap) swap.layer--;
+    el.layer++;
+  }
+  else if (action === 'front' && el.layer > 0) { // Bring to Top
+    allElements.forEach(e => {
+      if (e.layer < el.layer) e.layer++;
+    });
+    el.layer = 0;
+  }
+  else if (action === 'back' && el.layer < maxLayer) { // Send to Bottom
+    allElements.forEach(e => {
+      if (e.layer > el.layer) e.layer--;
+    });
+    el.layer = maxLayer;
   }
 
   vm2RenderElements();
+  vm2RenderTimeline();
   vm2RenderElementsList();
 }
 
@@ -1785,31 +1808,16 @@ function vm2RenderTimeline() {
       });
     });
 
-    // Sort by start time and layout into rows
-    allElements.sort((a, b) => a.startTime - b.startTime);
-    
-    const rowHeight = 28;
-    const rowGap = 4;
-    const rows = [];
-    
+    // Assure elements have a layer
     allElements.forEach(el => {
-      let placed = false;
-      for (let r = 0; r < rows.length; r++) {
-        const lastEnd = rows[r];
-        if (el.startTime >= lastEnd) {
-          rows[r] = el.endTime;
-          el.row = r;
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) {
-        el.row = rows.length;
-        rows.push(el.endTime);
-      }
+      if (el.layer === undefined) el.layer = 0;
     });
 
-    tracks.style.height = (rows.length * (rowHeight + rowGap) + 10) + 'px';
+    const maxLayer = Math.max(0, ...allElements.map(el => el.layer));
+    const rowHeight = 28;
+    const rowGap = 4;
+    
+    tracks.style.height = ((maxLayer + 1) * (rowHeight + rowGap) + 10) + 'px';
 
     const typeColors = {
       text: '#f59e0b',
@@ -1821,7 +1829,7 @@ function vm2RenderTimeline() {
     tracks.innerHTML = allElements.map(el => {
       const left = el.startTime * vm2.timelineZoom;
       const width = Math.max((el.endTime - el.startTime) * vm2.timelineZoom, 20);
-      const top = el.row * (rowHeight + rowGap);
+      const top = el.layer * (rowHeight + rowGap);
       const color = typeColors[el.type] || '#6b7280';
       const selected = vm2.selectedElementId === el.id;
       const icon = vm2GetElementIcon(el);
@@ -1919,8 +1927,10 @@ function vm2TimelineBarMouseDown(event, id) {
     vm2.timelineDragData = {
       id,
       startX: event.clientX,
+      startY: event.clientY,
       originalStart: el.startTime,
       originalEnd: el.endTime,
+      originalLayer: el.layer || 0,
     };
   }
 
@@ -1985,10 +1995,7 @@ document.addEventListener('mousemove', (event) => {
 
   // Element dragging on canvas
   if (vm2.isDraggingElement && vm2.selectedElementId) {
-    const step = vm2Step();
-    if (!step) return;
-    
-    const el = step.elements.find(e => e.id === vm2.selectedElementId);
+    const el = vm2FindElement(vm2.selectedElementId);
     if (!el) return;
 
     el.x = (event.clientX - vm2.dragOffset.x) / vm2.canvasZoom;
@@ -1999,10 +2006,7 @@ document.addEventListener('mousemove', (event) => {
 
   // Element resizing on canvas
   if (vm2.isResizingElement && vm2.selectedElementId && vm2.resizeHandle) {
-    const step = vm2Step();
-    if (!step) return;
-    
-    const el = step.elements.find(e => e.id === vm2.selectedElementId);
+    const el = vm2FindElement(vm2.selectedElementId);
     if (!el) return;
 
     const dx = (event.clientX - vm2.dragOffset.x) / vm2.canvasZoom;
@@ -2025,21 +2029,41 @@ document.addEventListener('mousemove', (event) => {
     const { el, step } = result;
 
     const dx = event.clientX - vm2.timelineDragData.startX;
+    const dy = event.clientY - vm2.timelineDragData.startY;
     const dt = dx / vm2.timelineZoom;
 
     if (vm2.timelineDragData.side === 'left') {
-      // Constrain to step start and element end
-      el.startTime = Math.max(step.startTime, Math.min(vm2.timelineDragData.originalStart + dt, el.endTime - 0.1));
+      el.startTime = Math.max(0, Math.min(vm2.timelineDragData.originalStart + dt, el.endTime - 0.1));
     } else if (vm2.timelineDragData.side === 'right') {
-      // Constrain to step end and element start
-      el.endTime = Math.min(step.endTime, Math.max(vm2.timelineDragData.originalEnd + dt, el.startTime + 0.1));
+      el.endTime = Math.min(vm2.duration, Math.max(vm2.timelineDragData.originalEnd + dt, el.startTime + 0.1));
     } else {
-      // Move both - keep within step bounds
       const duration = vm2.timelineDragData.originalEnd - vm2.timelineDragData.originalStart;
       let newStart = vm2.timelineDragData.originalStart + dt;
-      newStart = Math.max(step.startTime, Math.min(newStart, step.endTime - duration));
+      newStart = Math.max(0, Math.min(newStart, vm2.duration - duration));
       el.startTime = newStart;
       el.endTime = newStart + duration;
+
+      // Vertical track dragging logic
+      const rowHeight = 28;
+      const rowGap = 4;
+      const totalH = rowHeight + rowGap;
+      const layerShift = Math.round(dy / totalH);
+      const newLayer = Math.max(0, vm2.timelineDragData.originalLayer + layerShift);
+      
+      if (newLayer !== el.layer) {
+        // Swap layer with any element at that layer to simulate reordering
+        const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
+        const clash = allElements.find(e => e.id !== el.id && e.layer === newLayer);
+        if (clash) {
+          clash.layer = el.layer;
+        }
+        el.layer = newLayer;
+        vm2.timelineDragData.originalLayer = newLayer;
+        vm2.timelineDragData.startY = event.clientY; // reset base
+        
+        vm2RenderElements(); // because z-index changed
+        vm2RenderElementsList();
+      }
     }
 
     vm2RenderTimeline();
@@ -2106,8 +2130,20 @@ document.addEventListener('mouseup', () => {
   }
 
   if (vm2.isDraggingTimelineBar) {
+    if (vm2.timelineDragData) {
+      const result = vm2FindElementWithStep(vm2.timelineDragData.id);
+      if (result) {
+        const { el, step: oldStep } = result;
+        const newStep = vm2.project.steps.find(s => el.startTime >= s.startTime && el.startTime < s.endTime) || vm2.project.steps[vm2.project.steps.length - 1];
+        if (newStep && newStep !== oldStep) {
+          oldStep.elements = oldStep.elements.filter(e => e.id !== el.id);
+          newStep.elements.push(el);
+        }
+      }
+    }
     vm2.isDraggingTimelineBar = false;
     vm2.timelineDragData = null;
+    vm2RenderTimeline();
     vm2RenderProps();
   }
 
