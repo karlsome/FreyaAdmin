@@ -23,6 +23,8 @@ let vm2 = {
   dragOffset: { x: 0, y: 0 },
   isDraggingTimelineBar: false,
   timelineDragData: null,
+  isResizingStep: false,
+  stepResizeData: null,
   ffmpeg: null,
   ffmpegLoaded: false,
 };
@@ -167,13 +169,13 @@ function loadVideoManual2Page() {
               <div id="vm2-time-ruler" class="sticky top-0 h-6 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 z-10"></div>
               
               <!-- Tracks Container -->
-              <div id="vm2-tracks" class="relative" style="min-height: 150px;">
-                <!-- Video Track -->
-                <div id="vm2-video-track" class="absolute left-0 right-0 h-8 top-1" style="z-index: 1;">
+              <div id="vm2-tracks" class="relative" style="min-height: 150px; display: flex; flex-direction: column-reverse;">
+                <!-- Element Tracks (at top, rendered first in reversed flex) -->
+                <div id="vm2-element-tracks" class="relative flex-1" style="z-index: 5; min-height: 80px;"></div>
+                <!-- Video/Steps Track (at bottom) -->
+                <div id="vm2-video-track" class="relative h-8 flex-shrink-0" style="z-index: 1;">
                   <div id="vm2-step-segments" class="h-full"></div>
                 </div>
-                <!-- Element Tracks -->
-                <div id="vm2-element-tracks" class="absolute left-0 right-0" style="top: 36px; z-index: 5;"></div>
               </div>
 
               <!-- Hover Indicator (gray) -->
@@ -402,6 +404,21 @@ function loadVideoManual2Page() {
     }
     .vm2-timeline-bar .resize-left { left: 0; }
     .vm2-timeline-bar .resize-right { right: 0; }
+    .vm2-step-seg .resize-left,
+    .vm2-step-seg .resize-right {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      cursor: ew-resize;
+      background: rgba(255,255,255,0.3);
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .vm2-step-seg:hover .resize-left,
+    .vm2-step-seg:hover .resize-right { opacity: 1; }
+    .vm2-step-seg .resize-left { left: 0; border-radius: 4px 0 0 4px; }
+    .vm2-step-seg .resize-right { right: 0; border-radius: 0 4px 4px 0; }
     #vm2-timeline-scroll::-webkit-scrollbar { height: 8px; }
     #vm2-timeline-scroll::-webkit-scrollbar-track { background: #1f2937; }
     #vm2-timeline-scroll::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
@@ -471,6 +488,8 @@ function vm2OnVideoLoaded() {
       description: '',
       startTime: 0,
       endTime: video.duration,
+      sourceStart: 0,
+      sourceEnd: video.duration,
       elements: [],
     }];
   }
@@ -483,30 +502,64 @@ function vm2OnVideoLoaded() {
 
 function vm2OnTimeUpdate() {
   const video = vm2Video();
-  if (!video) return;
-  
-  vm2.currentTime = video.currentTime;
-  
+  if (!video || !vm2.project || !vm2.project.steps.length) return;
+
+  // We rely on vm2.currentStepIdx to know which step we are currently "inside"
+  let activeStepIdx = vm2.currentStepIdx;
+  let activeStep = vm2.project.steps[activeStepIdx];
+  if (!activeStep) return;
+
+  let srcPos = video.currentTime;
+  let srcStart = activeStep.sourceStart ?? activeStep.startTime;
+  let srcEnd = activeStep.sourceEnd ?? activeStep.endTime;
+
+  // If playing, strictly enforce the active step's boundaries
+  if (vm2.playing) {
+    if (srcPos >= srcEnd - 0.05) { // Reaching the end of the current clip
+      // Jump to the next step
+      activeStepIdx++;
+      if (activeStepIdx < vm2.project.steps.length) {
+        vm2.currentStepIdx = activeStepIdx;
+        activeStep = vm2.project.steps[activeStepIdx];
+        video.currentTime = activeStep.sourceStart ?? activeStep.startTime;
+        vm2RenderSteps();
+        vm2RenderElements();
+        return; // wait for next timeupdate
+      } else {
+        // Reached the end of the entire sequence
+        video.pause();
+        vm2.playing = false;
+        const btn = vm2Get('vm2-play-btn');
+        if (btn) btn.innerHTML = '<i class="ri-play-fill text-lg"></i>';
+        
+        vm2.currentTime = vm2.duration;
+        vm2SeekTo(vm2.duration);
+        return;
+      }
+    } else if (srcPos < srcStart) {
+      // Somehow we are before the start? Correct it.
+      video.currentTime = srcStart;
+      return;
+    }
+  }
+
+  // Map the valid source position back to timeline time
+  const offset = Math.max(0, srcPos - srcStart);
+  vm2.currentTime = activeStep.startTime + offset;
+
+  // Clamp just in case
+  if (vm2.currentTime > activeStep.endTime) {
+     vm2.currentTime = activeStep.endTime;
+  }
+
   // Update time display
   const display = vm2Get('vm2-time-display');
   if (display) {
     display.textContent = vm2Fmt(vm2.currentTime) + ' / ' + vm2Fmt(vm2.duration);
   }
 
-  // Update playhead position
+  // Update playhead
   vm2UpdatePlayhead();
-
-  // Check if we need to switch steps
-  const stepIdx = vm2.project.steps.findIndex(s => 
-    vm2.currentTime >= s.startTime && vm2.currentTime < s.endTime
-  );
-  if (stepIdx >= 0 && stepIdx !== vm2.currentStepIdx) {
-    vm2.currentStepIdx = stepIdx;
-    vm2RenderSteps();
-    vm2RenderElements();
-  }
-
-  // Update visible elements
   vm2UpdateVisibleElements();
 }
 
@@ -525,6 +578,16 @@ function vm2TogglePlay() {
   if (!video) return;
 
   if (video.paused) {
+    // Before playing, ensure video.currentTime is at the correct source position
+    // (vm2.currentTime is the timeline position, need to map to source)
+    const step = vm2.project.steps.find(s =>
+      vm2.currentTime >= s.startTime && vm2.currentTime < s.endTime
+    );
+    if (step) {
+      const offset = vm2.currentTime - step.startTime;
+      const srcPos = (step.sourceStart ?? step.startTime) + offset;
+      video.currentTime = srcPos;
+    }
     video.play();
     vm2.playing = true;
     vm2Get('vm2-play-btn').innerHTML = '<i class="ri-pause-fill text-lg"></i>';
@@ -535,11 +598,47 @@ function vm2TogglePlay() {
   }
 }
 
-function vm2SeekTo(time) {
+function vm2SeekTo(timelineTime) {
   const video = vm2Video();
-  if (!video) return;
-  video.currentTime = Math.max(0, Math.min(time, vm2.duration));
-  vm2OnTimeUpdate();
+  if (!video || !vm2.project) return;
+
+  // Clamp timelineTime within total duration
+  timelineTime = Math.max(0, Math.min(timelineTime, vm2.duration));
+
+  // Find the step that contains this timeline position
+  const stepIdx = vm2.project.steps.findIndex(s =>
+    timelineTime >= s.startTime && timelineTime <= s.endTime
+  );
+
+  let step = null;
+  if (stepIdx >= 0) {
+    step = vm2.project.steps[stepIdx];
+    vm2.currentStepIdx = stepIdx; // Update tracking!
+  } else if (vm2.project.steps.length > 0) {
+    // If exact match not found (e.g. at boundaries), snap to closest
+    step = timelineTime <= vm2.project.steps[0].startTime 
+           ? vm2.project.steps[0] 
+           : vm2.project.steps[vm2.project.steps.length - 1];
+    vm2.currentStepIdx = timelineTime <= vm2.project.steps[0].startTime ? 0 : vm2.project.steps.length - 1;
+  }
+
+  if (step) {
+    // Translate timeline position → source video position
+    const offset = Math.max(0, timelineTime - step.startTime);
+    const srcPos = (step.sourceStart ?? step.startTime) + offset;
+    const videoDuration = video.duration || vm2.duration;
+    // Don't exceed the step's source clip!
+    const activeSrcEnd = step.sourceEnd ?? step.endTime;
+    video.currentTime = Math.max(0, Math.min(srcPos, activeSrcEnd, videoDuration));
+  }
+
+  vm2.currentTime = timelineTime;
+  vm2UpdatePlayhead();
+  const display = vm2Get('vm2-time-display');
+  if (display) display.textContent = vm2Fmt(vm2.currentTime) + ' / ' + vm2Fmt(vm2.duration);
+  vm2RenderSteps();
+  vm2RenderElements();
+  vm2UpdateVisibleElements();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -627,20 +726,27 @@ function vm2RenderSteps() {
   count.textContent = vm2.project.steps.length;
   
   list.innerHTML = vm2.project.steps.map((step, i) => `
-    <div class="vm2-step-item p-2 rounded border border-gray-200 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${i === vm2.currentStepIdx ? 'active' : ''}"
+    <div class="vm2-step-item relative p-2 rounded border border-gray-200 dark:border-gray-600 cursor-grab hover:bg-gray-50 dark:hover:bg-gray-700 group ${i === vm2.currentStepIdx ? 'active' : ''}"
          onclick="vm2SelectStep(${i})"
          draggable="true"
          ondragstart="vm2StepDragStart(event, ${i})"
-         ondragover="event.preventDefault()"
-         ondrop="vm2StepDrop(event, ${i})">
+         ondragover="event.preventDefault(); this.classList.add('ring-2', 'ring-blue-400')"
+         ondragleave="this.classList.remove('ring-2', 'ring-blue-400')"
+         ondrop="this.classList.remove('ring-2', 'ring-blue-400'); vm2StepDrop(event, ${i})">
       <div class="flex items-center gap-2">
-        <span class="w-5 h-5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs flex items-center justify-center font-medium">${i + 1}</span>
+        <i class="ri-draggable text-gray-400 cursor-grab flex-shrink-0"></i>
+        <span class="w-5 h-5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs flex items-center justify-center font-medium flex-shrink-0">${i + 1}</span>
         <input type="text" value="${step.label}" 
-               class="flex-1 text-xs bg-transparent border-none focus:outline-none dark:text-white truncate"
+               class="flex-1 text-xs font-medium bg-transparent border-none focus:outline-none dark:text-white truncate"
                onclick="event.stopPropagation()"
                onchange="vm2.project.steps[${i}].label = this.value; vm2RenderTimeline()">
       </div>
-      <div class="text-[10px] text-gray-400 mt-1 pl-7">${vm2Fmt(step.startTime)} – ${vm2Fmt(step.endTime)}</div>
+      <div class="text-[10px] text-gray-400 mt-1 pl-10">${vm2Fmt(step.startTime)} – ${vm2Fmt(step.endTime)}</div>
+      <input type="text" value="${step.description || ''}" 
+             placeholder="Add description..."
+             class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 ml-10 w-[calc(100%-2.5rem)] bg-transparent border-none focus:outline-none truncate placeholder-gray-300 dark:placeholder-gray-600"
+             onclick="event.stopPropagation()"
+             onchange="vm2.project.steps[${i}].description = this.value">
       ${vm2.project.steps.length > 1 ? `
         <button onclick="event.stopPropagation(); vm2DeleteStep(${i})" class="absolute top-1 right-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100">
           <i class="ri-close-line text-sm"></i>
@@ -662,6 +768,18 @@ function vm2SelectStep(idx) {
   vm2RenderSteps();
   vm2RenderElements();
   vm2RenderProps();
+  vm2SwitchTab('properties');
+}
+
+function vm2UpdateStepProp(prop, value) {
+  const step = vm2Step();
+  if (!step) return;
+  
+  step[prop] = value;
+  
+  vm2RenderSteps();
+  vm2RenderTimeline();
+  // Don't re-render props to avoid losing focus
 }
 
 function vm2AddStep() {
@@ -697,14 +815,21 @@ function vm2CutAtPlayhead() {
     description: '',
     startTime: t,
     endTime: step.endTime,
+    sourceStart: (step.sourceStart ?? step.startTime) + (t - step.startTime),
+    sourceEnd: step.sourceEnd ?? step.endTime,
     elements: [],
   };
 
   step.endTime = t;
+  step.sourceEnd = (step.sourceStart ?? step.startTime) + (t - step.startTime);
   vm2.project.steps.splice(vm2.currentStepIdx + 1, 0, newStep);
 
-  // Renumber
-  vm2.project.steps.forEach((s, i) => s.label = `Step ${i + 1}`);
+  // Renumber only default labels
+  vm2.project.steps.forEach((s, i) => {
+    if (!s.label || /^Step \d+$/.test(s.label)) {
+      s.label = `Step ${i + 1}`;
+    }
+  });
 
   vm2RenderSteps();
   vm2RenderTimeline();
@@ -712,26 +837,52 @@ function vm2CutAtPlayhead() {
 
 function vm2DeleteStep(idx) {
   if (vm2.project.steps.length <= 1) {
-    alert('Cannot delete the only step');
+    if (!confirm('Delete the last step? This will reset the project but keep the video.')) return;
+    
+    // Reset to single step covering full video
+    vm2.project.steps = [{
+      id: vm2Id().replace('el_', 'step_'),
+      label: 'Step 1',
+      description: '',
+      startTime: 0,
+      endTime: vm2.duration,
+      sourceStart: 0,
+      sourceEnd: vm2.duration,
+      elements: [],
+    }];
+    vm2.currentStepIdx = 0;
+    vm2.selectedElementId = null;
+    vm2SeekTo(0);
+    vm2RenderSteps();
+    vm2RenderTimeline();
+    vm2RenderElements();
+    vm2RenderProps();
     return;
   }
   if (!confirm(`Delete "${vm2.project.steps[idx].label}"?`)) return;
 
-  // Expand adjacent step to fill the gap
-  const deleted = vm2.project.steps[idx];
-  if (idx > 0) {
-    vm2.project.steps[idx - 1].endTime = deleted.endTime;
-  } else if (vm2.project.steps.length > 1) {
-    vm2.project.steps[1].startTime = deleted.startTime;
-  }
-
   vm2.project.steps.splice(idx, 1);
-  vm2.project.steps.forEach((s, i) => s.label = `Step ${i + 1}`);
+
+  // Compact timeline positions while keeping sourceStart/sourceEnd frozen
+  let time = 0;
+  vm2.project.steps.forEach((s, i) => {
+    const srcDuration = (s.sourceEnd ?? s.endTime) - (s.sourceStart ?? s.startTime);
+    s.startTime = time;
+    s.endTime = time + srcDuration;
+    if (!s.label || /^Step \d+$/.test(s.label)) {
+      s.label = `Step ${i + 1}`;
+    }
+    time += srcDuration;
+  });
 
   if (vm2.currentStepIdx >= vm2.project.steps.length) {
     vm2.currentStepIdx = vm2.project.steps.length - 1;
   }
 
+  // Update total duration to match remaining steps
+  vm2.duration = time;
+
+  vm2SeekTo(vm2.project.steps[vm2.currentStepIdx]?.startTime ?? 0);
   vm2RenderSteps();
   vm2RenderTimeline();
 }
@@ -748,14 +899,17 @@ function vm2StepDrop(event, targetIdx) {
   const [moved] = vm2.project.steps.splice(sourceIdx, 1);
   vm2.project.steps.splice(targetIdx, 0, moved);
   
-  // Re-calculate times based on new order
+  // Re-calculate timeline positions based on new order — sourceStart/sourceEnd stay frozen
   let time = 0;
   vm2.project.steps.forEach((s, i) => {
-    const duration = s.endTime - s.startTime;
+    const srcDuration = (s.sourceEnd ?? s.endTime) - (s.sourceStart ?? s.startTime);
     s.startTime = time;
-    s.endTime = time + duration;
-    s.label = `Step ${i + 1}`;
-    time += duration;
+    s.endTime = time + srcDuration;
+    // Renumber only default labels
+    if (!s.label || /^Step \d+$/.test(s.label)) {
+      s.label = `Step ${i + 1}`;
+    }
+    time += srcDuration;
   });
 
   if (vm2.currentStepIdx === sourceIdx) {
@@ -764,6 +918,44 @@ function vm2StepDrop(event, targetIdx) {
 
   vm2RenderSteps();
   vm2RenderTimeline();
+}
+
+function vm2StepResizeStart(event, idx, side) {
+  event.preventDefault();
+  event.stopPropagation();
+  
+  const step = vm2.project.steps[idx];
+  if (!step) return;
+  
+  vm2.isResizingStep = true;
+  vm2.stepResizeData = {
+    idx,
+    side,
+    startX: event.clientX,
+    originalStart: step.startTime,
+    originalEnd: step.endTime,
+    originalSourceStart: step.sourceStart ?? step.startTime,
+    originalSourceEnd: step.sourceEnd ?? step.endTime,
+  };
+}
+
+function vm2ConstrainElementsToStep(step) {
+  if (!step || !step.elements) return;
+  
+  step.elements.forEach(el => {
+    // Constrain element start time to be within step bounds
+    if (el.startTime < step.startTime) {
+      el.startTime = step.startTime;
+    }
+    // Constrain element end time to be within step bounds
+    if (el.endTime > step.endTime) {
+      el.endTime = step.endTime;
+    }
+    // Ensure minimum duration
+    if (el.endTime - el.startTime < 0.1) {
+      el.endTime = Math.min(el.startTime + 0.5, step.endTime);
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -781,6 +973,10 @@ function vm2AddElement(type, subtype) {
   const centerX = vm2.project.width / 2;
   const centerY = vm2.project.height / 2;
 
+  // Default 4-second duration, starting at current playhead position
+  const elementStart = Math.max(step.startTime, Math.min(vm2.currentTime, step.endTime - 4));
+  const elementEnd = Math.min(elementStart + 4, step.endTime);
+
   let element = {
     id,
     type,
@@ -789,8 +985,8 @@ function vm2AddElement(type, subtype) {
     y: centerY - 50,
     width: 200,
     height: 100,
-    startTime: step.startTime,
-    endTime: step.endTime,
+    startTime: elementStart,
+    endTime: elementEnd,
     opacity: 100,
     rotation: 0,
     locked: false,
@@ -858,6 +1054,9 @@ async function vm2HandleImageUpload(event) {
     if (w > maxW) { h *= maxW / w; w = maxW; }
     if (h > maxH) { w *= maxH / h; h = maxH; }
 
+    const elementStart = Math.max(step.startTime, Math.min(vm2.currentTime, step.endTime - 4));
+    const elementEnd = Math.min(elementStart + 4, step.endTime);
+
     const element = {
       id: vm2Id(),
       type: 'image',
@@ -867,8 +1066,8 @@ async function vm2HandleImageUpload(event) {
       y: (vm2.project.height - h) / 2,
       width: w,
       height: h,
-      startTime: step.startTime,
-      endTime: step.endTime,
+      startTime: elementStart,
+      endTime: elementEnd,
       opacity: 100,
       rotation: 0,
       locked: false,
@@ -900,14 +1099,17 @@ async function vm2HandleAudioUpload(event) {
 
   const url = URL.createObjectURL(file);
 
+  const elementStart = Math.max(step.startTime, Math.min(vm2.currentTime, step.endTime - 4));
+  const elementEnd = Math.min(elementStart + 4, step.endTime);
+
   const element = {
     id: vm2Id(),
     type: 'audio',
     audioUrl: url,
     audioBlob: file,
     name: file.name,
-    startTime: step.startTime,
-    endTime: step.endTime,
+    startTime: elementStart,
+    endTime: elementEnd,
     volume: 100,
   };
 
@@ -1159,16 +1361,65 @@ function vm2RenderProps() {
   const container = vm2Get('vm2-props-content');
   if (!container) return;
 
-  if (!vm2.selectedElementId) {
-    container.innerHTML = '<p class="text-xs text-gray-400 italic text-center py-8">Select an element to edit its properties</p>';
+  const step = vm2Step();
+  if (!step) {
+    container.innerHTML = '<p class="text-xs text-gray-400 italic text-center py-8">Load a video first</p>';
     return;
   }
 
-  const step = vm2Step();
-  if (!step) return;
+  // If no element selected, show step properties
+  if (!vm2.selectedElementId) {
+    container.innerHTML = `
+      <!-- Step Properties -->
+      <div class="mb-4">
+        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1">
+          <i class="ri-film-line"></i>Step ${vm2.currentStepIdx + 1}
+        </p>
+        <div class="mb-3">
+          <label class="text-[10px] text-gray-400">Title</label>
+          <input type="text" value="${step.label}" onchange="vm2UpdateStepProp('label', this.value)"
+            class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white">
+        </div>
+        <div class="mb-3">
+          <label class="text-[10px] text-gray-400">Description</label>
+          <textarea onchange="vm2UpdateStepProp('description', this.value)" rows="3"
+            class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white resize-none" placeholder="Describe this step...">${step.description || ''}</textarea>
+        </div>
+      </div>
+
+      <!-- Timing -->
+      <div class="mb-4">
+        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1">
+          <i class="ri-time-line"></i>Timing
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-[10px] text-gray-400">Start</label>
+            <input type="text" value="${vm2Fmt(step.startTime)}" readonly
+              class="w-full px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-400">End</label>
+            <input type="text" value="${vm2Fmt(step.endTime)}" readonly
+              class="w-full px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+          </div>
+        </div>
+        <p class="text-[10px] text-gray-400 mt-1">Duration: ${vm2Fmt(step.endTime - step.startTime)}</p>
+      </div>
+
+      <!-- Delete button -->
+      <button onclick="vm2DeleteStep(${vm2.currentStepIdx})" class="w-full py-2 mt-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-xs flex items-center justify-center gap-1">
+        <i class="ri-delete-bin-line"></i>${vm2.project.steps.length > 1 ? 'Delete Step' : 'Reset Step'}
+      </button>
+    `;
+    return;
+  }
 
   const el = step.elements.find(e => e.id === vm2.selectedElementId);
-  if (!el) return;
+  if (!el) {
+    vm2.selectedElementId = null;
+    return vm2RenderProps();
+  }
 
   let html = `
     <!-- Layer / General -->
@@ -1427,7 +1678,7 @@ function vm2RenderTimeline() {
     ruler.innerHTML = rulerHtml;
   }
 
-  // Step segments (video track)
+  // Step segments (video track) - draggable to reorder
   const segs = vm2Get('vm2-step-segments');
   if (segs) {
     segs.style.width = timelineWidth + 'px';
@@ -1437,11 +1688,18 @@ function vm2RenderTimeline() {
       const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f97316', '#10b981', '#6366f1'];
       const color = colors[i % colors.length];
       return `
-        <div class="absolute h-full rounded cursor-pointer flex items-center px-2 text-xs text-white font-medium overflow-hidden"
+        <div class="absolute h-full rounded flex items-center px-2 text-xs text-white font-medium overflow-hidden vm2-step-seg"
              style="left: ${left}px; width: ${width}px; background: ${color};"
+             draggable="true"
+             ondragstart="vm2StepDragStart(event, ${i})"
+             ondragover="event.preventDefault(); this.style.outline='2px solid white'"
+             ondragleave="this.style.outline='none'"
+             ondrop="this.style.outline='none'; vm2StepDrop(event, ${i})"
              onclick="vm2SelectStep(${i})"
-             title="${step.label}">
-          ${step.label}
+             title="${step.label}: ${vm2Fmt(step.startTime)} - ${vm2Fmt(step.endTime)}">
+          <div class="resize-left" onmousedown="event.stopPropagation(); vm2StepResizeStart(event, ${i}, 'left')"></div>
+          <span class="flex-1 truncate px-2">${step.label}</span>
+          <div class="resize-right" onmousedown="event.stopPropagation(); vm2StepResizeStart(event, ${i}, 'right')"></div>
         </div>
       `;
     }).join('');
@@ -1630,6 +1888,14 @@ function vm2FindElement(id) {
   return null;
 }
 
+function vm2FindElementWithStep(id) {
+  for (const step of vm2.project.steps) {
+    const el = step.elements.find(e => e.id === id);
+    if (el) return { el, step };
+  }
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  GLOBAL MOUSE HANDLERS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1672,26 +1938,80 @@ document.addEventListener('mousemove', (event) => {
 
   // Timeline bar dragging
   if (vm2.isDraggingTimelineBar && vm2.timelineDragData) {
-    const el = vm2FindElement(vm2.timelineDragData.id);
-    if (!el) return;
+    const result = vm2FindElementWithStep(vm2.timelineDragData.id);
+    if (!result) return;
+    const { el, step } = result;
 
     const dx = event.clientX - vm2.timelineDragData.startX;
     const dt = dx / vm2.timelineZoom;
 
     if (vm2.timelineDragData.side === 'left') {
-      el.startTime = Math.max(0, Math.min(vm2.timelineDragData.originalStart + dt, el.endTime - 0.1));
+      // Constrain to step start and element end
+      el.startTime = Math.max(step.startTime, Math.min(vm2.timelineDragData.originalStart + dt, el.endTime - 0.1));
     } else if (vm2.timelineDragData.side === 'right') {
-      el.endTime = Math.min(vm2.duration, Math.max(vm2.timelineDragData.originalEnd + dt, el.startTime + 0.1));
+      // Constrain to step end and element start
+      el.endTime = Math.min(step.endTime, Math.max(vm2.timelineDragData.originalEnd + dt, el.startTime + 0.1));
     } else {
-      // Move both
+      // Move both - keep within step bounds
       const duration = vm2.timelineDragData.originalEnd - vm2.timelineDragData.originalStart;
       let newStart = vm2.timelineDragData.originalStart + dt;
-      newStart = Math.max(0, Math.min(newStart, vm2.duration - duration));
+      newStart = Math.max(step.startTime, Math.min(newStart, step.endTime - duration));
       el.startTime = newStart;
       el.endTime = newStart + duration;
     }
 
     vm2RenderTimeline();
+  }
+
+  // Step/video clip resizing
+  if (vm2.isResizingStep && vm2.stepResizeData) {
+    const d = vm2.stepResizeData;
+    const step = vm2.project.steps[d.idx];
+    if (!step) return;
+
+    const dx = event.clientX - d.startX;
+    const dt = dx / vm2.timelineZoom;
+    const minDuration = 0.5; // Minimum step duration
+
+    if (d.side === 'left') {
+      // Resize left - trim beginning of this step, expand previous step
+      let newStart = d.originalStart + dt;
+      newStart = Math.max(0, Math.min(newStart, d.originalEnd - minDuration));
+      const newSourceStart = d.originalSourceStart + (newStart - d.originalStart);
+      
+      // If previous step exists, adjust its end time and source end
+      if (d.idx > 0) {
+        const prevStep = vm2.project.steps[d.idx - 1];
+        newStart = Math.max(prevStep.startTime + minDuration, newStart);
+        prevStep.endTime = newStart;
+        prevStep.sourceEnd = newSourceStart;
+        vm2ConstrainElementsToStep(prevStep);
+      }
+      step.startTime = newStart;
+      step.sourceStart = newSourceStart;
+    } else if (d.side === 'right') {
+      // Resize right - trim end of this step, expand next step
+      let newEnd = d.originalEnd + dt;
+      newEnd = Math.min(vm2.duration, Math.max(newEnd, d.originalStart + minDuration));
+      const newSourceEnd = d.originalSourceEnd + (newEnd - d.originalEnd);
+      
+      // If next step exists, adjust its start time and source start
+      if (d.idx < vm2.project.steps.length - 1) {
+        const nextStep = vm2.project.steps[d.idx + 1];
+        newEnd = Math.min(nextStep.endTime - minDuration, newEnd);
+        nextStep.startTime = newEnd;
+        nextStep.sourceStart = newSourceEnd;
+        vm2ConstrainElementsToStep(nextStep);
+      }
+      step.endTime = newEnd;
+      step.sourceEnd = newSourceEnd;
+    }
+
+    // Constrain current step's elements
+    vm2ConstrainElementsToStep(step);
+
+    vm2RenderTimeline();
+    vm2RenderSteps();
   }
 });
 
@@ -1707,6 +2027,11 @@ document.addEventListener('mouseup', () => {
     vm2.isDraggingTimelineBar = false;
     vm2.timelineDragData = null;
     vm2RenderProps();
+  }
+
+  if (vm2.isResizingStep) {
+    vm2.isResizingStep = false;
+    vm2.stepResizeData = null;
   }
 });
 
@@ -1873,103 +2198,131 @@ async function vm2Export() {
   vm2Get('vm2-export-done').classList.add('hidden');
   vm2Get('vm2-export-error').classList.add('hidden');
   vm2Get('vm2-export-bar').style.width = '0%';
-  vm2Get('vm2-export-status').textContent = 'Loading FFmpeg...';
+  vm2Get('vm2-export-status').textContent = 'Preparing export...';
 
   try {
-    // Load FFmpeg if not loaded
-    if (!vm2.ffmpegLoaded) {
-      vm2Get('vm2-export-status').textContent = 'Loading FFmpeg (first time may take a moment)...';
-      
-      // Dynamic import FFmpeg
-      const { FFmpeg } = await import('https://esm.sh/@ffmpeg/ffmpeg@0.12.10');
-      const { fetchFile, toBlobURL } = await import('https://esm.sh/@ffmpeg/util@0.12.1');
-      
-      vm2.ffmpeg = new FFmpeg();
-      
-      // Load with CORS-friendly URLs
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      await vm2.ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      });
-      
-      vm2.ffmpegLoaded = true;
-      vm2._fetchFile = fetchFile;
+    // For now, use canvas-based export (records the preview with overlays)
+    // This approach works without CORS issues
+    vm2Get('vm2-export-status').textContent = 'Rendering video with overlays...';
+    vm2Get('vm2-export-detail').textContent = 'Using browser-based rendering';
+    
+    // Create a canvas to composite video + overlays
+    const video = vm2Video();
+    const canvas = document.createElement('canvas');
+    canvas.width = vm2.project.width;
+    canvas.height = vm2.project.height;
+    const ctx = canvas.getContext('2d');
+    
+    // Set up MediaRecorder
+    const stream = canvas.captureStream(30);
+    
+    // Try to get audio from video
+    if (video.captureStream) {
+      try {
+        const videoStream = video.captureStream();
+        const audioTracks = videoStream.getAudioTracks();
+        audioTracks.forEach(track => stream.addTrack(track));
+      } catch (e) {
+        console.log('Could not capture audio:', e);
+      }
     }
-
-    vm2Get('vm2-export-status').textContent = 'Processing video...';
-    vm2Get('vm2-export-bar').style.width = '10%';
-
-    const ffmpeg = vm2.ffmpeg;
-    const fetchFile = vm2._fetchFile;
-
-    // Write input video
-    await ffmpeg.writeFile('input.mp4', await fetchFile(vm2.project.videoBlob));
-    vm2Get('vm2-export-bar').style.width = '30%';
-
-    // Build filter complex for overlays
-    // For simplicity, we'll create a basic version that handles text overlays
-    // A full implementation would handle all element types
     
-    let filterComplex = '';
-    let filterCount = 0;
-    let lastOutput = '0:v';
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9') 
+        ? 'video/webm;codecs=vp9' 
+        : 'video/webm'
+    });
     
-    // Collect all elements and create FFmpeg filters
-    vm2.project.steps.forEach(step => {
-      step.elements.forEach(el => {
-        if (el.type === 'text') {
-          // FFmpeg drawtext filter
-          const text = el.text.replace(/'/g, "\\'").replace(/:/g, "\\:");
-          const filter = `drawtext=text='${text}':fontsize=${el.fontSize}:fontcolor=${el.color}:x=${Math.round(el.x)}:y=${Math.round(el.y)}:enable='between(t,${el.startTime},${el.endTime})'`;
-          
-          if (filterComplex) filterComplex += ',';
-          filterComplex += filter;
-          filterCount++;
+    const chunks = [];
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+    
+    // Start recording
+    mediaRecorder.start();
+    
+    const renderFrame = () => {
+      // Manage non-linear timeline playback routing for export!
+      const activeStepIdx = vm2.currentStepIdx;
+      const activeStep = vm2.project.steps[activeStepIdx];
+      
+      let effectiveTime = video.currentTime;
+      let shouldRender = true;
+
+      if (activeStep) {
+        // If we crossed the end boundary for this step's source clip
+        if (video.currentTime >= (activeStep.sourceEnd ?? activeStep.endTime) - 0.05) {
+          if (activeStepIdx + 1 < vm2.project.steps.length) {
+            vm2.currentStepIdx++;
+            video.currentTime = vm2.project.steps[vm2.currentStepIdx].sourceStart ?? vm2.project.steps[vm2.currentStepIdx].startTime;
+            shouldRender = false; // Skip drawing this split-second
+          } else {
+            // Reached the end of the last step, stop!
+            video.pause();
+            mediaRecorder.stop();
+            return;
+          }
         }
-        // Note: Shapes and images would need more complex handling
-        // For a complete implementation, consider drawing to canvas and overlaying
-      });
-    });
+        
+        // Calculate effective timeline time for overlays
+        if (shouldRender) {
+          const offset = video.currentTime - (activeStep.sourceStart ?? activeStep.startTime);
+          effectiveTime = activeStep.startTime + offset;
+        }
+      }
 
-    vm2Get('vm2-export-status').textContent = 'Encoding video...';
-    vm2Get('vm2-export-bar').style.width = '50%';
-
-    // Run FFmpeg
-    let args = ['-i', 'input.mp4'];
+      if (shouldRender) {
+        // Draw video frame
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Draw overlays for effective timeline time
+        vm2.project.steps.forEach(step => {
+          step.elements.forEach(el => {
+            if (effectiveTime >= el.startTime && effectiveTime < el.endTime && el.type !== 'audio') {
+              vm2DrawElementOnCanvas(ctx, el);
+            }
+          });
+        });
+        
+        // Update progress
+        const progress = effectiveTime / vm2.duration;
+        vm2Get('vm2-export-bar').style.width = Math.min((progress * 95), 100) + '%';
+        vm2Get('vm2-export-detail').textContent = `${Math.round(progress * 100)}% rendered`;
+      }
+    };
     
-    if (filterComplex) {
-      args.push('-vf', filterComplex);
-    }
+    // Play video and render each frame
+    video.muted = true;
+    video.playbackRate = 1;
     
-    args.push('-c:a', 'copy', '-y', 'output.mp4');
-
-    // Set up progress handler
-    ffmpeg.on('progress', ({ progress }) => {
-      const pct = 50 + progress * 45;
-      vm2Get('vm2-export-bar').style.width = pct + '%';
-      vm2Get('vm2-export-detail').textContent = Math.round(progress * 100) + '% encoded';
+    await new Promise((resolve) => {
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        
+        vm2Get('vm2-export-bar').style.width = '100%';
+        vm2Get('vm2-export-progress').classList.add('hidden');
+        vm2Get('vm2-export-done').classList.remove('hidden');
+        vm2Get('vm2-export-download').href = url;
+        vm2Get('vm2-export-download').download = (vm2.project.title || 'video-manual') + '.webm';
+        
+        // Reset playback state
+        video.muted = false;
+        video.ontimeupdate = vm2OnTimeUpdate; // Restore original handler
+        resolve();
+      };
+      
+      // Override standard ontimeupdate to capture via renderFrame
+      video.ontimeupdate = renderFrame;
+      // Start playback at the very first step's source slice
+      if (vm2.project.steps.length > 0) {
+        vm2.currentStepIdx = 0;
+        video.currentTime = vm2.project.steps[0].sourceStart ?? vm2.project.steps[0].startTime;
+        video.play();
+      } else {
+        mediaRecorder.stop();
+      }
     });
-
-    await ffmpeg.exec(args);
-
-    vm2Get('vm2-export-bar').style.width = '95%';
-    vm2Get('vm2-export-status').textContent = 'Finalizing...';
-
-    // Read output
-    const data = await ffmpeg.readFile('output.mp4');
-    const blob = new Blob([data.buffer], { type: 'video/mp4' });
-    const url = URL.createObjectURL(blob);
-
-    vm2Get('vm2-export-bar').style.width = '100%';
-    vm2Get('vm2-export-progress').classList.add('hidden');
-    vm2Get('vm2-export-done').classList.remove('hidden');
-    vm2Get('vm2-export-download').href = url;
-    vm2Get('vm2-export-download').download = (vm2.project.title || 'video-manual') + '.mp4';
-
-    // Cleanup
-    await ffmpeg.deleteFile('input.mp4');
-    await ffmpeg.deleteFile('output.mp4');
 
   } catch (err) {
     console.error('[VM2] Export error:', err);
@@ -1977,6 +2330,70 @@ async function vm2Export() {
     vm2Get('vm2-export-error').classList.remove('hidden');
     vm2Get('vm2-export-error-msg').textContent = err.message;
   }
+}
+
+// Helper function to draw element on canvas for export
+function vm2DrawElementOnCanvas(ctx, el) {
+  ctx.save();
+  ctx.globalAlpha = (el.opacity || 100) / 100;
+  
+  if (el.rotation) {
+    ctx.translate(el.x + el.width/2, el.y + el.height/2);
+    ctx.rotate(el.rotation * Math.PI / 180);
+    ctx.translate(-(el.x + el.width/2), -(el.y + el.height/2));
+  }
+  
+  if (el.type === 'text') {
+    ctx.font = `${el.fontWeight || 'normal'} ${el.fontSize}px ${el.fontFamily || 'system-ui'}`;
+    ctx.fillStyle = el.color || '#ffffff';
+    ctx.textAlign = el.textAlign || 'center';
+    ctx.textBaseline = 'middle';
+    
+    const x = el.textAlign === 'left' ? el.x : el.textAlign === 'right' ? el.x + el.width : el.x + el.width/2;
+    ctx.fillText(el.text, x, el.y + el.height/2);
+  } else if (el.type === 'shape') {
+    ctx.strokeStyle = el.strokeColor || '#ffffff';
+    ctx.lineWidth = el.strokeWidth || 3;
+    
+    if (el.subtype === 'rect') {
+      if (el.fill) {
+        ctx.fillStyle = el.strokeColor;
+        ctx.fillRect(el.x, el.y, el.width, el.height);
+      } else {
+        ctx.strokeRect(el.x, el.y, el.width, el.height);
+      }
+    } else if (el.subtype === 'circle') {
+      ctx.beginPath();
+      ctx.ellipse(el.x + el.width/2, el.y + el.height/2, el.width/2, el.height/2, 0, 0, Math.PI * 2);
+      if (el.fill) {
+        ctx.fillStyle = el.strokeColor;
+        ctx.fill();
+      } else {
+        ctx.stroke();
+      }
+    } else if (el.subtype === 'arrow' || el.subtype === 'line') {
+      ctx.beginPath();
+      ctx.moveTo(el.x, el.y + el.height);
+      ctx.lineTo(el.x + el.width, el.y);
+      ctx.stroke();
+      
+      if (el.subtype === 'arrow') {
+        // Draw arrowhead
+        const angle = Math.atan2(-el.height, el.width);
+        const headLen = 15;
+        ctx.beginPath();
+        ctx.moveTo(el.x + el.width, el.y);
+        ctx.lineTo(el.x + el.width - headLen * Math.cos(angle - Math.PI/6), el.y - headLen * Math.sin(angle - Math.PI/6));
+        ctx.moveTo(el.x + el.width, el.y);
+        ctx.lineTo(el.x + el.width - headLen * Math.cos(angle + Math.PI/6), el.y - headLen * Math.sin(angle + Math.PI/6));
+        ctx.stroke();
+      }
+    }
+  } else if (el.type === 'image' && el._imgElement) {
+    ctx.drawImage(el._imgElement, el.x, el.y, el.width, el.height);
+  }
+  
+  ctx.restore();
 }
 
 function vm2CloseExportModal() {
