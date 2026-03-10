@@ -2,8 +2,8 @@
 //  VIDEO MANUAL CREATOR  –  powered by Creatomate Render API
 // ═══════════════════════════════════════════════════════════════
 
-const CREATOMATE_API_KEY  = '4f11b47d461448cebe1d6a6dd41d54bd1ba6b10e55a9115740d8bc099222f2c244e5ddd6114b8423b267e85f43fe340e';
-const CREATOMATE_BASE     = 'https://api.creatomate.com/v1';
+// Creatomate API calls go through server proxy (API key is server-side)
+// Uses global BASE_URL from charts.js
 const VM_DB               = 'Sasaki_Coating_MasterDB';
 const VM_COLLECTION       = 'videoManuals';
 
@@ -20,6 +20,10 @@ let vmDrawEnd         = { x: 0, y: 0 };
 let vmDraggingOv      = null;   // { id, offsetX, offsetY } when dragging an existing overlay
 let vmResizeRAF       = null;   // requestAnimationFrame for canvas resize
 let vmLastRenderUrl   = '';     // most recent exported video URL
+let vmZoomLevel       = 1;      // canvas zoom level (0.5 to 2)
+let vmTimelineZoom    = 1;      // timeline zoom (pixels per second)
+let vmDraggingTimelineOv = null; // for dragging overlay bars on timeline
+let vmDraggingStep    = null;   // for reordering steps
 
 // ── utility ─────────────────────────────────────────────────────────────────
 function vmFmt(sec) {
@@ -96,11 +100,22 @@ function loadVideoManualPage() {
 
         <!-- Player area (hidden until video loaded) -->
         <div id="vm-player-area" class="hidden flex-1 flex flex-col min-h-0">
+          
+          <!-- Zoom controls bar -->
+          <div class="bg-gray-900 px-3 py-1 flex items-center gap-2 border-b border-gray-700 flex-shrink-0">
+            <span class="text-gray-500 text-xs">Zoom:</span>
+            <button onclick="vmSetZoom(0.5)" class="vm-zoom-btn px-2 py-0.5 text-xs rounded text-gray-400 hover:text-white hover:bg-gray-700" data-zoom="0.5">50%</button>
+            <button onclick="vmSetZoom(0.75)" class="vm-zoom-btn px-2 py-0.5 text-xs rounded text-gray-400 hover:text-white hover:bg-gray-700" data-zoom="0.75">75%</button>
+            <button onclick="vmSetZoom(1)" class="vm-zoom-btn px-2 py-0.5 text-xs rounded bg-gray-700 text-white" data-zoom="1">100%</button>
+            <button onclick="vmSetZoom(1.5)" class="vm-zoom-btn px-2 py-0.5 text-xs rounded text-gray-400 hover:text-white hover:bg-gray-700" data-zoom="1.5">150%</button>
+            <button onclick="vmFitZoom()" class="px-2 py-0.5 text-xs rounded text-gray-400 hover:text-white hover:bg-gray-700">Fit</button>
+          </div>
+
           <!-- video + canvas -->
-          <div id="vm-video-outer" class="flex-1 flex items-center justify-center bg-black overflow-hidden">
-            <div id="vm-video-wrapper" class="relative" style="display:inline-block; line-height:0;">
+          <div id="vm-video-outer" class="flex-1 flex items-center justify-center bg-black overflow-auto">
+            <div id="vm-video-wrapper" class="relative" style="display:inline-block; line-height:0; transform-origin: center center;">
               <video id="vm-video" class="block"
-                style="max-width:100%; max-height:calc(100vh - 250px);"
+                style="max-width:none;"
                 ontimeupdate="vmOnTimeUpdate()"
                 onloadedmetadata="vmOnVideoLoaded()"
                 onended="vmOnVideoEnded()"></video>
@@ -108,34 +123,57 @@ function loadVideoManualPage() {
             </div>
           </div>
 
-          <!-- Timeline + controls -->
-          <div class="bg-gray-800 px-3 pt-2 pb-2 flex-shrink-0">
-            <!-- Step-coloured progress bar -->
-            <div id="vm-timeline"
-              class="relative h-5 mb-2 rounded overflow-hidden cursor-pointer select-none"
-              onclick="vmSeekTo(event)"
-              title="Click to seek">
-              <div id="vm-step-segs" class="absolute inset-0 flex"></div>
-              <div id="vm-playhead" class="absolute top-0 h-full w-0.5 bg-white pointer-events-none shadow-md" style="left:0%"></div>
-            </div>
+          <!-- Enhanced Timeline Section -->
+          <div class="bg-gray-800 flex-shrink-0 border-t border-gray-700">
             <!-- Control row -->
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 px-3 py-1.5 border-b border-gray-700">
               <button onclick="vmTogglePlay()" id="vm-play-btn"
-                class="text-white hover:text-blue-300 transition-colors w-5 text-center flex-shrink-0">
+                class="text-white hover:text-blue-300 transition-colors w-6 text-center flex-shrink-0">
                 <i class="ri-play-line text-lg"></i>
               </button>
+              <button onclick="vmStepBackward()" class="text-gray-400 hover:text-white" title="Previous frame"><i class="ri-skip-back-mini-line"></i></button>
+              <button onclick="vmStepForward()" class="text-gray-400 hover:text-white" title="Next frame"><i class="ri-skip-forward-mini-line"></i></button>
               <span id="vm-time" class="text-gray-400 text-xs font-mono w-24 flex-shrink-0">0:00 / 0:00</span>
               <span id="vm-step-label" class="text-gray-500 text-xs truncate flex-1 text-center"></span>
+              <button onclick="vmSnapshot()"
+                class="flex items-center gap-1 px-2 py-1 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded font-medium flex-shrink-0"
+                title="Capture current frame as a freeze-frame">
+                <i class="ri-camera-line"></i>Snapshot
+              </button>
               <button onclick="vmCutHere()"
-                class="flex items-center gap-1 px-2.5 py-1 bg-red-500 hover:bg-red-600 text-white text-xs rounded font-semibold flex-shrink-0"
-                title="Split video at current playback position — creates a new step">
-                <i class="ri-scissors-cut-line"></i>Cut Here
+                class="flex items-center gap-1 px-2 py-1 bg-red-500 hover:bg-red-600 text-white text-xs rounded font-medium flex-shrink-0"
+                title="Split video at current position">
+                <i class="ri-scissors-cut-line"></i>Cut
               </button>
               <button onclick="vmDeleteCurrentStep()"
                 class="p-1 text-gray-500 hover:text-red-400 transition-colors flex-shrink-0"
                 title="Delete current step">
                 <i class="ri-delete-bin-line text-sm"></i>
               </button>
+            </div>
+
+            <!-- Timeline tracks container -->
+            <div id="vm-timeline-container" class="relative bg-gray-900" style="height: 120px; overflow-x: auto; overflow-y: hidden;">
+              <!-- Click area for seeking (behind everything) -->
+              <div class="absolute inset-0 cursor-pointer" style="z-index: 1;" onclick="vmTimelineSeek(event)"></div>
+              
+              <!-- Time ruler -->
+              <div id="vm-time-ruler" class="absolute top-0 left-0 right-0 h-5 bg-gray-900 border-b border-gray-700" style="z-index: 10;"></div>
+              
+              <!-- Overlay tracks area -->
+              <div id="vm-overlay-tracks" class="absolute left-0 right-0" style="top: 22px; bottom: 26px; z-index: 15;">
+                <!-- Dynamically filled with overlay bars -->
+              </div>
+
+              <!-- Video/Step track at bottom -->
+              <div id="vm-video-track" class="absolute left-0 right-0 bottom-0 h-6" style="z-index: 5;">
+                <div id="vm-step-segs" class="w-full h-full"></div>
+              </div>
+
+              <!-- Playhead -->
+              <div id="vm-playhead" class="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none" style="left: 0px; z-index: 25;">
+                <div class="absolute -top-0 left-1/2 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-sm rotate-45"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -305,6 +343,51 @@ function loadVideoManualPage() {
       background-color: #1e3a5f;
       border-color: #60a5fa;
     }
+    .vm-zoom-btn.active { background-color: #374151; color: white; }
+    .vm-overlay-bar {
+      position: absolute;
+      height: 22px;
+      border-radius: 4px;
+      cursor: grab;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      font-size: 10px;
+      color: white;
+      white-space: nowrap;
+      overflow: visible;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+      transition: opacity 0.15s, box-shadow 0.15s;
+      user-select: none;
+    }
+    .vm-overlay-bar:hover { 
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    }
+    .vm-overlay-bar.selected { 
+      outline: 2px solid #fff; 
+      outline-offset: 1px;
+      z-index: 10;
+    }
+    .vm-overlay-bar .resize-handle {
+      position: absolute;
+      top: -2px;
+      bottom: -2px;
+      width: 10px;
+      cursor: ew-resize;
+      z-index: 5;
+      background: transparent;
+    }
+    .vm-overlay-bar .resize-handle:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    .vm-overlay-bar .resize-handle.left { left: -3px; border-radius: 4px 0 0 4px; }
+    .vm-overlay-bar .resize-handle.right { right: -3px; border-radius: 0 4px 4px 0; }
+    .vm-step-drag { cursor: grab; }
+    .vm-step-drag:active { cursor: grabbing; }
+    .vm-step-drag.dragging { opacity: 0.5; }
+    #vm-timeline-container::-webkit-scrollbar { height: 8px; }
+    #vm-timeline-container::-webkit-scrollbar-track { background: #1f2937; }
+    #vm-timeline-container::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
   </style>
   `;
 
@@ -648,17 +731,24 @@ function vmRenderStepsList() {
   const stepColors = ['#3b82f6','#ef4444','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
 
   list.innerHTML = vmProject.steps.map((s, i) => `
-    <div onclick="vmSelectStep(${i})"
+    <div draggable="true" ondragstart="vmStepDragStart(event, ${i})" ondragover="vmStepDragOver(event)" ondrop="vmStepDrop(event, ${i})"
       class="vm-step-item flex flex-col p-2 rounded-lg border cursor-pointer transition-colors
         ${i === vmCurrentStepIdx
           ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/30'
           : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750'}">
       <div class="flex items-center gap-1.5 mb-1">
+        <div class="vm-step-drag flex-shrink-0 cursor-grab mr-1 text-gray-400 hover:text-gray-600">⋮⋮</div>
         <div class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:${stepColors[i % stepColors.length]}"></div>
-        <span class="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate flex-1">${s.label}</span>
-        <span class="text-xs text-gray-400">${vmFmt(s.trimEnd - s.trimStart)}</span>
+        <input type="text" value="${(s.label || '').replace(/"/g, '&quot;')}" onchange="vmRenameStep(${i}, this.value)" onclick="event.stopPropagation()"
+          class="text-xs font-semibold text-gray-700 dark:text-gray-200 bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-blue-400 rounded px-1 flex-1 min-w-0" />
+        <span class="text-xs text-gray-400 flex-shrink-0">${vmFmt(s.trimEnd - s.trimStart)}</span>
       </div>
-      <div class="text-xs text-gray-400">${vmFmt(s.trimStart)} → ${vmFmt(s.trimEnd)}</div>
+      <input type="text" value="${(s.description || '').replace(/"/g, '&quot;')}" placeholder="Description..." onchange="vmSetStepDesc(${i}, this.value)" onclick="vmSelectStep(${i}); event.stopPropagation()"
+        class="text-xs text-gray-500 dark:text-gray-400 bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-blue-400 rounded px-1 mb-1" />
+      <div class="flex justify-between items-center">
+        <div class="text-xs text-gray-400">${vmFmt(s.trimStart)} → ${vmFmt(s.trimEnd)}</div>
+        <button onclick="vmDeleteStep(${i}); event.stopPropagation()" class="text-xs text-red-400 hover:text-red-600 px-1">✕</button>
+      </div>
       ${s.overlays.length > 0
         ? `<div class="flex gap-0.5 mt-1 flex-wrap">${s.overlays.map(ov =>
             `<span class="text-xs px-1 rounded" style="background:${ov.color}22; color:${ov.color}; border:1px solid ${ov.color}44">
@@ -667,6 +757,69 @@ function vmRenderStepsList() {
         : ''}
     </div>
   `).join('');
+}
+
+// ── STEP EDITING FUNCTIONS ────────────────────────────────────────────────────
+function vmRenameStep(idx, newLabel) {
+  if (!vmProject || !vmProject.steps[idx]) return;
+  vmProject.steps[idx].label = newLabel || ('Step ' + (idx + 1));
+  vmRenderEnhancedTimeline();
+}
+
+function vmSetStepDesc(idx, desc) {
+  if (!vmProject || !vmProject.steps[idx]) return;
+  vmProject.steps[idx].description = desc;
+}
+
+function vmDeleteStep(idx) {
+  if (!vmProject || vmProject.steps.length <= 1) {
+    alert('Cannot delete the only step.');
+    return;
+  }
+  if (!confirm('Delete step "' + vmProject.steps[idx].label + '"?')) return;
+  vmProject.steps.splice(idx, 1);
+  if (vmCurrentStepIdx >= vmProject.steps.length) vmCurrentStepIdx = vmProject.steps.length - 1;
+  vmRenderStepsList();
+  vmRenderEnhancedTimeline();
+}
+
+// ── STEP DRAG & DROP REORDERING ───────────────────────────────────────────────
+let vmDraggedStepIdx = null;
+
+function vmStepDragStart(e, idx) {
+  vmDraggedStepIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', idx);
+  e.target.style.opacity = '0.5';
+}
+
+function vmStepDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function vmStepDrop(e, targetIdx) {
+  e.preventDefault();
+  e.target.style.opacity = '1';
+  if (vmDraggedStepIdx === null || vmDraggedStepIdx === targetIdx) return;
+  
+  const steps = vmProject.steps;
+  const [dragged] = steps.splice(vmDraggedStepIdx, 1);
+  steps.splice(targetIdx, 0, dragged);
+  
+  // Recalculate trim times based on new order
+  let cumTime = 0;
+  steps.forEach((s) => {
+    const dur = s.trimEnd - s.trimStart;
+    s.trimStart = cumTime;
+    s.trimEnd = cumTime + dur;
+    cumTime += dur;
+  });
+  
+  vmCurrentStepIdx = targetIdx;
+  vmDraggedStepIdx = null;
+  vmRenderStepsList();
+  vmRenderEnhancedTimeline();
 }
 
 // ── RENDER: TIMELINE ─────────────────────────────────────────────────────────
@@ -796,6 +949,9 @@ function vmCMouseDown(e) {
     const txt = prompt('Enter text:');
     if (!txt) return;
     const sw = (vmGet('vm-stroke-w')?.value || 3);
+    const step = vmStep();
+    const startTime = step.trimStart;
+    const endTime = Math.min(step.trimEnd, startTime + 4); // default 4 seconds
     vmStep().overlays.push({
       id: vmId(), type: 'text',
       x: vmPxToRel(mx, canvas.width),
@@ -803,6 +959,9 @@ function vmCMouseDown(e) {
       text: txt,
       color: vmCurrentColor,
       fontSize: vmPxToRel(vmCurrentFontSize, canvas.height),  // store as % of canvas height
+      startTime: startTime,
+      endTime: endTime,
+      name: 'Text',
     });
     vmRenderOvList();
     vmRedraw();
@@ -862,6 +1021,10 @@ function vmCMouseUp(e) {
 
   const sw = +(vmGet('vm-stroke-w')?.value || 3);
 
+  const step = vmStep();
+  const startTime = step.trimStart;
+  const endTime = Math.min(step.trimEnd, startTime + 4); // default 4 seconds
+
   if (vmActiveTool === 'rect') {
     vmStep().overlays.push({
       id: vmId(), type: 'rect',
@@ -871,6 +1034,9 @@ function vmCMouseUp(e) {
       h: vmPxToRel(Math.abs(y2-y1), canvas.height),
       color: vmCurrentColor,
       strokeWidth: sw,
+      startTime: startTime,
+      endTime: endTime,
+      name: 'Rectangle',
     });
   } else if (vmActiveTool === 'circle') {
     vmStep().overlays.push({
@@ -881,6 +1047,9 @@ function vmCMouseUp(e) {
       h: vmPxToRel(Math.abs(y2-y1), canvas.height),
       color: vmCurrentColor,
       strokeWidth: sw,
+      startTime: startTime,
+      endTime: endTime,
+      name: 'Circle',
     });
   } else if (vmActiveTool === 'arrow') {
     vmStep().overlays.push({
@@ -891,6 +1060,9 @@ function vmCMouseUp(e) {
       y2: vmPxToRel(y2, canvas.height),
       color: vmCurrentColor,
       strokeWidth: sw,
+      startTime: startTime,
+      endTime: endTime,
+      name: 'Arrow',
     });
   }
 
@@ -910,10 +1082,20 @@ function vmRedraw(withPreview = false) {
 
   const step = vmStep();
   if (!step) return;
+  
+  // Get current video time for overlay visibility
+  const video = vmVideo();
+  const currentTime = video ? video.currentTime : step.trimStart;
 
-  // Draw committed overlays
+  // Draw committed overlays - only if within their time range
   step.overlays.forEach(ov => {
-    vmDrawOverlay(ctx, ov, cw, ch, ov.id === vmSelectedOvId);
+    const startTime = ov.startTime !== undefined ? ov.startTime : step.trimStart;
+    const endTime = ov.endTime !== undefined ? ov.endTime : step.trimEnd;
+    
+    // Only draw if current time is within overlay's time range
+    if (currentTime >= startTime && currentTime <= endTime) {
+      vmDrawOverlay(ctx, ov, cw, ch, ov.id === vmSelectedOvId);
+    }
   });
 
   // Draw preview while dragging
@@ -1042,8 +1224,33 @@ function vmRenderOvProps(ov) {
     return;
   }
 
+  // Get step info for default timing
+  const step = vmStep();
+  const startTime = ov.startTime !== undefined ? ov.startTime : (step ? step.trimStart : 0);
+  const endTime = ov.endTime !== undefined ? ov.endTime : (step ? step.trimEnd : 4);
+
   let html = `<div class="space-y-2">
-    <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase">${ov.type}</p>`;
+    <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase">${ov.type}</p>
+    
+    <label class="text-xs text-gray-400 block">Name</label>
+    <input type="text" value="${(ov.name || ov.type || '').replace(/"/g, '&quot;')}"
+      class="w-full text-xs p-1 rounded border border-gray-200 dark:border-gray-600 bg-transparent dark:text-white focus:outline-none focus:border-blue-400"
+      onchange="vmOvUpdate('${ov.id}','name',this.value)">
+    
+    <div class="flex gap-2">
+      <div class="flex-1">
+        <label class="text-xs text-gray-400 block">Start (s)</label>
+        <input type="number" value="${startTime.toFixed(2)}" min="0" step="0.1"
+          class="w-full text-xs p-1 rounded border border-gray-200 dark:border-gray-600 bg-transparent dark:text-white focus:outline-none focus:border-blue-400"
+          onchange="vmOvUpdate('${ov.id}','startTime',+this.value); vmRenderEnhancedTimeline();">
+      </div>
+      <div class="flex-1">
+        <label class="text-xs text-gray-400 block">End (s)</label>
+        <input type="number" value="${endTime.toFixed(2)}" min="0" step="0.1"
+          class="w-full text-xs p-1 rounded border border-gray-200 dark:border-gray-600 bg-transparent dark:text-white focus:outline-none focus:border-blue-400"
+          onchange="vmOvUpdate('${ov.id}','endTime',+this.value); vmRenderEnhancedTimeline();">
+      </div>
+    </div>`;
 
   if (ov.type === 'text') {
     html += `
@@ -1099,6 +1306,7 @@ window.vmDeleteOverlay = function(id) {
   if (vmSelectedOvId === id) vmSelectedOvId = null;
   vmRenderOvList();
   vmRenderOvProps(null);
+  vmRenderEnhancedTimeline();
   vmRedraw();
 };
 
@@ -1107,20 +1315,26 @@ function vmRenderOvList() {
   const list = vmGet('vm-ov-list');
   if (!list || !vmStep()) { if (list) list.innerHTML = ''; return; }
   const ovs = vmStep().overlays;
+  const step = vmStep();
   if (ovs.length === 0) {
     list.innerHTML = '<p class="text-xs text-gray-400 italic py-1">No overlays yet.</p>';
     return;
   }
-  list.innerHTML = ovs.map(ov => `
+  list.innerHTML = ovs.map(ov => {
+    const startT = ov.startTime !== undefined ? ov.startTime : step.trimStart;
+    const endT = ov.endTime !== undefined ? ov.endTime : step.trimEnd;
+    const label = ov.name || (ov.type === 'text' ? `"${(ov.text||'').slice(0,10)}"` : ov.type);
+    return `
     <div onclick="vmSelectOvFromList('${ov.id}')"
-      class="flex items-center gap-1.5 py-0.5 px-1 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${ov.id === vmSelectedOvId ? 'bg-blue-50 dark:bg-blue-900/30' : ''}">
+      class="flex items-center gap-1.5 py-1 px-1 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${ov.id === vmSelectedOvId ? 'bg-blue-50 dark:bg-blue-900/30' : ''}">
       <div class="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-gray-300" style="background:${ov.color}"></div>
-      <span class="text-xs text-gray-600 dark:text-gray-300 truncate flex-1">
-        ${ov.type === 'text' ? `"${(ov.text||'').slice(0,14)}${ov.text?.length > 14 ? '…' : ''}"` : ov.type}
-      </span>
+      <div class="flex-1 min-w-0">
+        <span class="text-xs text-gray-600 dark:text-gray-300 block truncate">${label}</span>
+        <span class="text-xs text-gray-400">${vmFmt(startT)} → ${vmFmt(endT)}</span>
+      </div>
       <button onclick="event.stopPropagation();vmDeleteOverlay('${ov.id}')" class="text-gray-400 hover:text-red-400 text-xs"><i class="ri-close-line"></i></button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 window.vmSelectOvFromList = function(id) {
@@ -1315,10 +1529,9 @@ async function vmExportVideo() {
     const source = vmBuildCreatomateSource();
 
     msgEl.textContent = 'Submitting to Creatomate…';
-    const submitRes = await fetch(`${CREATOMATE_BASE}/renders`, {
+    const submitRes = await fetch(`${BASE_URL}api/creatomate/renders`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CREATOMATE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ source }),
@@ -1364,9 +1577,7 @@ async function vmPollRender(renderId, subEl) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 4000));
 
-    const res = await fetch(`${CREATOMATE_BASE}/renders/${renderId}`, {
-      headers: { 'Authorization': `Bearer ${CREATOMATE_API_KEY}` },
-    });
+    const res = await fetch(`${BASE_URL}api/creatomate/renders/${renderId}`);
     if (!res.ok) throw new Error(`Poll error ${res.status}`);
 
     const render = await res.json();
@@ -1383,8 +1594,16 @@ async function vmPollRender(renderId, subEl) {
 function vmBuildCreatomateSource() {
   const elements = [];
   let cumulativeTime = 0; // seconds into the output timeline
+  
+  // Build a map of step start times in output timeline
+  const stepOutputTimes = [];
+  let runningTime = 0;
+  vmProject.steps.forEach(step => {
+    stepOutputTimes.push(runningTime);
+    runningTime += step.trimEnd - step.trimStart;
+  });
 
-  vmProject.steps.forEach((step) => {
+  vmProject.steps.forEach((step, stepIdx) => {
     const stepDuration = step.trimEnd - step.trimStart;
 
     // ── Video clip ────────────────────────────────────────────
@@ -1400,11 +1619,27 @@ function vmBuildCreatomateSource() {
     // ── Overlays for this step ────────────────────────────────
     let ovTrack = 2;
     step.overlays.forEach(ov => {
+      // Calculate overlay timing
+      // startTime/endTime are in absolute video time, convert to output timeline
+      const ovStartVideo = ov.startTime !== undefined ? ov.startTime : step.trimStart;
+      const ovEndVideo = ov.endTime !== undefined ? ov.endTime : step.trimEnd;
+      
+      // Convert video timestamp to output timeline
+      // Find which parts of the overlay are visible in each step
+      const ovStartInStep = Math.max(ovStartVideo, step.trimStart);
+      const ovEndInStep = Math.min(ovEndVideo, step.trimEnd);
+      
+      // Skip if overlay doesn't appear in this step
+      if (ovStartInStep >= ovEndInStep) return;
+      
+      const ovOutputStart = cumulativeTime + (ovStartInStep - step.trimStart);
+      const ovDuration = ovEndInStep - ovStartInStep;
+      
       // Base properties shared by all overlay types
       const el = {
         track:    ovTrack++,
-        time:     cumulativeTime,      // same output start as its video clip
-        duration: stepDuration,
+        time:     ovOutputStart,
+        duration: ovDuration,
         x_anchor: '0%',
         y_anchor: '0%',
       };
@@ -1515,3 +1750,411 @@ function vmToast(msg, color = 'green') {
     setTimeout(() => toast.remove(), 400);
   }, 2500);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  NEW FEATURES: ZOOM, TIMELINE, SNAPSHOT, STEP EDITING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── ZOOM CONTROLS ─────────────────────────────────────────────────────────────
+function vmSetZoom(level) {
+  vmZoomLevel = level;
+  const wrapper = vmGet('vm-video-wrapper');
+  const video = vmVideo();
+  if (!wrapper || !video) return;
+  
+  wrapper.style.transform = `scale(${level})`;
+  
+  // Update zoom button states
+  document.querySelectorAll('.vm-zoom-btn').forEach(btn => {
+    btn.classList.toggle('active', parseFloat(btn.dataset.zoom) === level);
+    btn.classList.toggle('bg-gray-700', parseFloat(btn.dataset.zoom) === level);
+    btn.classList.toggle('text-white', parseFloat(btn.dataset.zoom) === level);
+  });
+  
+  vmSyncCanvasSize();
+}
+
+function vmFitZoom() {
+  const video = vmVideo();
+  const outer = vmGet('vm-video-outer');
+  if (!video || !outer) return;
+  
+  const vw = video.videoWidth || 1280;
+  const vh = video.videoHeight || 720;
+  const ow = outer.clientWidth - 40;
+  const oh = outer.clientHeight - 40;
+  
+  const scaleX = ow / vw;
+  const scaleY = oh / vh;
+  const fit = Math.min(scaleX, scaleY, 1);
+  
+  vmSetZoom(Math.round(fit * 100) / 100);
+}
+
+// ── FRAME STEPPING ────────────────────────────────────────────────────────────
+function vmStepForward() {
+  const video = vmVideo();
+  if (!video) return;
+  video.currentTime = Math.min(video.currentTime + (1/30), video.duration);
+}
+
+function vmStepBackward() {
+  const video = vmVideo();
+  if (!video) return;
+  video.currentTime = Math.max(video.currentTime - (1/30), 0);
+}
+
+// ── SNAPSHOT (FREEZE FRAME) ───────────────────────────────────────────────────
+function vmSnapshot() {
+  const video = vmVideo();
+  if (!video || !vmProject || !vmStep()) return;
+  
+  const t = video.currentTime;
+  const step = vmStep();
+  
+  // Check if we're at least 0.1s from edges
+  if (t <= step.trimStart + 0.1 || t >= step.trimEnd - 0.1) {
+    alert('Move playhead away from step boundaries to create a snapshot.');
+    return;
+  }
+  
+  const freezeDuration = parseFloat(prompt('Freeze duration (seconds):', '3') || '0');
+  if (freezeDuration <= 0) return;
+  
+  // Create a new step that's a freeze frame
+  const freezeStep = {
+    id: vmId().replace('ov_', 'step_'),
+    label: 'Freeze ' + (vmProject.steps.length + 1),
+    description: 'Freeze frame at ' + vmFmt(t),
+    trimStart: t,
+    trimEnd: t + 0.001, // tiny duration, we'll use freeze
+    freezeDuration: freezeDuration,
+    freezeTime: t, // the exact frame to freeze
+    overlays: [],
+  };
+  
+  // Split current step
+  const oldEnd = step.trimEnd;
+  step.trimEnd = t;
+  
+  // Create continuation step
+  const contStep = {
+    id: vmId().replace('ov_', 'step_'),
+    label: 'Step ' + (vmProject.steps.length + 2),
+    trimStart: t,
+    trimEnd: oldEnd,
+    overlays: [],
+  };
+  
+  // Insert freeze and continuation after current
+  vmProject.steps.splice(vmCurrentStepIdx + 1, 0, freezeStep, contStep);
+  
+  // Renumber
+  vmProject.steps.forEach((s, i) => {
+    if (!s.label.startsWith('Freeze')) s.label = 'Step ' + (i + 1);
+  });
+  
+  vmRenderStepsList();
+  vmRenderEnhancedTimeline();
+  vmToast('Freeze frame inserted', 'purple');
+}
+
+// ── ENHANCED TIMELINE RENDERING ───────────────────────────────────────────────
+function vmRenderEnhancedTimeline() {
+  const container = vmGet('vm-timeline-container');
+  const ruler = vmGet('vm-time-ruler');
+  const tracks = vmGet('vm-overlay-tracks');
+  const segs = vmGet('vm-step-segs');
+  if (!container || !vmProject || vmProject.videoDuration === 0) return;
+  
+  const dur = vmProject.videoDuration;
+  const pxPerSec = 50 * vmTimelineZoom; // 50px per second at zoom 1
+  const totalWidth = dur * pxPerSec;
+  
+  container.style.width = totalWidth + 'px';
+  
+  // Render time ruler
+  ruler.innerHTML = '';
+  ruler.style.width = totalWidth + 'px';
+  for (let t = 0; t <= dur; t++) {
+    const major = t % 5 === 0;
+    const tick = document.createElement('div');
+    tick.className = 'absolute text-gray-500';
+    tick.style.left = (t * pxPerSec) + 'px';
+    tick.innerHTML = major 
+      ? `<div class="h-3 w-px bg-gray-600"></div><span class="text-xs ml-1">${vmFmt(t)}</span>`
+      : `<div class="h-1.5 w-px bg-gray-700"></div>`;
+    ruler.appendChild(tick);
+  }
+  
+  // Render step segments
+  const colors = ['#3b82f6','#ef4444','#f59e0b','#10b981','#8b5cf6','#ec4899','#06b6d4','#84cc16'];
+  segs.innerHTML = vmProject.steps.map((s, i) => {
+    const left = s.trimStart * pxPerSec;
+    const width = (s.trimEnd - s.trimStart) * pxPerSec;
+    const active = i === vmCurrentStepIdx;
+    return `<div onclick="vmSelectStep(${i})" title="${s.label}"
+      class="h-full flex items-center justify-center text-white text-xs cursor-pointer ${active ? '' : 'opacity-60'}"
+      style="position:absolute; left:${left}px; width:${width}px; background:${colors[i % colors.length]};">
+      ${width > 40 ? s.label : ''}
+    </div>`;
+  }).join('');
+  segs.style.width = totalWidth + 'px';
+  segs.style.position = 'relative';
+  
+  // Render overlay tracks
+  vmRenderOverlayTracks(tracks, pxPerSec, totalWidth);
+}
+
+function vmRenderOverlayTracks(tracksEl, pxPerSec, totalWidth) {
+  if (!tracksEl || !vmProject) return;
+  
+  tracksEl.innerHTML = '';
+  tracksEl.style.width = totalWidth + 'px';
+  
+  // Collect all overlays from all steps with their timing
+  const allOverlays = [];
+  vmProject.steps.forEach((step, stepIdx) => {
+    step.overlays.forEach(ov => {
+      // Calculate overlay timing - default to full step duration, or use stored timing
+      const startTime = ov.startTime !== undefined ? ov.startTime : step.trimStart;
+      const endTime = ov.endTime !== undefined ? ov.endTime : step.trimEnd;
+      allOverlays.push({
+        ...ov,
+        stepIdx,
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+      });
+    });
+  });
+  
+  // Assign overlays to tracks using non-overlapping row algorithm
+  const trackRows = [];
+  allOverlays.forEach((ov) => {
+    let placed = false;
+    for (let row = 0; row < trackRows.length; row++) {
+      const lastInRow = trackRows[row];
+      if (ov.startTime >= lastInRow.endTime) {
+        trackRows[row] = ov;
+        ov.row = row;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      ov.row = trackRows.length;
+      trackRows.push(ov);
+    }
+  });
+  
+  allOverlays.forEach((ov) => {
+    const bar = document.createElement('div');
+    bar.className = `vm-overlay-bar ${ov.id === vmSelectedOvId ? 'selected' : ''}`;
+    bar.style.left = (ov.startTime * pxPerSec) + 'px';
+    bar.style.width = Math.max(30, ov.duration * pxPerSec) + 'px';
+    bar.style.top = (ov.row * 26) + 'px';
+    bar.style.background = ov.color || '#ff4444';
+    bar.dataset.ovId = ov.id;
+    bar.dataset.stepIdx = ov.stepIdx;
+    bar.dataset.startTime = ov.startTime;
+    bar.dataset.endTime = ov.endTime;
+    
+    const icon = ov.type === 'text' ? 'T' : ov.type === 'circle' ? '◯' : ov.type === 'rect' ? '▭' : '→';
+    const label = ov.name || (ov.type === 'text' ? (ov.text || '').slice(0, 10) : ov.type);
+    bar.innerHTML = `
+      <div class="resize-handle left" data-side="left"></div>
+      <span class="flex-1 flex items-center overflow-hidden pointer-events-none">
+        <span class="mr-1">${icon}</span>
+        <span class="truncate">${label}</span>
+      </span>
+      <div class="resize-handle right" data-side="right"></div>
+    `;
+    
+    // Store refs for handlers
+    const ovId = ov.id;
+    const stepIdx = ov.stepIdx;
+    const currentPxPerSec = pxPerSec;
+    
+    bar.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vmSelectOverlayOnTimeline(ovId, stepIdx);
+    });
+    
+    bar.addEventListener('mousedown', (e) => {
+      const handle = e.target.closest('.resize-handle');
+      if (handle) {
+        e.preventDefault();
+        e.stopPropagation();
+        vmStartResizeOverlayBar(e, ovId, stepIdx, handle.dataset.side, currentPxPerSec);
+      } else if (!e.target.classList.contains('resize-handle')) {
+        e.preventDefault();
+        vmStartDragOverlayBar(e, ovId, stepIdx, currentPxPerSec);
+      }
+    });
+    
+    tracksEl.appendChild(bar);
+  });
+  
+  // Adjust track area height based on actual rows used
+  const numRows = trackRows.length || 1;
+  const trackHeight = Math.max(60, numRows * 26 + 10);
+  tracksEl.style.height = trackHeight + 'px';
+}
+
+function vmSelectOverlayOnTimeline(ovId, stepIdx) {
+  if (stepIdx !== vmCurrentStepIdx) {
+    vmCurrentStepIdx = stepIdx;
+    const step = vmStep();
+    const video = vmVideo();
+    if (step && video) video.currentTime = step.trimStart;
+  }
+  vmSelectedOvId = ovId;
+  const ov = vmGetOverlay(ovId);
+  vmRenderOvProps(ov);
+  vmRenderOvList();
+  vmRenderEnhancedTimeline();
+  vmRedraw();
+}
+
+// ── OVERLAY TIMELINE DRAGGING ─────────────────────────────────────────────────
+function vmStartDragOverlayBar(e, ovId, stepIdx, pxPerSec) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const step = vmProject.steps[stepIdx];
+  if (!step) return;
+  const overlay = step.overlays.find(o => o.id === ovId);
+  if (!overlay) return;
+  
+  const origStart = overlay.startTime !== undefined ? overlay.startTime : step.trimStart;
+  const origEnd = overlay.endTime !== undefined ? overlay.endTime : step.trimEnd;
+  const duration = origEnd - origStart;
+  
+  // Visual feedback
+  document.body.style.cursor = 'grabbing';
+  
+  const onMove = (me) => {
+    const dx = me.clientX - startX;
+    const dt = dx / pxPerSec;
+    const newStart = Math.max(0, origStart + dt);
+    const newEnd = Math.min(vmProject.videoDuration, newStart + duration);
+    
+    overlay.startTime = newStart;
+    overlay.endTime = newEnd;
+    vmRenderEnhancedTimeline();
+  };
+  
+  const onUp = () => {
+    document.body.style.cursor = '';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    vmRenderOvProps(overlay);
+  };
+  
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function vmStartResizeOverlayBar(e, ovId, stepIdx, side, pxPerSec) {
+  e.preventDefault();
+  e.stopPropagation();
+  const startX = e.clientX;
+  const step = vmProject.steps[stepIdx];
+  if (!step) return;
+  const overlay = step.overlays.find(o => o.id === ovId);
+  if (!overlay) return;
+  
+  const origStart = overlay.startTime !== undefined ? overlay.startTime : step.trimStart;
+  const origEnd = overlay.endTime !== undefined ? overlay.endTime : step.trimEnd;
+  
+  // Visual feedback
+  document.body.style.cursor = 'ew-resize';
+  
+  const onMove = (me) => {
+    const dx = me.clientX - startX;
+    const dt = dx / pxPerSec;
+    
+    if (side === 'left') {
+      overlay.startTime = Math.max(0, Math.min(origEnd - 0.5, origStart + dt));
+    } else {
+      overlay.endTime = Math.min(vmProject.videoDuration, Math.max(origStart + 0.5, origEnd + dt));
+    }
+    vmRenderEnhancedTimeline();
+  };
+  
+  const onUp = () => {
+    document.body.style.cursor = '';
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    vmRenderOvProps(overlay);
+  };
+  
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// ── TIMELINE SEEK ─────────────────────────────────────────────────────────────
+function vmTimelineSeek(e) {
+  const container = vmGet('vm-timeline-container');
+  const video = vmVideo();
+  if (!container || !video || !vmProject) return;
+  
+  const rect = container.getBoundingClientRect();
+  const scrollLeft = container.scrollLeft;
+  const x = e.clientX - rect.left + scrollLeft;
+  const pxPerSec = 50 * vmTimelineZoom;
+  const time = Math.max(0, Math.min(vmProject.videoDuration, x / pxPerSec));
+  
+  video.currentTime = time;
+  
+  // Switch to the step at that time
+  const idx = vmProject.steps.findIndex(s => time >= s.trimStart && time < s.trimEnd);
+  if (idx >= 0 && idx !== vmCurrentStepIdx) {
+    vmCurrentStepIdx = idx;
+    vmRenderStepsList();
+    vmRenderOvList();
+    vmRedraw();
+  }
+  
+  vmUpdatePlayhead();
+}
+
+function vmUpdatePlayhead() {
+  const ph = vmGet('vm-playhead');
+  const video = vmVideo();
+  if (!ph || !video || !vmProject) return;
+  
+  const pxPerSec = 50 * vmTimelineZoom;
+  const left = video.currentTime * pxPerSec;
+  ph.style.left = left + 'px';
+}
+
+// ── UPDATE EXISTING FUNCTIONS ─────────────────────────────────────────────────
+// Override vmRenderTimeline to use enhanced version
+const _originalVmRenderTimeline = typeof vmRenderTimeline === 'function' ? vmRenderTimeline : null;
+vmRenderTimeline = function() {
+  vmRenderEnhancedTimeline();
+};
+
+// Override vmOnTimeUpdate to update new playhead
+const _originalVmOnTimeUpdate = vmOnTimeUpdate;
+vmOnTimeUpdate = function() {
+  _originalVmOnTimeUpdate();
+  vmUpdatePlayhead();
+};
+
+// ── WINDOW EXPORTS (for onclick handlers) ─────────────────────────────────────
+window.vmSetZoom = vmSetZoom;
+window.vmFitZoom = vmFitZoom;
+window.vmStepForward = vmStepForward;
+window.vmStepBackward = vmStepBackward;
+window.vmSnapshot = vmSnapshot;
+window.vmTimelineSeek = vmTimelineSeek;
+window.vmRenameStep = vmRenameStep;
+window.vmSetStepDesc = vmSetStepDesc;
+window.vmDeleteStep = vmDeleteStep;
+window.vmStepDragStart = vmStepDragStart;
+window.vmStepDragOver = vmStepDragOver;
+window.vmStepDrop = vmStepDrop;
+window.vmRenderEnhancedTimeline = vmRenderEnhancedTimeline;
+
