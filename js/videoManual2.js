@@ -28,6 +28,9 @@ let vm2 = {
   isScrubbing: false,
   ffmpeg: null,
   ffmpegLoaded: false,
+  previewRaf: null,
+  videoRect: null,
+  showDebugVideoRect: true,
 };
 
 // ── Utility Functions ───────────────────────────────────────────────────────
@@ -42,6 +45,8 @@ const vm2Fmt = (sec) => {
 const vm2Id = () => 'el_' + Math.random().toString(36).slice(2, 9);
 const vm2Step = () => vm2.project?.steps[vm2.currentStepIdx] || null;
 const vm2Video = () => vm2Get('vm2-video');
+const vm2PreviewCanvas = () => vm2Get('vm2-preview-canvas');
+const vm2CanvasViewport = () => vm2Get('vm2-canvas-viewport');
 
 // ── Page Loader ─────────────────────────────────────────────────────────────
 function loadVideoManual2Page() {
@@ -128,17 +133,21 @@ function loadVideoManual2Page() {
                ondragover="vm2CanvasDragOver(event)"
                ondragleave="vm2CanvasDragLeave(event)"
                ondrop="vm2CanvasDrop(event)">
-            <div id="vm2-canvas-wrapper" class="relative bg-black shadow-2xl" style="transform-origin: center center;">
-              <video id="vm2-video" class="block"
-                ontimeupdate="vm2OnTimeUpdate()"
-                onloadedmetadata="vm2OnVideoLoaded()"
-                onended="vm2OnEnded()"></video>
-              <!-- Elements overlay container -->
-              <div id="vm2-elements-container" class="absolute inset-0 pointer-events-none" style="overflow: hidden;">
-                <!-- Dynamic elements rendered here -->
+            <div id="vm2-canvas-viewport" class="relative flex-shrink-0">
+              <div id="vm2-canvas-wrapper" class="relative bg-black shadow-2xl" style="transform-origin: top left;">
+                <canvas id="vm2-preview-canvas" class="absolute inset-0 pointer-events-none"></canvas>
+                <div id="vm2-debug-video-rect" class="absolute pointer-events-none"></div>
+                <video id="vm2-video" class="absolute pointer-events-none opacity-0"
+                  ontimeupdate="vm2OnTimeUpdate()"
+                  onloadedmetadata="vm2OnVideoLoaded()"
+                  onended="vm2OnEnded()"></video>
+                <!-- Elements overlay container -->
+                <div id="vm2-elements-container" class="absolute inset-0 pointer-events-none" style="overflow: hidden;">
+                  <!-- Dynamic elements rendered here -->
+                </div>
+                <!-- Selection handles overlay -->
+                <div id="vm2-selection-overlay" class="absolute inset-0 pointer-events-none"></div>
               </div>
-              <!-- Selection handles overlay -->
-              <div id="vm2-selection-overlay" class="absolute inset-0 pointer-events-none"></div>
             </div>
           </div>
 
@@ -471,6 +480,8 @@ function loadVideoManual2Page() {
   vm2.currentStepIdx = 0;
   vm2.selectedElementId = null;
   vm2.playing = false;
+  vm2.videoRect = null;
+  vm2StopPreviewLoop();
 
   vm2RenderSteps();
 }
@@ -530,6 +541,7 @@ function vm2OnVideoLoaded() {
   }
 
   vm2SyncCanvasSize();
+  vm2StartPreviewLoop();
   vm2RenderSteps();
   vm2RenderTimeline();
   vm2RenderElements();
@@ -603,6 +615,78 @@ function vm2OnEnded() {
   vm2.playing = false;
   const btn = vm2Get('vm2-play-btn');
   if (btn) btn.innerHTML = '<i class="ri-play-fill text-lg"></i>';
+}
+
+function vm2GetVideoDrawRect(nativeW, nativeH, projectW, projectH) {
+  if (!nativeW || !nativeH || !projectW || !projectH) {
+    return { drawX: 0, drawY: 0, drawW: projectW || 0, drawH: projectH || 0 };
+  }
+
+  const videoRatio = nativeW / nativeH;
+  const projectRatio = projectW / projectH;
+
+  if (videoRatio > projectRatio) {
+    const drawW = projectW;
+    const drawH = projectW / videoRatio;
+    return {
+      drawX: 0,
+      drawY: (projectH - drawH) / 2,
+      drawW,
+      drawH,
+    };
+  }
+
+  const drawH = projectH;
+  const drawW = projectH * videoRatio;
+  return {
+    drawX: (projectW - drawW) / 2,
+    drawY: 0,
+    drawW,
+    drawH,
+  };
+}
+
+function vm2StartPreviewLoop() {
+  if (vm2.previewRaf) return;
+
+  const tick = () => {
+    vm2.previewRaf = requestAnimationFrame(tick);
+    vm2RenderPreviewFrame();
+  };
+
+  tick();
+}
+
+function vm2StopPreviewLoop() {
+  if (!vm2.previewRaf) return;
+  cancelAnimationFrame(vm2.previewRaf);
+  vm2.previewRaf = null;
+}
+
+function vm2RenderPreviewFrame() {
+  const canvas = vm2PreviewCanvas();
+  const video = vm2Video();
+  if (!canvas || !video || !vm2.project) return;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (video.readyState < 2) return;
+
+  const rect = vm2.videoRect || vm2GetVideoDrawRect(
+    video.videoWidth || vm2.project.width,
+    video.videoHeight || vm2.project.height,
+    vm2.project.width,
+    vm2.project.height
+  );
+
+  if (rect.drawW > 0 && rect.drawH > 0) {
+    ctx.drawImage(video, rect.drawX, rect.drawY, rect.drawW, rect.drawH);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -686,59 +770,52 @@ function vm2SeekTo(timelineTime) {
 function vm2SyncCanvasSize() {
   const video = vm2Video();
   const wrapper = vm2Get('vm2-canvas-wrapper');
-  if (!video || !wrapper) return;
+  const previewCanvas = vm2PreviewCanvas();
+  const debugRect = vm2Get('vm2-debug-video-rect');
+  if (!video || !wrapper || !previewCanvas || !debugRect) return;
 
   wrapper.style.width = vm2.project.width + 'px';
   wrapper.style.height = vm2.project.height + 'px';
-  video.style.width = '100%';
-  video.style.height = '100%';
-  // Use 'contain' to preserve video aspect ratio (may show black bars)
-  video.style.objectFit = 'contain';
+  wrapper.style.overflow = 'hidden';
+  wrapper.style.position = 'relative'; // ensure children position correctly
   // Show a visible background for the canvas so users can see letterbox/pillarbox areas
   wrapper.style.background = '#1a1a2e';
-  
-  // DEBUG: Add visual indicator showing where video actually renders with object-fit:contain
-  let debugRect = wrapper.querySelector('#vm2-debug-video-rect');
-  if (!debugRect) {
-    debugRect = document.createElement('div');
-    debugRect.id = 'vm2-debug-video-rect';
-    debugRect.style.cssText = 'position:absolute; border:4px solid #00ff00; pointer-events:none; box-sizing:border-box; z-index:9999;';
-    wrapper.appendChild(debugRect);
-  }
-  
-  // Calculate contain rect (same math as browser's object-fit:contain)
+
+  previewCanvas.width = vm2.project.width;
+  previewCanvas.height = vm2.project.height;
+  previewCanvas.style.width = vm2.project.width + 'px';
+  previewCanvas.style.height = vm2.project.height + 'px';
+
   const nativeW = video.videoWidth || vm2.project.width;
   const nativeH = video.videoHeight || vm2.project.height;
   const projectW = vm2.project.width;
   const projectH = vm2.project.height;
-  const videoRatio = nativeW / nativeH;
-  const projectRatio = projectW / projectH;
-  
-  let drawX, drawY, drawW, drawH;
-  if (videoRatio > projectRatio) {
-    // Video is wider → letterbox (bars top/bottom)
-    drawW = projectW;
-    drawH = projectW / videoRatio;
-    drawX = 0;
-    drawY = (projectH - drawH) / 2;
-  } else {
-    // Video is taller or same → pillarbox (bars left/right)
-    drawH = projectH;
-    drawW = projectH * videoRatio;
-    drawX = (projectW - drawW) / 2;
-    drawY = 0;
-  }
-  
+  const { drawX, drawY, drawW, drawH } = vm2GetVideoDrawRect(nativeW, nativeH, projectW, projectH);
+
+  // Keep the video element as a hidden media source for playback and export.
+  video.style.position = 'absolute';
+  video.style.left = '0';
+  video.style.top = '0';
+  video.style.width = '1px';
+  video.style.height = '1px';
+  video.style.objectFit = 'contain';
+  video.style.margin = '0';
+  video.style.padding = '0';
+  video.style.display = 'block';
+
   debugRect.style.left = drawX + 'px';
   debugRect.style.top = drawY + 'px';
   debugRect.style.width = drawW + 'px';
   debugRect.style.height = drawH + 'px';
-  
-  // Store the video rect for use by export
+  debugRect.style.border = vm2.showDebugVideoRect ? '4px solid #00ff00' : 'none';
+  debugRect.style.boxSizing = 'border-box';
+  debugRect.style.zIndex = '1';
+
   vm2.videoRect = { drawX, drawY, drawW, drawH };
-  
+
   console.log('[VM2] Preview video rect:', { drawX, drawY, drawW, drawH, projectW, projectH, nativeW, nativeH });
 
+  vm2RenderPreviewFrame();
   vm2ApplyCanvasZoomTransform();
   
   // Auto-fit on first sync
@@ -778,8 +855,12 @@ function vm2FitCanvas() {
 }
 
 function vm2ApplyCanvasZoomTransform() {
+  const viewport = vm2CanvasViewport();
   const wrapper = vm2Get('vm2-canvas-wrapper');
-  if (!wrapper) return;
+  if (!wrapper || !viewport || !vm2.project) return;
+
+  viewport.style.width = (vm2.project.width * vm2.canvasZoom) + 'px';
+  viewport.style.height = (vm2.project.height * vm2.canvasZoom) + 'px';
   wrapper.style.transform = `scale(${vm2.canvasZoom})`;
 }
 
@@ -2548,23 +2629,7 @@ async function vm2Export() {
     canvas.height = projectH;
     const ctx = canvas.getContext('2d');
     
-    // Calculate contain rect (same as preview's object-fit:contain)
-    const videoRatio = nativeW / nativeH;
-    const projectRatio = projectW / projectH;
-    let drawX, drawY, drawW, drawH;
-    if (videoRatio > projectRatio) {
-      // Video wider → letterbox (bars top/bottom)
-      drawW = projectW;
-      drawH = projectW / videoRatio;
-      drawX = 0;
-      drawY = (projectH - drawH) / 2;
-    } else {
-      // Video taller → pillarbox (bars left/right)
-      drawH = projectH;
-      drawW = projectH * videoRatio;
-      drawX = (projectW - drawW) / 2;
-      drawY = 0;
-    }
+    const { drawX, drawY, drawW, drawH } = vm2GetVideoDrawRect(nativeW, nativeH, projectW, projectH);
     
     console.log('[VM2 Export] Video rect:', { drawX, drawY, drawW, drawH, projectW, projectH, nativeW, nativeH });
     
@@ -2642,11 +2707,6 @@ async function vm2Export() {
         
         // Draw video frame using contain logic (same as preview's object-fit:contain)
         ctx.drawImage(video, drawX, drawY, drawW, drawH);
-        
-        // DEBUG: Draw green border around video area (matching preview debug rect)
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(drawX, drawY, drawW, drawH);
         
         // Draw overlays at their project-space coordinates (no transform needed
         // since canvas is sized to project dimensions)
