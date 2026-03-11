@@ -124,7 +124,10 @@ function loadVideoManual2Page() {
         <div id="vm2-player-area" class="hidden flex-1 flex flex-col min-h-0">
           
           <!-- Canvas Container -->
-          <div id="vm2-canvas-outer" class="flex-1 flex items-center justify-center overflow-auto p-4 bg-gray-800 dark:bg-black">
+          <div id="vm2-canvas-outer" class="flex-1 flex items-center justify-center overflow-auto p-4 bg-gray-800 dark:bg-black"
+               ondragover="vm2CanvasDragOver(event)"
+               ondragleave="vm2CanvasDragLeave(event)"
+               ondrop="vm2CanvasDrop(event)">
             <div id="vm2-canvas-wrapper" class="relative bg-black shadow-2xl" style="transform-origin: center center;">
               <video id="vm2-video" class="block"
                 ontimeupdate="vm2OnTimeUpdate()"
@@ -207,8 +210,16 @@ function loadVideoManual2Page() {
           <div class="mb-4">
             <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Text</p>
             <div class="grid grid-cols-2 gap-2">
-              <button onclick="vm2AddElement('text', 'title')" class="py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs font-medium text-gray-700 dark:text-gray-200">Title</button>
-              <button onclick="vm2AddElement('text', 'body')" class="py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs text-gray-600 dark:text-gray-300">Body Text</button>
+              <button draggable="true"
+                ondragstart="vm2ElementPanelDragStart(event,'text','title')"
+                onclick="vm2AddElement('text','title')"
+                class="py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs font-medium text-gray-700 dark:text-gray-200 cursor-grab active:cursor-grabbing select-none"
+                title="Drag onto canvas or click to add">Title</button>
+              <button draggable="true"
+                ondragstart="vm2ElementPanelDragStart(event,'text','body')"
+                onclick="vm2AddElement('text','body')"
+                class="py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs text-gray-600 dark:text-gray-300 cursor-grab active:cursor-grabbing select-none"
+                title="Drag onto canvas or click to add">Body Text</button>
             </div>
           </div>
 
@@ -216,17 +227,29 @@ function loadVideoManual2Page() {
           <div class="mb-4">
             <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Shapes</p>
             <div class="grid grid-cols-4 gap-2">
-              <button onclick="vm2AddElement('shape', 'rect')" class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center" title="Rectangle">
-                <div class="w-6 h-5 bg-gray-800 dark:bg-gray-200 rounded-sm"></div>
+              <button draggable="true"
+                ondragstart="vm2ElementPanelDragStart(event,'shape','rect')"
+                onclick="vm2AddElement('shape','rect')"
+                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Drag or click to add Rectangle">
+                <div class="w-6 h-5 bg-gray-800 dark:bg-gray-200 rounded-sm pointer-events-none"></div>
               </button>
-              <button onclick="vm2AddElement('shape', 'circle')" class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center" title="Circle">
-                <div class="w-6 h-6 bg-gray-800 dark:bg-gray-200 rounded-full"></div>
+              <button draggable="true"
+                ondragstart="vm2ElementPanelDragStart(event,'shape','circle')"
+                onclick="vm2AddElement('shape','circle')"
+                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Drag or click to add Circle">
+                <div class="w-6 h-6 bg-gray-800 dark:bg-gray-200 rounded-full pointer-events-none"></div>
               </button>
-              <button onclick="vm2AddElement('shape', 'arrow')" class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center" title="Arrow">
-                <i class="ri-arrow-right-up-line text-lg text-gray-800 dark:text-gray-200"></i>
+              <button draggable="true"
+                ondragstart="vm2ElementPanelDragStart(event,'shape','arrow')"
+                onclick="vm2AddElement('shape','arrow')"
+                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Drag or click to add Arrow">
+                <i class="ri-arrow-right-up-line text-lg text-gray-800 dark:text-gray-200 pointer-events-none"></i>
               </button>
-              <button onclick="vm2AddElement('shape', 'line')" class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center" title="Line">
-                <div class="w-6 h-0.5 bg-gray-800 dark:bg-gray-200 rotate-45"></div>
+              <button draggable="true"
+                ondragstart="vm2ElementPanelDragStart(event,'shape','line')"
+                onclick="vm2AddElement('shape','line')"
+                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Drag or click to add Line">
+                <div class="w-6 h-0.5 bg-gray-800 dark:bg-gray-200 rotate-45 pointer-events-none"></div>
               </button>
             </div>
           </div>
@@ -355,6 +378,8 @@ function loadVideoManual2Page() {
 
   <style>
     #vm2-root { font-family: system-ui, -apple-system, sans-serif; }
+    #vm2-canvas-outer.vm2-drop-active { outline: 3px dashed #3b82f6; outline-offset: -3px; }
+    #vm2-canvas-outer.vm2-drop-active #vm2-canvas-wrapper { outline: 2px solid #3b82f6; outline-offset: 1px; }
     .vm2-step-item { transition: all 0.15s; }
     .vm2-step-item.active { background: #eff6ff; border-color: #3b82f6; }
     .dark .vm2-step-item.active { background: #1e3a8a20; border-color: #60a5fa; }
@@ -973,7 +998,67 @@ function vm2ConstrainElementsToStep(step) {
 //  ELEMENTS (Text, Shapes, Images, Audio)
 // ═══════════════════════════════════════════════════════════════════════════
 
-function vm2AddElement(type, subtype) {
+// ── Drag-from-panel helpers ────────────────────────────────────────────────
+
+function vm2ElementPanelDragStart(event, type, subtype) {
+  // Store the element type/subtype so the canvas drop handler can read it
+  event.dataTransfer.setData('application/vm2-element', JSON.stringify({ type, subtype }));
+  event.dataTransfer.effectAllowed = 'copy';
+
+  // Build a small ghost image matching the element shape
+  const ghost = document.createElement('div');
+  ghost.style.cssText = 'position:fixed;top:-200px;left:-200px;pointer-events:none;' +
+    'width:60px;height:60px;display:flex;align-items:center;justify-content:center;' +
+    'background:#3b82f6;border-radius:8px;color:white;font-size:11px;font-weight:600;';
+  const label = subtype === 'rect' ? '▬' : subtype === 'circle' ? '●' :
+                subtype === 'arrow' ? '↗' : subtype === 'line' ? '╱' :
+                subtype === 'title' ? 'T' : 'T';
+  ghost.textContent = label;
+  document.body.appendChild(ghost);
+  event.dataTransfer.setDragImage(ghost, 30, 30);
+  setTimeout(() => document.body.removeChild(ghost), 0);
+}
+
+function vm2CanvasDragOver(event) {
+  // Only accept our custom element drags
+  if (!event.dataTransfer.types.includes('application/vm2-element')) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+  vm2Get('vm2-canvas-outer')?.classList.add('vm2-drop-active');
+}
+
+function vm2CanvasDragLeave(event) {
+  // Only clear when leaving the outer container entirely
+  const outer = vm2Get('vm2-canvas-outer');
+  if (outer && !outer.contains(event.relatedTarget)) {
+    outer.classList.remove('vm2-drop-active');
+  }
+}
+
+function vm2CanvasDrop(event) {
+  const outer = vm2Get('vm2-canvas-outer');
+  if (outer) outer.classList.remove('vm2-drop-active');
+
+  const raw = event.dataTransfer.getData('application/vm2-element');
+  if (!raw) return;
+  event.preventDefault();
+
+  let type, subtype;
+  try { ({ type, subtype } = JSON.parse(raw)); } catch { return; }
+
+  if (!vm2Step()) { alert('Load a video first'); return; }
+
+  // Map the drop position from viewport → canvas pixel coordinates.
+  // getBoundingClientRect() already accounts for the CSS scale transform.
+  const wrapper = vm2Get('vm2-canvas-wrapper');
+  const rect = wrapper.getBoundingClientRect();
+  const dropX = (event.clientX - rect.left) / vm2.canvasZoom;
+  const dropY = (event.clientY - rect.top)  / vm2.canvasZoom;
+
+  vm2AddElement(type, subtype, dropX, dropY);
+}
+
+function vm2AddElement(type, subtype, dropX, dropY) {
   const step = vm2Step();
   if (!step) {
     alert('Load a video first');
@@ -1046,6 +1131,13 @@ function vm2AddElement(type, subtype) {
       element.x = centerX - 100;
       element.y = centerY - 50;
     }
+  }
+
+  // If the element was dragged onto the canvas, center it on the drop point
+  // and keep it within canvas bounds.
+  if (dropX !== undefined && dropY !== undefined) {
+    element.x = Math.max(0, Math.min(dropX - element.width  / 2, vm2.project.width  - element.width));
+    element.y = Math.max(0, Math.min(dropY - element.height / 2, vm2.project.height - element.height));
   }
 
   step.elements.push(element);
