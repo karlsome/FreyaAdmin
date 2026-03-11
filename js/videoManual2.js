@@ -782,17 +782,26 @@ function vm2RenderSteps() {
   `).join('');
 }
 
-function vm2SelectStep(idx) {
+function vm2SelectStep(idx, clickEvent) {
   vm2.currentStepIdx = idx;
   vm2.selectedElementId = null;
-  
+
   const step = vm2.project.steps[idx];
   if (step) {
-    // Seek slightly into the step so we don't land on a shared boundary
-    // where vm2SeekTo might resolve to the previous step.
-    const seekTime = step.startTime + 0.001;
-    vm2SeekTo(Math.min(seekTime, step.endTime));
-    // Re-assert the intended step index in case vm2SeekTo snapped to wrong one at a boundary
+    let seekTime;
+    if (clickEvent) {
+      // Compute the timeline position from where the user actually clicked
+      const scroll = vm2Get('vm2-timeline-scroll');
+      if (scroll) {
+        const rect = scroll.getBoundingClientRect();
+        const x = clickEvent.clientX - rect.left + scroll.scrollLeft;
+        seekTime = Math.max(step.startTime, Math.min(x / vm2.timelineZoom, step.endTime));
+      }
+    }
+    // Fall back to just inside the step start if no click position available
+    if (seekTime === undefined) seekTime = step.startTime + 0.001;
+    vm2SeekTo(seekTime);
+    // Re-assert the intended step index in case vm2SeekTo snapped at a boundary
     vm2.currentStepIdx = idx;
   }
   
@@ -1877,7 +1886,7 @@ function vm2RenderTimeline() {
              ondragover="event.preventDefault(); this.style.transform='scale(0.95)'; this.style.boxShadow='0 0 0 2px #3b82f6 inset'"
              ondragleave="this.style.transform='scale(1)'; this.style.boxShadow='none'"
              ondrop="this.style.transform='scale(1)'; this.style.boxShadow='none'; vm2StepDrop(event, ${i})"
-             onclick="vm2SelectStep(${i})"
+             onclick="vm2SelectStep(${i}, event)"
              title="${step.label}: ${vm2Fmt(step.startTime)} - ${vm2Fmt(step.endTime)}">
           <div class="resize-left" onmousedown="event.stopPropagation(); vm2StepResizeStart(event, ${i}, 'left')"></div>
           <span class="flex-1 truncate px-2">${step.label}</span>
@@ -2485,9 +2494,31 @@ async function vm2Export() {
       }
 
       if (shouldRender) {
-        // Draw video frame
+        // Draw video frame – replicate the browser's objectFit:contain letterbox so that
+        // element coordinates (stored in project/wrapper space) match the exported frame.
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const vW = video.videoWidth  || canvas.width;
+        const vH = video.videoHeight || canvas.height;
+        const videoRatio  = vW / vH;
+        const canvasRatio = canvas.width / canvas.height;
+        let drawW, drawH, drawX, drawY;
+        if (videoRatio > canvasRatio) {
+          // Video is wider → pillarbox (black bars left/right)
+          drawW = canvas.width;
+          drawH = canvas.width / videoRatio;
+          drawX = 0;
+          drawY = (canvas.height - drawH) / 2;
+        } else {
+          // Video is taller (or same) → letterbox (black bars top/bottom)
+          drawH = canvas.height;
+          drawW = canvas.height * videoRatio;
+          drawX = (canvas.width - drawW) / 2;
+          drawY = 0;
+        }
+        ctx.drawImage(video, drawX, drawY, drawW, drawH);
         
         // Ensure all elements from all steps are considered, sorted by layer order (if implemented)
         // Draw overlays for effective timeline time
