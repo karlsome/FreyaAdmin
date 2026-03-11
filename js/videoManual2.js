@@ -1400,6 +1400,16 @@ function vm2UpdateDrawnShapeGeometry(el, startPoint, endPoint) {
   el.endNormY = (endPoint.y - minY) / height;
 }
 
+function vm2IsElementVisibleAtTime(el, time) {
+  const withinTiming = time >= el.startTime && time < el.endTime;
+  if (!withinTiming) return false;
+  if (!el.blink) return true;
+
+  // 1 Hz blink: 0.5s visible, 0.5s hidden.
+  const elapsed = Math.max(0, time - el.startTime);
+  return (elapsed % 1) < 0.5;
+}
+
 function vm2StartRotationDrag(event, el) {
   const wrapper = vm2Get('vm2-canvas-wrapper');
   if (!wrapper) return;
@@ -1483,6 +1493,7 @@ function vm2AddElement(type, subtype, dropX, dropY, options = {}) {
     startTime: elementStart,
     endTime: elementEnd,
     opacity: 100,
+    blink: false,
     rotation: 0,
     locked: false,
     color: '#3b82f6',
@@ -1808,7 +1819,7 @@ function vm2UpdateVisibleElements() {
     const div = vm2Get('vm2-el-' + el.id);
     if (!div) return;
 
-    const visible = vm2.currentTime >= el.startTime && vm2.currentTime < el.endTime;
+    const visible = vm2IsElementVisibleAtTime(el, vm2.currentTime);
     div.style.display = visible ? 'block' : 'none';
   });
 }
@@ -2081,6 +2092,19 @@ function vm2RenderProps() {
         <span class="text-xs text-gray-500 w-8 text-right">${el.opacity}%</span>
       </div>
     </div>
+
+    ${el.type !== 'audio' ? `
+      <div class="mb-4">
+        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1">
+          <i class="ri-flashlight-line"></i>Blink
+        </p>
+        <label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
+          <input type="checkbox" ${el.blink ? 'checked' : ''} onchange="vm2UpdateProp('blink', this.checked)">
+          <span>Blink at 1 Hz</span>
+        </label>
+        <p class="text-[10px] text-gray-400 mt-1">Visible for 0.5s, hidden for 0.5s.</p>
+      </div>
+    ` : ''}
 
     <!-- Timing -->
     <div class="mb-4">
@@ -3046,7 +3070,7 @@ async function vm2Export() {
         // since canvas is sized to project dimensions)
         vm2.project.steps.forEach(step => {
           step.elements.forEach(el => {
-            if (effectiveTime >= el.startTime && effectiveTime < el.endTime && el.type !== 'audio') {
+            if (el.type !== 'audio' && vm2IsElementVisibleAtTime(el, effectiveTime)) {
               vm2DrawElementOnCanvas(ctx, el, 1, 1, 0, 0);
             }
           });
