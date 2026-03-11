@@ -30,7 +30,7 @@ let vm2 = {
   ffmpegLoaded: false,
   previewRaf: null,
   videoRect: null,
-  showDebugVideoRect: true,
+  showDebugVideoRect: false,
 };
 
 // ── Utility Functions ───────────────────────────────────────────────────────
@@ -671,18 +671,22 @@ function vm2RenderPreviewFrame() {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  if (video.readyState < 2) return;
-
   const rect = vm2.videoRect || vm2GetVideoDrawRect(
     video.videoWidth || vm2.project.width,
     video.videoHeight || vm2.project.height,
     vm2.project.width,
     vm2.project.height
   );
+
+  // During scrubbing/seeking the browser can briefly drop below current-frame
+  // readiness. Keep the last rendered frame instead of flashing black.
+  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.seeking) {
+    return;
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if (rect.drawW > 0 && rect.drawH > 0) {
     ctx.drawImage(video, rect.drawX, rect.drawY, rect.drawW, rect.drawH);
@@ -810,6 +814,7 @@ function vm2SyncCanvasSize() {
   debugRect.style.border = vm2.showDebugVideoRect ? '4px solid #00ff00' : 'none';
   debugRect.style.boxSizing = 'border-box';
   debugRect.style.zIndex = '1';
+  debugRect.style.display = vm2.showDebugVideoRect ? 'block' : 'none';
 
   vm2.videoRect = { drawX, drawY, drawW, drawH };
 
