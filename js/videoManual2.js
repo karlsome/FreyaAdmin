@@ -763,7 +763,12 @@ function vm2SelectStep(idx) {
   
   const step = vm2.project.steps[idx];
   if (step) {
-    vm2SeekTo(step.startTime);
+    // Seek slightly into the step so we don't land on a shared boundary
+    // where vm2SeekTo might resolve to the previous step.
+    const seekTime = step.startTime + 0.001;
+    vm2SeekTo(Math.min(seekTime, step.endTime));
+    // Re-assert the intended step index in case vm2SeekTo snapped to wrong one at a boundary
+    vm2.currentStepIdx = idx;
   }
   
   vm2RenderSteps();
@@ -850,18 +855,13 @@ function vm2CutAtPlayhead() {
 function vm2UpdateTimelinePositions() {
   let time = 0;
   vm2.project.steps.forEach((s, i) => {
-    const timeShift = time - s.startTime;
     const srcDuration = (s.sourceEnd ?? s.endTime) - (s.sourceStart ?? s.startTime);
     s.startTime = time;
     s.endTime = time + srcDuration;
-    
-    // Shift elements relative to the step's new position
-    if (s.elements) {
-      s.elements.forEach(el => {
-        el.startTime += timeShift;
-        el.endTime += timeShift;
-      });
-    }
+
+    // Elements are independent global-timeline objects and must NOT be shifted
+    // when video clips are reordered or deleted. Their startTime/endTime are
+    // absolute timeline positions that the user explicitly placed.
 
     if (!s.label) {
       s.label = `Step ${i + 1}`;
