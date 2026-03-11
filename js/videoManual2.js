@@ -5,6 +5,7 @@
 // Database config
 const VM2_DB         = 'Sasaki_Coating_MasterDB';
 const VM2_COLLECTION = 'videoManuals';
+const VM2_AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
 
 // ── Module State ────────────────────────────────────────────────────────────
 let vm2 = {
@@ -35,6 +36,14 @@ let vm2 = {
   showDebugVideoRect: false,
   drawMode: null,
   drawShapeData: null,
+  dirty: false,
+  autosaveTimer: null,
+  isAutosaving: false,
+  lastSavedAt: null,
+  uploadXhr: null,
+  uploadInProgress: false,
+  revisionPreview: null,
+  _projectsList: [],
 };
 
 // ── Utility Functions ───────────────────────────────────────────────────────
@@ -53,6 +62,249 @@ const vm2PreviewCanvas = () => vm2Get('vm2-preview-canvas');
 const vm2CanvasViewport = () => vm2Get('vm2-canvas-viewport');
 const vm2DegToRad = (deg) => deg * Math.PI / 180;
 const vm2RadToDeg = (rad) => rad * 180 / Math.PI;
+const vm2BaseUrl = () => (typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000/');
+const vm2NowIso = () => new Date().toISOString();
+const vm2DeepClone = (value) => JSON.parse(JSON.stringify(value));
+const vm2IsBlobUrl = (value) => typeof value === 'string' && value.startsWith('blob:');
+
+function vm2ResolveMediaUrl(url) {
+  if (!url || vm2IsBlobUrl(url) || url.startsWith('data:')) return url;
+
+  try {
+    const parsed = new URL(url, window.location.href);
+    const needsProxy = parsed.hostname === 'firebasestorage.googleapis.com' || parsed.hostname === 'storage.googleapis.com';
+    if (!needsProxy) return parsed.toString();
+    return `${vm2BaseUrl()}api/video-manual-media?url=${encodeURIComponent(parsed.toString())}`;
+  } catch (_) {
+    return url;
+  }
+}
+
+function vm2PrimaryVideoUrl(project = vm2.project) {
+  if (!project) return null;
+  if (project.videoLocalUrl) return project.videoLocalUrl;
+  if (project.currentAssetId && Array.isArray(project.assets)) {
+    const asset = project.assets.find((item) => item.assetId === project.currentAssetId);
+    if (asset?.downloadUrl) return asset.downloadUrl;
+  }
+  return project.videoUrl || null;
+}
+
+function vm2SetSaveStatus(text, tone = 'neutral') {
+  const el = vm2Get('vm2-save-status');
+  if (!el) return;
+  const toneClass = tone === 'green'
+    ? 'text-green-500'
+    : tone === 'red'
+      ? 'text-red-500'
+      : tone === 'blue'
+        ? 'text-blue-500'
+        : 'text-gray-400';
+  el.className = `text-xs ${toneClass}`;
+  el.textContent = text;
+}
+
+function vm2EnsureEditable() {
+  if (!vm2.revisionPreview) return true;
+  alert('Revision preview is read-only. Return to the current project to edit.');
+  return false;
+}
+
+function vm2MarkDirty(reason = 'Edited') {
+  if (vm2.revisionPreview) return;
+  vm2.dirty = true;
+  vm2SetSaveStatus(`${reason} · autosave pending`);
+}
+
+function vm2HasPersistableProject() {
+  return !!vm2.project && (!!vm2.project._id || !!vm2.project.videoUrl);
+}
+
+function vm2CanPersistWorkingCopy() {
+  return !!vm2.project && !vm2.revisionPreview && !vm2.uploadInProgress && !!vm2.project.videoUrl;
+}
+
+function vm2BuildWorkingProjectPayload() {
+  const payload = vm2DeepClone(vm2.project || {});
+  delete payload.videoBlob;
+  delete payload.videoLocalUrl;
+  delete payload.__previewRevisionId;
+  payload.steps = (payload.steps || []).map((step) => ({
+    ...step,
+    elements: (step.elements || []).map((el) => {
+      const cleaned = { ...el };
+      delete cleaned.imageBlob;
+      delete cleaned.audioBlob;
+      delete cleaned._imgElement;
+      return cleaned;
+    }),
+  }));
+  payload.videoUrl = vm2.project?.videoUrl || null;
+  payload.lastEditedAt = vm2NowIso();
+  return payload;
+}
+
+function vm2BuildRevisionSnapshot() {
+  return vm2BuildWorkingProjectPayload();
+}
+
+function vm2HandleTitleChange(value) {
+  if (!vm2.project) return;
+  if (!vm2EnsureEditable()) {
+    vm2Get('vm2-title').value = vm2.project.title || 'Untitled1';
+    return;
+  }
+  vm2.project.title = value || vm2.project.title || 'Untitled1';
+  vm2MarkDirty('Title changed');
+}
+
+function vm2SetVideoSource(url, { local = false } = {}) {
+  const video = vm2Video();
+  if (!video) return;
+  const resolvedUrl = local ? url : vm2ResolveMediaUrl(url);
+  video.pause();
+  video.crossOrigin = local ? '' : 'anonymous';
+  video.src = resolvedUrl || '';
+  video.load();
+}
+
+function vm2StartAutosaveLoop() {
+  if (vm2.autosaveTimer) clearInterval(vm2.autosaveTimer);
+  vm2.autosaveTimer = setInterval(() => {
+    if (!vm2.dirty || vm2.isAutosaving || !vm2CanPersistWorkingCopy()) return;
+    vm2PersistWorkingProject({ silent: true, reason: 'Autosaved' });
+  }, VM2_AUTOSAVE_INTERVAL_MS);
+}
+
+async function vm2AssignNextUntitledTitle() {
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-manuals/next-untitled`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const title = data?.title || 'Untitled1';
+    if (!vm2.project?._id) {
+      vm2.project.title = title;
+      const input = vm2Get('vm2-title');
+      if (input) input.value = title;
+    }
+  } catch (err) {
+    console.warn('[VM2] Failed to fetch next untitled title:', err);
+  }
+}
+
+function vm2HydrateProjectMedia(project = vm2.project) {
+  if (!project?.steps) return;
+  project.steps.forEach((step) => {
+    (step.elements || []).forEach((el) => {
+      if (el.type === 'image' && el.imageUrl && !el._imgElement) {
+        const img = new Image();
+        if (!vm2IsBlobUrl(el.imageUrl)) img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          el._imgElement = img;
+        };
+        img.src = el.imageUrl;
+      }
+    });
+  });
+}
+
+async function vm2PersistWorkingProject({ silent = true, reason = 'Saved' } = {}) {
+  if (!vm2CanPersistWorkingCopy()) return null;
+
+  vm2.isAutosaving = true;
+  vm2SetSaveStatus(reason === 'Autosaved' ? 'Autosaving…' : 'Saving…', 'blue');
+
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-manuals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(vm2BuildWorkingProjectPayload()),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || String(res.status));
+    }
+
+    const data = await res.json();
+    if (data.insertedId && !vm2.project._id) vm2.project._id = data.insertedId;
+    if (data.currentRevisionNumber !== undefined) vm2.project.currentRevisionNumber = data.currentRevisionNumber;
+    if (data.lastRevisionId !== undefined) vm2.project.lastRevisionId = data.lastRevisionId;
+    vm2.dirty = false;
+    vm2.lastSavedAt = new Date();
+    vm2SetSaveStatus(reason, 'green');
+    if (!silent && reason !== 'Autosaved') {
+      alert(reason + '!');
+    }
+    return data;
+  } catch (err) {
+    console.error('[VM2] Persist working project error:', err);
+    vm2SetSaveStatus('Save failed', 'red');
+    if (!silent) alert('Failed to save project: ' + err.message);
+    return null;
+  } finally {
+    vm2.isAutosaving = false;
+  }
+}
+
+function vm2SetReadOnlyBanner(revision) {
+  const banner = vm2Get('vm2-readonly-banner');
+  const label = vm2Get('vm2-readonly-label');
+  if (!banner || !label) return;
+  banner.classList.toggle('hidden', !revision);
+  if (revision) {
+    label.textContent = `Previewing ${revision.revisionName || 'revision'} · ${new Date(revision.createdAt).toLocaleString()}`;
+  }
+}
+
+function vm2ApplyProjectState(project, { readOnlyRevision = null } = {}) {
+  vm2.project = {
+    _id: null,
+    title: 'Untitled1',
+    folder: 'root',
+    videoUrl: null,
+    videoLocalUrl: null,
+    videoBlob: null,
+    currentAssetId: null,
+    assets: [],
+    duration: 0,
+    width: 1920,
+    height: 1080,
+    steps: [],
+    currentRevisionNumber: 0,
+    lastRevisionId: null,
+    ...project,
+  };
+
+  vm2.currentStepIdx = 0;
+  vm2.selectedElementId = null;
+  vm2.duration = vm2.project.duration || 0;
+  vm2.playing = false;
+  vm2.revisionPreview = readOnlyRevision;
+  vm2.dirty = false;
+  vm2.videoRect = null;
+  vm2HydrateProjectMedia(vm2.project);
+
+  const titleInput = vm2Get('vm2-title');
+  if (titleInput) titleInput.value = vm2.project.title || 'Untitled1';
+  vm2SetReadOnlyBanner(readOnlyRevision);
+
+  const sourceUrl = vm2.project.videoUrl;
+  if (sourceUrl) {
+    vm2Get('vm2-upload-zone').classList.add('hidden');
+    vm2Get('vm2-player-area').classList.remove('hidden');
+    vm2SetVideoSource(sourceUrl, { local: false });
+  } else {
+    vm2Get('vm2-upload-zone').classList.remove('hidden');
+    vm2Get('vm2-player-area').classList.add('hidden');
+  }
+
+  vm2RenderSteps();
+  vm2RenderTimeline();
+  vm2RenderElements();
+  vm2RenderElementsList();
+  vm2RenderProps();
+  vm2SetSaveStatus(readOnlyRevision ? 'Revision preview' : 'Loaded', readOnlyRevision ? 'blue' : 'green');
+}
 
 // ── Page Loader ─────────────────────────────────────────────────────────────
 function loadVideoManual2Page() {
@@ -75,9 +327,10 @@ function loadVideoManual2Page() {
         <i class="ri-aspect-ratio-line"></i>Resize
       </button>
       <div class="flex-1"></div>
-      <input id="vm2-title" type="text" value="Untitled Manual"
+      <input id="vm2-title" type="text" value="Untitled1"
         class="text-sm font-medium bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none dark:text-white px-2 w-48 text-center"
-        onchange="vm2.project.title=this.value">
+        onchange="vm2HandleTitleChange(this.value)">
+      <span id="vm2-save-status" class="text-xs text-gray-400">Not saved</span>
       <div class="flex-1"></div>
       <select id="vm2-zoom-select" onchange="vm2SetCanvasZoom(this.value)" class="text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300">
         <option value="0.5">50%</option>
@@ -90,11 +343,20 @@ function loadVideoManual2Page() {
         <i class="ri-folder-open-line"></i>Open
       </button>
       <button onclick="vm2SaveProject()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
-        <i class="ri-save-line"></i>Save
+        <i class="ri-save-line"></i>Save Revision
+      </button>
+      <button onclick="vm2ShowHistory()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
+        <i class="ri-history-line"></i>History
       </button>
       <button onclick="vm2Export()" class="px-3 py-1.5 rounded text-xs bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-1 font-medium">
         <i class="ri-download-line"></i>Export
       </button>
+    </div>
+
+    <div id="vm2-readonly-banner" class="hidden px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-700 text-sm flex items-center gap-3 flex-shrink-0">
+      <i class="ri-eye-line"></i>
+      <span id="vm2-readonly-label" class="flex-1">Previewing saved revision</span>
+      <button onclick="vm2ExitRevisionPreview()" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-xs font-medium">Back To Current</button>
     </div>
 
     <!-- ═══ MAIN BODY (3 panels) ═══ -->
@@ -345,6 +607,19 @@ function loadVideoManual2Page() {
     </div>
   </div>
 
+  <!-- Upload Modal -->
+  <div id="vm2-modal-upload" class="hidden fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-5 w-80 shadow-2xl text-center">
+      <i class="ri-cloud-upload-line text-5xl text-blue-500 mb-2 block"></i>
+      <p id="vm2-upload-msg" class="font-semibold text-gray-800 dark:text-white text-sm mb-3">Uploading video…</p>
+      <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-2">
+        <div id="vm2-upload-bar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+      </div>
+      <p id="vm2-upload-detail" class="text-xs text-gray-400">This may take a moment</p>
+      <button onclick="vm2CancelUpload()" class="mt-4 w-full py-2 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-lg hover:bg-red-100 text-sm">Cancel Upload</button>
+    </div>
+  </div>
+
   <!-- Export Modal -->
   <div id="vm2-modal-export" class="hidden fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
     <div class="bg-white dark:bg-gray-800 rounded-xl p-5 w-96 shadow-2xl">
@@ -392,6 +667,21 @@ function loadVideoManual2Page() {
       </div>
       <input id="vm2-open-search" type="text" placeholder="Search projects..." class="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white mb-3" oninput="vm2FilterProjects(this.value)">
       <div id="vm2-projects-list" class="flex-1 overflow-y-auto space-y-2"></div>
+    </div>
+  </div>
+
+  <!-- Revision History Modal -->
+  <div id="vm2-modal-history" class="hidden fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-5 w-[540px] max-h-[70vh] flex flex-col shadow-2xl">
+      <div class="flex items-center justify-between mb-3 flex-shrink-0">
+        <h3 class="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+          <i class="ri-history-line text-blue-500"></i>Revision History
+        </h3>
+        <button onclick="vm2Get('vm2-modal-history').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">
+          <i class="ri-close-line text-xl"></i>
+        </button>
+      </div>
+      <div id="vm2-history-list" class="flex-1 overflow-y-auto space-y-2"></div>
     </div>
   </div>
 
@@ -513,13 +803,19 @@ function loadVideoManual2Page() {
   // Initialize project state
   vm2.project = {
     _id: null,
-    title: 'Untitled Manual',
+    title: 'Untitled1',
+    folder: 'root',
     videoUrl: null,
+    videoLocalUrl: null,
     videoBlob: null,
+    currentAssetId: null,
+    assets: [],
     duration: 0,
     width: 1920,
     height: 1080,
     steps: [],
+    currentRevisionNumber: 0,
+    lastRevisionId: null,
     createdBy: (JSON.parse(localStorage.getItem('authUser') || '{}')).username || 'admin',
     createdAt: new Date().toISOString(),
   };
@@ -528,7 +824,17 @@ function loadVideoManual2Page() {
   vm2.selectedElementId = null;
   vm2.playing = false;
   vm2.videoRect = null;
+  vm2.dirty = false;
+  vm2.isAutosaving = false;
+  vm2.lastSavedAt = null;
+  vm2.uploadXhr = null;
+  vm2.uploadInProgress = false;
+  vm2.revisionPreview = null;
+  vm2._projectsList = [];
   vm2StopPreviewLoop();
+  vm2StartAutosaveLoop();
+  vm2SetSaveStatus('Not saved');
+  vm2AssignNextUntitledTitle();
 
   vm2RenderSteps();
 }
@@ -549,15 +855,145 @@ function vm2HandleDrop(event) {
 }
 
 async function vm2LoadVideo(file) {
+  if (!vm2EnsureEditable()) return;
+  if (vm2.uploadInProgress) {
+    alert('Please wait for the current upload to finish or cancel it first.');
+    return;
+  }
+
+  if (vm2.project.videoLocalUrl) {
+    URL.revokeObjectURL(vm2.project.videoLocalUrl);
+  }
+
   const url = URL.createObjectURL(file);
   vm2.project.videoBlob = file;
-  
-  const video = vm2Video();
-  video.src = url;
-  video.load();
+  vm2.project.videoLocalUrl = url;
+  vm2.project.videoUrl = null;
+  vm2.project.currentAssetId = null;
+  vm2.project.assets = [];
+  vm2.project.steps = [];
+  vm2.currentStepIdx = 0;
+  vm2.selectedElementId = null;
+
+  vm2SetVideoSource(url, { local: true });
 
   vm2Get('vm2-upload-zone').classList.add('hidden');
   vm2Get('vm2-player-area').classList.remove('hidden');
+
+  vm2SetSaveStatus('Local preview ready · uploading video…', 'blue');
+  vm2UploadVideoAsset(file);
+}
+
+async function vm2UploadVideoAsset(file) {
+  const modal = vm2Get('vm2-modal-upload');
+  const bar = vm2Get('vm2-upload-bar');
+  const msg = vm2Get('vm2-upload-msg');
+  const detail = vm2Get('vm2-upload-detail');
+
+  modal.classList.remove('hidden');
+  msg.textContent = 'Uploading video…';
+  detail.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+  bar.style.width = '5%';
+  vm2.uploadInProgress = true;
+  vm2SetSaveStatus('Uploading video…', 'blue');
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      vm2.uploadXhr = xhr;
+      xhr.open('POST', `${vm2BaseUrl()}api/upload-video-manual`);
+      xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+      xhr.setRequestHeader('X-File-Name', file.name);
+
+      xhr.upload.addEventListener('progress', (event) => {
+        if (!event.lengthComputable) return;
+        const pct = Math.round((event.loaded / event.total) * 90) + 5;
+        bar.style.width = Math.min(pct, 95) + '%';
+        detail.textContent = `${(event.loaded / 1024 / 1024).toFixed(1)} / ${(event.total / 1024 / 1024).toFixed(1)} MB`;
+      });
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          let errorMessage = `${xhr.status} ${xhr.statusText}`;
+          try {
+            errorMessage = JSON.parse(xhr.responseText).error || errorMessage;
+          } catch (_) {}
+          reject(new Error(errorMessage));
+        }
+      };
+      xhr.onabort = () => reject(new Error('Upload canceled'));
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+      xhr.send(file);
+    });
+
+    bar.style.width = '100%';
+    msg.textContent = 'Upload complete';
+    detail.textContent = 'Refresh recovery is now available.';
+
+    const asset = {
+      assetId: result.assetId,
+      name: file.name,
+      fileName: result.fileName || file.name,
+      mimeType: result.mimeType || file.type || 'video/mp4',
+      storagePath: result.storagePath,
+      downloadUrl: result.url,
+      uploadedAt: result.uploadedAt || vm2NowIso(),
+      status: 'uploaded',
+    };
+
+    vm2.project.videoUrl = asset.downloadUrl;
+    vm2.project.currentAssetId = asset.assetId;
+    vm2.project.assets = [asset];
+    vm2MarkDirty('Video uploaded');
+    await vm2PersistWorkingProject({ silent: true, reason: 'Uploaded' });
+
+    setTimeout(() => modal.classList.add('hidden'), 1000);
+  } catch (err) {
+    modal.classList.add('hidden');
+    if (err.message === 'Upload canceled') {
+      vm2ResetCanceledUpload();
+    } else {
+      console.error('[VM2] Upload error:', err);
+      vm2SetSaveStatus('Upload failed', 'red');
+      alert('Video upload failed: ' + err.message + '\n\nRefresh recovery is not available until upload completes.');
+    }
+  } finally {
+    vm2.uploadInProgress = false;
+    vm2.uploadXhr = null;
+  }
+}
+
+function vm2CancelUpload() {
+  if (!vm2.uploadXhr || !vm2.uploadInProgress) return;
+  if (!confirm('Cancel upload and remove the local video from the editor?')) return;
+  vm2.uploadXhr.abort();
+}
+
+function vm2ResetCanceledUpload() {
+  if (vm2.project?.videoLocalUrl) {
+    URL.revokeObjectURL(vm2.project.videoLocalUrl);
+  }
+  vm2.project.videoBlob = null;
+  vm2.project.videoLocalUrl = null;
+  vm2.project.videoUrl = null;
+  vm2.project.currentAssetId = null;
+  vm2.project.assets = [];
+  vm2.project.steps = [];
+  vm2.project.duration = 0;
+  vm2.duration = 0;
+  vm2.currentStepIdx = 0;
+  vm2.selectedElementId = null;
+  vm2SetVideoSource('', { local: true });
+  vm2Get('vm2-upload-zone').classList.remove('hidden');
+  vm2Get('vm2-player-area').classList.add('hidden');
+  vm2RenderSteps();
+  vm2RenderTimeline();
+  vm2RenderElements();
+  vm2RenderElementsList();
+  vm2RenderProps();
+  vm2SetSaveStatus('Upload canceled', 'blue');
 }
 
 function vm2OnVideoLoaded() {
@@ -978,14 +1414,14 @@ function vm2RenderSteps() {
         <input type="text" value="${step.label}" 
                class="flex-1 text-xs font-medium bg-transparent border-none focus:outline-none dark:text-white truncate"
                onclick="event.stopPropagation()"
-               onchange="vm2.project.steps[${i}].label = this.value; vm2RenderTimeline()">
+           onchange="vm2SelectStep(${i}); vm2UpdateStepProp('label', this.value)">
       </div>
       <div class="text-[10px] text-gray-400 mt-1 pl-10">${vm2Fmt(step.startTime)} – ${vm2Fmt(step.endTime)}</div>
       <input type="text" value="${step.description || ''}" 
              placeholder="Add description..."
              class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 ml-10 w-[calc(100%-2.5rem)] bg-transparent border-none focus:outline-none truncate placeholder-gray-300 dark:placeholder-gray-600"
              onclick="event.stopPropagation()"
-             onchange="vm2.project.steps[${i}].description = this.value">
+              onchange="vm2SelectStep(${i}); vm2UpdateStepProp('description', this.value)">
       ${vm2.project.steps.length > 1 ? `
         <button onclick="event.stopPropagation(); vm2DeleteStep(${i})" class="absolute top-1 right-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100">
           <i class="ri-close-line text-sm"></i>
@@ -1025,10 +1461,12 @@ function vm2SelectStep(idx, clickEvent) {
 }
 
 function vm2UpdateStepProp(prop, value) {
+  if (!vm2EnsureEditable()) return;
   const step = vm2Step();
   if (!step) return;
   
   step[prop] = value;
+  vm2MarkDirty('Step updated');
   
   vm2RenderSteps();
   vm2RenderTimeline();
@@ -1036,9 +1474,11 @@ function vm2UpdateStepProp(prop, value) {
 }
 
 function vm2ToggleStepMute(idx) {
+  if (!vm2EnsureEditable()) return;
   const step = vm2.project.steps[idx];
   if (!step) return;
   step.muted = !step.muted;
+  vm2MarkDirty('Step audio updated');
   // Apply immediately to the video if this is the active step
   if (idx === vm2.currentStepIdx) {
     const video = vm2Video();
@@ -1049,6 +1489,7 @@ function vm2ToggleStepMute(idx) {
 }
 
 function vm2AddStep() {
+  if (!vm2EnsureEditable()) return;
   const lastStep = vm2.project.steps[vm2.project.steps.length - 1];
   if (!lastStep) return;
   
@@ -1066,6 +1507,7 @@ function vm2AddStep() {
 }
 
 function vm2CutAtPlayhead() {
+  if (!vm2EnsureEditable()) return;
   const t = vm2.currentTime;
   const step = vm2Step();
   if (!step) return;
@@ -1109,6 +1551,8 @@ function vm2CutAtPlayhead() {
     }
   });
 
+  vm2MarkDirty('Clip split');
+
   vm2RenderSteps();
   vm2RenderTimeline();
 }
@@ -1133,6 +1577,7 @@ function vm2UpdateTimelinePositions() {
 }
 
 function vm2DeleteStep(idx) {
+  if (!vm2EnsureEditable()) return;
   if (vm2.project.steps.length <= 1) {
     if (!confirm('Delete the last step? This will reset the project but keep the video.')) return;
     
@@ -1150,6 +1595,7 @@ function vm2DeleteStep(idx) {
     }];
     vm2.currentStepIdx = 0;
     vm2.selectedElementId = null;
+    vm2MarkDirty('Project reset');
     vm2SeekTo(0);
     vm2RenderSteps();
     vm2RenderTimeline();
@@ -1169,6 +1615,7 @@ function vm2DeleteStep(idx) {
   }
 
   vm2UpdateTimelinePositions();
+  vm2MarkDirty('Step deleted');
 
   if (vm2.currentStepIdx >= vm2.project.steps.length) {
     vm2.currentStepIdx = vm2.project.steps.length - 1;
@@ -1190,6 +1637,7 @@ function vm2StepDragEnd(event) {
 }
 
 function vm2StepDrop(event, targetIdx) {
+  if (!vm2EnsureEditable()) return;
   event.preventDefault();
   const sourceIdx = parseInt(event.dataTransfer.getData('text/plain'));
   if (sourceIdx === targetIdx) return;
@@ -1203,11 +1651,13 @@ function vm2StepDrop(event, targetIdx) {
     vm2.currentStepIdx = targetIdx;
   }
 
+  vm2MarkDirty('Step reordered');
   vm2RenderSteps();
   vm2RenderTimeline();
 }
 
 function vm2StepResizeStart(event, idx, side) {
+  if (!vm2EnsureEditable()) return;
   event.preventDefault();
   event.stopPropagation();
   
@@ -1274,6 +1724,7 @@ function vm2CanvasDragLeave(event) {
 }
 
 function vm2CanvasDrop(event) {
+  if (!vm2EnsureEditable()) return;
   const outer = vm2Get('vm2-canvas-outer');
   if (outer) outer.classList.remove('vm2-drop-active');
 
@@ -1305,6 +1756,7 @@ function vm2SetDrawMode(mode) {
 }
 
 function vm2ActivateShapeDraw(subtype) {
+  if (!vm2EnsureEditable()) return;
   if (!vm2Step()) {
     alert('Load a video first');
     return;
@@ -1369,16 +1821,19 @@ function vm2ConstrainPointAngle(startPoint, endPoint, incrementDegrees = 45) {
 }
 
 function vm2UpdateRotation(value, refreshProps = false) {
+  if (!vm2EnsureEditable()) return;
   const el = vm2FindElement(vm2.selectedElementId);
   if (!el) return;
 
   el.rotation = vm2NormalizeAngle(Number(value) || 0);
+  vm2MarkDirty('Rotation updated');
   vm2RenderElements();
 
   if (refreshProps) vm2RenderProps();
 }
 
 function vm2NudgeRotation(delta) {
+  if (!vm2EnsureEditable()) return;
   const el = vm2FindElement(vm2.selectedElementId);
   if (!el) return;
   vm2UpdateRotation((el.rotation || 0) + delta, true);
@@ -1429,6 +1884,7 @@ function vm2StartRotationDrag(event, el) {
 }
 
 function vm2OnCanvasMouseDown(event) {
+  if (!vm2EnsureEditable()) return;
   if (!vm2.drawMode || event.button !== 0 || !vm2.project) return;
 
   const point = vm2CanvasPointFromEvent(event);
@@ -1462,6 +1918,7 @@ function vm2OnCanvasMouseDown(event) {
 }
 
 function vm2AddElement(type, subtype, dropX, dropY, options = {}) {
+  if (!vm2EnsureEditable()) return;
   const step = vm2Step();
   if (!step) {
     alert('Load a video first');
@@ -1550,6 +2007,7 @@ function vm2AddElement(type, subtype, dropX, dropY, options = {}) {
 
   step.elements.push(element);
   vm2.selectedElementId = id;
+  vm2MarkDirty('Element added');
 
   if (!options.deferRender) {
     vm2RenderElements();
@@ -1563,6 +2021,7 @@ function vm2AddElement(type, subtype, dropX, dropY, options = {}) {
 }
 
 async function vm2HandleImageUpload(event) {
+  if (!vm2EnsureEditable()) return;
   const file = event.target.files[0];
   if (!file) return;
 
@@ -1606,6 +2065,7 @@ async function vm2HandleImageUpload(event) {
 
     step.elements.push(element);
     vm2.selectedElementId = element.id;
+  vm2MarkDirty('Image added');
 
     vm2RenderElements();
     vm2RenderTimeline();
@@ -1619,6 +2079,7 @@ async function vm2HandleImageUpload(event) {
 }
 
 async function vm2HandleAudioUpload(event) {
+  if (!vm2EnsureEditable()) return;
   const file = event.target.files[0];
   if (!file) return;
 
@@ -1646,6 +2107,7 @@ async function vm2HandleAudioUpload(event) {
 
   step.elements.push(element);
   vm2.selectedElementId = element.id;
+  vm2MarkDirty('Audio added');
 
   vm2RenderElements();
   vm2RenderTimeline();
@@ -1758,7 +2220,7 @@ function vm2RenderSelectionHandles() {
   if (!overlay) return;
   overlay.innerHTML = '';
 
-  if (!vm2.selectedElementId) return;
+  if (!vm2.selectedElementId || vm2.revisionPreview) return;
 
   if (!vm2.project) return;
   const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
@@ -1884,6 +2346,7 @@ function vm2SelectElement(id) {
 }
 
 function vm2DeleteElement(id) {
+  if (!vm2EnsureEditable()) return;
   const result = vm2FindElementWithStep(id);
   if (!result) return;
   const { el, step } = result;
@@ -1892,6 +2355,7 @@ function vm2DeleteElement(id) {
   if (idx >= 0) {
     step.elements.splice(idx, 1);
     if (vm2.selectedElementId === id) vm2.selectedElementId = null;
+    vm2MarkDirty('Element deleted');
     vm2RenderElements();
     vm2RenderTimeline();
     vm2RenderElementsList();
@@ -2255,10 +2719,12 @@ function vm2RenderProps() {
 }
 
 function vm2UpdateProp(prop, value) {
+  if (!vm2EnsureEditable()) return;
   const el = vm2FindElement(vm2.selectedElementId);
   if (!el) return;
 
   el[prop] = value;
+  vm2MarkDirty('Element updated');
 
   vm2RenderElements();
   vm2RenderTimeline();
@@ -2266,6 +2732,7 @@ function vm2UpdateProp(prop, value) {
 }
 
 function vm2AlignElement(alignment) {
+  if (!vm2EnsureEditable()) return;
   const el = vm2FindElement(vm2.selectedElementId);
   if (!el) return;
 
@@ -2278,11 +2745,13 @@ function vm2AlignElement(alignment) {
     case 'bottom': el.y = vm2.project.height - el.height; break;
   }
 
+  vm2MarkDirty('Element aligned');
   vm2RenderElements();
   vm2RenderProps();
 }
 
 function vm2LayerElement(action) {
+  if (!vm2EnsureEditable()) return;
   const result = vm2FindElementWithStep(vm2.selectedElementId);
   if (!result) return;
   const { el } = result;
@@ -2315,6 +2784,7 @@ function vm2LayerElement(action) {
     el.layer = maxLayer;
   }
 
+  vm2MarkDirty('Layer changed');
   vm2RenderElements();
   vm2RenderTimeline();
   vm2RenderElementsList();
@@ -2497,6 +2967,7 @@ function vm2FitTimeline() {
 
 // Timeline bar interactions
 function vm2TimelineBarMouseDown(event, id) {
+  if (!vm2EnsureEditable()) return;
   if (event.target.classList.contains('resize-left') || event.target.classList.contains('resize-right')) return;
   
   event.preventDefault();
@@ -2525,6 +2996,7 @@ function vm2TimelineBarMouseDown(event, id) {
 }
 
 function vm2TimelineResizeStart(event, id, side) {
+  if (!vm2EnsureEditable()) return;
   event.preventDefault();
   event.stopPropagation();
   vm2.selectedElementId = id;
@@ -2735,11 +3207,14 @@ document.addEventListener('mousemove', (event) => {
 });
 
 document.addEventListener('mouseup', () => {
+  let shouldMarkDirty = false;
+
   if (vm2.drawShapeData) {
     const element = vm2FindElement(vm2.drawShapeData.elementId);
     if (element) {
       element.width = Math.max(element.width, 20);
       element.height = Math.max(element.height, 20);
+      shouldMarkDirty = true;
     }
     vm2.drawShapeData = null;
     vm2RenderElements();
@@ -2749,6 +3224,7 @@ document.addEventListener('mouseup', () => {
   }
 
   if (vm2.isDraggingElement || vm2.isResizingElement) {
+    shouldMarkDirty = true;
     vm2.isDraggingElement = false;
     vm2.isResizingElement = false;
     vm2.resizeHandle = null;
@@ -2756,12 +3232,14 @@ document.addEventListener('mouseup', () => {
   }
 
   if (vm2.isRotatingElement) {
+    shouldMarkDirty = true;
     vm2.isRotatingElement = false;
     vm2.rotationData = null;
     vm2RenderProps();
   }
 
   if (vm2.isDraggingTimelineBar) {
+    shouldMarkDirty = true;
     if (vm2.timelineDragData) {
       const result = vm2FindElementWithStep(vm2.timelineDragData.id);
       if (result) {
@@ -2780,6 +3258,7 @@ document.addEventListener('mouseup', () => {
   }
 
   if (vm2.isResizingStep) {
+    shouldMarkDirty = true;
     vm2.isResizingStep = false;
     vm2.stepResizeData = null;
   }
@@ -2789,6 +3268,10 @@ document.addEventListener('mouseup', () => {
     }
 
   document.body.classList.remove('vm2-no-select');
+
+  if (shouldMarkDirty && !vm2.revisionPreview) {
+    vm2MarkDirty('Timeline updated');
+  }
 });
 
 document.addEventListener('click', (event) => {
@@ -2825,54 +3308,119 @@ document.addEventListener('keydown', (event) => {
   }
 });
 async function vm2SaveProject() {
-  if (!vm2.project) return;
+  if (!vm2.project || !vm2EnsureEditable()) return;
+  if (vm2.uploadInProgress) {
+    alert('Please wait for the video upload to finish before saving a revision.');
+    return;
+  }
+  if (!vm2.project.videoUrl) {
+    alert('A finished uploaded video is required before saving a revision.');
+    return;
+  }
 
-  // Prepare data (strip blob URLs)
-  const saveData = {
-    ...vm2.project,
-    videoUrl: vm2.project.videoUrl || null,
-    videoBlob: null,
-    updatedAt: new Date().toISOString(),
-  };
+  vm2.project.title = vm2Get('vm2-title')?.value || vm2.project.title || 'Untitled1';
+  const defaultRevisionName = `${vm2.project.title || 'Untitled'} Rev ${String((vm2.project.currentRevisionNumber || 0) + 1).padStart(2, '0')}`;
+  const revisionName = prompt('Revision name:', defaultRevisionName);
+  if (!revisionName) return;
+  const folder = prompt('Folder:', vm2.project.folder || 'root');
+  if (folder === null) return;
 
-  // Strip blob URLs from elements
-  saveData.steps = saveData.steps.map(step => ({
-    ...step,
-    elements: step.elements.map(el => {
-      const cleaned = { ...el };
-      if (cleaned.imageBlob) delete cleaned.imageBlob;
-      if (cleaned.audioBlob) delete cleaned.audioBlob;
-      return cleaned;
-    }),
-  }));
+  const saved = await vm2PersistWorkingProject({ silent: true, reason: 'Saved working copy' });
+  if (!vm2.project._id && !saved?.insertedId) {
+    alert('Failed to save the current working copy before creating a revision.');
+    return;
+  }
 
   try {
-    const method = vm2.project._id ? 'PUT' : 'POST';
-    const url = vm2.project._id 
-      ? `${BASE_URL}api/db/${VM2_DB}/${VM2_COLLECTION}/${vm2.project._id}`
-      : `${BASE_URL}api/db/${VM2_DB}/${VM2_COLLECTION}`;
-
-    const res = await fetch(url, {
-      method,
+    const res = await fetch(`${vm2BaseUrl()}api/video-manuals/${vm2.project._id}/revisions`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(saveData),
+      body: JSON.stringify({
+        revisionName,
+        folder: folder || 'root',
+        snapshot: vm2BuildRevisionSnapshot(),
+      }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || String(res.status));
+    }
 
-    if (!res.ok) throw new Error('Save failed');
-
-    const result = await res.json();
-    if (result.insertedId) vm2.project._id = result.insertedId;
-
-    alert('Project saved!');
+    const data = await res.json();
+    vm2.project.folder = folder || 'root';
+    vm2.project.currentRevisionNumber = data.revisionNumber || vm2.project.currentRevisionNumber;
+    vm2.project.lastRevisionId = data.revisionId || vm2.project.lastRevisionId;
+    await vm2PersistWorkingProject({ silent: true, reason: 'Revision saved' });
+    alert('Revision saved!');
+    vm2ShowHistory();
   } catch (err) {
-    console.error('[VM2] Save error:', err);
-    alert('Failed to save project: ' + err.message);
+    console.error('[VM2] Save revision error:', err);
+    alert('Failed to save revision: ' + err.message);
   }
 }
 
 async function vm2OpenProject() {
   vm2Get('vm2-modal-open').classList.remove('hidden');
   await vm2LoadProjectsList();
+}
+
+async function vm2ShowHistory() {
+  const list = vm2Get('vm2-history-list');
+  if (!list) return;
+
+  vm2Get('vm2-modal-history').classList.remove('hidden');
+
+  if (!vm2.project?._id) {
+    list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">Save a working project first.</p>';
+    return;
+  }
+
+  list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">Loading revisions…</p>';
+
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-manuals/${vm2.project._id}/revisions`);
+    if (!res.ok) throw new Error(String(res.status));
+    const revisions = await res.json();
+
+    if (!revisions.length) {
+      list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">No revisions yet.<br>Use Save Revision to create one.</p>';
+      return;
+    }
+
+    list.innerHTML = revisions.map((revision) => `
+      <div class="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${revision.revisionName || 'Unnamed revision'}</p>
+          <p class="text-xs text-gray-400">Revision ${revision.revisionNumber || '?'} · ${revision.folder || 'root'} · ${new Date(revision.createdAt).toLocaleString()}</p>
+        </div>
+        <button onclick="vm2PreviewRevision('${revision._id}')" class="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded hover:bg-blue-100">Preview</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    list.innerHTML = `<p class="text-sm text-red-400 text-center py-6">Failed to load revisions: ${err.message}</p>`;
+  }
+}
+
+async function vm2PreviewRevision(revisionId) {
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-revisions/${revisionId}`);
+    if (!res.ok) throw new Error(String(res.status));
+    const revision = await res.json();
+    const snapshot = vm2DeepClone(revision.snapshot || {});
+    snapshot._id = revision.projectId;
+    snapshot.__previewRevisionId = revision._id;
+    snapshot.currentRevisionNumber = revision.revisionNumber || snapshot.currentRevisionNumber || 0;
+    vm2ApplyProjectState(snapshot, { readOnlyRevision: revision });
+    vm2Get('vm2-modal-history').classList.add('hidden');
+  } catch (err) {
+    console.error('[VM2] Preview revision error:', err);
+    alert('Failed to preview revision: ' + err.message);
+  }
+}
+
+function vm2ExitRevisionPreview() {
+  if (!vm2.revisionPreview || !vm2.project?._id) return;
+  vm2LoadProject(vm2.project._id);
 }
 
 async function vm2LoadProjectsList() {
@@ -2882,7 +3430,8 @@ async function vm2LoadProjectsList() {
   list.innerHTML = '<p class="text-center text-gray-400 py-4">Loading...</p>';
 
   try {
-    const res = await fetch(`${BASE_URL}api/db/${VM2_DB}/${VM2_COLLECTION}`);
+    const res = await fetch(`${vm2BaseUrl()}api/video-manuals`);
+    if (!res.ok) throw new Error(String(res.status));
     const projects = await res.json();
 
     if (!projects.length) {
@@ -2893,6 +3442,7 @@ async function vm2LoadProjectsList() {
     vm2._projectsList = projects;
     vm2RenderProjectsList(projects);
   } catch (err) {
+    console.error('[VM2] Load projects list error:', err);
     list.innerHTML = '<p class="text-center text-red-400 py-4">Failed to load projects</p>';
   }
 }
@@ -2905,7 +3455,7 @@ function vm2RenderProjectsList(projects) {
     <div class="p-3 rounded border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
          onclick="vm2LoadProject('${p._id}')">
       <div class="font-medium text-gray-800 dark:text-white text-sm">${p.title || 'Untitled'}</div>
-      <div class="text-xs text-gray-400 mt-1">${p.steps?.length || 0} steps · ${new Date(p.updatedAt || p.createdAt).toLocaleDateString()}</div>
+      <div class="text-xs text-gray-400 mt-1">${p.stepsCount || 0} steps · ${p.folder || 'root'} · ${new Date(p.updatedAt || p.createdAt).toLocaleDateString()}</div>
     </div>
   `).join('');
 }
@@ -2920,33 +3470,15 @@ function vm2FilterProjects(query) {
 
 async function vm2LoadProject(id) {
   try {
-    const res = await fetch(`${BASE_URL}api/db/${VM2_DB}/${VM2_COLLECTION}/${id}`);
+    const res = await fetch(`${vm2BaseUrl()}api/video-manuals/${id}`);
+    if (!res.ok) throw new Error(String(res.status));
     const project = await res.json();
 
-    vm2.project = project;
-    vm2.currentStepIdx = 0;
-    vm2.selectedElementId = null;
-    vm2.duration = project.duration || 0;
-
     vm2Get('vm2-modal-open').classList.add('hidden');
-    vm2Get('vm2-title').value = project.title || 'Untitled';
-
-    // If video URL exists, load it
-    if (project.videoUrl) {
-      const video = vm2Video();
-      video.src = project.videoUrl;
-      video.load();
-      vm2Get('vm2-upload-zone').classList.add('hidden');
-      vm2Get('vm2-player-area').classList.remove('hidden');
-    }
-
-    vm2RenderSteps();
-    vm2RenderTimeline();
-    vm2RenderElements();
-
+    vm2ApplyProjectState(project, { readOnlyRevision: null });
   } catch (err) {
     console.error('[VM2] Load error:', err);
-    alert('Failed to load project');
+    alert('Failed to load project: ' + err.message);
   }
 }
 
@@ -2955,7 +3487,8 @@ async function vm2LoadProject(id) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function vm2Export() {
-  if (!vm2.project || !vm2.project.videoBlob) {
+  const video = vm2Video();
+  if (!vm2.project || !video || !video.currentSrc) {
     alert('Please load a video first');
     return;
   }
@@ -2975,7 +3508,6 @@ async function vm2Export() {
     
     // Create a canvas to composite video + overlays.
     // Use PROJECT dimensions to match preview exactly.
-    const video = vm2Video();
     const nativeW = video.videoWidth || vm2.project.width;
     const nativeH = video.videoHeight || vm2.project.height;
     const projectW = vm2.project.width;
@@ -3231,4 +3763,11 @@ function vm2Redo() {
 // Auto-load if navigating to video manual page
 if (typeof window !== 'undefined') {
   window.loadVideoManual2Page = loadVideoManual2Page;
+  window.addEventListener('beforeunload', (event) => {
+    if (!vm2) return;
+    const shouldWarn = vm2.uploadInProgress || (!!vm2.dirty && !vm2.revisionPreview);
+    if (!shouldWarn) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 }
