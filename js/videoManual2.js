@@ -19,8 +19,10 @@ let vm2 = {
   canvasZoom: 1,
   isDraggingElement: false,
   isResizingElement: false,
+  isRotatingElement: false,
   resizeHandle: null,
   dragOffset: { x: 0, y: 0 },
+  rotationData: null,
   isDraggingTimelineBar: false,
   timelineDragData: null,
   isResizingStep: false,
@@ -31,6 +33,8 @@ let vm2 = {
   previewRaf: null,
   videoRect: null,
   showDebugVideoRect: false,
+  drawMode: null,
+  drawShapeData: null,
 };
 
 // ── Utility Functions ───────────────────────────────────────────────────────
@@ -47,6 +51,8 @@ const vm2Step = () => vm2.project?.steps[vm2.currentStepIdx] || null;
 const vm2Video = () => vm2Get('vm2-video');
 const vm2PreviewCanvas = () => vm2Get('vm2-preview-canvas');
 const vm2CanvasViewport = () => vm2Get('vm2-canvas-viewport');
+const vm2DegToRad = (deg) => deg * Math.PI / 180;
+const vm2RadToDeg = (rad) => rad * 180 / Math.PI;
 
 // ── Page Loader ─────────────────────────────────────────────────────────────
 function loadVideoManual2Page() {
@@ -130,6 +136,7 @@ function loadVideoManual2Page() {
           
           <!-- Canvas Container -->
           <div id="vm2-canvas-outer" class="flex-1 flex items-center justify-center overflow-auto p-4 bg-gray-800 dark:bg-black"
+            onmousedown="vm2OnCanvasMouseDown(event)"
                ondragover="vm2CanvasDragOver(event)"
                ondragleave="vm2CanvasDragLeave(event)"
                ondrop="vm2CanvasDrop(event)">
@@ -250,14 +257,14 @@ function loadVideoManual2Page() {
               </button>
               <button draggable="true"
                 ondragstart="vm2ElementPanelDragStart(event,'shape','arrow')"
-                onclick="vm2AddElement('shape','arrow')"
-                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Drag or click to add Arrow">
+                onclick="vm2ActivateShapeDraw('arrow')"
+                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Click, then drag on preview to draw Arrow">
                 <i class="ri-arrow-right-up-line text-lg text-gray-800 dark:text-gray-200 pointer-events-none"></i>
               </button>
               <button draggable="true"
                 ondragstart="vm2ElementPanelDragStart(event,'shape','line')"
-                onclick="vm2AddElement('shape','line')"
-                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Drag or click to add Line">
+                onclick="vm2ActivateShapeDraw('line')"
+                class="aspect-square bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded flex items-center justify-center cursor-grab active:cursor-grabbing select-none" title="Click, then drag on preview to draw Line">
                 <div class="w-6 h-0.5 bg-gray-800 dark:bg-gray-200 rotate-45 pointer-events-none"></div>
               </button>
             </div>
@@ -392,6 +399,23 @@ function loadVideoManual2Page() {
     #vm2-root { font-family: system-ui, -apple-system, sans-serif; }
     #vm2-canvas-outer.vm2-drop-active { outline: 3px dashed #3b82f6; outline-offset: -3px; }
     #vm2-canvas-outer.vm2-drop-active #vm2-canvas-wrapper { outline: 2px solid #3b82f6; outline-offset: 1px; }
+    #vm2-timeline-scroll,
+    #vm2-time-ruler,
+    #vm2-tracks,
+    #vm2-step-segments,
+    #vm2-element-tracks {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body.vm2-no-select,
+    body.vm2-no-select * {
+      user-select: none !important;
+      -webkit-user-select: none !important;
+    }
+    #vm2-canvas-outer.vm2-draw-mode,
+    #vm2-canvas-outer.vm2-draw-mode * {
+      cursor: crosshair !important;
+    }
     .vm2-step-item { transition: all 0.15s; }
     .vm2-step-item.active { background: #eff6ff; border-color: #3b82f6; }
     .dark .vm2-step-item.active { background: #1e3a8a20; border-color: #60a5fa; }
@@ -413,6 +437,29 @@ function loadVideoManual2Page() {
     .vm2-element-handle.s { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
     .vm2-element-handle.w { left: -5px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
     .vm2-element-handle.e { right: -5px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+    .vm2-rotation-stem {
+      position: absolute;
+      left: 50%;
+      top: -28px;
+      width: 2px;
+      height: 18px;
+      background: #3b82f6;
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+    .vm2-rotation-handle {
+      position: absolute;
+      left: 50%;
+      top: -36px;
+      width: 14px;
+      height: 14px;
+      border-radius: 9999px;
+      background: white;
+      border: 2px solid #3b82f6;
+      transform: translateX(-50%);
+      pointer-events: auto;
+      cursor: grab;
+    }
     .vm2-timeline-bar {
       position: absolute;
       height: 24px;
@@ -1168,6 +1215,7 @@ function vm2StepResizeStart(event, idx, side) {
   if (!step) return;
   
   vm2.isResizingStep = true;
+  document.body.classList.add('vm2-no-select');
   vm2.stepResizeData = {
     idx,
     side,
@@ -1248,7 +1296,162 @@ function vm2CanvasDrop(event) {
   vm2AddElement(type, subtype, dropX, dropY);
 }
 
-function vm2AddElement(type, subtype, dropX, dropY) {
+function vm2SetDrawMode(mode) {
+  vm2.drawMode = mode;
+  const outer = vm2Get('vm2-canvas-outer');
+  if (outer) {
+    outer.classList.toggle('vm2-draw-mode', !!mode);
+  }
+}
+
+function vm2ActivateShapeDraw(subtype) {
+  if (!vm2Step()) {
+    alert('Load a video first');
+    return;
+  }
+
+  vm2.selectedElementId = null;
+  vm2SetDrawMode({ type: 'shape', subtype });
+  vm2RenderElements();
+  vm2RenderProps();
+}
+
+function vm2CanvasPointFromEvent(event) {
+  const wrapper = vm2Get('vm2-canvas-wrapper');
+  if (!wrapper) return null;
+
+  const rect = wrapper.getBoundingClientRect();
+  const rawX = (event.clientX - rect.left) / vm2.canvasZoom;
+  const rawY = (event.clientY - rect.top) / vm2.canvasZoom;
+
+  return {
+    x: Math.max(0, Math.min(rawX, vm2.project.width)),
+    y: Math.max(0, Math.min(rawY, vm2.project.height)),
+  };
+}
+
+function vm2GetShapeLocalEndpoints(el) {
+  const startNormX = el.startNormX ?? 0;
+  const startNormY = el.startNormY ?? 1;
+  const endNormX = el.endNormX ?? 1;
+  const endNormY = el.endNormY ?? 0;
+
+  return {
+    startX: startNormX * el.width,
+    startY: startNormY * el.height,
+    endX: endNormX * el.width,
+    endY: endNormY * el.height,
+  };
+}
+
+function vm2NormalizeAngle(angle) {
+  let normalized = angle % 360;
+  if (normalized < 0) normalized += 360;
+  return normalized;
+}
+
+function vm2SnapAngle(angle, increment = 15) {
+  return Math.round(angle / increment) * increment;
+}
+
+function vm2ConstrainPointAngle(startPoint, endPoint, incrementDegrees = 45) {
+  const dx = endPoint.x - startPoint.x;
+  const dy = endPoint.y - startPoint.y;
+  const distance = Math.hypot(dx, dy);
+  if (!distance) return endPoint;
+
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / vm2DegToRad(incrementDegrees)) * vm2DegToRad(incrementDegrees);
+  return {
+    x: startPoint.x + Math.cos(snapped) * distance,
+    y: startPoint.y + Math.sin(snapped) * distance,
+  };
+}
+
+function vm2UpdateRotation(value, refreshProps = false) {
+  const el = vm2FindElement(vm2.selectedElementId);
+  if (!el) return;
+
+  el.rotation = vm2NormalizeAngle(Number(value) || 0);
+  vm2RenderElements();
+
+  if (refreshProps) vm2RenderProps();
+}
+
+function vm2NudgeRotation(delta) {
+  const el = vm2FindElement(vm2.selectedElementId);
+  if (!el) return;
+  vm2UpdateRotation((el.rotation || 0) + delta, true);
+}
+
+function vm2UpdateDrawnShapeGeometry(el, startPoint, endPoint) {
+  const minX = Math.min(startPoint.x, endPoint.x);
+  const minY = Math.min(startPoint.y, endPoint.y);
+  const width = Math.max(Math.abs(endPoint.x - startPoint.x), 1);
+  const height = Math.max(Math.abs(endPoint.y - startPoint.y), 1);
+
+  el.x = minX;
+  el.y = minY;
+  el.width = width;
+  el.height = height;
+  el.startNormX = (startPoint.x - minX) / width;
+  el.startNormY = (startPoint.y - minY) / height;
+  el.endNormX = (endPoint.x - minX) / width;
+  el.endNormY = (endPoint.y - minY) / height;
+}
+
+function vm2StartRotationDrag(event, el) {
+  const wrapper = vm2Get('vm2-canvas-wrapper');
+  if (!wrapper) return;
+
+  const rect = wrapper.getBoundingClientRect();
+  const centerX = rect.left + (el.x + el.width / 2) * vm2.canvasZoom;
+  const centerY = rect.top + (el.y + el.height / 2) * vm2.canvasZoom;
+
+  vm2.isRotatingElement = true;
+  vm2.rotationData = {
+    centerX,
+    centerY,
+    startPointerAngle: vm2RadToDeg(Math.atan2(event.clientY - centerY, event.clientX - centerX)),
+    originalRotation: el.rotation || 0,
+  };
+  document.body.classList.add('vm2-no-select');
+}
+
+function vm2OnCanvasMouseDown(event) {
+  if (!vm2.drawMode || event.button !== 0 || !vm2.project) return;
+
+  const point = vm2CanvasPointFromEvent(event);
+  if (!point) return;
+
+  event.preventDefault();
+  document.body.classList.add('vm2-no-select');
+
+  const element = vm2AddElement(vm2.drawMode.type, vm2.drawMode.subtype, point.x, point.y, {
+    deferRender: true,
+    initialWidth: 1,
+    initialHeight: 1,
+    startNormX: 0,
+    startNormY: 0,
+    endNormX: 1,
+    endNormY: 1,
+  });
+  if (!element) return;
+
+  vm2UpdateDrawnShapeGeometry(element, point, point);
+  vm2.drawShapeData = {
+    elementId: element.id,
+    startPoint: point,
+  };
+  vm2SetDrawMode(null);
+  vm2RenderElements();
+  vm2RenderTimeline();
+  vm2RenderElementsList();
+  vm2RenderProps();
+  vm2SwitchTab('properties');
+}
+
+function vm2AddElement(type, subtype, dropX, dropY, options = {}) {
   const step = vm2Step();
   if (!step) {
     alert('Load a video first');
@@ -1275,8 +1478,8 @@ function vm2AddElement(type, subtype, dropX, dropY) {
     layer: nextLayer,
     x: centerX - 100,
     y: centerY - 50,
-    width: 200,
-    height: 100,
+    width: options.initialWidth ?? 200,
+    height: options.initialHeight ?? 100,
     startTime: elementStart,
     endTime: elementEnd,
     opacity: 100,
@@ -1303,11 +1506,15 @@ function vm2AddElement(type, subtype, dropX, dropY) {
     element.strokeWidth = 3;
     element.fill = false; // No fill by default
     if (subtype === 'arrow' || subtype === 'line') {
-      element.width = 150;
-      element.height = 100;
+      element.width = options.initialWidth ?? 150;
+      element.height = options.initialHeight ?? 100;
       element.fill = false;
       element.x = centerX - 75;
       element.y = centerY - 50;
+      element.startNormX = options.startNormX ?? 0;
+      element.startNormY = options.startNormY ?? 1;
+      element.endNormX = options.endNormX ?? 1;
+      element.endNormY = options.endNormY ?? 0;
     }
     if (subtype === 'circle') {
       element.width = 100;
@@ -1333,11 +1540,15 @@ function vm2AddElement(type, subtype, dropX, dropY) {
   step.elements.push(element);
   vm2.selectedElementId = id;
 
-  vm2RenderElements();
-  vm2RenderTimeline();
-  vm2RenderElementsList();
-  vm2RenderProps();
-  vm2SwitchTab('properties');
+  if (!options.deferRender) {
+    vm2RenderElements();
+    vm2RenderTimeline();
+    vm2RenderElementsList();
+    vm2RenderProps();
+    vm2SwitchTab('properties');
+  }
+
+  return element;
 }
 
 async function vm2HandleImageUpload(event) {
@@ -1491,6 +1702,7 @@ function vm2RenderElements() {
       } else if (el.subtype === 'circle') {
         div.innerHTML = `<div style="width:100%;height:100%;background:${el.fill ? el.strokeColor : 'transparent'};border:${el.strokeWidth}px solid ${el.strokeColor};border-radius:50%;box-sizing:border-box;"></div>`;
       } else if (el.subtype === 'arrow' || el.subtype === 'line') {
+        const { startX, startY, endX, endY } = vm2GetShapeLocalEndpoints(el);
         div.innerHTML = `
           <svg width="100%" height="100%" viewBox="0 0 ${el.width} ${el.height}" style="overflow:visible;">
             <defs>
@@ -1498,7 +1710,7 @@ function vm2RenderElements() {
                 <polygon points="0 0, 10 3.5, 0 7" fill="${el.strokeColor}" />
               </marker>
             </defs>
-            <line x1="0" y1="${el.height}" x2="${el.width}" y2="0" 
+            <line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" 
                   stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}"
                   ${el.subtype === 'arrow' ? `marker-end="url(#arrowhead-${el.id})"` : ''} />
           </svg>
@@ -1510,6 +1722,7 @@ function vm2RenderElements() {
 
     // Click to select
     div.addEventListener('mousedown', (e) => {
+      if (vm2.drawMode) return;
       if (el.locked) return;
       e.stopPropagation();
       vm2.selectedElementId = el.id;
@@ -1558,6 +1771,7 @@ function vm2RenderSelectionHandles() {
     const handle = document.createElement('div');
     handle.className = `vm2-element-handle ${h}`;
     handle.addEventListener('mousedown', (e) => {
+      if (vm2.drawMode) return;
       e.stopPropagation();
       vm2.isResizingElement = true;
       vm2.resizeHandle = h;
@@ -1565,6 +1779,23 @@ function vm2RenderSelectionHandles() {
     });
     box.appendChild(handle);
   });
+
+  if (el.type === 'shape' && (el.subtype === 'arrow' || el.subtype === 'line')) {
+    const stem = document.createElement('div');
+    stem.className = 'vm2-rotation-stem';
+    box.appendChild(stem);
+
+    const rotationHandle = document.createElement('div');
+    rotationHandle.className = 'vm2-rotation-handle';
+    rotationHandle.title = 'Drag to rotate. Hold Shift to snap.';
+    rotationHandle.addEventListener('mousedown', (e) => {
+      if (vm2.drawMode) return;
+      e.preventDefault();
+      e.stopPropagation();
+      vm2StartRotationDrag(e, el);
+    });
+    box.appendChild(rotationHandle);
+  }
 
   overlay.appendChild(box);
 }
@@ -1944,6 +2175,32 @@ function vm2RenderProps() {
         ` : ''}
       </div>
     `;
+
+    if (el.subtype === 'arrow' || el.subtype === 'line') {
+      const rotationValue = vm2NormalizeAngle(el.rotation || 0);
+      html += `
+        <div class="mb-4">
+          <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1">
+            <i class="ri-refresh-line"></i>Rotate ${el.subtype === 'arrow' ? 'Arrow' : 'Line'}
+          </p>
+          <div class="flex gap-1 mb-2">
+            <button onclick="vm2NudgeRotation(-45)" class="flex-1 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 rounded text-xs">-45°</button>
+            <button onclick="vm2NudgeRotation(-15)" class="flex-1 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 rounded text-xs">-15°</button>
+            <button onclick="vm2UpdateRotation(0, true)" class="flex-1 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 rounded text-xs">Reset</button>
+            <button onclick="vm2NudgeRotation(15)" class="flex-1 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 rounded text-xs">+15°</button>
+            <button onclick="vm2NudgeRotation(45)" class="flex-1 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 rounded text-xs">+45°</button>
+          </div>
+          <div class="flex items-center gap-2 mb-2">
+            <input type="range" min="0" max="360" value="${rotationValue}"
+              oninput="vm2UpdateRotation(this.value); this.nextElementSibling.textContent=Math.round(this.value)+'°'"
+              onchange="vm2UpdateRotation(this.value, true)"
+              class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full appearance-none cursor-pointer">
+            <span class="text-xs text-gray-500 w-10 text-right">${Math.round(rotationValue)}°</span>
+          </div>
+          <p class="text-[10px] text-gray-400">Drag the rotation handle above the selection box. Hold Shift to snap.</p>
+        </div>
+      `;
+    }
   } else if (el.type === 'audio') {
     html += `
       <!-- Audio Properties -->
@@ -2186,6 +2443,7 @@ function vm2OnTimelineMouseLeave() {
 function vm2OnTimelineMouseDown(event) {
   // Don't scrub if clicking on a bar or a handle or a step segment
   if (event.target.closest('.vm2-timeline-bar') || event.target.closest('.resize-left') || event.target.closest('.resize-right') || event.target.closest('.vm2-step-seg')) return;
+  event.preventDefault();
   
   const scroll = vm2Get('vm2-timeline-scroll');
   if (!scroll || vm2.duration <= 0) return;
@@ -2195,6 +2453,7 @@ function vm2OnTimelineMouseDown(event) {
   const time = Math.max(0, Math.min(x / vm2.timelineZoom, vm2.duration));
   
   vm2.isScrubbing = true;
+  document.body.classList.add('vm2-no-select');
   vm2SeekTo(time);
 }
 
@@ -2216,9 +2475,11 @@ function vm2FitTimeline() {
 function vm2TimelineBarMouseDown(event, id) {
   if (event.target.classList.contains('resize-left') || event.target.classList.contains('resize-right')) return;
   
+  event.preventDefault();
   event.stopPropagation();
   vm2.selectedElementId = id;
   vm2.isDraggingTimelineBar = true;
+  document.body.classList.add('vm2-no-select');
   
   const el = vm2FindElement(id);
   if (el) {
@@ -2240,9 +2501,11 @@ function vm2TimelineBarMouseDown(event, id) {
 }
 
 function vm2TimelineResizeStart(event, id, side) {
+  event.preventDefault();
   event.stopPropagation();
   vm2.selectedElementId = id;
   vm2.isDraggingTimelineBar = true;
+  document.body.classList.add('vm2-no-select');
   
   const el = vm2FindElement(id);
   if (el) {
@@ -2281,6 +2544,18 @@ function vm2FindElementWithStep(id) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 document.addEventListener('mousemove', (event) => {
+  if (vm2.drawShapeData) {
+    let point = vm2CanvasPointFromEvent(event);
+    const element = vm2FindElement(vm2.drawShapeData.elementId);
+    if (point && element) {
+      if (event.shiftKey) {
+        point = vm2ConstrainPointAngle(vm2.drawShapeData.startPoint, point, 45);
+      }
+      vm2UpdateDrawnShapeGeometry(element, vm2.drawShapeData.startPoint, point);
+      vm2RenderElements();
+    }
+  }
+
   // Timeline Scrubbing global drag
   if (vm2.isScrubbing) {
     const scroll = vm2Get('vm2-timeline-scroll');
@@ -2317,6 +2592,22 @@ document.addEventListener('mousemove', (event) => {
     if (h.includes('s')) { el.height = Math.max(20, orig.height + dy); }
     if (h.includes('n')) { el.y = orig.y + dy; el.height = Math.max(20, orig.height - dy); }
 
+    vm2RenderElements();
+  }
+
+  if (vm2.isRotatingElement && vm2.selectedElementId && vm2.rotationData) {
+    const el = vm2FindElement(vm2.selectedElementId);
+    if (!el) return;
+
+    const pointerAngle = vm2RadToDeg(Math.atan2(
+      event.clientY - vm2.rotationData.centerY,
+      event.clientX - vm2.rotationData.centerX
+    ));
+    let nextRotation = vm2.rotationData.originalRotation + (pointerAngle - vm2.rotationData.startPointerAngle);
+    if (event.shiftKey) {
+      nextRotation = vm2SnapAngle(nextRotation, 15);
+    }
+    el.rotation = vm2NormalizeAngle(nextRotation);
     vm2RenderElements();
   }
 
@@ -2420,10 +2711,29 @@ document.addEventListener('mousemove', (event) => {
 });
 
 document.addEventListener('mouseup', () => {
+  if (vm2.drawShapeData) {
+    const element = vm2FindElement(vm2.drawShapeData.elementId);
+    if (element) {
+      element.width = Math.max(element.width, 20);
+      element.height = Math.max(element.height, 20);
+    }
+    vm2.drawShapeData = null;
+    vm2RenderElements();
+    vm2RenderTimeline();
+    vm2RenderElementsList();
+    vm2RenderProps();
+  }
+
   if (vm2.isDraggingElement || vm2.isResizingElement) {
     vm2.isDraggingElement = false;
     vm2.isResizingElement = false;
     vm2.resizeHandle = null;
+    vm2RenderProps();
+  }
+
+  if (vm2.isRotatingElement) {
+    vm2.isRotatingElement = false;
+    vm2.rotationData = null;
     vm2RenderProps();
   }
 
@@ -2453,6 +2763,8 @@ document.addEventListener('mouseup', () => {
     if (vm2.isScrubbing) {
       vm2.isScrubbing = false;
     }
+
+  document.body.classList.remove('vm2-no-select');
 });
 
 document.addEventListener('click', (event) => {
@@ -2469,6 +2781,23 @@ document.addEventListener('click', (event) => {
     // vm2RenderElements();
     // vm2RenderTimeline();
     // vm2RenderProps();
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  const target = event.target;
+  const isEditable = target instanceof HTMLElement && (
+    target.isContentEditable ||
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT'
+  );
+
+  if (isEditable || event.repeat) return;
+
+  if (event.code === 'Space') {
+    event.preventDefault();
+    vm2TogglePlay();
   }
 });
 async function vm2SaveProject() {
@@ -2824,19 +3153,25 @@ function vm2DrawElementOnCanvas(ctx, el, sx = 1, sy = 1, ox = 0, oy = 0) {
         ctx.stroke();
       }
     } else if (el.subtype === 'arrow' || el.subtype === 'line') {
+      const localPoints = vm2GetShapeLocalEndpoints(el);
+      const startX = x + localPoints.startX * sx;
+      const startY = y + localPoints.startY * sy;
+      const endX = x + localPoints.endX * sx;
+      const endY = y + localPoints.endY * sy;
+
       ctx.beginPath();
-      ctx.moveTo(x, y + h);
-      ctx.lineTo(x + w, y);
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
       ctx.stroke();
 
       if (el.subtype === 'arrow') {
-        const angle = Math.atan2(-h, w);
+        const angle = Math.atan2(endY - startY, endX - startX);
         const headLen = 15 * Math.min(sx, sy);
         ctx.beginPath();
-        ctx.moveTo(x + w, y);
-        ctx.lineTo(x + w - headLen * Math.cos(angle - Math.PI / 6), y - headLen * Math.sin(angle - Math.PI / 6));
-        ctx.moveTo(x + w, y);
-        ctx.lineTo(x + w - headLen * Math.cos(angle + Math.PI / 6), y - headLen * Math.sin(angle + Math.PI / 6));
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6), endY - headLen * Math.sin(angle + Math.PI / 6));
         ctx.stroke();
       }
     }
