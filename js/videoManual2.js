@@ -71,9 +71,9 @@ function loadVideoManual2Page() {
       <select id="vm2-zoom-select" onchange="vm2SetCanvasZoom(this.value)" class="text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300">
         <option value="0.5">50%</option>
         <option value="0.75">75%</option>
-        <option value="1" selected>100%</option>
+        <option value="1">100%</option>
         <option value="1.5">150%</option>
-        <option value="fit">Fit</option>
+        <option value="fit" selected>Fit</option>
       </select>
       <button onclick="vm2OpenProject()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
         <i class="ri-folder-open-line"></i>Open
@@ -318,6 +318,9 @@ function loadVideoManual2Page() {
             <option value="1080x1080">Square (1080×1080)</option>
           </select>
         </div>
+        <button onclick="vm2MatchVideoSize()" class="w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded text-sm flex items-center justify-center gap-2">
+          <i class="ri-aspect-ratio-line"></i>Match Video Size (No Stretch)
+        </button>
       </div>
       <div class="flex gap-2 mt-4">
         <button onclick="vm2Get('vm2-modal-canvas').classList.add('hidden')" class="flex-1 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 rounded text-sm text-gray-600 dark:text-gray-300">Cancel</button>
@@ -503,8 +506,13 @@ function vm2OnVideoLoaded() {
   const video = vm2Video();
   vm2.duration = video.duration;
   vm2.project.duration = video.duration;
-  vm2.project.width = video.videoWidth || 1920;
-  vm2.project.height = video.videoHeight || 1080;
+  
+  // Store native video dimensions for reference, but DON'T override project canvas size.
+  // Canvas stays at its set size (default 1920x1080), video fits inside with object-fit:contain.
+  vm2.project.nativeVideoWidth = video.videoWidth;
+  vm2.project.nativeVideoHeight = video.videoHeight;
+
+
 
   // Create first step if none
   if (vm2.project.steps.length === 0) {
@@ -684,9 +692,60 @@ function vm2SyncCanvasSize() {
   wrapper.style.height = vm2.project.height + 'px';
   video.style.width = '100%';
   video.style.height = '100%';
+  // Use 'contain' to preserve video aspect ratio (may show black bars)
   video.style.objectFit = 'contain';
+  // Show a visible background for the canvas so users can see letterbox/pillarbox areas
+  wrapper.style.background = '#1a1a2e';
+  
+  // DEBUG: Add visual indicator showing where video actually renders with object-fit:contain
+  let debugRect = wrapper.querySelector('#vm2-debug-video-rect');
+  if (!debugRect) {
+    debugRect = document.createElement('div');
+    debugRect.id = 'vm2-debug-video-rect';
+    debugRect.style.cssText = 'position:absolute; border:4px solid #00ff00; pointer-events:none; box-sizing:border-box; z-index:9999;';
+    wrapper.appendChild(debugRect);
+  }
+  
+  // Calculate contain rect (same math as browser's object-fit:contain)
+  const nativeW = video.videoWidth || vm2.project.width;
+  const nativeH = video.videoHeight || vm2.project.height;
+  const projectW = vm2.project.width;
+  const projectH = vm2.project.height;
+  const videoRatio = nativeW / nativeH;
+  const projectRatio = projectW / projectH;
+  
+  let drawX, drawY, drawW, drawH;
+  if (videoRatio > projectRatio) {
+    // Video is wider → letterbox (bars top/bottom)
+    drawW = projectW;
+    drawH = projectW / videoRatio;
+    drawX = 0;
+    drawY = (projectH - drawH) / 2;
+  } else {
+    // Video is taller or same → pillarbox (bars left/right)
+    drawH = projectH;
+    drawW = projectH * videoRatio;
+    drawX = (projectW - drawW) / 2;
+    drawY = 0;
+  }
+  
+  debugRect.style.left = drawX + 'px';
+  debugRect.style.top = drawY + 'px';
+  debugRect.style.width = drawW + 'px';
+  debugRect.style.height = drawH + 'px';
+  
+  // Store the video rect for use by export
+  vm2.videoRect = { drawX, drawY, drawW, drawH };
+  
+  console.log('[VM2] Preview video rect:', { drawX, drawY, drawW, drawH, projectW, projectH, nativeW, nativeH });
 
   vm2ApplyCanvasZoomTransform();
+  
+  // Auto-fit on first sync
+  if (!vm2._initialFitDone) {
+    vm2._initialFitDone = true;
+    setTimeout(() => vm2FitCanvas(), 50);
+  }
 }
 
 function vm2SetCanvasZoom(value) {
@@ -742,6 +801,23 @@ function vm2ApplyCanvasSize() {
   vm2.project.height = parseInt(vm2Get('vm2-canvas-h').value) || 1080;
   vm2SyncCanvasSize();
   vm2Get('vm2-modal-canvas').classList.add('hidden');
+}
+
+function vm2MatchVideoSize() {
+  const video = vm2Video();
+  if (!video || !video.videoWidth) {
+    alert('Please load a video first');
+    return;
+  }
+  // Set canvas to match video's native dimensions (no stretching!)
+  vm2Get('vm2-canvas-w').value = video.videoWidth;
+  vm2Get('vm2-canvas-h').value = video.videoHeight;
+  // Apply immediately
+  vm2.project.width = video.videoWidth;
+  vm2.project.height = video.videoHeight;
+  vm2SyncCanvasSize();
+  vm2Get('vm2-modal-canvas').classList.add('hidden');
+  console.log('[VM2] Canvas matched to video:', video.videoWidth, 'x', video.videoHeight);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1137,9 +1213,9 @@ function vm2AddElement(type, subtype, dropX, dropY) {
     element.x = centerX - 200;
     element.y = centerY - (element.height / 2);
   } else if (type === 'shape') {
-    element.strokeColor = '#ffffff';
+    element.strokeColor = '#ef4444'; // Red color
     element.strokeWidth = 3;
-    element.fill = subtype === 'rect' || subtype === 'circle';
+    element.fill = false; // No fill by default
     if (subtype === 'arrow' || subtype === 'line') {
       element.width = 150;
       element.height = 100;
@@ -2458,12 +2534,39 @@ async function vm2Export() {
     vm2Get('vm2-export-status').textContent = 'Rendering video with overlays...';
     vm2Get('vm2-export-detail').textContent = 'Using browser-based rendering';
     
-    // Create a canvas to composite video + overlays
+    // Create a canvas to composite video + overlays.
+    // Use PROJECT dimensions to match preview exactly.
     const video = vm2Video();
+    const nativeW = video.videoWidth || vm2.project.width;
+    const nativeH = video.videoHeight || vm2.project.height;
+    const projectW = vm2.project.width;
+    const projectH = vm2.project.height;
+    
+    // Canvas matches project (preview) size
     const canvas = document.createElement('canvas');
-    canvas.width = vm2.project.width;
-    canvas.height = vm2.project.height;
+    canvas.width  = projectW;
+    canvas.height = projectH;
     const ctx = canvas.getContext('2d');
+    
+    // Calculate contain rect (same as preview's object-fit:contain)
+    const videoRatio = nativeW / nativeH;
+    const projectRatio = projectW / projectH;
+    let drawX, drawY, drawW, drawH;
+    if (videoRatio > projectRatio) {
+      // Video wider → letterbox (bars top/bottom)
+      drawW = projectW;
+      drawH = projectW / videoRatio;
+      drawX = 0;
+      drawY = (projectH - drawH) / 2;
+    } else {
+      // Video taller → pillarbox (bars left/right)
+      drawH = projectH;
+      drawW = projectH * videoRatio;
+      drawX = (projectW - drawW) / 2;
+      drawY = 0;
+    }
+    
+    console.log('[VM2 Export] Video rect:', { drawX, drawY, drawW, drawH, projectW, projectH, nativeW, nativeH });
     
     // Set up MediaRecorder
     const stream = canvas.captureStream(30);
@@ -2533,38 +2636,24 @@ async function vm2Export() {
       }
 
       if (shouldRender) {
-        // Draw video frame – replicate the browser's objectFit:contain letterbox so that
-        // element coordinates (stored in project/wrapper space) match the exported frame.
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#000000';
+        // Fill with dark background (same as preview wrapper background for letterbox/pillarbox areas)
+        ctx.fillStyle = '#1a1a2e';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        const vW = video.videoWidth  || canvas.width;
-        const vH = video.videoHeight || canvas.height;
-        const videoRatio  = vW / vH;
-        const canvasRatio = canvas.width / canvas.height;
-        let drawW, drawH, drawX, drawY;
-        if (videoRatio > canvasRatio) {
-          // Video is wider → pillarbox (black bars left/right)
-          drawW = canvas.width;
-          drawH = canvas.width / videoRatio;
-          drawX = 0;
-          drawY = (canvas.height - drawH) / 2;
-        } else {
-          // Video is taller (or same) → letterbox (black bars top/bottom)
-          drawH = canvas.height;
-          drawW = canvas.height * videoRatio;
-          drawX = (canvas.width - drawW) / 2;
-          drawY = 0;
-        }
+        
+        // Draw video frame using contain logic (same as preview's object-fit:contain)
         ctx.drawImage(video, drawX, drawY, drawW, drawH);
         
-        // Ensure all elements from all steps are considered, sorted by layer order (if implemented)
-        // Draw overlays for effective timeline time
+        // DEBUG: Draw green border around video area (matching preview debug rect)
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(drawX, drawY, drawW, drawH);
+        
+        // Draw overlays at their project-space coordinates (no transform needed
+        // since canvas is sized to project dimensions)
         vm2.project.steps.forEach(step => {
           step.elements.forEach(el => {
             if (effectiveTime >= el.startTime && effectiveTime < el.endTime && el.type !== 'audio') {
-              vm2DrawElementOnCanvas(ctx, el);
+              vm2DrawElementOnCanvas(ctx, el, 1, 1, 0, 0);
             }
           });
         });
@@ -2624,39 +2713,45 @@ async function vm2Export() {
   }
 }
 
-// Helper function to draw element on canvas for export
-function vm2DrawElementOnCanvas(ctx, el) {
+// Helper function to draw element on canvas for export.
+function vm2DrawElementOnCanvas(ctx, el, sx = 1, sy = 1, ox = 0, oy = 0) {
+  // Convert project-space (what the editor uses) into canvas-space.
+  const x  = (el.x - ox) * sx;
+  const y  = (el.y - oy) * sy;
+  const w  = el.width  * sx;
+  const h  = el.height * sy;
+
   ctx.save();
   ctx.globalAlpha = (el.opacity || 100) / 100;
-  
+
   if (el.rotation) {
-    ctx.translate(el.x + el.width/2, el.y + el.height/2);
+    ctx.translate(x + w / 2, y + h / 2);
     ctx.rotate(el.rotation * Math.PI / 180);
-    ctx.translate(-(el.x + el.width/2), -(el.y + el.height/2));
+    ctx.translate(-(x + w / 2), -(y + h / 2));
   }
   
   if (el.type === 'text') {
-    ctx.font = `${el.fontWeight || 'normal'} ${el.fontSize}px ${el.fontFamily || 'system-ui'}`;
     ctx.fillStyle = el.color || '#ffffff';
     ctx.textAlign = el.textAlign || 'center';
     ctx.textBaseline = 'middle';
-    
-    const x = el.textAlign === 'left' ? el.x : el.textAlign === 'right' ? el.x + el.width : el.x + el.width/2;
-    ctx.fillText(el.text, x, el.y + el.height/2);
+
+    const textX = el.textAlign === 'left' ? x : el.textAlign === 'right' ? x + w : x + w / 2;
+    ctx.font = `${el.fontWeight || 'normal'} ${el.fontSize * sy}px ${el.fontFamily || 'system-ui'}`;
+    ctx.fillText(el.text, textX, y + h / 2);
   } else if (el.type === 'shape') {
     ctx.strokeStyle = el.strokeColor || '#ffffff';
-    ctx.lineWidth = el.strokeWidth || 3;
-    
+    ctx.lineWidth = (el.strokeWidth || 3) * Math.min(sx, sy);
+
     if (el.subtype === 'rect') {
       if (el.fill) {
         ctx.fillStyle = el.strokeColor;
-        ctx.fillRect(el.x, el.y, el.width, el.height);
+        ctx.fillRect(x, y, w, h);
       } else {
-        ctx.strokeRect(el.x, el.y, el.width, el.height);
+        ctx.strokeRect(x, y, w, h);
       }
     } else if (el.subtype === 'circle') {
       ctx.beginPath();
-      ctx.ellipse(el.x + el.width/2, el.y + el.height/2, el.width/2, el.height/2, 0, 0, Math.PI * 2);
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
       if (el.fill) {
         ctx.fillStyle = el.strokeColor;
         ctx.fill();
@@ -2665,26 +2760,25 @@ function vm2DrawElementOnCanvas(ctx, el) {
       }
     } else if (el.subtype === 'arrow' || el.subtype === 'line') {
       ctx.beginPath();
-      ctx.moveTo(el.x, el.y + el.height);
-      ctx.lineTo(el.x + el.width, el.y);
+      ctx.moveTo(x, y + h);
+      ctx.lineTo(x + w, y);
       ctx.stroke();
-      
+
       if (el.subtype === 'arrow') {
-        // Draw arrowhead
-        const angle = Math.atan2(-el.height, el.width);
-        const headLen = 15;
+        const angle = Math.atan2(-h, w);
+        const headLen = 15 * Math.min(sx, sy);
         ctx.beginPath();
-        ctx.moveTo(el.x + el.width, el.y);
-        ctx.lineTo(el.x + el.width - headLen * Math.cos(angle - Math.PI/6), el.y - headLen * Math.sin(angle - Math.PI/6));
-        ctx.moveTo(el.x + el.width, el.y);
-        ctx.lineTo(el.x + el.width - headLen * Math.cos(angle + Math.PI/6), el.y - headLen * Math.sin(angle + Math.PI/6));
+        ctx.moveTo(x + w, y);
+        ctx.lineTo(x + w - headLen * Math.cos(angle - Math.PI / 6), y - headLen * Math.sin(angle - Math.PI / 6));
+        ctx.moveTo(x + w, y);
+        ctx.lineTo(x + w - headLen * Math.cos(angle + Math.PI / 6), y - headLen * Math.sin(angle + Math.PI / 6));
         ctx.stroke();
       }
     }
   } else if (el.type === 'image' && el._imgElement) {
-    ctx.drawImage(el._imgElement, el.x, el.y, el.width, el.height);
+    ctx.drawImage(el._imgElement, x, y, w, h);
   }
-  
+
   ctx.restore();
 }
 
