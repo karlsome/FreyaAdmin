@@ -516,6 +516,7 @@ function vm2OnVideoLoaded() {
       endTime: video.duration,
       sourceStart: 0,
       sourceEnd: video.duration,
+      muted: false,
       elements: [],
     }];
   }
@@ -548,6 +549,7 @@ function vm2OnTimeUpdate() {
         vm2.currentStepIdx = activeStepIdx;
         activeStep = vm2.project.steps[activeStepIdx];
         video.currentTime = activeStep.sourceStart ?? activeStep.startTime;
+        video.muted = !!activeStep.muted;
         vm2RenderSteps();
         vm2RenderElements();
         return; // wait for next timeupdate
@@ -656,6 +658,8 @@ function vm2SeekTo(timelineTime) {
     // Don't exceed the step's source clip!
     const activeSrcEnd = step.sourceEnd ?? step.endTime;
     video.currentTime = Math.max(0, Math.min(srcPos, activeSrcEnd, videoDuration));
+    // Apply the clip's mute state
+    video.muted = !!step.muted;
   }
 
   vm2.currentTime = timelineTime;
@@ -822,6 +826,19 @@ function vm2UpdateStepProp(prop, value) {
   // Don't re-render props to avoid losing focus
 }
 
+function vm2ToggleStepMute(idx) {
+  const step = vm2.project.steps[idx];
+  if (!step) return;
+  step.muted = !step.muted;
+  // Apply immediately to the video if this is the active step
+  if (idx === vm2.currentStepIdx) {
+    const video = vm2Video();
+    if (video) video.muted = !!step.muted;
+  }
+  vm2RenderTimeline();
+  vm2RenderProps();
+}
+
 function vm2AddStep() {
   const lastStep = vm2.project.steps[vm2.project.steps.length - 1];
   if (!lastStep) return;
@@ -857,6 +874,7 @@ function vm2CutAtPlayhead() {
     endTime: step.endTime,
     sourceStart: (step.sourceStart ?? step.startTime) + (t - step.startTime),
     sourceEnd: step.sourceEnd ?? step.endTime,
+    muted: false,
     elements: [],
   };
 
@@ -918,6 +936,7 @@ function vm2DeleteStep(idx) {
       endTime: vm2.duration,
       sourceStart: 0,
       sourceEnd: vm2.duration,
+      muted: false,
       elements: [],
     }];
     vm2.currentStepIdx = 0;
@@ -1551,6 +1570,21 @@ function vm2RenderProps() {
         <p class="text-[10px] text-gray-400 mt-1">Duration: ${vm2Fmt(step.endTime - step.startTime)}</p>
       </div>
 
+      <!-- Audio -->
+      <div class="mb-4">
+        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1">
+          <i class="ri-volume-up-line"></i>Audio
+        </p>
+        <button onclick="vm2ToggleStepMute(${vm2.currentStepIdx})"
+          class="w-full py-2 flex items-center justify-center gap-2 rounded text-xs font-medium border transition-colors
+            ${step.muted
+              ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-300 dark:border-orange-700 text-orange-600 dark:text-orange-400 hover:bg-orange-100'
+              : 'bg-gray-100 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}">
+          <i class="${step.muted ? 'ri-volume-mute-line' : 'ri-volume-up-line'}"></i>
+          ${step.muted ? 'Unmute Clip' : 'Mute Clip'}
+        </button>
+      </div>
+
       <!-- Delete button -->
       <button onclick="vm2DeleteStep(${vm2.currentStepIdx})" class="w-full py-2 mt-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-xs flex items-center justify-center gap-1">
         <i class="ri-delete-bin-line"></i>${vm2.project.steps.length > 1 ? 'Delete Step' : 'Reset Step'}
@@ -1887,9 +1921,10 @@ function vm2RenderTimeline() {
              ondragleave="this.style.transform='scale(1)'; this.style.boxShadow='none'"
              ondrop="this.style.transform='scale(1)'; this.style.boxShadow='none'; vm2StepDrop(event, ${i})"
              onclick="vm2SelectStep(${i}, event)"
-             title="${step.label}: ${vm2Fmt(step.startTime)} - ${vm2Fmt(step.endTime)}">
+             title="${step.label}: ${vm2Fmt(step.startTime)} - ${vm2Fmt(step.endTime)}${step.muted ? ' [Muted]' : ''}">
           <div class="resize-left" onmousedown="event.stopPropagation(); vm2StepResizeStart(event, ${i}, 'left')"></div>
           <span class="flex-1 truncate px-2">${step.label}</span>
+          ${step.muted ? '<i class="ri-volume-mute-line opacity-80 flex-shrink-0 mr-1"></i>' : ''}
           <div class="resize-right" onmousedown="event.stopPropagation(); vm2StepResizeStart(event, ${i}, 'right')"></div>
         </div>
       `;
@@ -2475,7 +2510,9 @@ async function vm2Export() {
         if (video.currentTime >= (activeStep.sourceEnd ?? activeStep.endTime) - 0.05) {
           if (activeStepIdx + 1 < vm2.project.steps.length) {
             vm2.currentStepIdx++;
-            video.currentTime = vm2.project.steps[vm2.currentStepIdx].sourceStart ?? vm2.project.steps[vm2.currentStepIdx].startTime;
+            const nextStep = vm2.project.steps[vm2.currentStepIdx];
+            video.currentTime = nextStep.sourceStart ?? nextStep.startTime;
+            video.muted = !!nextStep.muted;
             shouldRender = false; // Skip drawing this split-second
           } else {
             // Reached the end of the last step, stop!
@@ -2490,6 +2527,8 @@ async function vm2Export() {
         if (shouldRender) {
           const offset = video.currentTime - (activeStep.sourceStart ?? activeStep.startTime);
           effectiveTime = activeStep.startTime + offset;
+          // Apply per-clip mute state (affects the captureStream audio track)
+          video.muted = !!activeStep.muted;
         }
       }
 
@@ -2540,7 +2579,8 @@ async function vm2Export() {
     };
     
     // Play video and render each frame
-    video.muted = true;
+    // Mute is driven per-step; prime it from the first step now
+    video.muted = !!(vm2.project.steps[0]?.muted);
     video.playbackRate = 1;
     
     await new Promise((resolve) => {
@@ -2555,8 +2595,8 @@ async function vm2Export() {
         vm2Get('vm2-export-download').href = url;
         vm2Get('vm2-export-download').download = (vm2.project.title || 'video-manual') + '.webm';
         
-        // Reset playback state
-        video.muted = false;
+        // Reset playback state – restore mute to whatever the current step says
+        video.muted = !!(vm2.project.steps[vm2.currentStepIdx]?.muted);
         video.ontimeupdate = vm2OnTimeUpdate; // Restore original handler
         resolve();
       };
