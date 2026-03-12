@@ -3909,6 +3909,28 @@ async function vm2LoadProject(id) {
     vm2EnsureEditorMounted();
     vm2.playlist = vm2.playlists.find((item) => String(item._id) === String(project.playlistId)) || vm2.playlist;
     vm2ShowEditorScreen();
+
+    // If the working copy has no video but a saved revision exists, auto-restore
+    // from the latest revision so the user lands in a fully usable state.
+    if (!project.videoUrl && project.lastRevisionId) {
+      try {
+        const revRes = await fetch(`${vm2BaseUrl()}api/video-revisions/${project.lastRevisionId}`, {
+          headers: vm2AuthHeaders(),
+        });
+        if (revRes.ok) {
+          const revision = await revRes.json();
+          const snapshot = vm2DeepClone(revision.snapshot || {});
+          // Merge revision snapshot into the project doc so _id, playlistId, etc. are preserved.
+          const restored = { ...snapshot, _id: project._id, playlistId: project.playlistId };
+          vm2ApplyProjectState(restored, { readOnlyRevision: null });
+          vm2SetSaveStatus(`Restored from ${revision.revisionName || 'latest revision'}`, 'green');
+          return;
+        }
+      } catch (revErr) {
+        console.warn('[VM2] Could not auto-restore from revision, falling back to working copy:', revErr);
+      }
+    }
+
     vm2ApplyProjectState(project, { readOnlyRevision: null });
     vm2SetSaveStatus('Project loaded', 'green');
   } catch (err) {
