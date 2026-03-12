@@ -301,15 +301,154 @@ function vm2RenderPlaylistBrowser() {
   projectList.innerHTML = vm2.playlistProjects.map((project) => `
     <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
       <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${project.title || 'Untitled Project'}</div>
           <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${project.stepsCount || 0} steps · Rev ${project.currentRevisionNumber || 0}</div>
           <div class="mt-1 text-xs text-gray-400">Updated ${new Date(project.updatedAt || project.createdAt).toLocaleDateString()}</div>
         </div>
-        <button onclick="vm2LoadProject('${project._id}')" class="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-600">Open</button>
+        <div class="flex items-center gap-1 shrink-0">
+          <button onclick="vm2LoadProject('${project._id}')" class="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-600">Open</button>
+          <button onclick="vm2DeleteProject('${project._id}', '${(project.title || 'Untitled').replace(/'/g, '\\&apos;')}')" class="rounded-xl border border-red-200 px-2 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="Move to recycle bin">
+            <i class="ri-delete-bin-line"></i>
+          </button>
+        </div>
       </div>
     </div>
   `).join('');
+}
+
+async function vm2DeleteProject(id, title) {
+  if (!confirm(`Move "${title}" to the recycle bin?\n\nIt will be permanently deleted after 30 days.`)) return;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-projects/${id}`, {
+      method: 'DELETE',
+      headers: vm2AuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    // Refresh the project list.
+    if (vm2.playlist?._id) await vm2SelectPlaylist(String(vm2.playlist._id));
+  } catch (err) {
+    console.error('[VM2] Delete project error:', err);
+    alert('Failed to delete project: ' + err.message);
+  }
+}
+
+async function vm2ToggleTrashView() {
+  const projectSection = vm2Get('vm2-browser-project-list');
+  const trashPanel = vm2Get('vm2-trash-panel');
+  const emptyState = vm2Get('vm2-browser-project-empty');
+  const trashBtn = vm2Get('vm2-trash-btn');
+  if (!trashPanel) return;
+
+  const isShowingTrash = !trashPanel.classList.contains('hidden');
+  if (isShowingTrash) {
+    // Return to normal project view.
+    trashPanel.classList.add('hidden');
+    if (projectSection) projectSection.classList.remove('hidden');
+    if (emptyState && !vm2.playlist) emptyState.classList.remove('hidden');
+    if (trashBtn) {
+      trashBtn.classList.remove('bg-red-50', 'text-red-600', 'border-red-300');
+      trashBtn.innerHTML = '<i class="ri-delete-bin-line mr-1"></i>Recycle Bin';
+    }
+  } else {
+    // Show trash panel.
+    if (projectSection) projectSection.classList.add('hidden');
+    if (emptyState) emptyState.classList.add('hidden');
+    trashPanel.classList.remove('hidden');
+    if (trashBtn) {
+      trashBtn.classList.add('bg-red-50', 'text-red-600', 'border-red-300');
+      trashBtn.innerHTML = '<i class="ri-arrow-left-line mr-1"></i>Back to Projects';
+    }
+    await vm2LoadTrash();
+  }
+}
+
+async function vm2LoadTrash() {
+  const list = vm2Get('vm2-trash-list');
+  if (!list) return;
+
+  if (!vm2.playlist?._id) {
+    list.innerHTML = '<p class="col-span-3 text-sm text-gray-400 text-center py-8">Select a playlist first to view its recycle bin.</p>';
+    return;
+  }
+
+  list.innerHTML = '<p class="col-span-3 text-sm text-gray-400 text-center py-6">Loading…</p>';
+
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-playlists/${vm2.playlist._id}/trash`, {
+      headers: vm2AuthHeaders(),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const items = await res.json();
+
+    if (!items.length) {
+      list.innerHTML = '<p class="col-span-3 text-sm text-gray-400 text-center py-8">Recycle bin is empty.</p>';
+      return;
+    }
+
+    const canPermDelete = new Set(['admin', '課長', '係長', '部長']).has(vm2AuthUser().role || '');
+
+    list.innerHTML = items.map((p) => {
+      const deletedDate = p.deletedAt ? new Date(p.deletedAt).toLocaleDateString() : '?';
+      const daysRemaining = p.daysRemaining ?? '?';
+      const urgentClass = daysRemaining <= 3 ? 'text-red-500 font-semibold' : 'text-orange-500';
+      const permDeleteBtn = canPermDelete
+        ? `<button onclick="vm2PermanentDeleteProject('${p._id}', '${(p.title || 'Untitled').replace(/'/g, '\\&apos;')}')" class="rounded-xl border border-red-300 px-2 py-1.5 text-xs text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30" title="Delete forever"><i class="ri-delete-bin-2-fill"></i></button>`
+        : '';
+      return `
+        <div class="rounded-2xl border border-red-100 bg-red-50/60 p-4 dark:border-red-900/40 dark:bg-red-900/10">
+          <div class="text-sm font-semibold text-gray-800 dark:text-white truncate">${p.title || 'Untitled'}</div>
+          <div class="mt-1 text-xs text-gray-500">${p.stepsCount || 0} steps · Rev ${p.currentRevisionNumber || 0}</div>
+          <div class="mt-1 text-xs text-gray-400">Deleted ${deletedDate} by ${p.deletedBy || '?'}</div>
+          <div class="mt-1 text-xs ${urgentClass}">${daysRemaining} day${daysRemaining === 1 ? '' : 's'} until permanent deletion</div>
+          <div class="mt-3 flex gap-2">
+            <button onclick="vm2PreviewTrashProject('${p._id}')" class="rounded-xl border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" title="Preview">
+              <i class="ri-eye-line"></i>
+            </button>
+            <button onclick="vm2RestoreProject('${p._id}')" class="flex-1 rounded-xl bg-green-500 px-2 py-1.5 text-xs font-medium text-white hover:bg-green-600">
+              <i class="ri-arrow-go-back-line mr-1"></i>Restore
+            </button>
+            ${permDeleteBtn}
+          </div>
+        </div>`;
+    }).join('');
+  } catch (err) {
+    console.error('[VM2] Load trash error:', err);
+    list.innerHTML = `<p class="col-span-3 text-sm text-red-400 text-center py-8">Failed to load recycle bin: ${err.message}</p>`;
+  }
+}
+
+async function vm2RestoreProject(id) {
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-projects/${id}/restore`, {
+      method: 'POST',
+      headers: vm2AuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    await vm2LoadTrash();
+    if (vm2.playlist?._id) await vm2SelectPlaylist(String(vm2.playlist._id));
+  } catch (err) {
+    console.error('[VM2] Restore project error:', err);
+    alert('Failed to restore project: ' + err.message);
+  }
+}
+
+async function vm2PermanentDeleteProject(id, title) {
+  if (!confirm(`Permanently delete "${title}"?\n\nThis cannot be undone. The video file will also be removed if no other projects use it.`)) return;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-projects/${id}/permanent`, {
+      method: 'DELETE',
+      headers: vm2AuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    await vm2LoadTrash();
+  } catch (err) {
+    console.error('[VM2] Permanent delete error:', err);
+    alert('Failed to permanently delete: ' + err.message);
+  }
 }
 
 async function vm2LoadPlaylists() {
@@ -1108,6 +1247,9 @@ function loadVideoManual2Page() {
               <button onclick="vm2LoadPlaylists()" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
                 <i class="ri-refresh-line mr-1"></i>Refresh
               </button>
+              <button onclick="vm2ToggleTrashView()" id="vm2-trash-btn" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                <i class="ri-delete-bin-line mr-1"></i>Recycle Bin
+              </button>
               <button id="vm2-create-playlist-btn" onclick="vm2CreatePlaylist()" class="hidden rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-sky-500 dark:hover:bg-sky-400">
                 <i class="ri-stack-line mr-1"></i>New Playlist
               </button>
@@ -1143,6 +1285,18 @@ function loadVideoManual2Page() {
               <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Pick a playlist on the left to see its projects.</p>
             </div>
             <div id="vm2-browser-project-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+
+            <!-- Trash panel (hidden by default) -->
+            <div id="vm2-trash-panel" class="hidden">
+              <div class="mb-4 flex items-center gap-3">
+                <i class="ri-delete-bin-2-line text-xl text-red-400"></i>
+                <div>
+                  <p class="text-sm font-semibold text-slate-800 dark:text-white">Recycle Bin</p>
+                  <p class="text-xs text-slate-500 dark:text-slate-400">Deleted projects are kept for 30 days then permanently removed.</p>
+                </div>
+              </div>
+              <div id="vm2-trash-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+            </div>
           </section>
         </div>
       </div>
@@ -1213,6 +1367,313 @@ async function vm2LoadVideo(file) {
 
   vm2SetSaveStatus('Local preview ready · uploading video…', 'blue');
   vm2UploadVideoAsset(file);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TRASH PREVIEW  (isolated — never touches main editor DOM)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const vm2TP = {
+  project: null,
+  stepIdx: 0,
+  raf: null,
+  videoRect: null,
+};
+
+function vm2TpGet(id) { return document.getElementById(id); }
+const vm2TpVideo   = () => vm2TpGet('vm2-tp-video');
+const vm2TpCanvas  = () => vm2TpGet('vm2-tp-canvas');
+const vm2TpWrapper = () => vm2TpGet('vm2-tp-canvas-wrapper');
+
+function vm2EnsureTrashPreviewModal() {
+  if (document.getElementById('vm2-modal-trash-preview')) return;
+  const el = document.createElement('div');
+  el.innerHTML = `<div id="vm2-modal-trash-preview" class="hidden fixed inset-0 z-[400] flex flex-col bg-black">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-5 py-3 bg-gray-900 border-b border-gray-800 flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-semibold uppercase tracking-widest text-red-400"><i class="ri-delete-bin-2-line mr-1"></i>Recycle Bin Preview</span>
+        <span id="vm2-tp-title" class="text-sm font-medium text-white truncate max-w-[320px]"></span>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 bg-gray-800 rounded-xl px-3 py-1.5">
+          <button onclick="vm2TrashPreviewPrevStep()" class="w-7 h-7 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center" title="Previous step">
+            <i class="ri-arrow-left-s-line text-lg"></i>
+          </button>
+          <span id="vm2-tp-step-label" class="text-xs text-gray-300 min-w-[80px] text-center">Step 1 / 1</span>
+          <button onclick="vm2TrashPreviewNextStep()" class="w-7 h-7 rounded-lg hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center" title="Next step">
+            <i class="ri-arrow-right-s-line text-lg"></i>
+          </button>
+        </div>
+        <button id="vm2-tp-play-btn" onclick="vm2TrashPreviewTogglePlay()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center">
+          <i class="ri-play-fill"></i>
+        </button>
+        <span id="vm2-tp-time" class="text-xs font-mono text-gray-400 w-28 text-right">0:00.0 / 0:00.0</span>
+        <button onclick="vm2CloseTrashPreview()" class="ml-2 w-8 h-8 rounded-full bg-white/10 hover:bg-red-500/80 text-white flex items-center justify-center" title="Close preview">
+          <i class="ri-close-line text-lg"></i>
+        </button>
+      </div>
+    </div>
+    <div id="vm2-tp-canvas-outer" class="flex-1 flex items-center justify-center overflow-hidden bg-black">
+      <div id="vm2-tp-canvas-viewport" class="relative flex-shrink-0">
+        <div id="vm2-tp-canvas-wrapper" class="relative bg-black shadow-2xl">
+          <canvas id="vm2-tp-canvas" class="absolute inset-0 pointer-events-none"></canvas>
+          <video id="vm2-tp-video" class="absolute pointer-events-none opacity-0"
+            ontimeupdate="vm2TrashPreviewOnTimeUpdate()"
+            onloadedmetadata="vm2TrashPreviewOnLoaded()"></video>
+          <div id="vm2-tp-elements" class="absolute inset-0 pointer-events-none" style="overflow:hidden;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="flex-shrink-0 px-5 py-2 bg-gray-900 border-t border-gray-800 flex items-center gap-3">
+      <i class="ri-information-line text-gray-500"></i>
+      <span id="vm2-tp-step-desc" class="text-xs text-gray-400">No description</span>
+    </div>
+  </div>`;
+  document.body.appendChild(el.firstElementChild);
+}
+
+async function vm2PreviewTrashProject(id) {
+  vm2EnsureTrashPreviewModal();
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-projects/${id}`, {
+      headers: vm2AuthHeaders(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const project = await res.json();
+
+    // Always prefer the revision snapshot when available — it is the authoritative
+    // full state (steps + elements). Merge in the working copy's videoUrl in case
+    // a video was uploaded after the last explicit save.
+    let data = project;
+    if (project.lastRevisionId) {
+      try {
+        const revRes = await fetch(`${vm2BaseUrl()}api/video-revisions/${project.lastRevisionId}`, {
+          headers: vm2AuthHeaders(),
+        });
+        if (revRes.ok) {
+          const rev = await revRes.json();
+          const snap = rev.snapshot || {};
+          data = {
+            ...snap,
+            _id: project._id,
+            playlistId: project.playlistId,
+            videoUrl: project.videoUrl || snap.videoUrl || '',
+            assets: (project.assets && project.assets.length) ? project.assets : (snap.assets || []),
+          };
+        }
+      } catch (_) { /* fall back to working copy */ }
+    }
+
+    vm2TP.project = data;
+    vm2TP.stepIdx = 0;
+    vm2TP.videoRect = null;
+
+    // Populate header.
+    const titleEl = vm2TpGet('vm2-tp-title');
+    if (titleEl) titleEl.textContent = data.title || 'Untitled';
+
+    vm2TpGet('vm2-modal-trash-preview')?.classList.remove('hidden');
+    vm2TpUpdateStepLabel();
+    vm2TpRenderElements();
+    vm2TpSyncCanvasSize();
+
+    const video = vm2TpVideo();
+    if (video) {
+      video.pause();
+      const url = data.videoUrl ? vm2ResolveMediaUrl(data.videoUrl) : '';
+      video.crossOrigin = 'anonymous';
+      video.src = url || '';
+      if (url) video.load();
+    }
+
+    vm2TpStartLoop();
+  } catch (err) {
+    console.error('[VM2 TrashPreview] Error:', err);
+    alert('Could not load preview: ' + err.message);
+  }
+}
+
+function vm2CloseTrashPreview() {
+  vm2TpStopLoop();
+  const video = vm2TpVideo();
+  if (video) { video.pause(); video.src = ''; }
+  const modal = vm2TpGet('vm2-modal-trash-preview');
+  if (modal) modal.classList.add('hidden');
+  vm2TP.project = null;
+}
+
+function vm2TpStartLoop() {
+  if (vm2TP.raf) return;
+  const tick = () => {
+    vm2TP.raf = requestAnimationFrame(tick);
+    vm2TpRenderFrame();
+  };
+  tick();
+}
+
+function vm2TpStopLoop() {
+  if (!vm2TP.raf) return;
+  cancelAnimationFrame(vm2TP.raf);
+  vm2TP.raf = null;
+}
+
+function vm2TpRenderFrame() {
+  const canvas = vm2TpCanvas();
+  const video = vm2TpVideo();
+  if (!canvas || !video || !vm2TP.project) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const { width: pw, height: ph } = vm2TP.project;
+  const rect = vm2TP.videoRect || vm2GetVideoDrawRect(
+    video.videoWidth || pw, video.videoHeight || ph, pw, ph
+  );
+
+  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.seeking) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (rect.drawW > 0 && rect.drawH > 0) {
+    ctx.drawImage(video, rect.drawX, rect.drawY, rect.drawW, rect.drawH);
+  }
+}
+
+function vm2TpSyncCanvasSize() {
+  const video  = vm2TpVideo();
+  const canvas = vm2TpCanvas();
+  const wrapper = vm2TpWrapper();
+  const outer   = vm2TpGet('vm2-tp-canvas-outer');
+  if (!canvas || !wrapper || !outer || !vm2TP.project) return;
+
+  const { width: pw, height: ph } = vm2TP.project;
+  const outerW = outer.clientWidth  || window.innerWidth;
+  const outerH = outer.clientHeight || (window.innerHeight - 120);
+  const scale  = Math.min(1, outerW / pw, outerH / ph);
+
+  wrapper.style.width  = pw + 'px';
+  wrapper.style.height = ph + 'px';
+  wrapper.style.overflow = 'hidden';
+  wrapper.style.background = '#1a1a2e';
+  wrapper.style.transform = `scale(${scale})`;
+  wrapper.style.transformOrigin = 'top left';
+
+  const viewport = vm2TpGet('vm2-tp-canvas-viewport');
+  if (viewport) {
+    viewport.style.width  = Math.round(pw * scale) + 'px';
+    viewport.style.height = Math.round(ph * scale) + 'px';
+  }
+
+  canvas.width  = pw;
+  canvas.height = ph;
+  canvas.style.width  = pw + 'px';
+  canvas.style.height = ph + 'px';
+
+  if (video) {
+    video.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;';
+  }
+
+  if (video && video.videoWidth) {
+    vm2TP.videoRect = vm2GetVideoDrawRect(video.videoWidth, video.videoHeight, pw, ph);
+  }
+}
+
+function vm2TrashPreviewOnLoaded() {
+  vm2TpSyncCanvasSize();
+  // Seek to the start time of the current step.
+  const step = vm2TP.project?.steps?.[vm2TP.stepIdx];
+  const video = vm2TpVideo();
+  if (step && video) video.currentTime = step.sourceStart ?? step.startTime ?? 0;
+  vm2TpUpdateStepLabel();
+}
+
+function vm2TrashPreviewOnTimeUpdate() {
+  const video = vm2TpVideo();
+  if (!video || !vm2TP.project) return;
+  const dur = video.duration || 0;
+  const cur = video.currentTime;
+  const fmt = vm2Fmt;
+  const timeEl = vm2TpGet('vm2-tp-time');
+  if (timeEl) timeEl.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+}
+
+function vm2TrashPreviewTogglePlay() {
+  const video = vm2TpVideo();
+  const btn   = vm2TpGet('vm2-tp-play-btn');
+  if (!video) return;
+  if (video.paused) {
+    video.play();
+    if (btn) btn.innerHTML = '<i class="ri-pause-fill"></i>';
+  } else {
+    video.pause();
+    if (btn) btn.innerHTML = '<i class="ri-play-fill"></i>';
+  }
+}
+
+function vm2TrashPreviewPrevStep() {
+  if (!vm2TP.project?.steps?.length) return;
+  vm2TP.stepIdx = Math.max(0, vm2TP.stepIdx - 1);
+  vm2TpGoToStep();
+}
+
+function vm2TrashPreviewNextStep() {
+  if (!vm2TP.project?.steps?.length) return;
+  vm2TP.stepIdx = Math.min(vm2TP.project.steps.length - 1, vm2TP.stepIdx + 1);
+  vm2TpGoToStep();
+}
+
+function vm2TpGoToStep() {
+  const step  = vm2TP.project?.steps?.[vm2TP.stepIdx];
+  const video = vm2TpVideo();
+  if (step && video) {
+    video.pause();
+    video.currentTime = step.sourceStart ?? step.startTime ?? 0;
+    const btn = vm2TpGet('vm2-tp-play-btn');
+    if (btn) btn.innerHTML = '<i class="ri-play-fill"></i>';
+  }
+  vm2TpUpdateStepLabel();
+  vm2TpRenderElements();
+}
+
+function vm2TpUpdateStepLabel() {
+  const steps = vm2TP.project?.steps || [];
+  const step  = steps[vm2TP.stepIdx];
+  const labelEl = vm2TpGet('vm2-tp-step-label');
+  const descEl  = vm2TpGet('vm2-tp-step-desc');
+  if (labelEl) labelEl.textContent = `Step ${vm2TP.stepIdx + 1} / ${steps.length || 1}`;
+  if (descEl)  descEl.textContent  = step?.description || step?.label || 'No description';
+}
+
+function vm2TpRenderElements() {
+  const container = vm2TpGet('vm2-tp-elements');
+  if (!container || !vm2TP.project) return;
+  const step = vm2TP.project.steps?.[vm2TP.stepIdx];
+  const elements = (step?.elements || []).filter(el => el.type !== 'audio');
+  container.innerHTML = '';
+
+  elements.forEach(el => {
+    const div = document.createElement('div');
+    div.className = 'absolute pointer-events-none';
+    div.style.cssText = `left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;opacity:${el.opacity / 100};transform:rotate(${el.rotation || 0}deg);`;
+
+    if (el.type === 'text') {
+      div.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:${el.textAlign === 'left' ? 'flex-start' : el.textAlign === 'right' ? 'flex-end' : 'center'};font-size:${el.fontSize}px;font-family:${el.fontFamily};font-weight:${el.fontWeight};color:${el.color};background:${el.backgroundColor || 'transparent'};text-align:${el.textAlign};padding:8px;box-sizing:border-box;overflow:hidden;">${el.text}</div>`;
+    } else if (el.type === 'shape') {
+      if (el.subtype === 'rect') {
+        div.innerHTML = `<div style="width:100%;height:100%;background:${el.fill ? el.strokeColor : 'transparent'};border:${el.strokeWidth}px solid ${el.strokeColor};border-radius:4px;box-sizing:border-box;"></div>`;
+      } else if (el.subtype === 'circle') {
+        div.innerHTML = `<div style="width:100%;height:100%;background:${el.fill ? el.strokeColor : 'transparent'};border:${el.strokeWidth}px solid ${el.strokeColor};border-radius:50%;box-sizing:border-box;"></div>`;
+      } else if (el.subtype === 'arrow' || el.subtype === 'line') {
+        const { startX, startY, endX, endY } = vm2GetShapeLocalEndpoints(el);
+        div.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 ${el.width} ${el.height}" style="overflow:visible;"><defs><marker id="vm2tp-arrow-${el.id}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="${el.strokeColor}" /></marker></defs><line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}" ${el.subtype === 'arrow' ? `marker-end="url(#vm2tp-arrow-${el.id})"` : ''} /></svg>`;
+      }
+    } else if (el.type === 'image' && el.imageUrl && !vm2IsBlobUrl(el.imageUrl)) {
+      div.innerHTML = `<img src="${vm2ResolveMediaUrl(el.imageUrl)}" crossorigin="anonymous" style="width:100%;height:100%;object-fit:contain;" />`;
+    }
+
+    container.appendChild(div);
+  });
 }
 
 async function vm2ShowAssetPicker() {
@@ -4227,6 +4688,17 @@ if (typeof window !== 'undefined') {
   window.vm2ReturnToBrowser = vm2ReturnToBrowser;
   window.vm2ShowAssetPicker = vm2ShowAssetPicker;
   window.vm2SelectPlaylistAsset = vm2SelectPlaylistAsset;
+  window.vm2DeleteProject = vm2DeleteProject;
+  window.vm2ToggleTrashView = vm2ToggleTrashView;
+  window.vm2RestoreProject = vm2RestoreProject;
+  window.vm2PermanentDeleteProject = vm2PermanentDeleteProject;
+  window.vm2PreviewTrashProject = vm2PreviewTrashProject;
+  window.vm2CloseTrashPreview = vm2CloseTrashPreview;
+  window.vm2TrashPreviewTogglePlay = vm2TrashPreviewTogglePlay;
+  window.vm2TrashPreviewPrevStep = vm2TrashPreviewPrevStep;
+  window.vm2TrashPreviewNextStep = vm2TrashPreviewNextStep;
+  window.vm2TrashPreviewOnLoaded = vm2TrashPreviewOnLoaded;
+  window.vm2TrashPreviewOnTimeUpdate = vm2TrashPreviewOnTimeUpdate;
   window.addEventListener('beforeunload', (event) => {
     if (!vm2) return;
     const shouldWarn = vm2.uploadInProgress || (!!vm2.dirty && !vm2.revisionPreview);
