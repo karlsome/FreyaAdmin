@@ -2916,7 +2916,7 @@ function vm2TogglePlay() {
 }
 
 function vm2SeekTo(timelineTime, { autoplay = false } = {}) {
-  const video = vm2Video();
+  let video = vm2Video();
   if (!video || !vm2.project) return;
 
   // Clamp timelineTime within total duration
@@ -2946,6 +2946,9 @@ function vm2SeekTo(timelineTime, { autoplay = false } = {}) {
       vm2UpdateVisibleElements();
       return;
     }
+
+    video = vm2Video();
+    if (!video) return;
 
     // Translate timeline position → source video position
     const offset = Math.max(0, timelineTime - step.startTime);
