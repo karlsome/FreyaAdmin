@@ -6,6 +6,7 @@
 const VM2_DB         = 'Sasaki_Coating_MasterDB';
 const VM2_COLLECTION = 'videoManuals';
 const VM2_AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
+const VM2_HISTORY_LIMIT = 150;
 
 // ── Module State ────────────────────────────────────────────────────────────
 let vm2 = {
@@ -55,6 +56,11 @@ let vm2 = {
   mediaPreloadQueue: [],
   mediaPreloading: false,
   revisionPreview: null,
+  undoStack: [],
+  redoStack: [],
+  historyBaseSignature: '',
+  suppressHistory: false,
+  pendingHistoryRestore: null,
   _projectsList: [],
   _editorMounted: false,
 };
@@ -502,8 +508,7 @@ function vm2EnsureEditable() {
 
 function vm2MarkDirty(reason = 'Edited') {
   if (vm2.revisionPreview) return;
-  vm2.dirty = true;
-  vm2SetSaveStatus(`${reason} · autosave pending`);
+  vm2PushHistoryState(reason);
 }
 
 function vm2HasPersistableProject() {
@@ -545,6 +550,122 @@ function vm2BuildWorkingProjectPayload() {
 
 function vm2BuildRevisionSnapshot() {
   return vm2BuildWorkingProjectPayload();
+}
+
+function vm2BuildHistoryEntry(reason = 'Edited') {
+  const snapshot = {
+    project: vm2BuildWorkingProjectPayload(),
+    currentTime: vm2.currentTime || 0,
+    currentStepIdx: vm2.currentStepIdx || 0,
+    selectedElementId: vm2.selectedElementId || null,
+  };
+  return {
+    reason,
+    snapshot,
+    signature: JSON.stringify(snapshot),
+  };
+}
+
+function vm2UpdateUndoRedoButtons() {
+  const undoBtn = vm2Get('vm2-undo-btn');
+  const redoBtn = vm2Get('vm2-redo-btn');
+  const canUndo = !vm2.revisionPreview && vm2.undoStack.length > 1;
+  const canRedo = !vm2.revisionPreview && vm2.redoStack.length > 0;
+
+  if (undoBtn) {
+    undoBtn.disabled = !canUndo;
+    undoBtn.className = `p-1.5 rounded ${canUndo ? 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500' : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'}`;
+    undoBtn.title = canUndo ? 'Undo' : 'Nothing to undo';
+  }
+
+  if (redoBtn) {
+    redoBtn.disabled = !canRedo;
+    redoBtn.className = `p-1.5 rounded ${canRedo ? 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500' : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'}`;
+    redoBtn.title = canRedo ? 'Redo' : 'Nothing to redo';
+  }
+}
+
+function vm2SyncHistoryDirtyState(reason = 'Edited') {
+  const currentEntry = vm2.undoStack[vm2.undoStack.length - 1];
+  const isDirty = !!currentEntry && currentEntry.signature !== vm2.historyBaseSignature;
+  vm2.dirty = isDirty;
+  if (vm2.revisionPreview) {
+    vm2SetSaveStatus('Revision preview', 'blue');
+  } else if (isDirty) {
+    vm2SetSaveStatus(`${reason} · autosave pending`);
+  } else {
+    vm2SetSaveStatus('Loaded', 'green');
+  }
+  vm2UpdateUndoRedoButtons();
+}
+
+function vm2ResetHistory(reason = 'Loaded') {
+  vm2.undoStack = [];
+  vm2.redoStack = [];
+  vm2.historyBaseSignature = '';
+  if (vm2.project && !vm2.revisionPreview) {
+    const entry = vm2BuildHistoryEntry(reason);
+    vm2.undoStack.push(entry);
+    vm2.historyBaseSignature = entry.signature;
+  }
+  vm2SyncHistoryDirtyState(reason);
+}
+
+function vm2PushHistoryState(reason = 'Edited') {
+  if (vm2.revisionPreview || vm2.suppressHistory || !vm2.project) return;
+  const entry = vm2BuildHistoryEntry(reason);
+  const lastEntry = vm2.undoStack[vm2.undoStack.length - 1];
+  if (lastEntry?.signature === entry.signature) {
+    vm2SyncHistoryDirtyState(reason);
+    return;
+  }
+  vm2.undoStack.push(entry);
+  if (vm2.undoStack.length > VM2_HISTORY_LIMIT) {
+    vm2.undoStack.splice(1, 1);
+  }
+  if (!vm2.historyBaseSignature && vm2.undoStack[0]) {
+    vm2.historyBaseSignature = vm2.undoStack[0].signature;
+  }
+  vm2.redoStack = [];
+  vm2SyncHistoryDirtyState(reason);
+}
+
+function vm2ApplyHistoryUiState(state = {}) {
+  if (!vm2.project) return;
+  const maxStepIdx = Math.max(0, (vm2.project.steps?.length || 1) - 1);
+  vm2.currentStepIdx = Math.max(0, Math.min(state.currentStepIdx || 0, maxStepIdx));
+  vm2.selectedElementId = state.selectedElementId && vm2FindElement(state.selectedElementId)
+    ? state.selectedElementId
+    : null;
+  const desiredTime = Math.max(0, Math.min(state.currentTime || 0, vm2.duration || vm2.project.duration || 0));
+  if (vm2Video()) {
+    vm2SeekTo(desiredTime);
+  } else {
+    vm2.currentTime = desiredTime;
+    vm2UpdatePlayhead();
+  }
+  vm2RenderSteps();
+  vm2RenderElements();
+  vm2RenderElementsList();
+  vm2RenderProps();
+}
+
+function vm2RestoreHistoryEntry(entry, reason = 'Edited') {
+  if (!entry?.snapshot) return;
+  vm2.suppressHistory = true;
+  vm2.pendingHistoryRestore = vm2DeepClone(entry.snapshot);
+  vm2ApplyProjectState(vm2DeepClone(entry.snapshot.project), {
+    readOnlyRevision: null,
+    preserveHistory: true,
+  });
+  const activeVideo = vm2Video();
+  if (!vm2PrimaryVideoUrl(vm2.project) || (activeVideo && activeVideo.videoWidth && activeVideo.videoHeight)) {
+    const restoreState = vm2.pendingHistoryRestore;
+    vm2.pendingHistoryRestore = null;
+    vm2ApplyHistoryUiState(restoreState);
+  }
+  vm2.suppressHistory = false;
+  vm2SyncHistoryDirtyState(reason);
 }
 
 function vm2BrowserRoot() {
@@ -1035,7 +1156,7 @@ function vm2SetReadOnlyBanner(revision) {
   }
 }
 
-function vm2ApplyProjectState(project, { readOnlyRevision = null } = {}) {
+function vm2ApplyProjectState(project, { readOnlyRevision = null, preserveHistory = false } = {}) {
   vm2.project = {
     _id: null,
     title: 'Untitled1',
@@ -1092,6 +1213,11 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null } = {}) {
   vm2RenderElementsList();
   vm2RenderProps();
   vm2SetSaveStatus(readOnlyRevision ? 'Revision preview' : 'Loaded', readOnlyRevision ? 'blue' : 'green');
+  if (!preserveHistory) {
+    vm2ResetHistory(readOnlyRevision ? 'Revision preview' : 'Loaded');
+  } else {
+    vm2UpdateUndoRedoButtons();
+  }
 }
 
 // ── Page Loader ─────────────────────────────────────────────────────────────
@@ -1107,10 +1233,10 @@ function vm2RenderEditorShell() {
       <button onclick="vm2ReturnToBrowser()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
         <i class="ri-arrow-left-line"></i>Projects
       </button>
-      <button onclick="vm2Undo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Undo">
+      <button id="vm2-undo-btn" onclick="vm2Undo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Undo">
         <i class="ri-arrow-go-back-line text-lg"></i>
       </button>
-      <button onclick="vm2Redo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Redo">
+      <button id="vm2-redo-btn" onclick="vm2Redo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Redo">
         <i class="ri-arrow-go-forward-line text-lg"></i>
       </button>
       <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
@@ -1655,6 +1781,7 @@ function vm2RenderEditorShell() {
 
   vm2InitManagedMedia();
   vm2SetSaveStatus(vm2.project?._id ? 'Loaded' : 'Not saved');
+  vm2UpdateUndoRedoButtons();
 }
 
 function loadVideoManual2Page() {
@@ -2737,6 +2864,13 @@ function vm2OnVideoLoaded() {
   if (pendingSwitch) {
     vm2.pendingMediaSwitch = null;
     vm2SeekTo(pendingSwitch.timelineTime, { autoplay: pendingSwitch.autoplay });
+    return;
+  }
+
+  if (vm2.pendingHistoryRestore) {
+    const restoreState = vm2.pendingHistoryRestore;
+    vm2.pendingHistoryRestore = null;
+    vm2ApplyHistoryUiState(restoreState);
     return;
   }
 
@@ -5826,17 +5960,30 @@ function vm2CloseExportModal() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  UNDO / REDO (placeholder)
+//  UNDO / REDO
 // ═══════════════════════════════════════════════════════════════════════════
 
 function vm2Undo() {
-  // TODO: Implement undo stack
-  console.log('[VM2] Undo - not implemented yet');
+  if (vm2.revisionPreview || vm2.undoStack.length <= 1) {
+    vm2UpdateUndoRedoButtons();
+    return;
+  }
+  const current = vm2.undoStack.pop();
+  if (current) vm2.redoStack.push(current);
+  const previous = vm2.undoStack[vm2.undoStack.length - 1];
+  if (!previous) return;
+  vm2RestoreHistoryEntry(previous, 'Undo');
 }
 
 function vm2Redo() {
-  // TODO: Implement redo stack
-  console.log('[VM2] Redo - not implemented yet');
+  if (vm2.revisionPreview || vm2.redoStack.length === 0) {
+    vm2UpdateUndoRedoButtons();
+    return;
+  }
+  const next = vm2.redoStack.pop();
+  if (!next) return;
+  vm2.undoStack.push(next);
+  vm2RestoreHistoryEntry(next, 'Redo');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5850,6 +5997,8 @@ if (typeof window !== 'undefined') {
   window.vm2SelectPlaylist = vm2SelectPlaylist;
   window.vm2CreatePlaylist = vm2CreatePlaylist;
   window.vm2CreateProject = vm2CreateProject;
+  window.vm2Undo = vm2Undo;
+  window.vm2Redo = vm2Redo;
   window.vm2ReturnToBrowser = vm2ReturnToBrowser;
   window.vm2ShowAssetPicker = vm2ShowAssetPicker;
   window.vm2CloseAssetPicker = vm2CloseAssetPicker;
