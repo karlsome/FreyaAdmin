@@ -1897,12 +1897,208 @@ const vm2TP = {
   stepIdx: 0,
   raf: null,
   videoRect: null,
+  activeVideoEl: null,
+  activeMediaKey: '',
+  mediaCache: null,
+  mediaPreloadQueue: [],
+  mediaPreloading: false,
+  pendingSwitch: null,
 };
 
 function vm2TpGet(id) { return document.getElementById(id); }
-const vm2TpVideo   = () => vm2TpGet('vm2-tp-video');
+const vm2TpPrimaryVideo = () => vm2TpGet('vm2-tp-video');
+const vm2TpVideo   = () => vm2TP.activeVideoEl || vm2TpPrimaryVideo();
 const vm2TpCanvas  = () => vm2TpGet('vm2-tp-canvas');
 const vm2TpWrapper = () => vm2TpGet('vm2-tp-canvas-wrapper');
+
+function vm2TpMediaHost() {
+  return vm2TpGet('vm2-tp-media-cache');
+}
+
+function vm2TpEnsureMediaCache() {
+  if (!(vm2TP.mediaCache instanceof Map)) vm2TP.mediaCache = new Map();
+  return vm2TP.mediaCache;
+}
+
+function vm2TpClearMedia() {
+  const primaryVideo = vm2TpPrimaryVideo();
+  const cache = vm2TpEnsureMediaCache();
+  cache.forEach((entry) => {
+    const video = entry.video;
+    if (!video) return;
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    if (video !== primaryVideo) video.remove();
+  });
+  cache.clear();
+  vm2TP.activeVideoEl = primaryVideo || null;
+  vm2TP.activeMediaKey = '';
+  vm2TP.mediaPreloadQueue = [];
+  vm2TP.mediaPreloading = false;
+  vm2TP.pendingSwitch = null;
+}
+
+function vm2TpAttachVideo(video) {
+  if (!video || video.dataset.vm2tpBound === '1') return;
+  video.dataset.vm2tpBound = '1';
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.addEventListener('loadedmetadata', () => {
+    const entry = vm2TpEnsureMediaCache().get(video.dataset.sourceKey || '');
+    if (entry) entry.metadataReady = true;
+    if (video !== vm2TpVideo()) return;
+    vm2TrashPreviewOnLoaded();
+  });
+  video.addEventListener('timeupdate', () => {
+    if (video !== vm2TpVideo()) return;
+    vm2TrashPreviewOnTimeUpdate();
+  });
+}
+
+function vm2TpCreateVideo() {
+  const video = document.createElement('video');
+  video.className = 'absolute pointer-events-none opacity-0';
+  video.style.left = '0';
+  video.style.top = '0';
+  vm2TpAttachVideo(video);
+  vm2TpMediaHost()?.appendChild(video);
+  return video;
+}
+
+function vm2TpInitManagedMedia() {
+  const primaryVideo = vm2TpPrimaryVideo();
+  if (!primaryVideo) return;
+  vm2TpAttachVideo(primaryVideo);
+  vm2TP.activeVideoEl = primaryVideo;
+  vm2TpEnsureMediaCache();
+}
+
+function vm2TpEnsureEntry(url, { sourceKey = '', local = false, usePrimary = false } = {}) {
+  if (!url) return null;
+  const key = sourceKey || `url:${url}`;
+  const cache = vm2TpEnsureMediaCache();
+  const existing = cache.get(key);
+  if (existing) return existing;
+
+  const video = usePrimary ? vm2TpPrimaryVideo() : vm2TpCreateVideo();
+  if (!video) return null;
+  vm2TpAttachVideo(video);
+  video.crossOrigin = local ? '' : 'anonymous';
+  video.dataset.sourceKey = key;
+  const entry = { key, url, local, video, status: 'idle', metadataReady: false, readyPromise: null };
+  cache.set(key, entry);
+  return entry;
+}
+
+function vm2TpLoadEntry(entry) {
+  if (!entry) return Promise.reject(new Error('Missing trash preview media entry'));
+  if (entry.status === 'ready') return Promise.resolve(entry);
+  if (entry.readyPromise) return entry.readyPromise;
+
+  entry.status = 'loading';
+  entry.readyPromise = new Promise((resolve, reject) => {
+    const onReady = () => {
+      cleanup();
+      entry.status = 'ready';
+      entry.readyPromise = null;
+      resolve(entry);
+    };
+    const onError = () => {
+      cleanup();
+      entry.status = 'error';
+      entry.readyPromise = null;
+      reject(new Error('Failed to load trash preview clip'));
+    };
+    const cleanup = () => {
+      entry.video.removeEventListener('loadeddata', onReady);
+      entry.video.removeEventListener('error', onError);
+    };
+    entry.video.addEventListener('loadeddata', onReady);
+    entry.video.addEventListener('error', onError);
+  });
+
+  entry.video.pause();
+  entry.video.crossOrigin = entry.local ? '' : 'anonymous';
+  entry.video.dataset.sourceKey = entry.key;
+  entry.video.src = entry.local ? entry.url : vm2ResolveMediaUrl(entry.url);
+  entry.video.load();
+  return entry.readyPromise;
+}
+
+function vm2TpSetActiveEntry(entry) {
+  if (!entry?.video) return;
+  const previous = vm2TP.activeVideoEl;
+  if (previous && previous !== entry.video) previous.pause();
+  vm2TP.activeVideoEl = entry.video;
+  vm2TP.activeMediaKey = entry.key;
+}
+
+function vm2TpQueuePreloads() {
+  const cache = vm2TpEnsureMediaCache();
+  const queued = new Set(vm2TP.mediaPreloadQueue.map((item) => item.key));
+  vm2GetUniqueProjectSources(vm2TP.project).forEach((source) => {
+    if (!source?.key || source.key === vm2TP.activeMediaKey || queued.has(source.key)) return;
+    const existing = cache.get(source.key);
+    if (existing?.status === 'ready' || existing?.status === 'loading') return;
+    vm2TP.mediaPreloadQueue.push(source);
+    queued.add(source.key);
+  });
+}
+
+async function vm2TpPreloadQueue() {
+  if (vm2TP.mediaPreloading) return;
+  vm2TP.mediaPreloading = true;
+  try {
+    while (vm2TP.mediaPreloadQueue.length) {
+      const source = vm2TP.mediaPreloadQueue.shift();
+      const entry = vm2TpEnsureEntry(source.url, source);
+      if (!entry || entry.status === 'ready') continue;
+      try {
+        await vm2TpLoadEntry(entry);
+      } catch (err) {
+        console.warn('[VM2 TrashPreview] Background preload failed:', err);
+      }
+    }
+  } finally {
+    vm2TP.mediaPreloading = false;
+  }
+}
+
+function vm2TpPrimeMedia() {
+  vm2TpClearMedia();
+  const sources = vm2GetUniqueProjectSources(vm2TP.project);
+  if (!sources.length) return;
+  const [first, ...rest] = sources;
+  const firstEntry = vm2TpEnsureEntry(first.url, { ...first, usePrimary: true });
+  if (firstEntry) {
+    vm2TpSetActiveEntry(firstEntry);
+    void vm2TpLoadEntry(firstEntry).catch((err) => console.error('[VM2 TrashPreview] Primary media load error:', err));
+  }
+  vm2TP.mediaPreloadQueue = [];
+  rest.forEach((source) => vm2TP.mediaPreloadQueue.push(source));
+  void vm2TpPreloadQueue();
+}
+
+function vm2TpEnsureStepSource(step, { autoplay = false } = {}) {
+  if (!step) return true;
+  const url = vm2GetStepVideoUrl(step, vm2TP.project);
+  const key = vm2GetStepSourceKey(step, vm2TP.project);
+  if (!url || !key) return true;
+  const entry = vm2TpEnsureEntry(url, {
+    sourceKey: key,
+    local: vm2IsBlobUrl(url),
+    usePrimary: key === vm2TP.activeMediaKey || !vm2TP.activeMediaKey,
+  });
+  if (!entry) return true;
+  if (vm2TP.activeMediaKey === key && (entry.status === 'ready' || entry.metadataReady)) return true;
+
+  vm2TP.pendingSwitch = { stepIdx: vm2TP.stepIdx, autoplay };
+  vm2TpSetActiveEntry(entry);
+  if (entry.status === 'ready' || entry.metadataReady) return true;
+  void vm2TpLoadEntry(entry).catch((err) => console.error('[VM2 TrashPreview] Step switch load error:', err));
+  return false;
+}
 
 function vm2TpStepStart(step) {
   return step?.sourceStart ?? step?.startTime ?? 0;
@@ -1939,8 +2135,11 @@ function vm2TpAdvanceStepPlayback() {
   vm2TP.stepIdx = nextIdx;
   vm2TpUpdateStepLabel();
   vm2TpRenderElements();
-  video.currentTime = vm2TpStepStart(steps[nextIdx]);
-  const playPromise = video.play();
+  if (!vm2TpEnsureStepSource(steps[nextIdx], { autoplay: true })) return;
+  const nextVideo = vm2TpVideo();
+  if (!nextVideo) return;
+  nextVideo.currentTime = vm2TpStepStart(steps[nextIdx]);
+  const playPromise = nextVideo.play();
   if (playPromise?.catch) playPromise.catch(() => vm2TpSetPlayButton(true));
 }
 
@@ -1977,9 +2176,8 @@ function vm2EnsureTrashPreviewModal() {
       <div id="vm2-tp-canvas-viewport" class="relative flex-shrink-0">
         <div id="vm2-tp-canvas-wrapper" class="relative bg-black shadow-2xl">
           <canvas id="vm2-tp-canvas" class="absolute inset-0 pointer-events-none"></canvas>
-          <video id="vm2-tp-video" class="absolute pointer-events-none opacity-0"
-            ontimeupdate="vm2TrashPreviewOnTimeUpdate()"
-            onloadedmetadata="vm2TrashPreviewOnLoaded()"></video>
+          <video id="vm2-tp-video" class="absolute pointer-events-none opacity-0"></video>
+          <div id="vm2-tp-media-cache" class="hidden"></div>
           <div id="vm2-tp-elements" class="absolute inset-0 pointer-events-none" style="overflow:hidden;"></div>
         </div>
       </div>
@@ -1990,6 +2188,7 @@ function vm2EnsureTrashPreviewModal() {
     </div>
   </div>`;
   document.body.appendChild(el.firstElementChild);
+  vm2TpInitManagedMedia();
 }
 
 async function vm2PreviewTrashProject(id) {
@@ -2027,6 +2226,7 @@ async function vm2PreviewTrashProject(id) {
     vm2TP.project = data;
     vm2TP.stepIdx = 0;
     vm2TP.videoRect = null;
+    vm2TP.pendingSwitch = null;
 
     // Populate header.
     const titleEl = vm2TpGet('vm2-tp-title');
@@ -2037,14 +2237,7 @@ async function vm2PreviewTrashProject(id) {
     vm2TpRenderElements();
     vm2TpSyncCanvasSize();
 
-    const video = vm2TpVideo();
-    if (video) {
-      video.pause();
-      const url = data.videoUrl ? vm2ResolveMediaUrl(data.videoUrl) : '';
-      video.crossOrigin = 'anonymous';
-      video.src = url || '';
-      if (url) video.load();
-    }
+    vm2TpPrimeMedia();
 
     vm2TpStartLoop();
   } catch (err) {
@@ -2055,8 +2248,7 @@ async function vm2PreviewTrashProject(id) {
 
 function vm2CloseTrashPreview() {
   vm2TpStopLoop();
-  const video = vm2TpVideo();
-  if (video) { video.pause(); video.src = ''; }
+  vm2TpClearMedia();
   const modal = vm2TpGet('vm2-modal-trash-preview');
   if (modal) modal.classList.add('hidden');
   vm2TP.project = null;
@@ -2143,8 +2335,17 @@ function vm2TrashPreviewOnLoaded() {
   // Seek to the start time of the current step.
   const step = vm2TP.project?.steps?.[vm2TP.stepIdx];
   const video = vm2TpVideo();
-  if (step && video) video.currentTime = vm2TpStepStart(step);
+  if (step && video) {
+    video.currentTime = vm2TpStepStart(step);
+    if (vm2TP.pendingSwitch?.autoplay) {
+      const playPromise = video.play();
+      vm2TpSetPlayButton(false);
+      if (playPromise?.catch) playPromise.catch(() => vm2TpSetPlayButton(true));
+    }
+    vm2TP.pendingSwitch = null;
+  }
   vm2TpUpdateStepLabel();
+  void vm2TpPreloadQueue();
 }
 
 function vm2TrashPreviewOnTimeUpdate() {
@@ -2173,10 +2374,12 @@ function vm2TrashPreviewOnTimeUpdate() {
 }
 
 function vm2TrashPreviewTogglePlay() {
+  const step = vm2TP.project?.steps?.[vm2TP.stepIdx];
+  if (!step) return;
+  if (!vm2TpEnsureStepSource(step, { autoplay: true })) return;
   const video = vm2TpVideo();
   if (!video) return;
   if (video.paused) {
-    const step = vm2TP.project?.steps?.[vm2TP.stepIdx];
     const srcStart = vm2TpStepStart(step);
     const srcEnd = vm2TpStepEnd(step);
     if (step && (video.currentTime < srcStart || video.currentTime >= srcEnd - 0.05)) {
@@ -2206,11 +2409,12 @@ function vm2TrashPreviewNextStep() {
 function vm2TpGoToStep() {
   const step  = vm2TP.project?.steps?.[vm2TP.stepIdx];
   const video = vm2TpVideo();
-  if (step && video) {
-    video.pause();
-    video.currentTime = vm2TpStepStart(step);
-    vm2TpSetPlayButton(true);
+  if (video) video.pause();
+  if (step && vm2TpEnsureStepSource(step)) {
+    const activeVideo = vm2TpVideo();
+    if (activeVideo) activeVideo.currentTime = vm2TpStepStart(step);
   }
+  vm2TpSetPlayButton(true);
   vm2TpUpdateStepLabel();
   vm2TpRenderElements();
 }
@@ -5081,9 +5285,116 @@ async function vm2LoadProject(id) {
 //  EXPORT (FFmpeg.wasm)
 // ═══════════════════════════════════════════════════════════════════════════
 
+function vm2CreateExportMediaPool(project = vm2.project) {
+  const host = document.createElement('div');
+  host.className = 'hidden';
+  document.body.appendChild(host);
+
+  const audioContext = window.AudioContext ? new AudioContext() : null;
+  const destination = audioContext?.createMediaStreamDestination?.() || null;
+  const entries = new Map();
+
+  const ensureEntry = (source) => {
+    const existing = entries.get(source.key);
+    if (existing) return existing;
+
+    const video = document.createElement('video');
+    video.className = 'absolute pointer-events-none opacity-0';
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.crossOrigin = source.local ? '' : 'anonymous';
+    host.appendChild(video);
+
+    const entry = {
+      ...source,
+      video,
+      gainNode: null,
+      readyPromise: null,
+      status: 'idle',
+    };
+
+    if (audioContext && destination && audioContext.createMediaElementSource) {
+      try {
+        const sourceNode = audioContext.createMediaElementSource(video);
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = 0;
+        sourceNode.connect(gainNode);
+        gainNode.connect(destination);
+        entry.gainNode = gainNode;
+      } catch (err) {
+        console.warn('[VM2 Export] Could not create audio source for clip:', err);
+      }
+    }
+
+    entries.set(source.key, entry);
+    return entry;
+  };
+
+  const loadEntry = (entry) => {
+    if (!entry) return Promise.reject(new Error('Missing export media entry'));
+    if (entry.status === 'ready') return Promise.resolve(entry);
+    if (entry.readyPromise) return entry.readyPromise;
+
+    entry.status = 'loading';
+    entry.readyPromise = new Promise((resolve, reject) => {
+      const onReady = () => {
+        cleanup();
+        entry.status = 'ready';
+        entry.readyPromise = null;
+        resolve(entry);
+      };
+      const onError = () => {
+        cleanup();
+        entry.status = 'error';
+        entry.readyPromise = null;
+        reject(new Error(`Failed to load export clip: ${entry.key}`));
+      };
+      const cleanup = () => {
+        entry.video.removeEventListener('loadeddata', onReady);
+        entry.video.removeEventListener('error', onError);
+      };
+      entry.video.addEventListener('loadeddata', onReady);
+      entry.video.addEventListener('error', onError);
+    });
+
+    entry.video.src = entry.local ? entry.url : vm2ResolveMediaUrl(entry.url);
+    entry.video.load();
+    return entry.readyPromise;
+  };
+
+  const loadAll = async () => {
+    const sources = vm2GetUniqueProjectSources(project);
+    await Promise.all(sources.map((source) => loadEntry(ensureEntry(source))));
+    if (audioContext?.state === 'suspended') {
+      try { await audioContext.resume(); } catch (_) {}
+    }
+    return entries;
+  };
+
+  const cleanup = async () => {
+    entries.forEach((entry) => {
+      entry.video.pause();
+      entry.video.removeAttribute('src');
+      entry.video.load();
+    });
+    host.remove();
+    if (audioContext && typeof audioContext.close === 'function') {
+      try { await audioContext.close(); } catch (_) {}
+    }
+  };
+
+  return {
+    entries,
+    destination,
+    ensureEntry,
+    loadEntry,
+    loadAll,
+    cleanup,
+  };
+}
+
 async function vm2Export() {
-  const video = vm2Video();
-  if (!vm2.project || !video || !video.currentSrc) {
+  if (!vm2.project || !vm2.project.steps?.length) {
     alert('Please load a video first');
     return;
   }
@@ -5095,43 +5406,33 @@ async function vm2Export() {
   vm2Get('vm2-export-bar').style.width = '0%';
   vm2Get('vm2-export-status').textContent = 'Preparing export...';
 
+  const originalStepIdx = vm2.currentStepIdx;
+  let exportPool = null;
+
   try {
-    // For now, use canvas-based export (records the preview with overlays)
-    // This approach works without CORS issues
+    vm2Get('vm2-export-status').textContent = 'Preparing clip sources...';
+    vm2Get('vm2-export-detail').textContent = 'Loading video clips into export pool';
+
+    exportPool = vm2CreateExportMediaPool(vm2.project);
+    await exportPool.loadAll();
+
     vm2Get('vm2-export-status').textContent = 'Rendering video with overlays...';
     vm2Get('vm2-export-detail').textContent = 'Using browser-based rendering';
     
-    // Create a canvas to composite video + overlays.
-    // Use PROJECT dimensions to match preview exactly.
-    const nativeW = video.videoWidth || vm2.project.width;
-    const nativeH = video.videoHeight || vm2.project.height;
     const projectW = vm2.project.width;
     const projectH = vm2.project.height;
     
-    // Canvas matches project (preview) size
     const canvas = document.createElement('canvas');
     canvas.width  = projectW;
     canvas.height = projectH;
     const ctx = canvas.getContext('2d');
-    
-    const { drawX, drawY, drawW, drawH } = vm2GetVideoDrawRect(nativeW, nativeH, projectW, projectH);
-    
-    console.log('[VM2 Export] Video rect:', { drawX, drawY, drawW, drawH, projectW, projectH, nativeW, nativeH });
-    
-    // Set up MediaRecorder
+
     const stream = canvas.captureStream(30);
-    
-    // Try to get audio from video
-    if (video.captureStream) {
-      try {
-        const videoStream = video.captureStream();
-        const audioTracks = videoStream.getAudioTracks();
-        audioTracks.forEach(track => stream.addTrack(track));
-      } catch (e) {
-        console.log('Could not capture audio:', e);
-      }
+
+    if (exportPool.destination) {
+      exportPool.destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
     }
-    
+
     const mediaRecorder = new MediaRecorder(stream, {
       mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9') 
         ? 'video/webm;codecs=vp9' 
@@ -5142,83 +5443,115 @@ async function vm2Export() {
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
     };
-    
-    // Start recording
+
     mediaRecorder.start();
-    
+
     let isRecording = true;
+    let isSwitching = false;
+    let activeEntry = null;
+
+    const setActiveEntry = async (step, { autoplay = false } = {}) => {
+      const key = vm2GetStepSourceKey(step, vm2.project);
+      const source = vm2GetUniqueProjectSources(vm2.project).find((item) => item.key === key);
+      const entry = key ? exportPool.entries.get(key) || (source ? exportPool.ensureEntry(source) : null) : null;
+      if (!entry) return null;
+
+      exportPool.entries.forEach((item) => {
+        if (item.gainNode) item.gainNode.gain.value = 0;
+        if (item !== entry) item.video.pause();
+      });
+
+      activeEntry = entry;
+      if (entry.gainNode) entry.gainNode.gain.value = step?.muted ? 0 : 1;
+      entry.video.currentTime = vm2TpStepStart(step);
+      entry.video.playbackRate = 1;
+      if (autoplay) {
+        await entry.video.play();
+      }
+      return entry;
+    };
 
     const renderFrame = () => {
-      if (!isRecording) return;
-      
-      // Manage non-linear timeline playback routing for export!
+      if (!isRecording || isSwitching || !activeEntry) return;
+
+      const video = activeEntry.video;
       const activeStepIdx = vm2.currentStepIdx;
       const activeStep = vm2.project.steps[activeStepIdx];
-      
+
       let effectiveTime = video.currentTime;
       let shouldRender = true;
 
       if (activeStep) {
-        // If we crossed the end boundary for this step's source clip
         if (video.currentTime >= (activeStep.sourceEnd ?? activeStep.endTime) - 0.05) {
           if (activeStepIdx + 1 < vm2.project.steps.length) {
             vm2.currentStepIdx++;
             const nextStep = vm2.project.steps[vm2.currentStepIdx];
-            video.currentTime = nextStep.sourceStart ?? nextStep.startTime;
-            video.muted = !!nextStep.muted;
-            shouldRender = false; // Skip drawing this split-second
+            isSwitching = true;
+            shouldRender = false;
+            setActiveEntry(nextStep, { autoplay: true })
+              .then(() => {
+                isSwitching = false;
+                requestAnimationFrame(renderFrame);
+              })
+              .catch((err) => {
+                isRecording = false;
+                isSwitching = false;
+                mediaRecorder.stop();
+                console.error('[VM2 Export] Clip switch error:', err);
+              });
+            return;
           } else {
-            // Reached the end of the last step, stop!
             isRecording = false;
             video.pause();
             mediaRecorder.stop();
             return;
           }
         }
-        
-        // Calculate effective timeline time for overlays
+
         if (shouldRender) {
           const offset = video.currentTime - (activeStep.sourceStart ?? activeStep.startTime);
           effectiveTime = activeStep.startTime + offset;
-          // Apply per-clip mute state (affects the captureStream audio track)
-          video.muted = !!activeStep.muted;
+          if (activeEntry.gainNode) activeEntry.gainNode.gain.value = activeStep.muted ? 0 : 1;
         }
       }
 
       if (shouldRender) {
-        // Fill with dark background (same as preview wrapper background for letterbox/pillarbox areas)
         ctx.fillStyle = '#1a1a2e';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw video frame using contain logic (same as preview's object-fit:contain)
+
+        const { drawX, drawY, drawW, drawH } = vm2GetVideoDrawRect(
+          video.videoWidth || projectW,
+          video.videoHeight || projectH,
+          projectW,
+          projectH
+        );
         ctx.drawImage(video, drawX, drawY, drawW, drawH);
-        
-        // Draw overlays at their project-space coordinates (no transform needed
-        // since canvas is sized to project dimensions)
-        vm2.project.steps.forEach(step => {
-          step.elements.forEach(el => {
-            if (el.type !== 'audio' && vm2IsElementVisibleAtTime(el, effectiveTime)) {
-              vm2DrawElementOnCanvas(ctx, el, 1, 1, 0, 0);
-            }
-          });
+
+        const visibleElements = vm2.project.steps
+          .reduce((acc, step) => acc.concat(step.elements || []), [])
+          .filter((el) => el.type !== 'audio' && vm2IsElementVisibleAtTime(el, effectiveTime));
+
+        visibleElements.forEach((el) => {
+          if (el.layer === undefined) el.layer = 0;
         });
-        
-        // Update progress
+
+        // Match editor ordering: higher layer renders first (behind), layer 0 last (on top).
+        visibleElements.sort((a, b) => b.layer - a.layer);
+
+        visibleElements.forEach((el) => {
+          vm2DrawElementOnCanvas(ctx, el, 1, 1, 0, 0);
+        });
+
         const progress = effectiveTime / vm2.duration;
         vm2Get('vm2-export-bar').style.width = Math.min((progress * 95), 100) + '%';
         vm2Get('vm2-export-detail').textContent = `${Math.round(progress * 100)}% rendered`;
       }
-      
+
       requestAnimationFrame(renderFrame);
     };
-    
-    // Play video and render each frame
-    // Mute is driven per-step; prime it from the first step now
-    video.muted = !!(vm2.project.steps[0]?.muted);
-    video.playbackRate = 1;
-    
+
     await new Promise((resolve) => {
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         isRecording = false;
         const blob = new Blob(chunks, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
@@ -5228,22 +5561,18 @@ async function vm2Export() {
         vm2Get('vm2-export-done').classList.remove('hidden');
         vm2Get('vm2-export-download').href = url;
         vm2Get('vm2-export-download').download = (vm2.project.title || 'video-manual') + '.webm';
-        
-        // Reset playback state – restore mute to whatever the current step says
-        video.muted = !!(vm2.project.steps[vm2.currentStepIdx]?.muted);
-        video.ontimeupdate = vm2OnTimeUpdate; // Restore original handler
+
+        exportPool.entries.forEach((entry) => entry.video.pause());
         resolve();
       };
-      
-      // Override standard ontimeupdate to capture via renderFrame
-      video.ontimeupdate = null; // Disable original handler during export
-      
-      // Start playback at the very first step's source slice
+
       if (vm2.project.steps.length > 0) {
         vm2.currentStepIdx = 0;
-        video.currentTime = vm2.project.steps[0].sourceStart ?? vm2.project.steps[0].startTime;
-        video.play().then(() => {
-          requestAnimationFrame(renderFrame); // Start the render loop
+        setActiveEntry(vm2.project.steps[0], { autoplay: true }).then(() => {
+          requestAnimationFrame(renderFrame);
+        }).catch((err) => {
+          console.error('[VM2 Export] Initial clip start error:', err);
+          mediaRecorder.stop();
         });
       } else {
         mediaRecorder.stop();
@@ -5255,6 +5584,9 @@ async function vm2Export() {
     vm2Get('vm2-export-progress').classList.add('hidden');
     vm2Get('vm2-export-error').classList.remove('hidden');
     vm2Get('vm2-export-error-msg').textContent = err.message;
+  } finally {
+    vm2.currentStepIdx = originalStepIdx;
+    if (exportPool) await exportPool.cleanup();
   }
 }
 
