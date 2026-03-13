@@ -156,6 +156,23 @@ function vm2GetStepSourceKey(step, project = vm2.project) {
   return url ? `url:${url}` : '';
 }
 
+function vm2FindStepIndexAtTime(timelineTime, project = vm2.project) {
+  const steps = project?.steps || [];
+  if (!steps.length) return -1;
+
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    const isLast = index === steps.length - 1;
+    if (timelineTime < step.startTime) continue;
+    if (timelineTime < step.endTime || (isLast && timelineTime <= step.endTime)) {
+      return index;
+    }
+  }
+
+  if (timelineTime <= steps[0].startTime) return 0;
+  return steps.length - 1;
+}
+
 function vm2GetSequenceDuration(project = vm2.project) {
   if (!project) return 0;
   if (Array.isArray(project.steps) && project.steps.length) {
@@ -2373,10 +2390,9 @@ function vm2SeekTo(timelineTime, { autoplay = false } = {}) {
   // Clamp timelineTime within total duration
   timelineTime = Math.max(0, Math.min(timelineTime, vm2.duration));
 
-  // Find the step that contains this timeline position
-  const stepIdx = vm2.project.steps.findIndex(s =>
-    timelineTime >= s.startTime && timelineTime <= s.endTime
-  );
+  // Find the step that contains this timeline position. Boundaries belong to
+  // the next step so playback can advance continuously across adjacent clips.
+  const stepIdx = vm2FindStepIndexAtTime(timelineTime, vm2.project);
 
   let step = null;
   if (stepIdx >= 0) {
