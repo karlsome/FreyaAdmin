@@ -3667,6 +3667,7 @@ function vm2AddElement(type, subtype, dropX, dropY, options = {}) {
     type,
     subtype,
     layer: nextLayer,
+    timelineLane: vm2GetDefaultTimelineLaneForRange(elementStart, elementEnd),
     x: centerX - 100,
     y: centerY - 50,
     width: options.initialWidth ?? 200,
@@ -3776,6 +3777,7 @@ async function vm2HandleImageUpload(event) {
       type: 'image',
       imageUrl: url,
       imageBlob: file,
+      timelineLane: vm2GetDefaultTimelineLaneForRange(elementStart, elementEnd),
       x: (vm2.project.width - w) / 2,
       y: (vm2.project.height - h) / 2,
       width: w,
@@ -3824,6 +3826,7 @@ async function vm2HandleAudioUpload(event) {
     audioUrl: url,
     audioBlob: file,
     name: file.name,
+    timelineLane: vm2GetDefaultTimelineLaneForRange(elementStart, elementEnd),
     startTime: elementStart,
     endTime: elementEnd,
     volume: 100,
@@ -4525,6 +4528,34 @@ function vm2TimelineBarsOverlap(a, b) {
   return a.startTime < b.endTime && b.startTime < a.endTime;
 }
 
+function vm2GetTimelineLaneNeighbors(elementId, laneIndex, project = vm2.project) {
+  const laneLayout = vm2BuildTimelineLaneLayout(project);
+  const target = vm2FindElement(elementId);
+  if (!target) {
+    return { laneLayout, previous: null, next: null };
+  }
+
+  const laneElements = [];
+  laneLayout.laneById.forEach((lane, id) => {
+    if (lane !== laneIndex || id === elementId) return;
+    const other = vm2FindElement(id);
+    if (other) laneElements.push(other);
+  });
+
+  let previous = null;
+  let next = null;
+  laneElements.forEach((other) => {
+    if (other.endTime <= target.startTime) {
+      if (!previous || other.endTime > previous.endTime) previous = other;
+    }
+    if (other.startTime >= target.endTime) {
+      if (!next || other.startTime < next.startTime) next = other;
+    }
+  });
+
+  return { laneLayout, previous, next };
+}
+
 function vm2BuildTimelineLaneLayout(project = vm2.project) {
   const elements = [];
   project?.steps?.forEach((step, stepIdx) => {
@@ -4549,9 +4580,10 @@ function vm2BuildTimelineLaneLayout(project = vm2.project) {
   });
 
   sorted.forEach((el) => {
-    const rawPreferredLane = Number.isFinite(el.timelineLane) ? Math.max(0, Math.floor(el.timelineLane)) : 0;
-    const highestExpandableLane = Math.min(VM2_TIMELINE_MAX_LANES - 1, laneOccupants.length);
-    const preferredLane = Math.min(rawPreferredLane, highestExpandableLane);
+    const hasExplicitLane = Number.isFinite(el.timelineLane);
+    const preferredLane = hasExplicitLane
+      ? Math.max(0, Math.min(VM2_TIMELINE_MAX_LANES - 1, Math.floor(el.timelineLane)))
+      : 0;
     let lane = preferredLane;
 
     const canUseLane = (laneIndex) => {
@@ -4559,10 +4591,11 @@ function vm2BuildTimelineLaneLayout(project = vm2.project) {
       return occupants.every(existing => !vm2TimelineBarsOverlap(existing, el));
     };
 
-    while (lane < VM2_TIMELINE_MAX_LANES && !canUseLane(lane)) lane++;
-
-    if (lane >= VM2_TIMELINE_MAX_LANES) {
-      lane = VM2_TIMELINE_MAX_LANES - 1;
+    if (!hasExplicitLane) {
+      while (lane < VM2_TIMELINE_MAX_LANES && !canUseLane(lane)) lane++;
+      if (lane >= VM2_TIMELINE_MAX_LANES) {
+        lane = VM2_TIMELINE_MAX_LANES - 1;
+      }
     }
 
     if (!laneOccupants[lane]) laneOccupants[lane] = [];
@@ -4570,11 +4603,34 @@ function vm2BuildTimelineLaneLayout(project = vm2.project) {
     laneById.set(el.id, lane);
   });
 
+  const usedLanes = [...new Set([...laneById.values()].sort((a, b) => a - b))];
+  const denseLaneMap = new Map(usedLanes.map((lane, idx) => [lane, idx]));
+  const denseLaneById = new Map();
+  laneById.forEach((lane, id) => {
+    denseLaneById.set(id, denseLaneMap.get(lane) || 0);
+  });
+
   return {
     elements,
-    laneById,
-    laneCount: Math.max(1, Math.min(VM2_TIMELINE_MAX_LANES, laneOccupants.length)),
+    laneById: denseLaneById,
+    laneCount: Math.max(1, Math.min(VM2_TIMELINE_MAX_LANES, usedLanes.length)),
   };
+}
+
+function vm2GetDefaultTimelineLaneForRange(startTime, endTime, { excludeId = null, project = vm2.project } = {}) {
+  const laneLayout = vm2BuildTimelineLaneLayout(project);
+  let highestOccupiedLane = -1;
+
+  laneLayout.laneById.forEach((lane, id) => {
+    if (id === excludeId) return;
+    const other = vm2FindElement(id);
+    if (!other) return;
+    if (other.startTime < endTime && startTime < other.endTime) {
+      highestOccupiedLane = Math.max(highestOccupiedLane, lane);
+    }
+  });
+
+  return Math.max(0, Math.min(VM2_TIMELINE_MAX_LANES - 1, highestOccupiedLane + 1));
 }
 
 function vm2RenderTimeline() {
@@ -4682,6 +4738,15 @@ function vm2RenderTimeline() {
     tracks.style.width = timelineContentWidth + 'px';
     tracks.style.height = elementTracksHeight + 'px';
     tracks.style.minHeight = elementTracksHeight + 'px';
+
+    vm2.project.steps.forEach((step) => {
+      (step.elements || []).forEach((el) => {
+        const assignedLane = laneById.get(el.id);
+        if (assignedLane !== undefined) {
+          el.timelineLane = assignedLane;
+        }
+      });
+    });
 
     const typeColors = {
       text: '#f59e0b',
@@ -4946,15 +5011,21 @@ document.addEventListener('mousemove', (event) => {
     const dx = event.clientX - vm2.timelineDragData.startX;
     const dy = event.clientY - vm2.timelineDragData.startY;
     const dt = dx / vm2.timelineZoom;
+    const activeLane = Number.isFinite(el.timelineLane) ? el.timelineLane : (vm2.timelineDragData.originalLane || 0);
+    const { laneLayout, previous, next } = vm2GetTimelineLaneNeighbors(el.id, activeLane, vm2.project);
 
     if (vm2.timelineDragData.side === 'left') {
-      el.startTime = Math.max(0, Math.min(vm2.timelineDragData.originalStart + dt, el.endTime - 0.1));
+      const minStart = previous ? previous.endTime : 0;
+      el.startTime = Math.max(minStart, Math.min(vm2.timelineDragData.originalStart + dt, el.endTime - 0.1));
     } else if (vm2.timelineDragData.side === 'right') {
-      el.endTime = Math.min(vm2.duration, Math.max(vm2.timelineDragData.originalEnd + dt, el.startTime + 0.1));
+      const maxEnd = next ? next.startTime : vm2.duration;
+      el.endTime = Math.min(maxEnd, Math.max(vm2.timelineDragData.originalEnd + dt, el.startTime + 0.1));
     } else {
       const duration = vm2.timelineDragData.originalEnd - vm2.timelineDragData.originalStart;
       let newStart = vm2.timelineDragData.originalStart + dt;
-      newStart = Math.max(0, Math.min(newStart, vm2.duration - duration));
+      const minStart = previous ? previous.endTime : 0;
+      const maxStart = next ? next.startTime - duration : vm2.duration - duration;
+      newStart = Math.max(minStart, Math.min(newStart, maxStart));
       el.startTime = newStart;
       el.endTime = newStart + duration;
 
@@ -4963,7 +5034,6 @@ document.addEventListener('mousemove', (event) => {
       const rowGap = 4;
       const totalH = rowHeight + rowGap;
       const layerShift = Math.round(dy / totalH);
-      const laneLayout = vm2BuildTimelineLaneLayout(vm2.project);
       let highestOtherLane = -1;
       laneLayout.laneById.forEach((lane, id) => {
         if (id !== el.id) highestOtherLane = Math.max(highestOtherLane, lane);
@@ -4971,8 +5041,14 @@ document.addEventListener('mousemove', (event) => {
       const maxAllowedLane = Math.min(VM2_TIMELINE_MAX_LANES - 1, highestOtherLane + 1);
       const requestedLane = vm2.timelineDragData.originalLane - layerShift;
       const newLane = Math.max(0, Math.min(maxAllowedLane, requestedLane));
+      const currentLane = laneLayout.laneById.get(el.id) || 0;
+      const targetHasConflict = [...laneLayout.laneById.entries()].some(([id, lane]) => {
+        if (id === el.id || lane !== newLane) return false;
+        const other = vm2FindElement(id);
+        return other ? vm2TimelineBarsOverlap(other, el) : false;
+      });
 
-      if (newLane !== (el.timelineLane || 0)) {
+      if (newLane !== currentLane && !targetHasConflict) {
         el.timelineLane = newLane;
         vm2.timelineDragData.originalLane = newLane;
         vm2.timelineDragData.startY = event.clientY; // reset base
