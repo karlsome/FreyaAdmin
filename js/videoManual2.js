@@ -189,6 +189,35 @@ function vm2SyncSequenceDuration(project = vm2.project) {
   return duration;
 }
 
+const VM2_TIMELINE_MIN_ZOOM = 2;
+const VM2_TIMELINE_MAX_ZOOM = 200;
+const VM2_TIMELINE_ADD_CLIP_WIDTH = 150;
+
+function vm2GetTimelineContentWidth(duration = vm2.duration) {
+  const sequencePixelWidth = duration * vm2.timelineZoom;
+  return Math.max(800, sequencePixelWidth + VM2_TIMELINE_ADD_CLIP_WIDTH + 12);
+}
+
+function vm2GetTimelineMajorStep() {
+  const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+  const minLabelPx = 70;
+  return steps.find((step) => step * vm2.timelineZoom >= minLabelPx) || steps[steps.length - 1];
+}
+
+function vm2GetTimelineMinorStep(majorStep) {
+  const candidates = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+  const majorIndex = candidates.indexOf(majorStep);
+  if (majorIndex <= 0) return null;
+
+  for (let index = majorIndex - 1; index >= 0; index--) {
+    const candidate = candidates[index];
+    if (majorStep % candidate === 0 && candidate * vm2.timelineZoom >= 18) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function vm2SetLoadingIndicator(visible, text = 'Loading video...') {
   const overlay = vm2Get('vm2-loading-overlay');
   const label = vm2Get('vm2-loading-text');
@@ -4035,16 +4064,30 @@ function vm2RenderTimeline() {
   const sequenceDuration = vm2SyncSequenceDuration(vm2.project);
   if (sequenceDuration <= 0) return;
 
-  const timelineWidth = Math.max(sequenceDuration * vm2.timelineZoom, 800);
-  const timelineContentWidth = timelineWidth + 150;
+  const sequencePixelWidth = sequenceDuration * vm2.timelineZoom;
+  const timelineWidth = Math.max(sequencePixelWidth, 800);
+  const timelineContentWidth = vm2GetTimelineContentWidth(sequenceDuration);
 
   // Time ruler
   const ruler = vm2Get('vm2-time-ruler');
   if (ruler) {
     ruler.style.width = timelineContentWidth + 'px';
     let rulerHtml = '';
-    const step = vm2.timelineZoom >= 80 ? 1 : vm2.timelineZoom >= 40 ? 2 : 5;
-    for (let t = 0; t <= sequenceDuration; t += step) {
+    const majorStep = vm2GetTimelineMajorStep();
+    const minorStep = vm2GetTimelineMinorStep(majorStep);
+
+    if (minorStep) {
+      for (let t = minorStep; t < sequenceDuration; t += minorStep) {
+        const isMajorTick = Math.abs((t / majorStep) - Math.round(t / majorStep)) < 1e-6;
+        if (isMajorTick) continue;
+        const x = t * vm2.timelineZoom;
+        rulerHtml += `
+          <div class="absolute w-px h-1.5 bg-gray-200 dark:bg-gray-700" style="left: ${x}px; bottom: 0;"></div>
+        `;
+      }
+    }
+
+    for (let t = 0; t <= sequenceDuration + 1e-6; t += majorStep) {
       const x = t * vm2.timelineZoom;
       rulerHtml += `
         <div class="absolute text-[10px] text-gray-500" style="left: ${x}px; top: 4px;">${vm2Fmt(t)}</div>
@@ -4082,7 +4125,7 @@ function vm2RenderTimeline() {
       `;
     }).join('') + `
       <button class="absolute h-full rounded border border-dashed border-sky-300 bg-sky-50/80 px-3 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-900/20 dark:text-sky-300 dark:hover:bg-sky-900/30"
-              style="left: ${timelineWidth + 12}px; width: 120px;"
+              style="left: ${sequencePixelWidth + 12}px; width: 120px;"
               onclick="vm2OpenAddClipChooser()">
         <i class="ri-add-line mr-1"></i>Add Clip
       </button>
@@ -4197,17 +4240,29 @@ function vm2OnTimelineMouseDown(event) {
 }
 
 function vm2ZoomTimeline(delta) {
-  vm2.timelineZoom = Math.max(20, Math.min(200, vm2.timelineZoom + delta));
+  let nextZoom = vm2.timelineZoom;
+
+  if (delta < 0) {
+    const zoomOutStep = Math.max(1, Math.min(Math.abs(delta), vm2.timelineZoom * 0.2));
+    nextZoom = vm2.timelineZoom - zoomOutStep;
+  } else if (delta > 0) {
+    const zoomInStep = Math.max(1, Math.min(Math.abs(delta), Math.max(vm2.timelineZoom * 0.2, 1)));
+    nextZoom = vm2.timelineZoom + zoomInStep;
+  }
+
+  vm2.timelineZoom = Math.max(VM2_TIMELINE_MIN_ZOOM, Math.min(VM2_TIMELINE_MAX_ZOOM, nextZoom));
   vm2RenderTimeline();
 }
 
 function vm2FitTimeline() {
   const scroll = vm2Get('vm2-timeline-scroll');
   if (!scroll || vm2.duration <= 0) return;
-  
-  const availWidth = scroll.clientWidth - 20;
-  vm2.timelineZoom = availWidth / vm2.duration;
+
+  const availWidth = Math.max(0, scroll.clientWidth - 20 - VM2_TIMELINE_ADD_CLIP_WIDTH);
+  const nextZoom = availWidth / vm2.duration;
+  vm2.timelineZoom = Math.max(VM2_TIMELINE_MIN_ZOOM, Math.min(VM2_TIMELINE_MAX_ZOOM, nextZoom));
   vm2RenderTimeline();
+  scroll.scrollLeft = 0;
 }
 
 // Timeline bar interactions
