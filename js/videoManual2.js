@@ -1057,6 +1057,20 @@ async function vm2LoadPlaylistModelOptions(force = false) {
   }
 }
 
+function vm2BuildPlaylistModelOptionsMarkup(models, selectedModel = '') {
+  const uniqueModels = Array.isArray(models) ? Array.from(new Set(models.filter(Boolean))) : [];
+  const normalizedSelectedModel = String(selectedModel || '').trim();
+  const hasSelectedModel = normalizedSelectedModel && uniqueModels.includes(normalizedSelectedModel);
+  const options = ['<option value="">No model selected</option>'];
+  if (normalizedSelectedModel && !hasSelectedModel) {
+    options.push(`<option value="${vm2EscapeHtml(normalizedSelectedModel)}">${vm2EscapeHtml(normalizedSelectedModel)}</option>`);
+  }
+  uniqueModels.forEach((model) => {
+    options.push(`<option value="${vm2EscapeHtml(model)}">${vm2EscapeHtml(model)}</option>`);
+  });
+  return options.join('');
+}
+
 function vm2SyncCreatePlaylistSubmitState() {
   const submitBtn = vm2Get('vm2-create-playlist-submit');
   const titleInput = vm2Get('vm2-create-playlist-title');
@@ -1088,6 +1102,30 @@ function vm2OnCreatePlaylistModelChange() {
   }
   titleInput.dataset.autoModel = selectedModel;
   vm2SyncCreatePlaylistSubmitState();
+}
+
+function vm2OnEditPlaylistTitleInput() {
+  const titleInput = vm2Get('vm2-edit-playlist-title');
+  if (!titleInput) return;
+  const autoModel = titleInput.dataset.autoModel || '';
+  const value = titleInput.value.trim();
+  titleInput.dataset.manual = value && value !== autoModel ? '1' : '0';
+  vm2SyncEditPlaylistSubmitState();
+}
+
+function vm2OnEditPlaylistModelChange() {
+  const titleInput = vm2Get('vm2-edit-playlist-title');
+  const modelSelect = vm2Get('vm2-edit-playlist-model');
+  if (!titleInput || !modelSelect) return;
+  const selectedModel = modelSelect.value || '';
+  const prevAuto = titleInput.dataset.autoModel || '';
+  const isManual = titleInput.dataset.manual === '1';
+  if (!isManual || !titleInput.value.trim() || titleInput.value.trim() === prevAuto) {
+    titleInput.value = selectedModel;
+    titleInput.dataset.manual = '0';
+  }
+  titleInput.dataset.autoModel = selectedModel;
+  vm2SyncEditPlaylistSubmitState();
 }
 
 function vm2CloseCreatePlaylistModal() {
@@ -1198,30 +1236,53 @@ function vm2CloseEditPlaylistModal() {
   vm2SyncEditPlaylistSubmitState();
 }
 
-function vm2OpenEditPlaylistModal(id) {
+async function vm2OpenEditPlaylistModal(id) {
   const playlist = vm2.playlists.find((item) => String(item._id) === String(id));
   const modal = vm2Get('vm2-modal-edit-playlist');
+  const modelSelect = vm2Get('vm2-edit-playlist-model');
   const titleInput = vm2Get('vm2-edit-playlist-title');
   const descInput = vm2Get('vm2-edit-playlist-description');
   const errorEl = vm2Get('vm2-edit-playlist-error');
-  if (!playlist || !modal || !titleInput || !descInput || !errorEl) return;
+  const loadingEl = vm2Get('vm2-edit-playlist-model-loading');
+  if (!playlist || !modal || !modelSelect || !titleInput || !descInput || !errorEl || !loadingEl) return;
   modal.dataset.playlistId = String(playlist._id);
+  modelSelect.innerHTML = '<option value="">Loading models...</option>';
+  modelSelect.disabled = true;
+  loadingEl.textContent = 'Loading models...';
   titleInput.value = playlist.name || '';
+  titleInput.dataset.autoModel = playlist.model || '';
+  titleInput.dataset.manual = playlist.model && playlist.name === playlist.model ? '0' : (playlist.name ? '1' : '0');
   descInput.value = playlist.description || '';
   errorEl.textContent = '';
   vm2.playlistUpdating = false;
   modal.classList.remove('hidden');
   vm2SyncEditPlaylistSubmitState();
+
+  try {
+    const models = await vm2LoadPlaylistModelOptions();
+    modelSelect.innerHTML = vm2BuildPlaylistModelOptionsMarkup(models, playlist.model || '');
+    modelSelect.value = playlist.model || '';
+    modelSelect.disabled = false;
+    loadingEl.textContent = `${Array.isArray(models) ? models.length : 0} models available`;
+  } catch (err) {
+    console.error('[VM2] Load edit playlist model options error:', err);
+    modelSelect.innerHTML = vm2BuildPlaylistModelOptionsMarkup([], playlist.model || '');
+    modelSelect.value = playlist.model || '';
+    modelSelect.disabled = false;
+    loadingEl.textContent = 'Failed to load models. You can still save without changing it.';
+  }
 }
 
 async function vm2SubmitEditPlaylist() {
   const modal = vm2Get('vm2-modal-edit-playlist');
+  const modelSelect = vm2Get('vm2-edit-playlist-model');
   const titleInput = vm2Get('vm2-edit-playlist-title');
   const descInput = vm2Get('vm2-edit-playlist-description');
   const errorEl = vm2Get('vm2-edit-playlist-error');
   const playlistId = modal?.dataset.playlistId;
-  if (!modal || !titleInput || !descInput || !errorEl || !playlistId) return;
+  if (!modal || !modelSelect || !titleInput || !descInput || !errorEl || !playlistId) return;
 
+  const model = (modelSelect.value || '').trim();
   const name = titleInput.value.trim();
   const description = descInput.value.trim();
   if (!name) {
@@ -1237,7 +1298,7 @@ async function vm2SubmitEditPlaylist() {
     const res = await fetch(`${vm2BaseUrl()}api/video-playlists/${playlistId}`, {
       method: 'PATCH',
       headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ name, description }),
+      body: JSON.stringify({ name, description, model: model || null }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || String(res.status));
@@ -2231,7 +2292,7 @@ function loadVideoManual2Page() {
           <div>
             <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Edit Playlist</p>
             <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Update playlist details</h3>
-            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">課長, 係長, 部長, and admin can edit the title and description.</p>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">課長, 係長, 部長, and admin can edit the model, title, and description.</p>
           </div>
           <button onclick="vm2CloseEditPlaylistModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
             <i class="ri-close-line text-lg"></i>
@@ -2240,8 +2301,16 @@ function loadVideoManual2Page() {
 
         <div class="mt-6 space-y-4">
           <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Model</label>
+            <select id="vm2-edit-playlist-model" onchange="vm2OnEditPlaylistModelChange()" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+              <option value="">Loading models...</option>
+            </select>
+            <p id="vm2-edit-playlist-model-loading" class="mt-2 text-xs text-slate-400">Loading models...</p>
+          </div>
+
+          <div>
             <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
-            <input id="vm2-edit-playlist-title" type="text" oninput="vm2SyncEditPlaylistSubmitState()" placeholder="Playlist title" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+            <input id="vm2-edit-playlist-title" type="text" oninput="vm2OnEditPlaylistTitleInput()" placeholder="Playlist title" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
           </div>
 
           <div>
@@ -6403,6 +6472,8 @@ if (typeof window !== 'undefined') {
   window.vm2SubmitCreatePlaylist = vm2SubmitCreatePlaylist;
   window.vm2OnCreatePlaylistModelChange = vm2OnCreatePlaylistModelChange;
   window.vm2OnCreatePlaylistTitleInput = vm2OnCreatePlaylistTitleInput;
+  window.vm2OnEditPlaylistModelChange = vm2OnEditPlaylistModelChange;
+  window.vm2OnEditPlaylistTitleInput = vm2OnEditPlaylistTitleInput;
   window.vm2OpenEditPlaylistModal = vm2OpenEditPlaylistModal;
   window.vm2CloseEditPlaylistModal = vm2CloseEditPlaylistModal;
   window.vm2SubmitEditPlaylist = vm2SubmitEditPlaylist;
