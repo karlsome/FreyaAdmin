@@ -710,6 +710,34 @@ function vm2ShowEditorScreen() {
   if (editor) editor.classList.remove('hidden');
 }
 
+function vm2SyncTrashUiState() {
+  const trashBtn = vm2Get('vm2-trash-btn');
+  const trashPanel = vm2Get('vm2-trash-panel');
+  const projectSection = vm2Get('vm2-browser-project-list');
+  const emptyState = vm2Get('vm2-browser-project-empty');
+  const hasPlaylist = !!vm2.playlist;
+  let isShowingTrash = !!trashPanel && !trashPanel.classList.contains('hidden');
+
+  if (!hasPlaylist && isShowingTrash) {
+    trashPanel.classList.add('hidden');
+    if (projectSection) projectSection.classList.remove('hidden');
+    if (emptyState) emptyState.classList.remove('hidden');
+    isShowingTrash = false;
+  }
+
+  if (!trashBtn) return;
+
+  trashBtn.disabled = !hasPlaylist;
+  trashBtn.className = `rounded-2xl border px-4 py-2 text-sm font-medium transition ${isShowingTrash
+    ? 'border-red-300 bg-red-50 text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300'
+    : hasPlaylist
+      ? 'border-slate-200 bg-white text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
+      : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 opacity-70 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500'}`;
+  trashBtn.innerHTML = isShowingTrash
+    ? '<i class="ri-arrow-left-line mr-1"></i>Back to Projects'
+    : '<i class="ri-delete-bin-line mr-1"></i>Recycle Bin';
+}
+
 function vm2RenderPlaylistBrowser() {
   const playlistList = vm2Get('vm2-playlist-list');
   const playlistMeta = vm2Get('vm2-playlist-meta');
@@ -736,10 +764,12 @@ function vm2RenderPlaylistBrowser() {
     });
   if (createPlaylistBtn) createPlaylistBtn.classList.toggle('hidden', !canManagePlaylists);
   if (createProjectBtn) createProjectBtn.disabled = !vm2.playlist;
+  vm2SyncTrashUiState();
 
   playlistList.innerHTML = visiblePlaylists.length
     ? visiblePlaylists.map((playlist) => {
         const selected = vm2.playlist && String(vm2.playlist._id) === String(playlist._id);
+        const projectCount = Number.isFinite(Number(playlist.projectCount)) ? Number(playlist.projectCount) : 0;
         return `
           <div
             onclick="vm2SelectPlaylist('${playlist._id}')"
@@ -750,7 +780,10 @@ function vm2RenderPlaylistBrowser() {
               <div class="min-w-0">
                 <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${playlist.name || 'Untitled Playlist'}</div>
                 <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${playlist.description || 'No description yet'}</div>
-                ${playlist.model ? `<div class="mt-2 inline-flex rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold tracking-wide text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">${vm2EscapeHtml(playlist.model)}</div>` : ''}
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  ${playlist.model ? `<div class="inline-flex rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold tracking-wide text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">${vm2EscapeHtml(playlist.model)}</div>` : ''}
+                </div>
+                <div class="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">Project: ${projectCount}</div>
               </div>
               <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${playlist.privacy === 'public'
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
@@ -838,8 +871,11 @@ async function vm2ToggleTrashView() {
   const projectSection = vm2Get('vm2-browser-project-list');
   const trashPanel = vm2Get('vm2-trash-panel');
   const emptyState = vm2Get('vm2-browser-project-empty');
-  const trashBtn = vm2Get('vm2-trash-btn');
   if (!trashPanel) return;
+  if (!vm2.playlist) {
+    vm2SyncTrashUiState();
+    return;
+  }
 
   const isShowingTrash = !trashPanel.classList.contains('hidden');
   if (isShowingTrash) {
@@ -847,21 +883,15 @@ async function vm2ToggleTrashView() {
     trashPanel.classList.add('hidden');
     if (projectSection) projectSection.classList.remove('hidden');
     if (emptyState && !vm2.playlist) emptyState.classList.remove('hidden');
-    if (trashBtn) {
-      trashBtn.classList.remove('bg-red-50', 'text-red-600', 'border-red-300');
-      trashBtn.innerHTML = '<i class="ri-delete-bin-line mr-1"></i>Recycle Bin';
-    }
   } else {
     // Show trash panel.
     if (projectSection) projectSection.classList.add('hidden');
     if (emptyState) emptyState.classList.add('hidden');
     trashPanel.classList.remove('hidden');
-    if (trashBtn) {
-      trashBtn.classList.add('bg-red-50', 'text-red-600', 'border-red-300');
-      trashBtn.innerHTML = '<i class="ri-arrow-left-line mr-1"></i>Back to Projects';
-    }
     await vm2LoadTrash();
   }
+
+  vm2SyncTrashUiState();
 }
 
 async function vm2LoadTrash() {
@@ -996,6 +1026,9 @@ async function vm2SelectPlaylist(id) {
     });
     if (!res.ok) throw new Error(String(res.status));
     vm2.playlistProjects = await res.json();
+    if (vm2.playlist) vm2.playlist.projectCount = vm2.playlistProjects.length;
+    const playlistIndex = vm2.playlists.findIndex((item) => String(item._id) === String(id));
+    if (playlistIndex >= 0) vm2.playlists[playlistIndex].projectCount = vm2.playlistProjects.length;
     vm2RenderPlaylistBrowser();
   } catch (err) {
     console.error('[VM2] Load playlist projects error:', err);
@@ -2054,6 +2087,7 @@ function vm2RenderEditorShell() {
   `;
 
   vm2InitManagedMedia();
+  vm2SyncTrashUiState();
   vm2SetSaveStatus(vm2.project?._id ? 'Loaded' : 'Not saved');
   vm2UpdateUndoRedoButtons();
 }
