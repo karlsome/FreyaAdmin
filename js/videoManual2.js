@@ -65,6 +65,7 @@ let vm2 = {
   playlistModelLoading: false,
   playlistCreating: false,
   playlistUpdating: false,
+  playlistSearchQuery: '',
   _projectsList: [],
   _editorMounted: false,
 };
@@ -724,11 +725,20 @@ function vm2RenderPlaylistBrowser() {
   const canManagePlaylists = ['admin', '課長', '部長', '係長'].includes(role);
   const canEditPlaylistMeta = ['admin', '課長', '部長', '係長'].includes(role);
   const canDeletePlaylists = role === 'admin';
+  const searchQuery = (vm2.playlistSearchQuery || '').trim().toLocaleLowerCase();
+  const visiblePlaylists = [...vm2.playlists]
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja', { sensitivity: 'base', numeric: true }))
+    .filter((playlist) => {
+      if (!searchQuery) return true;
+      return [playlist.name, playlist.description, playlist.model]
+        .filter(Boolean)
+        .some((value) => String(value).toLocaleLowerCase().includes(searchQuery));
+    });
   if (createPlaylistBtn) createPlaylistBtn.classList.toggle('hidden', !canManagePlaylists);
   if (createProjectBtn) createProjectBtn.disabled = !vm2.playlist;
 
-  playlistList.innerHTML = vm2.playlists.length
-    ? vm2.playlists.map((playlist) => {
+  playlistList.innerHTML = visiblePlaylists.length
+    ? visiblePlaylists.map((playlist) => {
         const selected = vm2.playlist && String(vm2.playlist._id) === String(playlist._id);
         return `
           <div
@@ -751,7 +761,7 @@ function vm2RenderPlaylistBrowser() {
           </div>
         `;
       }).join('')
-    : '<div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No playlists yet.</div>';
+    : `<div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">${searchQuery ? 'No playlists match your search.' : 'No playlists yet.'}</div>`;
 
   if (projectTitle) {
     projectTitle.textContent = vm2.playlist ? vm2.playlist.name || 'Projects' : 'Select a playlist';
@@ -962,6 +972,11 @@ async function vm2LoadPlaylists() {
       playlistList.innerHTML = '<div class="text-sm text-red-400 py-6 text-center">Failed to load playlists</div>';
     }
   }
+}
+
+function vm2SetPlaylistSearch(value) {
+  vm2.playlistSearchQuery = value || '';
+  vm2RenderPlaylistBrowser();
 }
 
 async function vm2SelectPlaylist(id) {
@@ -2080,6 +2095,13 @@ function loadVideoManual2Page() {
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Playlists</p>
                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Model groups and access boundaries</p>
+              </div>
+            </div>
+            <div class="mb-4">
+              <label for="vm2-playlist-search" class="sr-only">Search playlists</label>
+              <div class="relative">
+                <i class="ri-search-line pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                <input id="vm2-playlist-search" type="search" value="${vm2EscapeHtml(vm2.playlistSearchQuery || '')}" oninput="vm2SetPlaylistSearch(this.value)" placeholder="Search playlists..." class="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
               </div>
             </div>
             <div id="vm2-playlist-list" class="space-y-3"></div>
@@ -6341,6 +6363,7 @@ if (typeof window !== 'undefined') {
   window.vm2LoadPlaylists = vm2LoadPlaylists;
   window.vm2SelectPlaylist = vm2SelectPlaylist;
   window.vm2CreatePlaylist = vm2CreatePlaylist;
+  window.vm2SetPlaylistSearch = vm2SetPlaylistSearch;
   window.vm2OpenCreatePlaylistModal = vm2OpenCreatePlaylistModal;
   window.vm2CloseCreatePlaylistModal = vm2CloseCreatePlaylistModal;
   window.vm2SubmitCreatePlaylist = vm2SubmitCreatePlaylist;
