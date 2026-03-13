@@ -46,6 +46,8 @@ let vm2 = {
   lastSavedAt: null,
   uploadXhr: null,
   uploadInProgress: false,
+  mediaInsertMode: null,
+  pendingMediaSwitch: null,
   revisionPreview: null,
   _projectsList: [],
   _editorMounted: false,
@@ -133,8 +135,46 @@ function vm2ResolveMediaUrl(url) {
   }
 }
 
+function vm2GetProjectAssetById(assetId, project = vm2.project) {
+  if (!assetId || !Array.isArray(project?.assets)) return null;
+  return project.assets.find((item) => String(item.assetId || item._id) === String(assetId)) || null;
+}
+
+function vm2GetStepAssetId(step, project = vm2.project) {
+  return step?.assetId || project?.currentAssetId || null;
+}
+
+function vm2GetStepVideoUrl(step, project = vm2.project) {
+  const asset = vm2GetProjectAssetById(vm2GetStepAssetId(step, project), project);
+  return asset?.downloadUrl || asset?.url || step?.videoUrl || project?.videoUrl || null;
+}
+
+function vm2GetStepSourceKey(step, project = vm2.project) {
+  const assetId = vm2GetStepAssetId(step, project);
+  if (assetId) return `asset:${assetId}`;
+  const url = vm2GetStepVideoUrl(step, project);
+  return url ? `url:${url}` : '';
+}
+
+function vm2GetSequenceDuration(project = vm2.project) {
+  if (!project) return 0;
+  if (Array.isArray(project.steps) && project.steps.length) {
+    return project.steps.reduce((maxEnd, step) => Math.max(maxEnd, step?.endTime || 0), 0);
+  }
+  return project.duration || 0;
+}
+
+function vm2SyncSequenceDuration(project = vm2.project) {
+  const duration = vm2GetSequenceDuration(project);
+  if (project) project.duration = duration;
+  vm2.duration = duration;
+  return duration;
+}
+
 function vm2PrimaryVideoUrl(project = vm2.project) {
   if (!project) return null;
+  const firstStepUrl = vm2GetStepVideoUrl(project.steps?.[0], project);
+  if (firstStepUrl) return firstStepUrl;
   if (project.videoLocalUrl) return project.videoLocalUrl;
   if (project.currentAssetId && Array.isArray(project.assets)) {
     const asset = project.assets.find((item) => item.assetId === project.currentAssetId);
@@ -565,14 +605,33 @@ function vm2HandleTitleChange(value) {
   vm2MarkDirty('Title changed');
 }
 
-function vm2SetVideoSource(url, { local = false } = {}) {
+function vm2SetVideoSource(url, { local = false, sourceKey = '' } = {}) {
   const video = vm2Video();
   if (!video) return;
   const resolvedUrl = local ? url : vm2ResolveMediaUrl(url);
   video.pause();
   video.crossOrigin = local ? '' : 'anonymous';
+  video.dataset.sourceKey = sourceKey || (url ? `url:${url}` : '');
   video.src = resolvedUrl || '';
   video.load();
+}
+
+function vm2EnsureStepVideoSource(step, timelineTime, { autoplay = false } = {}) {
+  const video = vm2Video();
+  if (!video || !step) return true;
+
+  const desiredUrl = vm2GetStepVideoUrl(step);
+  if (!desiredUrl) return true;
+
+  const desiredKey = vm2GetStepSourceKey(step);
+  if ((video.dataset.sourceKey || '') === desiredKey) return true;
+
+  vm2.pendingMediaSwitch = { timelineTime, autoplay };
+  vm2SetVideoSource(desiredUrl, {
+    local: vm2IsBlobUrl(desiredUrl),
+    sourceKey: desiredKey,
+  });
+  return false;
 }
 
 function vm2StartAutosaveLoop() {
@@ -581,6 +640,28 @@ function vm2StartAutosaveLoop() {
     if (!vm2.dirty || vm2.isAutosaving || !vm2CanPersistWorkingCopy()) return;
     vm2PersistWorkingProject({ silent: true, reason: 'Autosaved' });
   }, VM2_AUTOSAVE_INTERVAL_MS);
+}
+
+function vm2LoadVideoMetadata(url, { local = false } = {}) {
+  return new Promise((resolve, reject) => {
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.crossOrigin = local ? '' : 'anonymous';
+    probe.onloadedmetadata = () => {
+      const result = {
+        duration: probe.duration || 0,
+        width: probe.videoWidth || 0,
+        height: probe.videoHeight || 0,
+      };
+      probe.src = '';
+      resolve(result);
+    };
+    probe.onerror = () => {
+      probe.src = '';
+      reject(new Error('Could not load clip metadata'));
+    };
+    probe.src = local ? url : vm2ResolveMediaUrl(url);
+  });
 }
 
 function vm2HydrateProjectMedia(project = vm2.project) {
@@ -666,7 +747,7 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null } = {}) {
 
   vm2.currentStepIdx = 0;
   vm2.selectedElementId = null;
-  vm2.duration = vm2.project.duration || 0;
+  vm2SyncSequenceDuration(vm2.project);
   vm2.playing = false;
   vm2.revisionPreview = readOnlyRevision;
   vm2.dirty = false;
@@ -681,11 +762,14 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null } = {}) {
   // Both states require the project to already be persisted (_id exists).
   const uploadZone = vm2Get('vm2-upload-zone');
   const playerArea = vm2Get('vm2-player-area');
-  const sourceUrl = vm2.project.videoUrl;
+  const sourceUrl = vm2PrimaryVideoUrl(vm2.project);
   if (sourceUrl) {
     if (uploadZone) uploadZone.classList.add('hidden');
     if (playerArea) playerArea.classList.remove('hidden');
-    vm2SetVideoSource(sourceUrl, { local: false });
+    vm2SetVideoSource(sourceUrl, {
+      local: vm2IsBlobUrl(sourceUrl),
+      sourceKey: vm2GetStepSourceKey(vm2.project.steps?.[0], vm2.project),
+    });
   } else {
     if (uploadZone) uploadZone.classList.remove('hidden');
     if (playerArea) playerArea.classList.add('hidden');
@@ -1087,12 +1171,36 @@ function vm2RenderEditorShell() {
         <h3 class="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
           <i class="ri-film-line text-violet-500"></i>Playlist Asset Library
         </h3>
-        <button onclick="vm2Get('vm2-modal-assets').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">
+        <button onclick="vm2CloseAssetPicker()" class="text-gray-400 hover:text-gray-600">
           <i class="ri-close-line text-xl"></i>
         </button>
       </div>
       <p class="text-xs text-gray-500 dark:text-gray-400 mb-3 flex-shrink-0">Pick an existing video to use in this project. The video will be shared — it won't be re-uploaded.</p>
       <div id="vm2-assets-list" class="flex-1 overflow-y-auto grid grid-cols-2 gap-3 content-start"></div>
+    </div>
+  </div>
+
+  <!-- Add Clip Modal -->
+  <div id="vm2-modal-add-clip" class="hidden fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-5 w-[420px] shadow-2xl">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
+          <i class="ri-add-circle-line text-sky-500"></i>Add Clip
+        </h3>
+        <button onclick="vm2CloseAddClipChooser()" class="text-gray-400 hover:text-gray-600">
+          <i class="ri-close-line text-xl"></i>
+        </button>
+      </div>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Append another video clip to the end of the timeline.</p>
+      <div class="grid grid-cols-2 gap-3">
+        <button onclick="vm2ChooseAddClipUpload()" class="rounded-xl border border-slate-200 dark:border-gray-700 px-4 py-4 text-sm font-medium text-slate-700 dark:text-gray-200 hover:border-sky-300 hover:bg-sky-50 dark:hover:bg-sky-900/20">
+          <i class="ri-video-upload-line mr-1"></i>Upload Video
+        </button>
+        <button onclick="vm2ChooseAddClipLibrary()" class="rounded-xl border border-slate-200 dark:border-gray-700 px-4 py-4 text-sm font-medium text-slate-700 dark:text-gray-200 hover:border-violet-300 hover:bg-violet-50 dark:hover:bg-violet-900/20">
+          <i class="ri-film-line mr-1"></i>Pick From Library
+        </button>
+      </div>
+      <button onclick="vm2CloseAddClipChooser()" class="w-full py-2 mt-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 rounded text-sm text-gray-600 dark:text-gray-300">Cancel</button>
     </div>
   </div>
 
@@ -1314,6 +1422,8 @@ function loadVideoManual2Page() {
   vm2.lastSavedAt = null;
   vm2.uploadXhr = null;
   vm2.uploadInProgress = false;
+  vm2.mediaInsertMode = null;
+  vm2.pendingMediaSwitch = null;
   vm2.revisionPreview = null;
   vm2._projectsList = [];
   vm2._editorMounted = false;
@@ -1329,7 +1439,12 @@ function loadVideoManual2Page() {
 
 function vm2HandleFileSelect(event) {
   const file = event.target.files[0];
-  if (file) vm2LoadVideo(file);
+  if (file) {
+    vm2LoadVideo(file);
+  } else if (vm2.mediaInsertMode === 'append') {
+    vm2.mediaInsertMode = null;
+  }
+  event.target.value = '';
 }
 
 function vm2HandleDrop(event) {
@@ -1339,6 +1454,11 @@ function vm2HandleDrop(event) {
 }
 
 async function vm2LoadVideo(file) {
+  if (vm2.mediaInsertMode === 'append') {
+    await vm2UploadVideoAsset(file);
+    return;
+  }
+
   if (!vm2EnsureProject()) return;
   if (!vm2EnsureEditable()) return;
   if (vm2.uploadInProgress) {
@@ -1367,6 +1487,82 @@ async function vm2LoadVideo(file) {
 
   vm2SetSaveStatus('Local preview ready · uploading video…', 'blue');
   vm2UploadVideoAsset(file);
+}
+
+function vm2CloseAssetPicker() {
+  vm2Get('vm2-modal-assets')?.classList.add('hidden');
+  if (vm2.mediaInsertMode === 'append') vm2.mediaInsertMode = null;
+}
+
+function vm2OpenAddClipChooser() {
+  if (!vm2EnsureProject() || !vm2EnsureEditable()) return;
+  if (!vm2.project?.steps?.length) {
+    alert('Load the first video before appending another clip.');
+    return;
+  }
+  vm2.mediaInsertMode = 'append';
+  vm2Get('vm2-modal-add-clip')?.classList.remove('hidden');
+}
+
+function vm2CloseAddClipChooser() {
+  vm2Get('vm2-modal-add-clip')?.classList.add('hidden');
+  if (vm2.mediaInsertMode === 'append') vm2.mediaInsertMode = null;
+}
+
+function vm2ChooseAddClipUpload() {
+  vm2Get('vm2-modal-add-clip')?.classList.add('hidden');
+  vm2Get('vm2-file-input')?.click();
+}
+
+function vm2ChooseAddClipLibrary() {
+  vm2Get('vm2-modal-add-clip')?.classList.add('hidden');
+  vm2ShowAssetPicker();
+}
+
+async function vm2AppendClipAsset(asset) {
+  if (!vm2EnsureProject() || !vm2EnsureEditable()) return;
+
+  const assetId = asset.assetId || asset._id;
+  const assetUrl = asset.downloadUrl || asset.url;
+  if (!assetId || !assetUrl) throw new Error('Clip asset is missing an id or URL');
+
+  if (!Array.isArray(vm2.project.assets)) vm2.project.assets = [];
+  if (!vm2.project.assets.some((item) => String(item.assetId || item._id) === String(assetId))) {
+    vm2.project.assets.push(asset);
+  }
+
+  const meta = await vm2LoadVideoMetadata(assetUrl, { local: vm2IsBlobUrl(assetUrl) });
+  const clipDuration = meta.duration || 0;
+  if (!clipDuration) throw new Error('Could not determine clip duration');
+
+  const startTime = vm2.duration || vm2.project.duration || 0;
+  const newStep = {
+    id: vm2Id().replace('el_', 'step_'),
+    label: `Step ${vm2.project.steps.length + 1}`,
+    description: '',
+    startTime,
+    endTime: startTime + clipDuration,
+    sourceStart: 0,
+    sourceEnd: clipDuration,
+    assetId,
+    muted: false,
+    elements: [],
+  };
+
+  vm2.project.steps.push(newStep);
+  vm2.project.duration = newStep.endTime;
+  vm2.duration = newStep.endTime;
+  vm2.currentStepIdx = vm2.project.steps.length - 1;
+  vm2.selectedElementId = null;
+
+  vm2MarkDirty('Clip added');
+  await vm2PersistWorkingProject({ silent: true, reason: 'Added clip' });
+  vm2SeekTo(newStep.startTime);
+  vm2RenderSteps();
+  vm2RenderTimeline();
+  vm2RenderElements();
+  vm2RenderElementsList();
+  vm2RenderProps();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1791,8 +1987,17 @@ async function vm2ShowAssetPicker() {
 async function vm2SelectPlaylistAsset(assetId, downloadUrl, name) {
   if (!vm2EnsureProject() || !vm2EnsureEditable()) return;
 
+  const isAppend = vm2.mediaInsertMode === 'append';
+  const sharedAsset = { assetId, name, downloadUrl, shared: true };
+
   // Close the picker.
   vm2Get('vm2-modal-assets')?.classList.add('hidden');
+
+  if (isAppend) {
+    vm2.mediaInsertMode = null;
+    await vm2AppendClipAsset(sharedAsset);
+    return;
+  }
 
   // Clear any previous local video blob.
   if (vm2.project.videoLocalUrl) URL.revokeObjectURL(vm2.project.videoLocalUrl);
@@ -1805,7 +2010,7 @@ async function vm2SelectPlaylistAsset(assetId, downloadUrl, name) {
   if (!vm2.project.assets) vm2.project.assets = [];
   // Avoid duplicate entries.
   if (!vm2.project.assets.some((a) => (a.assetId || a._id) === assetId)) {
-    vm2.project.assets.push({ assetId, name, downloadUrl, shared: true });
+    vm2.project.assets.push(sharedAsset);
   }
 
   // If the project had steps from a previous video, ask user.
@@ -1818,7 +2023,7 @@ async function vm2SelectPlaylistAsset(assetId, downloadUrl, name) {
     }
   }
 
-  vm2SetVideoSource(downloadUrl, { local: false });
+  vm2SetVideoSource(downloadUrl, { local: false, sourceKey: vm2GetStepSourceKey(vm2.project.steps?.[0], vm2.project) || `asset:${assetId}` });
   vm2Get('vm2-upload-zone')?.classList.add('hidden');
   vm2Get('vm2-player-area')?.classList.remove('hidden');
 
@@ -1832,6 +2037,7 @@ async function vm2SelectPlaylistAsset(assetId, downloadUrl, name) {
 }
 
 async function vm2UploadVideoAsset(file) {
+  const isAppend = vm2.mediaInsertMode === 'append';
   const modal = vm2Get('vm2-modal-upload');
   const bar = vm2Get('vm2-upload-bar');
   const msg = vm2Get('vm2-upload-msg');
@@ -1894,6 +2100,13 @@ async function vm2UploadVideoAsset(file) {
       status: 'uploaded',
     };
 
+    if (isAppend) {
+      vm2.mediaInsertMode = null;
+      await vm2AppendClipAsset(asset);
+      setTimeout(() => modal.classList.add('hidden'), 1000);
+      return;
+    }
+
     vm2.project.videoUrl = asset.downloadUrl;
     vm2.project.currentAssetId = asset.assetId;
     vm2.project.assets = [asset];
@@ -1903,8 +2116,9 @@ async function vm2UploadVideoAsset(file) {
     setTimeout(() => modal.classList.add('hidden'), 1000);
   } catch (err) {
     modal.classList.add('hidden');
+    if (isAppend) vm2.mediaInsertMode = null;
     if (err.message === 'Upload canceled') {
-      vm2ResetCanceledUpload();
+      if (!isAppend) vm2ResetCanceledUpload();
     } else {
       console.error('[VM2] Upload error:', err);
       vm2SetSaveStatus('Upload failed', 'red');
@@ -1949,8 +2163,11 @@ function vm2ResetCanceledUpload() {
 
 function vm2OnVideoLoaded() {
   const video = vm2Video();
-  vm2.duration = video.duration;
-  vm2.project.duration = video.duration;
+  const pendingSwitch = vm2.pendingMediaSwitch;
+  if (!pendingSwitch) {
+    vm2.duration = video.duration;
+    vm2.project.duration = video.duration;
+  }
   
   // Store native video dimensions for reference, but DON'T override project canvas size.
   // Canvas stays at its set size (default 1920x1080), video fits inside with object-fit:contain.
@@ -1969,13 +2186,23 @@ function vm2OnVideoLoaded() {
       endTime: video.duration,
       sourceStart: 0,
       sourceEnd: video.duration,
+      assetId: vm2.project.currentAssetId || null,
       muted: false,
       elements: [],
     }];
   }
 
+  vm2SyncSequenceDuration(vm2.project);
+
   vm2SyncCanvasSize();
   vm2StartPreviewLoop();
+
+  if (pendingSwitch) {
+    vm2.pendingMediaSwitch = null;
+    vm2SeekTo(pendingSwitch.timelineTime, { autoplay: pendingSwitch.autoplay });
+    return;
+  }
+
   vm2RenderSteps();
   vm2RenderTimeline();
   vm2RenderElements();
@@ -2000,13 +2227,8 @@ function vm2OnTimeUpdate() {
       // Jump to the next step
       activeStepIdx++;
       if (activeStepIdx < vm2.project.steps.length) {
-        vm2.currentStepIdx = activeStepIdx;
-        activeStep = vm2.project.steps[activeStepIdx];
-        video.currentTime = activeStep.sourceStart ?? activeStep.startTime;
-        video.muted = !!activeStep.muted;
-        vm2RenderSteps();
-        vm2RenderElements();
-        return; // wait for next timeupdate
+        vm2SeekTo(vm2.project.steps[activeStepIdx].startTime, { autoplay: true });
+        return;
       } else {
         // Reached the end of the entire sequence
         video.pause();
@@ -2136,19 +2358,7 @@ function vm2TogglePlay() {
   if (!video) return;
 
   if (video.paused) {
-    // Before playing, ensure video.currentTime is at the correct source position
-    // (vm2.currentTime is the timeline position, need to map to source)
-    const step = vm2.project.steps.find(s =>
-      vm2.currentTime >= s.startTime && vm2.currentTime < s.endTime
-    );
-    if (step) {
-      const offset = vm2.currentTime - step.startTime;
-      const srcPos = (step.sourceStart ?? step.startTime) + offset;
-      video.currentTime = srcPos;
-    }
-    video.play();
-    vm2.playing = true;
-    vm2Get('vm2-play-btn').innerHTML = '<i class="ri-pause-fill text-lg"></i>';
+    vm2SeekTo(vm2.currentTime, { autoplay: true });
   } else {
     video.pause();
     vm2.playing = false;
@@ -2156,7 +2366,7 @@ function vm2TogglePlay() {
   }
 }
 
-function vm2SeekTo(timelineTime) {
+function vm2SeekTo(timelineTime, { autoplay = false } = {}) {
   const video = vm2Video();
   if (!video || !vm2.project) return;
 
@@ -2181,6 +2391,14 @@ function vm2SeekTo(timelineTime) {
   }
 
   if (step) {
+    if (!vm2EnsureStepVideoSource(step, timelineTime, { autoplay })) {
+      vm2.currentTime = timelineTime;
+      vm2RenderSteps();
+      vm2RenderElements();
+      vm2UpdateVisibleElements();
+      return;
+    }
+
     // Translate timeline position → source video position
     const offset = Math.max(0, timelineTime - step.startTime);
     const srcPos = (step.sourceStart ?? step.startTime) + offset;
@@ -2190,6 +2408,17 @@ function vm2SeekTo(timelineTime) {
     video.currentTime = Math.max(0, Math.min(srcPos, activeSrcEnd, videoDuration));
     // Apply the clip's mute state
     video.muted = !!step.muted;
+    if (autoplay) {
+      const playPromise = video.play();
+      vm2.playing = true;
+      vm2Get('vm2-play-btn').innerHTML = '<i class="ri-pause-fill text-lg"></i>';
+      if (playPromise?.catch) {
+        playPromise.catch(() => {
+          vm2.playing = false;
+          vm2Get('vm2-play-btn').innerHTML = '<i class="ri-play-fill text-lg"></i>';
+        });
+      }
+    }
   }
 
   vm2.currentTime = timelineTime;
@@ -2477,6 +2706,7 @@ function vm2CutAtPlayhead() {
     endTime: step.endTime,
     sourceStart: (step.sourceStart ?? step.startTime) + (t - step.startTime),
     sourceEnd: step.sourceEnd ?? step.endTime,
+    assetId: step.assetId || vm2.project.currentAssetId || null,
     muted: false,
     elements: [],
   };
@@ -2525,6 +2755,7 @@ function vm2UpdateTimelinePositions() {
     }
     time += srcDuration;
   });
+  vm2.project.duration = time;
   vm2.duration = time;
 }
 
@@ -3748,17 +3979,21 @@ function vm2LayerElement(action) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function vm2RenderTimeline() {
-  if (!vm2.project || vm2.duration <= 0) return;
+  if (!vm2.project) return;
 
-  const timelineWidth = Math.max(vm2.duration * vm2.timelineZoom, 800);
+  const sequenceDuration = vm2SyncSequenceDuration(vm2.project);
+  if (sequenceDuration <= 0) return;
+
+  const timelineWidth = Math.max(sequenceDuration * vm2.timelineZoom, 800);
+  const timelineContentWidth = timelineWidth + 150;
 
   // Time ruler
   const ruler = vm2Get('vm2-time-ruler');
   if (ruler) {
-    ruler.style.width = timelineWidth + 'px';
+    ruler.style.width = timelineContentWidth + 'px';
     let rulerHtml = '';
     const step = vm2.timelineZoom >= 80 ? 1 : vm2.timelineZoom >= 40 ? 2 : 5;
-    for (let t = 0; t <= vm2.duration; t += step) {
+    for (let t = 0; t <= sequenceDuration; t += step) {
       const x = t * vm2.timelineZoom;
       rulerHtml += `
         <div class="absolute text-[10px] text-gray-500" style="left: ${x}px; top: 4px;">${vm2Fmt(t)}</div>
@@ -3771,7 +4006,7 @@ function vm2RenderTimeline() {
   // Step segments (video track) - draggable to reorder
   const segs = vm2Get('vm2-step-segments');
   if (segs) {
-    segs.style.width = timelineWidth + 'px';
+    segs.style.width = timelineContentWidth + 'px';
     segs.innerHTML = vm2.project.steps.map((step, i) => {
       const left = step.startTime * vm2.timelineZoom;
       const width = (step.endTime - step.startTime) * vm2.timelineZoom;
@@ -3794,13 +4029,19 @@ function vm2RenderTimeline() {
           <div class="resize-right" onmousedown="event.stopPropagation(); vm2StepResizeStart(event, ${i}, 'right')"></div>
         </div>
       `;
-    }).join('');
+    }).join('') + `
+      <button class="absolute h-full rounded border border-dashed border-sky-300 bg-sky-50/80 px-3 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-900/20 dark:text-sky-300 dark:hover:bg-sky-900/30"
+              style="left: ${timelineWidth + 12}px; width: 120px;"
+              onclick="vm2OpenAddClipChooser()">
+        <i class="ri-add-line mr-1"></i>Add Clip
+      </button>
+    `;
   }
 
   // Element tracks
   const tracks = vm2Get('vm2-element-tracks');
   if (tracks) {
-    tracks.style.width = timelineWidth + 'px';
+    tracks.style.width = timelineContentWidth + 'px';
     
     // Gather all elements from all steps
     const allElements = [];
@@ -4153,6 +4394,8 @@ document.addEventListener('mousemove', (event) => {
 
     // Constrain current step's elements
     vm2ConstrainElementsToStep(step);
+
+    vm2SyncSequenceDuration(vm2.project);
 
     vm2RenderTimeline();
     vm2RenderSteps();
@@ -4747,7 +4990,12 @@ if (typeof window !== 'undefined') {
   window.vm2CreateProject = vm2CreateProject;
   window.vm2ReturnToBrowser = vm2ReturnToBrowser;
   window.vm2ShowAssetPicker = vm2ShowAssetPicker;
+  window.vm2CloseAssetPicker = vm2CloseAssetPicker;
   window.vm2SelectPlaylistAsset = vm2SelectPlaylistAsset;
+  window.vm2OpenAddClipChooser = vm2OpenAddClipChooser;
+  window.vm2CloseAddClipChooser = vm2CloseAddClipChooser;
+  window.vm2ChooseAddClipUpload = vm2ChooseAddClipUpload;
+  window.vm2ChooseAddClipLibrary = vm2ChooseAddClipLibrary;
   window.vm2DeleteProject = vm2DeleteProject;
   window.vm2ToggleTrashView = vm2ToggleTrashView;
   window.vm2RestoreProject = vm2RestoreProject;
