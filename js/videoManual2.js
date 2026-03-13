@@ -61,6 +61,9 @@ let vm2 = {
   historyBaseSignature: '',
   suppressHistory: false,
   pendingHistoryRestore: null,
+  playlistModelOptions: null,
+  playlistModelLoading: false,
+  playlistCreating: false,
   _projectsList: [],
   _editorMounted: false,
 };
@@ -87,6 +90,12 @@ const vm2NowIso = () => new Date().toISOString();
 const vm2DeepClone = (value) => JSON.parse(JSON.stringify(value));
 const vm2IsBlobUrl = (value) => typeof value === 'string' && value.startsWith('blob:');
 const vm2AuthUser = () => JSON.parse(localStorage.getItem('authUser') || '{}');
+const vm2EscapeHtml = (value) => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 function vm2EncodeBase64Unicode(value) {
   const bytes = new TextEncoder().encode(value);
@@ -727,6 +736,7 @@ function vm2RenderPlaylistBrowser() {
               <div class="min-w-0">
                 <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${playlist.name || 'Untitled Playlist'}</div>
                 <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${playlist.description || 'No description yet'}</div>
+                ${playlist.model ? `<div class="mt-2 inline-flex rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold tracking-wide text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">${vm2EscapeHtml(playlist.model)}</div>` : ''}
               </div>
               <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${playlist.privacy === 'public'
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
@@ -958,25 +968,147 @@ async function vm2SelectPlaylist(id) {
   }
 }
 
+async function vm2LoadPlaylistModelOptions(force = false) {
+  if (!force && Array.isArray(vm2.playlistModelOptions)) return vm2.playlistModelOptions;
+  vm2.playlistModelLoading = true;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/masterdb/models`, {
+      headers: vm2AuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    vm2.playlistModelOptions = Array.isArray(data.data) ? data.data : [];
+    return vm2.playlistModelOptions;
+  } catch (err) {
+    console.error('[VM2] Load playlist model options error:', err);
+    throw err;
+  } finally {
+    vm2.playlistModelLoading = false;
+  }
+}
+
+function vm2SyncCreatePlaylistSubmitState() {
+  const submitBtn = vm2Get('vm2-create-playlist-submit');
+  const titleInput = vm2Get('vm2-create-playlist-title');
+  if (!submitBtn || !titleInput) return;
+  const canSubmit = !vm2.playlistCreating && !!titleInput.value.trim();
+  submitBtn.disabled = !canSubmit;
+  submitBtn.className = `flex-1 py-2 rounded text-sm text-white ${canSubmit ? 'bg-slate-900 hover:bg-slate-700 dark:bg-sky-500 dark:hover:bg-sky-400' : 'bg-slate-300 cursor-not-allowed dark:bg-gray-700'}`;
+}
+
+function vm2OnCreatePlaylistTitleInput() {
+  const titleInput = vm2Get('vm2-create-playlist-title');
+  if (!titleInput) return;
+  const autoModel = titleInput.dataset.autoModel || '';
+  const value = titleInput.value.trim();
+  titleInput.dataset.manual = value && value !== autoModel ? '1' : '0';
+  vm2SyncCreatePlaylistSubmitState();
+}
+
+function vm2OnCreatePlaylistModelChange() {
+  const titleInput = vm2Get('vm2-create-playlist-title');
+  const modelSelect = vm2Get('vm2-create-playlist-model');
+  if (!titleInput || !modelSelect) return;
+  const selectedModel = modelSelect.value || '';
+  const prevAuto = titleInput.dataset.autoModel || '';
+  const isManual = titleInput.dataset.manual === '1';
+  if (!isManual || !titleInput.value.trim() || titleInput.value.trim() === prevAuto) {
+    titleInput.value = selectedModel;
+    titleInput.dataset.manual = '0';
+  }
+  titleInput.dataset.autoModel = selectedModel;
+  vm2SyncCreatePlaylistSubmitState();
+}
+
+function vm2CloseCreatePlaylistModal() {
+  const modal = vm2Get('vm2-modal-create-playlist');
+  if (modal) modal.classList.add('hidden');
+  vm2.playlistCreating = false;
+  vm2SyncCreatePlaylistSubmitState();
+}
+
+async function vm2OpenCreatePlaylistModal() {
+  const modal = vm2Get('vm2-modal-create-playlist');
+  const modelSelect = vm2Get('vm2-create-playlist-model');
+  const titleInput = vm2Get('vm2-create-playlist-title');
+  const descInput = vm2Get('vm2-create-playlist-description');
+  const privacySelect = vm2Get('vm2-create-playlist-privacy');
+  const errorEl = vm2Get('vm2-create-playlist-error');
+  const loadingEl = vm2Get('vm2-create-playlist-model-loading');
+  if (!modal || !modelSelect || !titleInput || !descInput || !privacySelect || !errorEl || !loadingEl) return;
+
+  modal.classList.remove('hidden');
+  titleInput.value = '';
+  titleInput.dataset.autoModel = '';
+  titleInput.dataset.manual = '0';
+  descInput.value = '';
+  privacySelect.value = 'internal';
+  errorEl.textContent = '';
+  loadingEl.textContent = 'Loading models...';
+  modelSelect.innerHTML = '<option value="">Loading models...</option>';
+  modelSelect.disabled = true;
+  vm2.playlistCreating = false;
+  vm2SyncCreatePlaylistSubmitState();
+
+  try {
+    const models = await vm2LoadPlaylistModelOptions();
+    modelSelect.innerHTML = ['<option value="">No model selected</option>']
+      .concat(models.map((model) => `<option value="${vm2EscapeHtml(model)}">${vm2EscapeHtml(model)}</option>`))
+      .join('');
+    modelSelect.disabled = false;
+    loadingEl.textContent = models.length ? `${models.length} models available` : 'No models found';
+  } catch (err) {
+    modelSelect.innerHTML = '<option value="">Failed to load models</option>';
+    modelSelect.disabled = true;
+    loadingEl.textContent = 'Could not load model list';
+    errorEl.textContent = `Model list failed to load: ${err.message}`;
+  }
+}
+
 async function vm2CreatePlaylist() {
-  const name = prompt('Playlist name:');
-  if (!name) return;
-  const description = prompt('Description:', '') || '';
-  const privacy = prompt('Privacy (public/internal/private):', 'internal') || 'internal';
+  vm2OpenCreatePlaylistModal();
+}
+
+async function vm2SubmitCreatePlaylist() {
+  const titleInput = vm2Get('vm2-create-playlist-title');
+  const descInput = vm2Get('vm2-create-playlist-description');
+  const privacySelect = vm2Get('vm2-create-playlist-privacy');
+  const modelSelect = vm2Get('vm2-create-playlist-model');
+  const errorEl = vm2Get('vm2-create-playlist-error');
+  if (!titleInput || !descInput || !privacySelect || !modelSelect || !errorEl) return;
+
+  const name = titleInput.value.trim() || modelSelect.value.trim();
+  const description = descInput.value.trim();
+  const privacy = privacySelect.value || 'internal';
+  const model = modelSelect.value.trim();
+
+  if (!name) {
+    errorEl.textContent = 'Title is required.';
+    vm2SyncCreatePlaylistSubmitState();
+    return;
+  }
+
+  vm2.playlistCreating = true;
+  errorEl.textContent = '';
+  vm2SyncCreatePlaylistSubmitState();
 
   try {
     const res = await fetch(`${vm2BaseUrl()}api/video-playlists`, {
       method: 'POST',
       headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ name, description, privacy }),
+      body: JSON.stringify({ name, description, privacy, model: model || null }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || String(res.status));
+    vm2CloseCreatePlaylistModal();
     await vm2LoadPlaylists();
     if (data.insertedId) await vm2SelectPlaylist(String(data.insertedId));
   } catch (err) {
     console.error('[VM2] Create playlist error:', err);
-    alert('Failed to create playlist: ' + err.message);
+    errorEl.textContent = `Failed to create playlist: ${err.message}`;
+  } finally {
+    vm2.playlistCreating = false;
+    vm2SyncCreatePlaylistSubmitState();
   }
 }
 
@@ -1871,6 +2003,57 @@ function loadVideoManual2Page() {
       </div>
     </div>
     <div id="vm2-editor-host" class="hidden"></div>
+
+    <div id="vm2-modal-create-playlist" class="hidden fixed inset-0 z-[320] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">New Playlist</p>
+            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Create playlist</h3>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Title defaults to the selected model, but you can override it.</p>
+          </div>
+          <button onclick="vm2CloseCreatePlaylistModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+            <i class="ri-close-line text-lg"></i>
+          </button>
+        </div>
+
+        <div class="mt-6 space-y-4">
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Model</label>
+            <select id="vm2-create-playlist-model" onchange="vm2OnCreatePlaylistModelChange()" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+              <option value="">Loading models...</option>
+            </select>
+            <p id="vm2-create-playlist-model-loading" class="mt-2 text-xs text-slate-400">Loading models...</p>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
+            <input id="vm2-create-playlist-title" type="text" oninput="vm2OnCreatePlaylistTitleInput()" placeholder="Playlist title" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+          </div>
+
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</label>
+            <textarea id="vm2-create-playlist-description" rows="4" placeholder="Optional description" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Privacy</label>
+            <select id="vm2-create-playlist-privacy" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+              <option value="internal">Internal</option>
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+            </select>
+          </div>
+
+          <p id="vm2-create-playlist-error" class="min-h-[1.25rem] text-sm text-red-500"></p>
+        </div>
+
+        <div class="mt-6 flex gap-3">
+          <button onclick="vm2CloseCreatePlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
+          <button id="vm2-create-playlist-submit" onclick="vm2SubmitCreatePlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Create Playlist</button>
+        </div>
+      </div>
+    </div>
   `;
 
   vm2.project = vm2CreateEmptyProject();
@@ -6010,6 +6193,11 @@ if (typeof window !== 'undefined') {
   window.vm2LoadPlaylists = vm2LoadPlaylists;
   window.vm2SelectPlaylist = vm2SelectPlaylist;
   window.vm2CreatePlaylist = vm2CreatePlaylist;
+  window.vm2OpenCreatePlaylistModal = vm2OpenCreatePlaylistModal;
+  window.vm2CloseCreatePlaylistModal = vm2CloseCreatePlaylistModal;
+  window.vm2SubmitCreatePlaylist = vm2SubmitCreatePlaylist;
+  window.vm2OnCreatePlaylistModelChange = vm2OnCreatePlaylistModelChange;
+  window.vm2OnCreatePlaylistTitleInput = vm2OnCreatePlaylistTitleInput;
   window.vm2CreateProject = vm2CreateProject;
   window.vm2Undo = vm2Undo;
   window.vm2Redo = vm2Redo;
