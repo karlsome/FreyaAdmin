@@ -1250,7 +1250,7 @@ function vm2RenderEditorShell() {
             </div>
 
             <!-- Timeline Tracks -->
-            <div id="vm2-timeline-scroll" class="relative overflow-x-auto overflow-y-hidden" style="height: 180px;"
+              <div id="vm2-timeline-scroll" class="relative overflow-x-auto overflow-y-hidden" style="height: 180px;"
                  onmousemove="vm2OnTimelineMouseMove(event)"
                  onmouseleave="vm2OnTimelineMouseLeave()"
                  onmousedown="vm2OnTimelineMouseDown(event)">
@@ -1259,11 +1259,11 @@ function vm2RenderEditorShell() {
               <div id="vm2-time-ruler" class="sticky top-0 h-6 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 z-10"></div>
               
               <!-- Tracks Container -->
-              <div id="vm2-tracks" class="relative" style="min-height: 150px; display: flex; flex-direction: column;">
+              <div id="vm2-tracks" class="relative" style="min-height: 150px;">
                 <!-- Element Tracks (at top) -->
-                <div id="vm2-element-tracks" class="relative flex-1" style="z-index: 5; min-height: 80px;"></div>
+                <div id="vm2-element-tracks" class="relative" style="z-index: 5; min-height: 80px;"></div>
                 <!-- Video/Steps Track (at bottom) -->
-                <div id="vm2-video-track" class="relative h-8 flex-shrink-0 mt-4 mb-2" style="z-index: 1;">
+                <div id="vm2-video-track" class="relative" style="z-index: 1; height: 32px; margin-top: 12px; margin-bottom: 8px;">
                   <div id="vm2-step-segments" class="h-full"></div>
                 </div>
               </div>
@@ -4490,7 +4490,7 @@ function vm2LayerElement(action) {
     const swap = allElements.find(e => e.layer === el.layer - 1);
     if (swap) swap.layer++;
     el.layer--;
-  } 
+  }
   else if (action === 'down' && el.layer < maxLayer) { // Send Backward (visually lower track, higher layer num)
     const swap = allElements.find(e => e.layer === el.layer + 1);
     if (swap) swap.layer--;
@@ -4513,11 +4513,62 @@ function vm2LayerElement(action) {
   vm2RenderElements();
   vm2RenderTimeline();
   vm2RenderElementsList();
+  vm2RenderProps();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  TIMELINE
 // ═══════════════════════════════════════════════════════════════════════════
+
+function vm2TimelineBarsOverlap(a, b) {
+  return a.startTime < b.endTime && b.startTime < a.endTime;
+}
+
+function vm2BuildTimelineLaneLayout(project = vm2.project) {
+  const elements = [];
+  project?.steps?.forEach((step, stepIdx) => {
+    (step.elements || []).forEach((el) => {
+      elements.push({ ...el, stepIdx });
+    });
+  });
+
+  if (!elements.length) {
+    return { elements, laneById: new Map(), laneCount: 1 };
+  }
+
+  const laneOccupants = [];
+  const laneById = new Map();
+  const sorted = [...elements].sort((a, b) => {
+    if (a.startTime !== b.startTime) return a.startTime - b.startTime;
+    if (a.endTime !== b.endTime) return a.endTime - b.endTime;
+    const aPref = Number.isFinite(a.timelineLane) ? a.timelineLane : Number.MAX_SAFE_INTEGER;
+    const bPref = Number.isFinite(b.timelineLane) ? b.timelineLane : Number.MAX_SAFE_INTEGER;
+    if (aPref !== bPref) return aPref - bPref;
+    return (a.layer || 0) - (b.layer || 0);
+  });
+
+  sorted.forEach((el) => {
+    const preferredLane = Number.isFinite(el.timelineLane) ? Math.max(0, Math.floor(el.timelineLane)) : 0;
+    let lane = preferredLane;
+
+    const canUseLane = (laneIndex) => {
+      const occupants = laneOccupants[laneIndex] || [];
+      return occupants.every(existing => !vm2TimelineBarsOverlap(existing, el));
+    };
+
+    while (!canUseLane(lane)) lane++;
+
+    if (!laneOccupants[lane]) laneOccupants[lane] = [];
+    laneOccupants[lane].push(el);
+    laneById.set(el.id, lane);
+  });
+
+  return {
+    elements,
+    laneById,
+    laneCount: Math.max(1, laneOccupants.length),
+  };
+}
 
 function vm2RenderTimeline() {
   if (!vm2.project) return;
@@ -4526,10 +4577,37 @@ function vm2RenderTimeline() {
   if (sequenceDuration <= 0) return;
 
   const sequencePixelWidth = sequenceDuration * vm2.timelineZoom;
-  const timelineWidth = Math.max(sequencePixelWidth, 800);
   const timelineContentWidth = vm2GetTimelineContentWidth(sequenceDuration);
+  const rowHeight = 28;
+  const rowGap = 4;
+  const laneInset = 8;
+  const videoTrackHeight = 32;
+  const trackGap = 12;
+  const trackBottomMargin = 8;
+  const rulerHeight = 24;
+  const scrollChromeAllowance = 14;
+  const { elements: allTimelineElements, laneById, laneCount } = vm2BuildTimelineLaneLayout(vm2.project);
+  const elementTracksHeight = Math.max(80, laneCount * (rowHeight + rowGap) - rowGap + laneInset);
+  const tracksHeight = elementTracksHeight + trackGap + videoTrackHeight + trackBottomMargin;
 
-  // Time ruler
+  const tracksHost = vm2Get('vm2-tracks');
+  if (tracksHost) {
+    tracksHost.style.height = tracksHeight + 'px';
+    tracksHost.style.minHeight = tracksHeight + 'px';
+  }
+
+  const scroll = vm2Get('vm2-timeline-scroll');
+  if (scroll) {
+    scroll.style.height = Math.max(180, rulerHeight + tracksHeight + scrollChromeAllowance) + 'px';
+  }
+
+  const videoTrack = vm2Get('vm2-video-track');
+  if (videoTrack) {
+    videoTrack.style.height = videoTrackHeight + 'px';
+    videoTrack.style.marginTop = trackGap + 'px';
+    videoTrack.style.marginBottom = trackBottomMargin + 'px';
+  }
+
   const ruler = vm2Get('vm2-time-ruler');
   if (ruler) {
     ruler.style.width = timelineContentWidth + 'px';
@@ -4558,7 +4636,6 @@ function vm2RenderTimeline() {
     ruler.innerHTML = rulerHtml;
   }
 
-  // Step segments (video track) - draggable to reorder
   const segs = vm2Get('vm2-step-segments');
   if (segs) {
     segs.style.width = timelineContentWidth + 'px';
@@ -4593,29 +4670,11 @@ function vm2RenderTimeline() {
     `;
   }
 
-  // Element tracks
   const tracks = vm2Get('vm2-element-tracks');
   if (tracks) {
     tracks.style.width = timelineContentWidth + 'px';
-    
-    // Gather all elements from all steps
-    const allElements = [];
-    vm2.project.steps.forEach((step, stepIdx) => {
-      step.elements.forEach(el => {
-        allElements.push({ ...el, stepIdx });
-      });
-    });
-
-    // Assure elements have a layer
-    allElements.forEach(el => {
-      if (el.layer === undefined) el.layer = 0;
-    });
-
-    const maxLayer = Math.max(0, ...allElements.map(el => el.layer));
-    const rowHeight = 28;
-    const rowGap = 4;
-    
-    tracks.style.height = ((maxLayer + 1) * (rowHeight + rowGap) + 10) + 'px';
+    tracks.style.height = elementTracksHeight + 'px';
+    tracks.style.minHeight = elementTracksHeight + 'px';
 
     const typeColors = {
       text: '#f59e0b',
@@ -4624,14 +4683,15 @@ function vm2RenderTimeline() {
       audio: '#ec4899',
     };
 
-    tracks.innerHTML = allElements.map(el => {
+    tracks.innerHTML = allTimelineElements.map(el => {
       const left = el.startTime * vm2.timelineZoom;
       const width = Math.max((el.endTime - el.startTime) * vm2.timelineZoom, 20);
-      const top = el.layer * (rowHeight + rowGap);
+      const lane = laneById.get(el.id) || 0;
+      const top = (laneCount - lane - 1) * (rowHeight + rowGap);
       const color = typeColors[el.type] || '#6b7280';
       const selected = vm2.selectedElementId === el.id;
       const icon = vm2GetElementIcon(el);
-      
+
       return `
         <div class="vm2-timeline-bar ${selected ? 'selected' : ''}"
              style="left: ${left}px; width: ${width}px; top: ${top}px; background: ${color};"
@@ -4739,13 +4799,14 @@ function vm2TimelineBarMouseDown(event, id) {
   
   const el = vm2FindElement(id);
   if (el) {
+    const laneLayout = vm2BuildTimelineLaneLayout(vm2.project);
     vm2.timelineDragData = {
       id,
       startX: event.clientX,
       startY: event.clientY,
       originalStart: el.startTime,
       originalEnd: el.endTime,
-      originalLayer: el.layer || 0,
+      originalLane: laneLayout.laneById.get(el.id) || 0,
     };
   }
 
@@ -4894,21 +4955,12 @@ document.addEventListener('mousemove', (event) => {
       const rowGap = 4;
       const totalH = rowHeight + rowGap;
       const layerShift = Math.round(dy / totalH);
-      const newLayer = Math.max(0, vm2.timelineDragData.originalLayer + layerShift);
-      
-      if (newLayer !== el.layer) {
-        // Swap layer with any element at that layer to simulate reordering
-        const allElements = vm2.project.steps.reduce((acc, s) => acc.concat(s.elements || []), []);
-        const clash = allElements.find(e => e.id !== el.id && e.layer === newLayer);
-        if (clash) {
-          clash.layer = el.layer;
-        }
-        el.layer = newLayer;
-        vm2.timelineDragData.originalLayer = newLayer;
+      const newLane = Math.max(0, vm2.timelineDragData.originalLane - layerShift);
+
+      if (newLane !== (el.timelineLane || 0)) {
+        el.timelineLane = newLane;
+        vm2.timelineDragData.originalLane = newLane;
         vm2.timelineDragData.startY = event.clientY; // reset base
-        
-        vm2RenderElements(); // because z-index changed
-        vm2RenderElementsList();
       }
     }
 
