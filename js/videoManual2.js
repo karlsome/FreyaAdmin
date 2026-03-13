@@ -3935,6 +3935,7 @@ function vm2RenderElements() {
     container.appendChild(div);
   });
 
+  vm2UpdateVisibleElements();
   vm2RenderSelectionHandles();
 }
 
@@ -3950,6 +3951,7 @@ function vm2RenderSelectionHandles() {
 
   const el = allElements.find(e => e.id === vm2.selectedElementId);
   if (!el || el.type === 'audio') return;
+  if (!vm2IsElementVisibleAtTime(el, vm2.currentTime)) return;
 
   const box = document.createElement('div');
   box.className = 'absolute border-2 border-blue-500 pointer-events-none';
