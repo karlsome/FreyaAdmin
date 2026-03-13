@@ -1385,6 +1385,46 @@ const vm2TpVideo   = () => vm2TpGet('vm2-tp-video');
 const vm2TpCanvas  = () => vm2TpGet('vm2-tp-canvas');
 const vm2TpWrapper = () => vm2TpGet('vm2-tp-canvas-wrapper');
 
+function vm2TpStepStart(step) {
+  return step?.sourceStart ?? step?.startTime ?? 0;
+}
+
+function vm2TpStepEnd(step) {
+  if (!step) return 0;
+  if (Number.isFinite(step.sourceEnd)) return step.sourceEnd;
+  if (Number.isFinite(step.endTime) && Number.isFinite(step.startTime)) {
+    return vm2TpStepStart(step) + Math.max(0, step.endTime - step.startTime);
+  }
+  return step.endTime ?? vm2TpStepStart(step);
+}
+
+function vm2TpSetPlayButton(paused) {
+  const btn = vm2TpGet('vm2-tp-play-btn');
+  if (btn) btn.innerHTML = paused ? '<i class="ri-play-fill"></i>' : '<i class="ri-pause-fill"></i>';
+}
+
+function vm2TpAdvanceStepPlayback() {
+  const steps = vm2TP.project?.steps || [];
+  const video = vm2TpVideo();
+  if (!video || !steps.length) return;
+
+  const nextIdx = vm2TP.stepIdx + 1;
+  if (nextIdx >= steps.length) {
+    const lastStep = steps[vm2TP.stepIdx];
+    video.pause();
+    video.currentTime = vm2TpStepEnd(lastStep);
+    vm2TpSetPlayButton(true);
+    return;
+  }
+
+  vm2TP.stepIdx = nextIdx;
+  vm2TpUpdateStepLabel();
+  vm2TpRenderElements();
+  video.currentTime = vm2TpStepStart(steps[nextIdx]);
+  const playPromise = video.play();
+  if (playPromise?.catch) playPromise.catch(() => vm2TpSetPlayButton(true));
+}
+
 function vm2EnsureTrashPreviewModal() {
   if (document.getElementById('vm2-modal-trash-preview')) return;
   const el = document.createElement('div');
@@ -1584,13 +1624,28 @@ function vm2TrashPreviewOnLoaded() {
   // Seek to the start time of the current step.
   const step = vm2TP.project?.steps?.[vm2TP.stepIdx];
   const video = vm2TpVideo();
-  if (step && video) video.currentTime = step.sourceStart ?? step.startTime ?? 0;
+  if (step && video) video.currentTime = vm2TpStepStart(step);
   vm2TpUpdateStepLabel();
 }
 
 function vm2TrashPreviewOnTimeUpdate() {
   const video = vm2TpVideo();
   if (!video || !vm2TP.project) return;
+  const step = vm2TP.project.steps?.[vm2TP.stepIdx];
+  const srcStart = vm2TpStepStart(step);
+  const srcEnd = vm2TpStepEnd(step);
+
+  if (step && !video.paused) {
+    if (video.currentTime >= srcEnd - 0.05) {
+      vm2TpAdvanceStepPlayback();
+      return;
+    }
+    if (video.currentTime < srcStart) {
+      video.currentTime = srcStart;
+      return;
+    }
+  }
+
   const dur = video.duration || 0;
   const cur = video.currentTime;
   const fmt = vm2Fmt;
@@ -1600,14 +1655,20 @@ function vm2TrashPreviewOnTimeUpdate() {
 
 function vm2TrashPreviewTogglePlay() {
   const video = vm2TpVideo();
-  const btn   = vm2TpGet('vm2-tp-play-btn');
   if (!video) return;
   if (video.paused) {
-    video.play();
-    if (btn) btn.innerHTML = '<i class="ri-pause-fill"></i>';
+    const step = vm2TP.project?.steps?.[vm2TP.stepIdx];
+    const srcStart = vm2TpStepStart(step);
+    const srcEnd = vm2TpStepEnd(step);
+    if (step && (video.currentTime < srcStart || video.currentTime >= srcEnd - 0.05)) {
+      video.currentTime = srcStart;
+    }
+    const playPromise = video.play();
+    vm2TpSetPlayButton(false);
+    if (playPromise?.catch) playPromise.catch(() => vm2TpSetPlayButton(true));
   } else {
     video.pause();
-    if (btn) btn.innerHTML = '<i class="ri-play-fill"></i>';
+    vm2TpSetPlayButton(true);
   }
 }
 
@@ -1628,9 +1689,8 @@ function vm2TpGoToStep() {
   const video = vm2TpVideo();
   if (step && video) {
     video.pause();
-    video.currentTime = step.sourceStart ?? step.startTime ?? 0;
-    const btn = vm2TpGet('vm2-tp-play-btn');
-    if (btn) btn.innerHTML = '<i class="ri-play-fill"></i>';
+    video.currentTime = vm2TpStepStart(step);
+    vm2TpSetPlayButton(true);
   }
   vm2TpUpdateStepLabel();
   vm2TpRenderElements();
