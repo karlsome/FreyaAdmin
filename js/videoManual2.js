@@ -198,6 +198,7 @@ function vm2SyncSequenceDuration(project = vm2.project) {
 const VM2_TIMELINE_MIN_ZOOM = 2;
 const VM2_TIMELINE_MAX_ZOOM = 200;
 const VM2_TIMELINE_ADD_CLIP_WIDTH = 150;
+const VM2_TIMELINE_MAX_LANES = 6;
 
 function vm2GetTimelineContentWidth(duration = vm2.duration) {
   const sequencePixelWidth = duration * vm2.timelineZoom;
@@ -4548,7 +4549,9 @@ function vm2BuildTimelineLaneLayout(project = vm2.project) {
   });
 
   sorted.forEach((el) => {
-    const preferredLane = Number.isFinite(el.timelineLane) ? Math.max(0, Math.floor(el.timelineLane)) : 0;
+    const rawPreferredLane = Number.isFinite(el.timelineLane) ? Math.max(0, Math.floor(el.timelineLane)) : 0;
+    const highestExpandableLane = Math.min(VM2_TIMELINE_MAX_LANES - 1, laneOccupants.length);
+    const preferredLane = Math.min(rawPreferredLane, highestExpandableLane);
     let lane = preferredLane;
 
     const canUseLane = (laneIndex) => {
@@ -4556,7 +4559,11 @@ function vm2BuildTimelineLaneLayout(project = vm2.project) {
       return occupants.every(existing => !vm2TimelineBarsOverlap(existing, el));
     };
 
-    while (!canUseLane(lane)) lane++;
+    while (lane < VM2_TIMELINE_MAX_LANES && !canUseLane(lane)) lane++;
+
+    if (lane >= VM2_TIMELINE_MAX_LANES) {
+      lane = VM2_TIMELINE_MAX_LANES - 1;
+    }
 
     if (!laneOccupants[lane]) laneOccupants[lane] = [];
     laneOccupants[lane].push(el);
@@ -4566,7 +4573,7 @@ function vm2BuildTimelineLaneLayout(project = vm2.project) {
   return {
     elements,
     laneById,
-    laneCount: Math.max(1, laneOccupants.length),
+    laneCount: Math.max(1, Math.min(VM2_TIMELINE_MAX_LANES, laneOccupants.length)),
   };
 }
 
@@ -4807,6 +4814,7 @@ function vm2TimelineBarMouseDown(event, id) {
       originalStart: el.startTime,
       originalEnd: el.endTime,
       originalLane: laneLayout.laneById.get(el.id) || 0,
+      originalAssignedLane: laneLayout.laneById.get(el.id) || 0,
     };
   }
 
@@ -4955,7 +4963,14 @@ document.addEventListener('mousemove', (event) => {
       const rowGap = 4;
       const totalH = rowHeight + rowGap;
       const layerShift = Math.round(dy / totalH);
-      const newLane = Math.max(0, vm2.timelineDragData.originalLane - layerShift);
+      const laneLayout = vm2BuildTimelineLaneLayout(vm2.project);
+      let highestOtherLane = -1;
+      laneLayout.laneById.forEach((lane, id) => {
+        if (id !== el.id) highestOtherLane = Math.max(highestOtherLane, lane);
+      });
+      const maxAllowedLane = Math.min(VM2_TIMELINE_MAX_LANES - 1, highestOtherLane + 1);
+      const requestedLane = vm2.timelineDragData.originalLane - layerShift;
+      const newLane = Math.max(0, Math.min(maxAllowedLane, requestedLane));
 
       if (newLane !== (el.timelineLane || 0)) {
         el.timelineLane = newLane;
