@@ -48,6 +48,7 @@ let vm2 = {
   uploadInProgress: false,
   mediaInsertMode: null,
   pendingMediaSwitch: null,
+  loadingProject: false,
   revisionPreview: null,
   _projectsList: [],
   _editorMounted: false,
@@ -186,6 +187,13 @@ function vm2SyncSequenceDuration(project = vm2.project) {
   if (project) project.duration = duration;
   vm2.duration = duration;
   return duration;
+}
+
+function vm2SetLoadingIndicator(visible, text = 'Loading video...') {
+  const overlay = vm2Get('vm2-loading-overlay');
+  const label = vm2Get('vm2-loading-text');
+  if (label) label.textContent = text;
+  if (overlay) overlay.classList.toggle('hidden', !visible);
 }
 
 function vm2PrimaryVideoUrl(project = vm2.project) {
@@ -622,10 +630,11 @@ function vm2HandleTitleChange(value) {
   vm2MarkDirty('Title changed');
 }
 
-function vm2SetVideoSource(url, { local = false, sourceKey = '' } = {}) {
+function vm2SetVideoSource(url, { local = false, sourceKey = '', showLoader = false, loadingText = 'Loading video...' } = {}) {
   const video = vm2Video();
   if (!video) return;
   const resolvedUrl = local ? url : vm2ResolveMediaUrl(url);
+  if (showLoader && resolvedUrl) vm2SetLoadingIndicator(true, loadingText);
   video.pause();
   video.crossOrigin = local ? '' : 'anonymous';
   video.dataset.sourceKey = sourceKey || (url ? `url:${url}` : '');
@@ -786,10 +795,13 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null } = {}) {
     vm2SetVideoSource(sourceUrl, {
       local: vm2IsBlobUrl(sourceUrl),
       sourceKey: vm2GetStepSourceKey(vm2.project.steps?.[0], vm2.project),
+      showLoader: true,
+      loadingText: vm2.loadingProject ? 'Loading project video...' : 'Loading video...',
     });
   } else {
     if (uploadZone) uploadZone.classList.remove('hidden');
     if (playerArea) playerArea.classList.add('hidden');
+    vm2SetLoadingIndicator(false);
   }
 
   vm2RenderSteps();
@@ -905,7 +917,7 @@ function vm2RenderEditorShell() {
         </div>
 
         <!-- Player Area (hidden until video loaded) -->
-        <div id="vm2-player-area" class="hidden flex-1 flex flex-col min-h-0">
+        <div id="vm2-player-area" class="hidden flex-1 flex flex-col min-h-0 relative">
           
           <!-- Canvas Container -->
           <div id="vm2-canvas-outer" class="flex-1 flex items-center justify-center overflow-auto p-4 bg-gray-800 dark:bg-black"
@@ -920,6 +932,8 @@ function vm2RenderEditorShell() {
                 <video id="vm2-video" class="absolute pointer-events-none opacity-0"
                   ontimeupdate="vm2OnTimeUpdate()"
                   onloadedmetadata="vm2OnVideoLoaded()"
+                  onloadeddata="vm2OnVideoReady()"
+                  onerror="vm2OnVideoError()"
                   onended="vm2OnEnded()"></video>
                 <!-- Elements overlay container -->
                 <div id="vm2-elements-container" class="absolute inset-0 pointer-events-none" style="overflow: hidden;">
@@ -927,6 +941,16 @@ function vm2RenderEditorShell() {
                 </div>
                 <!-- Selection handles overlay -->
                 <div id="vm2-selection-overlay" class="absolute inset-0 pointer-events-none"></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="vm2-loading-overlay" class="hidden absolute inset-0 z-20 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm">
+            <div class="flex flex-col items-center gap-3 rounded-2xl bg-slate-900/90 px-6 py-5 text-white shadow-2xl">
+              <div class="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-sky-400"></div>
+              <div class="text-center">
+                <p class="text-sm font-medium">Preparing editor</p>
+                <p id="vm2-loading-text" class="mt-1 text-xs text-slate-300">Loading video...</p>
               </div>
             </div>
           </div>
@@ -2223,6 +2247,17 @@ function vm2OnVideoLoaded() {
   vm2RenderSteps();
   vm2RenderTimeline();
   vm2RenderElements();
+}
+
+function vm2OnVideoReady() {
+  vm2.loadingProject = false;
+  vm2SetLoadingIndicator(false);
+}
+
+function vm2OnVideoError() {
+  vm2.loadingProject = false;
+  vm2SetLoadingIndicator(false);
+  vm2SetSaveStatus('Video failed to load', 'red');
 }
 
 function vm2OnTimeUpdate() {
@@ -4679,6 +4714,11 @@ function vm2FilterProjects(query) {
 }
 
 async function vm2LoadProject(id) {
+  vm2EnsureEditorMounted();
+  vm2ShowEditorScreen();
+  vm2.loadingProject = true;
+  vm2SetLoadingIndicator(true, 'Loading project...');
+
   try {
     const res = await fetch(`${vm2BaseUrl()}api/video-projects/${id}`, {
       headers: vm2AuthHeaders(),
@@ -4686,9 +4726,7 @@ async function vm2LoadProject(id) {
     if (!res.ok) throw new Error(String(res.status));
     const project = await res.json();
 
-    vm2EnsureEditorMounted();
     vm2.playlist = vm2.playlists.find((item) => String(item._id) === String(project.playlistId)) || vm2.playlist;
-    vm2ShowEditorScreen();
 
     // If the working copy has no video but a saved revision exists, auto-restore
     // from the latest revision so the user lands in a fully usable state.
@@ -4704,6 +4742,10 @@ async function vm2LoadProject(id) {
           const restored = { ...snapshot, _id: project._id, playlistId: project.playlistId };
           vm2ApplyProjectState(restored, { readOnlyRevision: null });
           vm2SetSaveStatus(`Restored from ${revision.revisionName || 'latest revision'}`, 'green');
+          if (!vm2PrimaryVideoUrl(restored)) {
+            vm2.loadingProject = false;
+            vm2SetLoadingIndicator(false);
+          }
           return;
         }
       } catch (revErr) {
@@ -4713,7 +4755,13 @@ async function vm2LoadProject(id) {
 
     vm2ApplyProjectState(project, { readOnlyRevision: null });
     vm2SetSaveStatus('Project loaded', 'green');
+    if (!vm2PrimaryVideoUrl(project)) {
+      vm2.loadingProject = false;
+      vm2SetLoadingIndicator(false);
+    }
   } catch (err) {
+    vm2.loadingProject = false;
+    vm2SetLoadingIndicator(false);
     console.error('[VM2] Load error:', err);
     alert('Failed to load project: ' + err.message);
   }
