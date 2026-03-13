@@ -49,6 +49,11 @@ let vm2 = {
   mediaInsertMode: null,
   pendingMediaSwitch: null,
   loadingProject: false,
+  activeVideoEl: null,
+  activeMediaKey: '',
+  mediaCache: null,
+  mediaPreloadQueue: [],
+  mediaPreloading: false,
   revisionPreview: null,
   _projectsList: [],
   _editorMounted: false,
@@ -65,7 +70,8 @@ const vm2Fmt = (sec) => {
 };
 const vm2Id = () => 'el_' + Math.random().toString(36).slice(2, 9);
 const vm2Step = () => vm2.project?.steps[vm2.currentStepIdx] || null;
-const vm2Video = () => vm2Get('vm2-video');
+const vm2PrimaryVideoEl = () => vm2Get('vm2-video');
+const vm2Video = () => vm2.activeVideoEl || vm2PrimaryVideoEl();
 const vm2PreviewCanvas = () => vm2Get('vm2-preview-canvas');
 const vm2CanvasViewport = () => vm2Get('vm2-canvas-viewport');
 const vm2DegToRad = (deg) => deg * Math.PI / 180;
@@ -223,6 +229,238 @@ function vm2SetLoadingIndicator(visible, text = 'Loading video...') {
   const label = vm2Get('vm2-loading-text');
   if (label) label.textContent = text;
   if (overlay) overlay.classList.toggle('hidden', !visible);
+}
+
+function vm2GetMediaCacheHost() {
+  return vm2Get('vm2-media-cache');
+}
+
+function vm2EnsureMediaCacheStore() {
+  if (!(vm2.mediaCache instanceof Map)) vm2.mediaCache = new Map();
+  return vm2.mediaCache;
+}
+
+function vm2ClearManagedMedia(preservePrimary = true) {
+  const primaryVideo = vm2PrimaryVideoEl();
+  const cache = vm2EnsureMediaCacheStore();
+  cache.forEach((entry) => {
+    const video = entry.video;
+    if (!video) return;
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    if (video !== primaryVideo) video.remove();
+  });
+  cache.clear();
+  vm2.activeVideoEl = primaryVideo || null;
+  vm2.activeMediaKey = '';
+  vm2.mediaPreloadQueue = [];
+  vm2.mediaPreloading = false;
+  vm2.pendingMediaSwitch = null;
+  if (!preservePrimary && primaryVideo) {
+    primaryVideo.pause();
+    primaryVideo.removeAttribute('src');
+    primaryVideo.load();
+  }
+}
+
+function vm2AttachManagedVideo(video) {
+  if (!video || video.dataset.vm2Bound === '1') return;
+  video.dataset.vm2Bound = '1';
+  video.playsInline = true;
+  video.preload = 'auto';
+
+  video.addEventListener('timeupdate', () => {
+    if (video !== vm2Video()) return;
+    vm2OnTimeUpdate();
+  });
+  video.addEventListener('loadedmetadata', () => {
+    const entry = vm2EnsureMediaCacheStore().get(video.dataset.sourceKey || '');
+    if (entry) entry.metadataReady = true;
+    if (video !== vm2Video()) return;
+    vm2OnVideoLoaded();
+  });
+  video.addEventListener('loadeddata', () => {
+    const entry = vm2EnsureMediaCacheStore().get(video.dataset.sourceKey || '');
+    if (entry) entry.status = 'ready';
+    if (video !== vm2Video()) return;
+    vm2OnVideoReady();
+  });
+  video.addEventListener('error', () => {
+    const entry = vm2EnsureMediaCacheStore().get(video.dataset.sourceKey || '');
+    if (entry) entry.status = 'error';
+    if (video !== vm2Video()) return;
+    vm2OnVideoError();
+  });
+  video.addEventListener('ended', () => {
+    if (video !== vm2Video()) return;
+    vm2OnEnded();
+  });
+}
+
+function vm2CreateManagedVideoElement() {
+  const video = document.createElement('video');
+  video.className = 'absolute pointer-events-none opacity-0';
+  video.style.left = '0';
+  video.style.top = '0';
+  vm2AttachManagedVideo(video);
+  vm2GetMediaCacheHost()?.appendChild(video);
+  return video;
+}
+
+function vm2InitManagedMedia() {
+  const primaryVideo = vm2PrimaryVideoEl();
+  if (!primaryVideo) return;
+  vm2AttachManagedVideo(primaryVideo);
+  vm2.activeVideoEl = primaryVideo;
+  vm2EnsureMediaCacheStore();
+}
+
+function vm2EnsureMediaEntry(url, { local = false, sourceKey = '', usePrimary = false } = {}) {
+  if (!url) return null;
+  const key = sourceKey || `url:${url}`;
+  const cache = vm2EnsureMediaCacheStore();
+  const existing = cache.get(key);
+  if (existing) return existing;
+
+  const video = usePrimary ? vm2PrimaryVideoEl() : vm2CreateManagedVideoElement();
+  if (!video) return null;
+  vm2AttachManagedVideo(video);
+  video.crossOrigin = local ? '' : 'anonymous';
+  video.dataset.sourceKey = key;
+
+  const entry = {
+    key,
+    url,
+    local,
+    video,
+    status: 'idle',
+    metadataReady: false,
+    readyPromise: null,
+  };
+  cache.set(key, entry);
+  return entry;
+}
+
+function vm2LoadMediaEntry(entry, { showLoader = false, loadingText = 'Loading video...' } = {}) {
+  if (!entry) return Promise.reject(new Error('Missing media entry'));
+  if (entry.status === 'ready') return Promise.resolve(entry);
+  if (entry.readyPromise) {
+    if (showLoader) vm2SetLoadingIndicator(true, loadingText);
+    return entry.readyPromise;
+  }
+
+  if (showLoader) vm2SetLoadingIndicator(true, loadingText);
+  entry.status = 'loading';
+  entry.readyPromise = new Promise((resolve, reject) => {
+    const onReady = () => {
+      cleanup();
+      entry.status = 'ready';
+      entry.readyPromise = null;
+      resolve(entry);
+    };
+    const onError = () => {
+      cleanup();
+      entry.status = 'error';
+      entry.readyPromise = null;
+      reject(new Error('Failed to load media source'));
+    };
+    const cleanup = () => {
+      entry.video.removeEventListener('loadeddata', onReady);
+      entry.video.removeEventListener('error', onError);
+    };
+    entry.video.addEventListener('loadeddata', onReady);
+    entry.video.addEventListener('error', onError);
+  });
+
+  entry.video.pause();
+  entry.video.crossOrigin = entry.local ? '' : 'anonymous';
+  entry.video.dataset.sourceKey = entry.key;
+  entry.video.src = entry.local ? entry.url : vm2ResolveMediaUrl(entry.url);
+  entry.video.load();
+  return entry.readyPromise;
+}
+
+function vm2SetActiveMediaEntry(entry) {
+  if (!entry?.video) return;
+  const previous = vm2.activeVideoEl;
+  if (previous && previous !== entry.video) previous.pause();
+  vm2.activeVideoEl = entry.video;
+  vm2.activeMediaKey = entry.key;
+}
+
+function vm2GetUniqueProjectSources(project = vm2.project) {
+  const sources = [];
+  const seen = new Set();
+  (project?.steps || []).forEach((step, index) => {
+    const url = vm2GetStepVideoUrl(step, project);
+    const key = vm2GetStepSourceKey(step, project);
+    if (!url || !key || seen.has(key)) return;
+    seen.add(key);
+    sources.push({ key, url, local: vm2IsBlobUrl(url), usePrimary: index === 0 });
+  });
+  if (!sources.length) {
+    const fallbackUrl = vm2PrimaryVideoUrl(project);
+    if (fallbackUrl) {
+      sources.push({
+        key: vm2GetStepSourceKey(project?.steps?.[0], project) || `url:${fallbackUrl}`,
+        url: fallbackUrl,
+        local: vm2IsBlobUrl(fallbackUrl),
+        usePrimary: true,
+      });
+    }
+  }
+  return sources;
+}
+
+function vm2QueueProjectMediaPreloads(project = vm2.project, excludeKey = vm2.activeMediaKey) {
+  const cache = vm2EnsureMediaCacheStore();
+  const queuedKeys = new Set(vm2.mediaPreloadQueue.map((item) => item.key));
+  vm2GetUniqueProjectSources(project).forEach((source) => {
+    if (!source?.key || source.key === excludeKey || queuedKeys.has(source.key)) return;
+    const existing = cache.get(source.key);
+    if (existing?.status === 'ready' || existing?.status === 'loading') return;
+    vm2.mediaPreloadQueue.push(source);
+    queuedKeys.add(source.key);
+  });
+}
+
+function vm2PrimeProjectMedia(project = vm2.project, { showLoader = false, loadingText = 'Loading video...' } = {}) {
+  vm2ClearManagedMedia(true);
+  const sources = vm2GetUniqueProjectSources(project);
+  if (!sources.length) return;
+
+  const [first, ...rest] = sources;
+  const firstEntry = vm2EnsureMediaEntry(first.url, first);
+  if (firstEntry) {
+    vm2SetActiveMediaEntry(firstEntry);
+    void vm2LoadMediaEntry(firstEntry, { showLoader, loadingText }).catch((err) => {
+      console.error('[VM2] Primary media load error:', err);
+    });
+  }
+
+  vm2.mediaPreloadQueue = [];
+  rest.forEach((source) => vm2.mediaPreloadQueue.push(source));
+  void vm2PreloadProjectMedia();
+}
+
+async function vm2PreloadProjectMedia() {
+  if (vm2.mediaPreloading) return;
+  vm2.mediaPreloading = true;
+  try {
+    while (vm2.mediaPreloadQueue.length) {
+      const next = vm2.mediaPreloadQueue.shift();
+      const entry = vm2EnsureMediaEntry(next.url, next);
+      if (!entry || entry.status === 'ready') continue;
+      try {
+        await vm2LoadMediaEntry(entry);
+      } catch (err) {
+        console.warn('[VM2] Background preload failed:', err);
+      }
+    }
+  } finally {
+    vm2.mediaPreloading = false;
+  }
 }
 
 function vm2PrimaryVideoUrl(project = vm2.project) {
@@ -660,31 +898,42 @@ function vm2HandleTitleChange(value) {
 }
 
 function vm2SetVideoSource(url, { local = false, sourceKey = '', showLoader = false, loadingText = 'Loading video...' } = {}) {
-  const video = vm2Video();
-  if (!video) return;
-  const resolvedUrl = local ? url : vm2ResolveMediaUrl(url);
-  if (showLoader && resolvedUrl) vm2SetLoadingIndicator(true, loadingText);
-  video.pause();
-  video.crossOrigin = local ? '' : 'anonymous';
-  video.dataset.sourceKey = sourceKey || (url ? `url:${url}` : '');
-  video.src = resolvedUrl || '';
-  video.load();
+  if (!url) {
+    vm2ClearManagedMedia(false);
+    return;
+  }
+  const entry = vm2EnsureMediaEntry(url, { local, sourceKey, usePrimary: true });
+  if (!entry) return;
+  vm2SetActiveMediaEntry(entry);
+  void vm2LoadMediaEntry(entry, { showLoader, loadingText }).catch((err) => {
+    console.error('[VM2] Set video source error:', err);
+  });
 }
 
 function vm2EnsureStepVideoSource(step, timelineTime, { autoplay = false } = {}) {
-  const video = vm2Video();
-  if (!video || !step) return true;
+  if (!step) return true;
 
   const desiredUrl = vm2GetStepVideoUrl(step);
   if (!desiredUrl) return true;
 
   const desiredKey = vm2GetStepSourceKey(step);
-  if ((video.dataset.sourceKey || '') === desiredKey) return true;
-
-  vm2.pendingMediaSwitch = { timelineTime, autoplay };
-  vm2SetVideoSource(desiredUrl, {
+  const desiredEntry = vm2EnsureMediaEntry(desiredUrl, {
     local: vm2IsBlobUrl(desiredUrl),
     sourceKey: desiredKey,
+    usePrimary: desiredKey === vm2.activeMediaKey || !vm2.activeMediaKey,
+  });
+  if (!desiredEntry) return true;
+  if (vm2.activeMediaKey === desiredKey && (desiredEntry.status === 'ready' || desiredEntry.metadataReady)) return true;
+
+  vm2.pendingMediaSwitch = { timelineTime, autoplay, sourceKey: desiredKey };
+  vm2SetActiveMediaEntry(desiredEntry);
+  if (desiredEntry.status === 'ready') return true;
+
+  void vm2LoadMediaEntry(desiredEntry, {
+    showLoader: true,
+    loadingText: 'Loading clip...',
+  }).catch((err) => {
+    console.error('[VM2] Step media switch error:', err);
   });
   return false;
 }
@@ -821,15 +1070,14 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null } = {}) {
   if (sourceUrl) {
     if (uploadZone) uploadZone.classList.add('hidden');
     if (playerArea) playerArea.classList.remove('hidden');
-    vm2SetVideoSource(sourceUrl, {
-      local: vm2IsBlobUrl(sourceUrl),
-      sourceKey: vm2GetStepSourceKey(vm2.project.steps?.[0], vm2.project),
+    vm2PrimeProjectMedia(vm2.project, {
       showLoader: true,
       loadingText: vm2.loadingProject ? 'Loading project video...' : 'Loading video...',
     });
   } else {
     if (uploadZone) uploadZone.classList.remove('hidden');
     if (playerArea) playerArea.classList.add('hidden');
+    vm2ClearManagedMedia(false);
     vm2SetLoadingIndicator(false);
   }
 
@@ -958,12 +1206,8 @@ function vm2RenderEditorShell() {
               <div id="vm2-canvas-wrapper" class="relative bg-black shadow-2xl" style="transform-origin: top left;">
                 <canvas id="vm2-preview-canvas" class="absolute inset-0 pointer-events-none"></canvas>
                 <div id="vm2-debug-video-rect" class="absolute pointer-events-none"></div>
-                <video id="vm2-video" class="absolute pointer-events-none opacity-0"
-                  ontimeupdate="vm2OnTimeUpdate()"
-                  onloadedmetadata="vm2OnVideoLoaded()"
-                  onloadeddata="vm2OnVideoReady()"
-                  onerror="vm2OnVideoError()"
-                  onended="vm2OnEnded()"></video>
+                <video id="vm2-video" class="absolute pointer-events-none opacity-0"></video>
+                <div id="vm2-media-cache" class="hidden"></div>
                 <!-- Elements overlay container -->
                 <div id="vm2-elements-container" class="absolute inset-0 pointer-events-none" style="overflow: hidden;">
                   <!-- Dynamic elements rendered here -->
@@ -1404,6 +1648,7 @@ function vm2RenderEditorShell() {
   </style>
   `;
 
+  vm2InitManagedMedia();
   vm2SetSaveStatus(vm2.project?._id ? 'Loaded' : 'Not saved');
 }
 
@@ -1494,6 +1739,12 @@ function loadVideoManual2Page() {
   vm2.uploadInProgress = false;
   vm2.mediaInsertMode = null;
   vm2.pendingMediaSwitch = null;
+  vm2.loadingProject = false;
+  vm2.activeVideoEl = null;
+  vm2.activeMediaKey = '';
+  vm2.mediaCache = new Map();
+  vm2.mediaPreloadQueue = [];
+  vm2.mediaPreloading = false;
   vm2.revisionPreview = null;
   vm2._projectsList = [];
   vm2._editorMounted = false;
@@ -1627,6 +1878,8 @@ async function vm2AppendClipAsset(asset) {
 
   vm2MarkDirty('Clip added');
   await vm2PersistWorkingProject({ silent: true, reason: 'Added clip' });
+  vm2QueueProjectMediaPreloads(vm2.project);
+  void vm2PreloadProjectMedia();
   vm2SeekTo(newStep.startTime);
   vm2RenderSteps();
   vm2RenderTimeline();
@@ -2220,6 +2473,7 @@ function vm2ResetCanceledUpload() {
   vm2.duration = 0;
   vm2.currentStepIdx = 0;
   vm2.selectedElementId = null;
+  vm2ClearManagedMedia(false);
   vm2SetVideoSource('', { local: true });
   vm2Get('vm2-upload-zone').classList.remove('hidden');
   vm2Get('vm2-player-area').classList.add('hidden');
@@ -2281,6 +2535,7 @@ function vm2OnVideoLoaded() {
 function vm2OnVideoReady() {
   vm2.loadingProject = false;
   vm2SetLoadingIndicator(false);
+  void vm2PreloadProjectMedia();
 }
 
 function vm2OnVideoError() {
