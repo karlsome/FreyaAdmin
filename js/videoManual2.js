@@ -64,6 +64,7 @@ let vm2 = {
   playlistModelOptions: null,
   playlistModelLoading: false,
   playlistCreating: false,
+  playlistUpdating: false,
   _projectsList: [],
   _editorMounted: false,
 };
@@ -714,12 +715,15 @@ function vm2RenderPlaylistBrowser() {
   const projectList = vm2Get('vm2-browser-project-list');
   const projectTitle = vm2Get('vm2-browser-project-title');
   const emptyState = vm2Get('vm2-browser-project-empty');
+  const playlistActions = vm2Get('vm2-browser-playlist-actions');
   const createProjectBtn = vm2Get('vm2-create-project-btn');
   const createPlaylistBtn = vm2Get('vm2-create-playlist-btn');
   if (!playlistList || !projectList) return;
 
   const role = vm2AuthUser().role || 'viewer';
   const canManagePlaylists = ['admin', '課長', '部長', '係長'].includes(role);
+  const canEditPlaylistMeta = ['admin', '課長', '部長', '係長'].includes(role);
+  const canDeletePlaylists = role === 'admin';
   if (createPlaylistBtn) createPlaylistBtn.classList.toggle('hidden', !canManagePlaylists);
   if (createProjectBtn) createProjectBtn.disabled = !vm2.playlist;
 
@@ -727,9 +731,9 @@ function vm2RenderPlaylistBrowser() {
     ? vm2.playlists.map((playlist) => {
         const selected = vm2.playlist && String(vm2.playlist._id) === String(playlist._id);
         return `
-          <button
+          <div
             onclick="vm2SelectPlaylist('${playlist._id}')"
-            class="w-full text-left rounded-2xl border px-4 py-3 transition ${selected
+            class="w-full cursor-pointer text-left rounded-2xl border px-4 py-3 transition ${selected
               ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400'
               : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'}">
             <div class="flex items-start justify-between gap-3">
@@ -744,7 +748,7 @@ function vm2RenderPlaylistBrowser() {
                   ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
                   : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}">${playlist.privacy || 'internal'}</span>
             </div>
-          </button>
+          </div>
         `;
       }).join('')
     : '<div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No playlists yet.</div>';
@@ -757,6 +761,24 @@ function vm2RenderPlaylistBrowser() {
     playlistMeta.textContent = vm2.playlist
       ? `${vm2.playlistProjects.length} project${vm2.playlistProjects.length === 1 ? '' : 's'} · ${vm2.playlist.privacy || 'internal'}`
       : 'Choose a playlist to browse projects';
+  }
+
+  if (playlistActions) {
+    if (vm2.playlist) {
+      const actions = [
+        canEditPlaylistMeta
+          ? `<button onclick="vm2OpenEditPlaylistModal('${vm2.playlist._id}')" class="rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title="Edit playlist"><i class="ri-pencil-line mr-1"></i>Edit Playlist</button>`
+          : '',
+        canDeletePlaylists
+          ? `<button onclick="vm2DeletePlaylist('${vm2.playlist._id}', '${vm2EscapeHtml(vm2.playlist.name || 'Untitled Playlist')}')" class="rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="Delete playlist"><i class="ri-delete-bin-line mr-1"></i>Delete Playlist</button>`
+          : ''
+      ].filter(Boolean).join('');
+      playlistActions.innerHTML = actions;
+      playlistActions.classList.toggle('hidden', !actions);
+    } else {
+      playlistActions.innerHTML = '';
+      playlistActions.classList.add('hidden');
+    }
   }
 
   if (!vm2.playlist || !vm2.playlistProjects.length) {
@@ -1109,6 +1131,97 @@ async function vm2SubmitCreatePlaylist() {
   } finally {
     vm2.playlistCreating = false;
     vm2SyncCreatePlaylistSubmitState();
+  }
+}
+
+function vm2SyncEditPlaylistSubmitState() {
+  const submitBtn = vm2Get('vm2-edit-playlist-submit');
+  const titleInput = vm2Get('vm2-edit-playlist-title');
+  if (!submitBtn || !titleInput) return;
+  const canSubmit = !vm2.playlistUpdating && !!titleInput.value.trim();
+  submitBtn.disabled = !canSubmit;
+  submitBtn.className = `flex-1 py-2 rounded text-sm text-white ${canSubmit ? 'bg-slate-900 hover:bg-slate-700 dark:bg-sky-500 dark:hover:bg-sky-400' : 'bg-slate-300 cursor-not-allowed dark:bg-gray-700'}`;
+}
+
+function vm2CloseEditPlaylistModal() {
+  const modal = vm2Get('vm2-modal-edit-playlist');
+  if (modal) modal.classList.add('hidden');
+  vm2.playlistUpdating = false;
+  vm2SyncEditPlaylistSubmitState();
+}
+
+function vm2OpenEditPlaylistModal(id) {
+  const playlist = vm2.playlists.find((item) => String(item._id) === String(id));
+  const modal = vm2Get('vm2-modal-edit-playlist');
+  const titleInput = vm2Get('vm2-edit-playlist-title');
+  const descInput = vm2Get('vm2-edit-playlist-description');
+  const errorEl = vm2Get('vm2-edit-playlist-error');
+  if (!playlist || !modal || !titleInput || !descInput || !errorEl) return;
+  modal.dataset.playlistId = String(playlist._id);
+  titleInput.value = playlist.name || '';
+  descInput.value = playlist.description || '';
+  errorEl.textContent = '';
+  vm2.playlistUpdating = false;
+  modal.classList.remove('hidden');
+  vm2SyncEditPlaylistSubmitState();
+}
+
+async function vm2SubmitEditPlaylist() {
+  const modal = vm2Get('vm2-modal-edit-playlist');
+  const titleInput = vm2Get('vm2-edit-playlist-title');
+  const descInput = vm2Get('vm2-edit-playlist-description');
+  const errorEl = vm2Get('vm2-edit-playlist-error');
+  const playlistId = modal?.dataset.playlistId;
+  if (!modal || !titleInput || !descInput || !errorEl || !playlistId) return;
+
+  const name = titleInput.value.trim();
+  const description = descInput.value.trim();
+  if (!name) {
+    errorEl.textContent = 'Title is required.';
+    vm2SyncEditPlaylistSubmitState();
+    return;
+  }
+
+  vm2.playlistUpdating = true;
+  errorEl.textContent = '';
+  vm2SyncEditPlaylistSubmitState();
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-playlists/${playlistId}`, {
+      method: 'PATCH',
+      headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ name, description }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    await vm2LoadPlaylists();
+    await vm2SelectPlaylist(playlistId);
+    vm2CloseEditPlaylistModal();
+  } catch (err) {
+    console.error('[VM2] Edit playlist error:', err);
+    errorEl.textContent = `Failed to update playlist: ${err.message}`;
+  } finally {
+    vm2.playlistUpdating = false;
+    vm2SyncEditPlaylistSubmitState();
+  }
+}
+
+async function vm2DeletePlaylist(id, name) {
+  if (!confirm(`Delete playlist "${name}"?\n\nThis will permanently delete the playlist, all its projects, and all shared assets.`)) return;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-playlists/${id}`, {
+      method: 'DELETE',
+      headers: vm2AuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    if (vm2.playlist && String(vm2.playlist._id) === String(id)) {
+      vm2.playlist = null;
+      vm2.playlistProjects = [];
+    }
+    await vm2LoadPlaylists();
+  } catch (err) {
+    console.error('[VM2] Delete playlist error:', err);
+    alert('Failed to delete playlist: ' + err.message);
   }
 }
 
@@ -1978,6 +2091,7 @@ function loadVideoManual2Page() {
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Projects</p>
                 <h3 id="vm2-browser-project-title" class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">Select a playlist</h3>
                 <p id="vm2-playlist-meta" class="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a playlist to browse projects</p>
+                <div id="vm2-browser-playlist-actions" class="hidden mt-3 flex flex-wrap gap-2"></div>
               </div>
             </div>
             <div id="vm2-browser-project-empty" class="rounded-[24px] border border-dashed border-slate-300 px-6 py-14 text-center dark:border-gray-700">
@@ -2051,6 +2165,40 @@ function loadVideoManual2Page() {
         <div class="mt-6 flex gap-3">
           <button onclick="vm2CloseCreatePlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
           <button id="vm2-create-playlist-submit" onclick="vm2SubmitCreatePlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Create Playlist</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="vm2-modal-edit-playlist" class="hidden fixed inset-0 z-[320] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Edit Playlist</p>
+            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Update playlist details</h3>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">課長, 係長, 部長, and admin can edit the title and description.</p>
+          </div>
+          <button onclick="vm2CloseEditPlaylistModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+            <i class="ri-close-line text-lg"></i>
+          </button>
+        </div>
+
+        <div class="mt-6 space-y-4">
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
+            <input id="vm2-edit-playlist-title" type="text" oninput="vm2SyncEditPlaylistSubmitState()" placeholder="Playlist title" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+          </div>
+
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</label>
+            <textarea id="vm2-edit-playlist-description" rows="4" placeholder="Playlist description" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
+          </div>
+
+          <p id="vm2-edit-playlist-error" class="min-h-[1.25rem] text-sm text-red-500"></p>
+        </div>
+
+        <div class="mt-6 flex gap-3">
+          <button onclick="vm2CloseEditPlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
+          <button id="vm2-edit-playlist-submit" onclick="vm2SubmitEditPlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Save Changes</button>
         </div>
       </div>
     </div>
@@ -6198,6 +6346,11 @@ if (typeof window !== 'undefined') {
   window.vm2SubmitCreatePlaylist = vm2SubmitCreatePlaylist;
   window.vm2OnCreatePlaylistModelChange = vm2OnCreatePlaylistModelChange;
   window.vm2OnCreatePlaylistTitleInput = vm2OnCreatePlaylistTitleInput;
+  window.vm2OpenEditPlaylistModal = vm2OpenEditPlaylistModal;
+  window.vm2CloseEditPlaylistModal = vm2CloseEditPlaylistModal;
+  window.vm2SubmitEditPlaylist = vm2SubmitEditPlaylist;
+  window.vm2SyncEditPlaylistSubmitState = vm2SyncEditPlaylistSubmitState;
+  window.vm2DeletePlaylist = vm2DeletePlaylist;
   window.vm2CreateProject = vm2CreateProject;
   window.vm2Undo = vm2Undo;
   window.vm2Redo = vm2Redo;
