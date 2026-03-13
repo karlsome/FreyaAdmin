@@ -388,6 +388,10 @@ function vm2SetActiveMediaEntry(entry) {
   if (previous && previous !== entry.video) previous.pause();
   vm2.activeVideoEl = entry.video;
   vm2.activeMediaKey = entry.key;
+  vm2.videoRect = null;
+  if (entry.video.videoWidth && entry.video.videoHeight) {
+    vm2SyncCanvasSize();
+  }
 }
 
 function vm2GetUniqueProjectSources(project = vm2.project) {
@@ -2033,6 +2037,10 @@ function vm2TpSetActiveEntry(entry) {
   if (previous && previous !== entry.video) previous.pause();
   vm2TP.activeVideoEl = entry.video;
   vm2TP.activeMediaKey = entry.key;
+  vm2TP.videoRect = null;
+  if (entry.video.videoWidth && entry.video.videoHeight) {
+    vm2TpSyncCanvasSize();
+  }
 }
 
 function vm2TpQueuePreloads() {
