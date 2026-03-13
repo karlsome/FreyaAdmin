@@ -1773,9 +1773,23 @@ function vm2RenderEditorShell() {
     .vm2-step-seg:hover .resize-right { opacity: 1; }
     .vm2-step-seg .resize-left { left: 0; border-radius: 4px 0 0 4px; }
     .vm2-step-seg .resize-right { right: 0; border-radius: 0 4px 4px 0; }
-    #vm2-timeline-scroll::-webkit-scrollbar { height: 8px; }
-    #vm2-timeline-scroll::-webkit-scrollbar-track { background: #1f2937; }
-    #vm2-timeline-scroll::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+    #vm2-timeline-scroll {
+      scrollbar-color: #94a3b8 #e5e7eb;
+      scrollbar-width: auto;
+    }
+    #vm2-timeline-scroll::-webkit-scrollbar { height: 12px; }
+    #vm2-timeline-scroll::-webkit-scrollbar-track {
+      background: #e5e7eb;
+      border-radius: 9999px;
+    }
+    #vm2-timeline-scroll::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
+      border: 2px solid #e5e7eb;
+      border-radius: 9999px;
+    }
+    #vm2-timeline-scroll::-webkit-scrollbar-thumb:hover {
+      background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+    }
   </style>
   `;
 
