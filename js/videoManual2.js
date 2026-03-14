@@ -140,9 +140,36 @@ function vm2CreateEmptyProject(overrides = {}) {
     steps: [],
     currentRevisionNumber: 0,
     lastRevisionId: null,
+    deployedRevisionId: null,
+    deployedRevisionNumber: null,
+    deployedRevisionName: null,
+    deployedAt: null,
+    deployedBy: null,
     createdBy: authUser.username || 'admin',
     createdAt: vm2NowIso(),
     ...overrides,
+  };
+}
+
+function vm2CanDeployProject() {
+  const role = vm2AuthUser().role || 'viewer';
+  return ['admin', '班長', '課長', '部長', '係長'].includes(role);
+}
+
+function vm2ProjectDeploymentLabel(project) {
+  if (!project?.deployedRevisionId) return 'Not deployed';
+  const revisionLabel = project.deployedRevisionNumber
+    ? `Rev ${project.deployedRevisionNumber}`
+    : (project.deployedRevisionName || 'Deployed');
+  return `Deployed · ${revisionLabel}`;
+}
+
+function vm2SyncPlaylistProjectEntry(projectId, updates = {}) {
+  const index = vm2.playlistProjects.findIndex((item) => String(item._id) === String(projectId));
+  if (index < 0) return;
+  vm2.playlistProjects[index] = {
+    ...vm2.playlistProjects[index],
+    ...updates,
   };
 }
 
@@ -835,8 +862,14 @@ function vm2RenderPlaylistBrowser() {
     <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
-          <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${project.title || 'Untitled Project'}</div>
+          <div class="flex items-center gap-2 min-w-0">
+            <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${project.title || 'Untitled Project'}</div>
+            <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${project.deployedRevisionId
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+              : 'bg-slate-100 text-slate-500 dark:bg-gray-700 dark:text-gray-300'}">${project.deployedRevisionId ? `LIVE ${project.deployedRevisionNumber ? `Rev ${project.deployedRevisionNumber}` : ''}`.trim() : 'DRAFT'}</span>
+          </div>
           <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${project.stepsCount || 0} steps · Rev ${project.currentRevisionNumber || 0}</div>
+          <div class="mt-1 text-xs ${project.deployedRevisionId ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-400'}">${vm2ProjectDeploymentLabel(project)}</div>
           <div class="mt-1 text-xs text-gray-400">Updated ${new Date(project.updatedAt || project.createdAt).toLocaleDateString()}</div>
         </div>
         <div class="flex items-center gap-1 shrink-0">
@@ -1526,6 +1559,11 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null, preserveHistor
     steps: [],
     currentRevisionNumber: 0,
     lastRevisionId: null,
+    deployedRevisionId: null,
+    deployedRevisionNumber: null,
+    deployedRevisionName: null,
+    deployedAt: null,
+    deployedBy: null,
     ...project,
   };
 
@@ -2014,6 +2052,7 @@ function vm2RenderEditorShell() {
           <i class="ri-close-line text-xl"></i>
         </button>
       </div>
+      <div id="vm2-history-meta" class="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300"></div>
       <div id="vm2-history-list" class="flex-1 overflow-y-auto space-y-2"></div>
     </div>
   </div>
@@ -5879,13 +5918,22 @@ async function vm2OpenProject() {
 
 async function vm2ShowHistory() {
   const list = vm2Get('vm2-history-list');
+  const meta = vm2Get('vm2-history-meta');
   if (!list) return;
 
   vm2Get('vm2-modal-history').classList.remove('hidden');
 
   if (!vm2.project?._id) {
+    if (meta) meta.textContent = 'Select a saved project to view revision deployment status.';
     list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">Save a working project first.</p>';
     return;
+  }
+
+  if (meta) {
+    const deploymentText = vm2.project.deployedRevisionId
+      ? `Factory live revision: ${vm2.project.deployedRevisionName || `Rev ${vm2.project.deployedRevisionNumber || '?'}`} · Deployed ${new Date(vm2.project.deployedAt || Date.now()).toLocaleString()}`
+      : 'Factory live revision: Not deployed';
+    meta.innerHTML = `<div class="flex items-center justify-between gap-3"><span>${deploymentText}</span>${vm2CanDeployProject() && vm2.project.deployedRevisionId ? '<button onclick="vm2UndeployProject()" class="rounded border border-amber-200 px-2 py-1 text-[11px] font-medium text-amber-700 transition hover:bg-amber-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-900/20">Undeploy</button>' : ''}</div>`;
   }
 
   list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">Loading revisions…</p>';
@@ -5903,16 +5951,101 @@ async function vm2ShowHistory() {
     }
 
     list.innerHTML = revisions.map((revision) => `
-      <div class="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${revision.revisionName || 'Unnamed revision'}</p>
-          <p class="text-xs text-gray-400">Revision ${revision.revisionNumber || '?'} · ${revision.folder || 'root'} · ${new Date(revision.createdAt).toLocaleString()}</p>
+      <div class="rounded-lg border ${revision.isDeployed ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800/60 dark:bg-emerald-900/10' : 'border-gray-200 dark:border-gray-700'} p-3">
+        <div class="flex items-start gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 min-w-0">
+              <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${revision.revisionName || 'Unnamed revision'}</p>
+              ${revision.isDeployed ? '<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">LIVE</span>' : ''}
+            </div>
+            <p class="text-xs text-gray-400">Revision ${revision.revisionNumber || '?'} · ${revision.folder || 'root'} · ${new Date(revision.createdAt).toLocaleString()}</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button onclick="vm2PreviewRevision('${revision._id}')" class="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded hover:bg-blue-100">Preview</button>
+            ${vm2CanDeployProject() && !vm2.revisionPreview ? (revision.isDeployed
+              ? '<span class="px-2 py-1 text-xs rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Deployed</span>'
+              : `<button onclick="vm2DeployRevision('${revision._id}')" class="px-2 py-1 text-xs bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-300">Deploy</button>`)
+              : ''}
+          </div>
         </div>
-        <button onclick="vm2PreviewRevision('${revision._id}')" class="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded hover:bg-blue-100">Preview</button>
       </div>
     `).join('');
   } catch (err) {
     list.innerHTML = `<p class="text-sm text-red-400 text-center py-6">Failed to load revisions: ${err.message}</p>`;
+  }
+}
+
+async function vm2DeployRevision(revisionId) {
+  if (!vm2.project?._id) return;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-projects/${vm2.project._id}/deploy`, {
+      method: 'POST',
+      headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ revisionId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || String(res.status));
+    }
+
+    const data = await res.json();
+    const deployedAt = data.deployedAt || vm2NowIso();
+    vm2.project.deployedRevisionId = data.revisionId || revisionId;
+    vm2.project.deployedRevisionNumber = data.revisionNumber || null;
+    vm2.project.deployedRevisionName = data.revisionName || null;
+    vm2.project.deployedAt = deployedAt;
+    vm2.project.deployedBy = data.deployedBy || vm2AuthUser().username || 'unknown';
+    vm2.project.updatedAt = deployedAt;
+    vm2SyncPlaylistProjectEntry(vm2.project._id, {
+      deployedRevisionId: vm2.project.deployedRevisionId,
+      deployedRevisionNumber: vm2.project.deployedRevisionNumber,
+      deployedRevisionName: vm2.project.deployedRevisionName,
+      deployedAt: vm2.project.deployedAt,
+      deployedBy: vm2.project.deployedBy,
+      updatedAt: vm2.project.updatedAt,
+    });
+    vm2SetSaveStatus(`Deployed ${data.revisionName || `Rev ${data.revisionNumber || '?'}`}`, 'green');
+    vm2RenderPlaylistBrowser();
+    await vm2ShowHistory();
+  } catch (err) {
+    console.error('[VM2] Deploy revision error:', err);
+    alert('Failed to deploy revision: ' + err.message);
+  }
+}
+
+async function vm2UndeployProject() {
+  if (!vm2.project?._id) return;
+  if (!confirm(`Hide "${vm2.project.title || 'Untitled Project'}" from the factory side?`)) return;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-projects/${vm2.project._id}/undeploy`, {
+      method: 'POST',
+      headers: vm2AuthHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || String(res.status));
+    }
+
+    vm2.project.deployedRevisionId = null;
+    vm2.project.deployedRevisionNumber = null;
+    vm2.project.deployedRevisionName = null;
+    vm2.project.deployedAt = null;
+    vm2.project.deployedBy = null;
+    vm2.project.updatedAt = vm2NowIso();
+    vm2SyncPlaylistProjectEntry(vm2.project._id, {
+      deployedRevisionId: null,
+      deployedRevisionNumber: null,
+      deployedRevisionName: null,
+      deployedAt: null,
+      deployedBy: null,
+      updatedAt: vm2.project.updatedAt,
+    });
+    vm2SetSaveStatus('Undeployed', 'green');
+    vm2RenderPlaylistBrowser();
+    await vm2ShowHistory();
+  } catch (err) {
+    console.error('[VM2] Undeploy project error:', err);
+    alert('Failed to undeploy project: ' + err.message);
   }
 }
 
