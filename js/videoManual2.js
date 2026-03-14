@@ -65,6 +65,7 @@ let vm2 = {
   playlistModelLoading: false,
   playlistCreating: false,
   playlistUpdating: false,
+  projectCreating: false,
   playlistSearchQuery: '',
   _projectsList: [],
   _editorMounted: false,
@@ -1368,27 +1369,84 @@ async function vm2DeletePlaylist(id, name) {
 }
 
 async function vm2CreateProject() {
+  vm2OpenCreateProjectModal();
+}
+
+function vm2SyncCreateProjectSubmitState() {
+  const submitBtn = vm2Get('vm2-create-project-submit');
+  const titleInput = vm2Get('vm2-create-project-title');
+  if (!submitBtn || !titleInput) return;
+  const canSubmit = !vm2.projectCreating && !!titleInput.value.trim();
+  submitBtn.disabled = !canSubmit;
+  submitBtn.className = `flex-1 py-2 rounded text-sm text-white ${
+    canSubmit
+      ? 'bg-slate-900 hover:bg-slate-700 dark:bg-sky-500 dark:hover:bg-sky-400'
+      : 'bg-slate-300 cursor-not-allowed dark:bg-gray-700'
+  }`;
+}
+
+function vm2CloseCreateProjectModal() {
+  const modal = vm2Get('vm2-modal-create-project');
+  if (modal) modal.classList.add('hidden');
+  vm2.projectCreating = false;
+  vm2SyncCreateProjectSubmitState();
+}
+
+function vm2OpenCreateProjectModal() {
   if (!vm2.playlist?._id) {
     alert('Select a playlist first.');
     return;
   }
+  const modal = vm2Get('vm2-modal-create-project');
+  const titleInput = vm2Get('vm2-create-project-title');
+  const descInput = vm2Get('vm2-create-project-description');
+  const errorEl = vm2Get('vm2-create-project-error');
+  if (!modal || !titleInput || !descInput || !errorEl) return;
+  modal.classList.remove('hidden');
+  titleInput.value = '';
+  descInput.value = '';
+  errorEl.textContent = '';
+  vm2.projectCreating = false;
+  vm2SyncCreateProjectSubmitState();
+  setTimeout(() => titleInput.focus(), 50);
+}
 
-  const title = prompt('Project title:');
-  if (!title) return;
+async function vm2SubmitCreateProject() {
+  const titleInput = vm2Get('vm2-create-project-title');
+  const descInput = vm2Get('vm2-create-project-description');
+  const errorEl = vm2Get('vm2-create-project-error');
+  if (!titleInput || !descInput || !errorEl) return;
+
+  const title = titleInput.value.trim();
+  const description = descInput.value.trim();
+
+  if (!title) {
+    errorEl.textContent = 'Title is required.';
+    vm2SyncCreateProjectSubmitState();
+    return;
+  }
+
+  vm2.projectCreating = true;
+  errorEl.textContent = '';
+  vm2SyncCreateProjectSubmitState();
 
   try {
     const res = await fetch(`${vm2BaseUrl()}api/video-playlists/${vm2.playlist._id}/projects`, {
       method: 'POST',
       headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, description }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || String(res.status));
+    vm2CloseCreateProjectModal();
     await vm2SelectPlaylist(String(vm2.playlist._id));
     if (data.insertedId) await vm2LoadProject(String(data.insertedId));
   } catch (err) {
     console.error('[VM2] Create project error:', err);
-    alert('Failed to create project: ' + err.message);
+    errorEl.textContent = `Failed to create project: ${err.message}`;
+  } finally {
+    vm2.projectCreating = false;
+    vm2SyncCreateProjectSubmitState();
   }
 }
 
@@ -2273,6 +2331,40 @@ function loadVideoManual2Page() {
       </div>
     </div>
     <div id="vm2-editor-host" class="hidden"></div>
+
+    <div id="vm2-modal-create-project" class="hidden fixed inset-0 z-[320] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">New Project</p>
+            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Create project</h3>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Add a title and description so your team knows what this project covers.</p>
+          </div>
+          <button onclick="vm2CloseCreateProjectModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+            <i class="ri-close-line text-lg"></i>
+          </button>
+        </div>
+
+        <div class="mt-6 space-y-4">
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
+            <input id="vm2-create-project-title" type="text" oninput="vm2SyncCreateProjectSubmitState()" placeholder="e.g. SRS Assembly Step 1" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+          </div>
+
+          <div>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</label>
+            <textarea id="vm2-create-project-description" rows="4" placeholder="Describe what this project covers, which process, which part, and any important notes for operators." class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
+          </div>
+
+          <p id="vm2-create-project-error" class="min-h-[1.25rem] text-sm text-red-500"></p>
+        </div>
+
+        <div class="mt-6 flex gap-3">
+          <button onclick="vm2CloseCreateProjectModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
+          <button id="vm2-create-project-submit" onclick="vm2SubmitCreateProject()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Create Project</button>
+        </div>
+      </div>
+    </div>
 
     <div id="vm2-modal-create-playlist" class="hidden fixed inset-0 z-[320] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
@@ -6613,6 +6705,10 @@ if (typeof window !== 'undefined') {
   window.vm2SyncEditPlaylistSubmitState = vm2SyncEditPlaylistSubmitState;
   window.vm2DeletePlaylist = vm2DeletePlaylist;
   window.vm2CreateProject = vm2CreateProject;
+  window.vm2OpenCreateProjectModal = vm2OpenCreateProjectModal;
+  window.vm2CloseCreateProjectModal = vm2CloseCreateProjectModal;
+  window.vm2SubmitCreateProject = vm2SubmitCreateProject;
+  window.vm2SyncCreateProjectSubmitState = vm2SyncCreateProjectSubmitState;
   window.vm2Undo = vm2Undo;
   window.vm2Redo = vm2Redo;
   window.vm2ReturnToBrowser = vm2ReturnToBrowser;
