@@ -6274,6 +6274,7 @@ async function vm2ShowHistory() {
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <button onclick="vm2PreviewRevision('${revision._id}')" class="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded hover:bg-blue-100">Preview</button>
+            ${!vm2.revisionPreview ? `<button onclick="vm2RestoreRevisionAsWorkingCopy('${revision._id}')" class="px-2 py-1 text-xs bg-amber-50 text-amber-700 rounded hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300">Restore</button>` : ''}
             ${vm2CanDeployProject() && !vm2.revisionPreview ? (revision.isDeployed
               ? '<span class="px-2 py-1 text-xs rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Deployed</span>'
               : `<button onclick="vm2DeployRevision('${revision._id}')" class="px-2 py-1 text-xs bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-300">Deploy</button>`)
@@ -6358,6 +6359,39 @@ async function vm2UndeployProject() {
   } catch (err) {
     console.error('[VM2] Undeploy project error:', err);
     alert('Failed to undeploy project: ' + err.message);
+  }
+}
+
+async function vm2RestoreRevisionAsWorkingCopy(revisionId) {
+  if (!vm2.project?._id) return;
+  if (!confirm('Restore this revision as your working copy? Your current unsaved changes will be overwritten. You can then save it as a new revision.')) return;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-revisions/${revisionId}`, {
+      headers: vm2AuthHeaders(),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const revision = await res.json();
+    const snapshot = vm2DeepClone(revision.snapshot || {});
+
+    // Preserve identity and deployment metadata from the live project
+    snapshot._id = vm2.project._id;
+    snapshot.playlistId = vm2.project.playlistId;
+    snapshot.currentRevisionNumber = vm2.project.currentRevisionNumber;
+    snapshot.lastRevisionId = vm2.project.lastRevisionId;
+    snapshot.deployedRevisionId = vm2.project.deployedRevisionId;
+    snapshot.deployedRevisionNumber = vm2.project.deployedRevisionNumber;
+    snapshot.deployedRevisionName = vm2.project.deployedRevisionName;
+    snapshot.deployedAt = vm2.project.deployedAt;
+    snapshot.deployedBy = vm2.project.deployedBy;
+
+    vm2ApplyProjectState(snapshot, { readOnlyRevision: null });
+    vm2MarkDirty('Restored from revision');
+    vm2Get('vm2-modal-history')?.classList.add('hidden');
+    await vm2PersistWorkingProject({ silent: true, reason: 'Restored from revision' });
+    vm2SetSaveStatus(`Restored from ${revision.revisionName || `Rev ${revision.revisionNumber || '?'}`} — save a new revision when ready`, 'blue');
+  } catch (err) {
+    console.error('[VM2] Restore revision as working copy error:', err);
+    alert('Failed to restore revision: ' + err.message);
   }
 }
 
