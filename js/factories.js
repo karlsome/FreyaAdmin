@@ -6506,9 +6506,13 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                   }
 
                   if (state.process === proc.name && state.column) {
+                    const numericCols = new Set(['Total', 'Total_NG', 'Process_Quantity', 'Remaining_Quantity', 'Cycle_Time', 'Spare', 'ショット数']);
                     sorted.sort((a, b) => {
                       const valA = a[state.column] ?? "";
                       const valB = b[state.column] ?? "";
+                      if (numericCols.has(state.column)) {
+                        return (Number(valA) - Number(valB)) * state.direction;
+                      }
                       return valA.toString().localeCompare(valB.toString(), "ja") * state.direction;
                     });
                   }
@@ -6809,10 +6813,14 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
             const records = resultsByProcess[index];
             if (!records.length) return "";
 
+            const _numericCols = new Set(['Total', 'Total_NG', 'Process_Quantity', 'Remaining_Quantity', 'Cycle_Time', 'Spare', 'ショット数']);
             const sorted = [...records].sort((a, b) => {
               if (sortState.process === procLabel && sortState.column) {
                 const valA = a[sortState.column] ?? "";
                 const valB = b[sortState.column] ?? "";
+                if (_numericCols.has(sortState.column)) {
+                  return (Number(valA) - Number(valB)) * sortState.direction;
+                }
                 return (valA.toString().localeCompare(valB.toString(), "ja")) * sortState.direction;
               }
               return 0;
