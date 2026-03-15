@@ -159,11 +159,11 @@ function vm2CanDeployProject() {
 }
 
 function vm2ProjectDeploymentLabel(project) {
-  if (!project?.deployedRevisionId) return 'Not deployed';
+  if (!project?.deployedRevisionId) return t('vmDeployedLabel') + ': —';
   const revisionLabel = project.deployedRevisionNumber
-    ? `Rev ${project.deployedRevisionNumber}`
-    : (project.deployedRevisionName || 'Deployed');
-  return `Deployed · ${revisionLabel}`;
+    ? `${t('vmRevLabel')} ${project.deployedRevisionNumber}`
+    : (project.deployedRevisionName || t('vmDeployedLabel'));
+  return `${t('vmDeployedLabel')} · ${revisionLabel}`;
 }
 
 function vm2SyncPlaylistProjectEntry(projectId, updates = {}) {
@@ -271,7 +271,8 @@ function vm2GetTimelineMinorStep(majorStep) {
   return null;
 }
 
-function vm2SetLoadingIndicator(visible, text = 'Loading video...') {
+function vm2SetLoadingIndicator(visible, text) {
+  if (text === undefined) text = t('vmLoadingVideo');
   const overlay = vm2Get('vm2-loading-overlay');
   const label = vm2Get('vm2-loading-text');
   if (label) label.textContent = text;
@@ -389,7 +390,8 @@ function vm2EnsureMediaEntry(url, { local = false, sourceKey = '', usePrimary = 
   return entry;
 }
 
-function vm2LoadMediaEntry(entry, { showLoader = false, loadingText = 'Loading video...' } = {}) {
+function vm2LoadMediaEntry(entry, { showLoader = false, loadingText = null } = {}) {
+  if (loadingText === null) loadingText = t('vmLoadingVideo');
   if (!entry) return Promise.reject(new Error('Missing media entry'));
   if (entry.status === 'ready') return Promise.resolve(entry);
   if (entry.readyPromise) {
@@ -476,7 +478,8 @@ function vm2QueueProjectMediaPreloads(project = vm2.project, excludeKey = vm2.ac
   });
 }
 
-function vm2PrimeProjectMedia(project = vm2.project, { showLoader = false, loadingText = 'Loading video...' } = {}) {
+function vm2PrimeProjectMedia(project = vm2.project, { showLoader = false, loadingText = null } = {}) {
+  if (loadingText === null) loadingText = t('vmLoadingVideo');
   vm2ClearManagedMedia(true);
   const sources = vm2GetUniqueProjectSources(project);
   if (!sources.length) return;
@@ -615,13 +618,13 @@ function vm2UpdateUndoRedoButtons() {
   if (undoBtn) {
     undoBtn.disabled = !canUndo;
     undoBtn.className = `p-1.5 rounded ${canUndo ? 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500' : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'}`;
-    undoBtn.title = canUndo ? 'Undo' : 'Nothing to undo';
+    undoBtn.title = canUndo ? t('vmUndoTitle') : t('vmNothingToUndo');
   }
 
   if (redoBtn) {
     redoBtn.disabled = !canRedo;
     redoBtn.className = `p-1.5 rounded ${canRedo ? 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500' : 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'}`;
-    redoBtn.title = canRedo ? 'Redo' : 'Nothing to redo';
+    redoBtn.title = canRedo ? t('vmRedoTitle') : t('vmNothingToRedo');
   }
 }
 
@@ -763,8 +766,8 @@ function vm2SyncTrashUiState() {
       ? 'border-slate-200 bg-white text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
       : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 opacity-70 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500'}`;
   trashBtn.innerHTML = isShowingTrash
-    ? '<i class="ri-arrow-left-line mr-1"></i>Back to Projects'
-    : '<i class="ri-delete-bin-line mr-1"></i>Recycle Bin';
+    ? `<i class="ri-arrow-left-line mr-1"></i>${t('vmBackToProjects')}`
+    : `<i class="ri-delete-bin-line mr-1"></i>${t('vmRecycleBin')}`;
 }
 
 function vm2RenderPlaylistBrowser() {
@@ -808,12 +811,12 @@ function vm2RenderPlaylistBrowser() {
               : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'}">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${playlist.name || 'Untitled Playlist'}</div>
-                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${playlist.description || 'No description yet'}</div>
+                <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${playlist.name || t('vmUntitledPlaylist')}</div>
+                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${playlist.description || t('vmNoDescriptionYet')}</div>
                 <div class="mt-2 flex flex-wrap items-center gap-2">
                   ${playlist.model ? `<div class="inline-flex rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold tracking-wide text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">${vm2EscapeHtml(playlist.model)}</div>` : ''}
                 </div>
-                <div class="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">Project: ${projectCount}</div>
+                <div class="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">${t('vmProjectCount')}: ${projectCount}</div>
               </div>
               <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${playlist.privacy === 'public'
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
@@ -824,26 +827,26 @@ function vm2RenderPlaylistBrowser() {
           </div>
         `;
       }).join('')
-    : `<div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">${searchQuery ? 'No playlists match your search.' : 'No playlists yet.'}</div>`;
+    : `<div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">${searchQuery ? t('vmNoPlaylistsMatchSearch') : t('vmNoPlaylistsYet')}</div>`;
 
   if (projectTitle) {
-    projectTitle.textContent = vm2.playlist ? vm2.playlist.name || 'Projects' : 'Select a playlist';
+    projectTitle.textContent = vm2.playlist ? vm2.playlist.name || t('vmProjectsBtn') : t('vmSelectAPlaylist');
   }
 
   if (playlistMeta) {
     playlistMeta.textContent = vm2.playlist
-      ? `${vm2.playlistProjects.length} project${vm2.playlistProjects.length === 1 ? '' : 's'} · ${vm2.playlist.privacy || 'internal'}`
-      : 'Choose a playlist to browse projects';
+      ? `${vm2.playlistProjects.length} ${t('vmProjectCount')}${vm2.playlistProjects.length === 1 ? '' : 's'} · ${vm2.playlist.privacy || t('vmInternalOption')}`
+      : t('vmChoosePlaylistToBrowse');
   }
 
   if (playlistActions) {
     if (vm2.playlist) {
       const actions = [
         canEditPlaylistMeta
-          ? `<button onclick="vm2OpenEditPlaylistModal('${vm2.playlist._id}')" class="rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title="Edit playlist"><i class="ri-pencil-line mr-1"></i>Edit Playlist</button>`
+          ? `<button onclick="vm2OpenEditPlaylistModal('${vm2.playlist._id}')" class="rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title="Edit playlist"><i class="ri-pencil-line mr-1"></i>${t('vmEditPlaylistBtn')}</button>`
           : '',
         canDeletePlaylists
-          ? `<button onclick="vm2DeletePlaylist('${vm2.playlist._id}', '${vm2EscapeHtml(vm2.playlist.name || 'Untitled Playlist')}')" class="rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="Delete playlist"><i class="ri-delete-bin-line mr-1"></i>Delete Playlist</button>`
+          ? `<button onclick="vm2DeletePlaylist('${vm2.playlist._id}', '${vm2EscapeHtml(vm2.playlist.name || t('vmUntitledPlaylist'))}')" class="rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="Delete playlist"><i class="ri-delete-bin-line mr-1"></i>${t('vmDeletePlaylistBtn')}</button>`
           : ''
       ].filter(Boolean).join('');
       playlistActions.innerHTML = actions;
@@ -866,21 +869,21 @@ function vm2RenderPlaylistBrowser() {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 min-w-0">
-            <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${project.title || 'Untitled Project'}</div>
+            <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${project.title || t('vmUntitledProject')}</div>
             <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${project.deployedRevisionId
               ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-              : 'bg-slate-100 text-slate-500 dark:bg-gray-700 dark:text-gray-300'}">${project.deployedRevisionId ? `LIVE ${project.deployedRevisionNumber ? `Rev ${project.deployedRevisionNumber}` : ''}`.trim() : 'DRAFT'}</span>
+              : 'bg-slate-100 text-slate-500 dark:bg-gray-700 dark:text-gray-300'}">${project.deployedRevisionId ? `${t('vmLiveStatus')} ${project.deployedRevisionNumber ? `${t('vmRevLabel')} ${project.deployedRevisionNumber}` : ''}`.trim() : t('vmDraftStatus')}</span>
           </div>
           ${project.description ? `<div class="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-2">${vm2EscapeHtml(project.description)}</div>` : ''}
-          <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${project.stepsCount || 0} steps · Rev ${project.currentRevisionNumber || 0}</div>
+          <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${project.stepsCount || 0} ${t('vmStepsRevLabel')} ${project.currentRevisionNumber || 0}</div>
           <div class="mt-1 text-xs ${project.deployedRevisionId ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-400'}">${vm2ProjectDeploymentLabel(project)}</div>
-          <div class="mt-1 text-xs text-gray-400">Updated ${new Date(project.updatedAt || project.createdAt).toLocaleDateString()}</div>
+          <div class="mt-1 text-xs text-gray-400">${t('vmUpdatedAt')} ${new Date(project.updatedAt || project.createdAt).toLocaleDateString()}</div>
         </div>
         <div class="flex items-center gap-1 shrink-0">
-          <button onclick="vm2LoadProject('${project._id}')" class="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-600">Open</button>
-          <button onclick="vm2OpenProjectInfoModal('${project._id}')" class="rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-700" title="Project info"><i class="ri-information-line"></i></button>
-          ${canEditProject ? `<button onclick="vm2OpenEditProjectModal('${project._id}')" class="rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-700" title="Edit project details"><i class="ri-pencil-line"></i></button>` : ''}
-          <button onclick="vm2DeleteProject('${project._id}', '${(project.title || 'Untitled').replace(/'/g, '\\&apos;')}')" class="rounded-xl border border-red-200 px-2 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="Move to recycle bin">
+          <button onclick="vm2LoadProject('${project._id}')" class="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-600">${t('vmOpen')}</button>
+          <button onclick="vm2OpenProjectInfoModal('${project._id}')" class="rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-700" title="${t('vmProjectInfo')}"><i class="ri-information-line"></i></button>
+          ${canEditProject ? `<button onclick="vm2OpenEditProjectModal('${project._id}')" class="rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-700" title="${t('vmEditProject')}"><i class="ri-pencil-line"></i></button>` : ''}
+          <button onclick="vm2DeleteProject('${project._id}', '${(project.title || 'Untitled').replace(/'/g, '\\&apos;')}')" class="rounded-xl border border-red-200 px-2 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="${t('vmMoveToRecycleBinTitle')}">
             <i class="ri-delete-bin-line"></i>
           </button>
         </div>
@@ -890,7 +893,7 @@ function vm2RenderPlaylistBrowser() {
 }
 
 async function vm2DeleteProject(id, title) {
-  if (!confirm(`Move "${title}" to the recycle bin?\n\nIt will be permanently deleted after 30 days.`)) return;
+  if (!confirm(`${t('vmMoveToRecycleBinTitle')}: "${title}"\n\n${t('vmDeletedProjectsKept')}`)) return;
   try {
     const res = await fetch(`${vm2BaseUrl()}api/video-projects/${id}`, {
       method: 'DELETE',
@@ -938,7 +941,7 @@ async function vm2LoadTrash() {
   if (!list) return;
 
   if (!vm2.playlist?._id) {
-    list.innerHTML = '<p class="col-span-3 text-sm text-gray-400 text-center py-8">Select a playlist first to view its recycle bin.</p>';
+    list.innerHTML = `<p class="col-span-3 text-sm text-gray-400 text-center py-8">${t('vmSelectPlaylistFirstToView')}</p>`;
     return;
   }
 
@@ -963,20 +966,20 @@ async function vm2LoadTrash() {
       const daysRemaining = p.daysRemaining ?? '?';
       const urgentClass = daysRemaining <= 3 ? 'text-red-500 font-semibold' : 'text-orange-500';
       const permDeleteBtn = canPermDelete
-        ? `<button onclick="vm2PermanentDeleteProject('${p._id}', '${(p.title || 'Untitled').replace(/'/g, '\\&apos;')}')" class="rounded-xl border border-red-300 px-2 py-1.5 text-xs text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30" title="Delete forever"><i class="ri-delete-bin-2-fill"></i></button>`
+        ? `<button onclick="vm2PermanentDeleteProject('${p._id}', '${(p.title || 'Untitled').replace(/'/g, '\\&apos;')}')" class="rounded-xl border border-red-300 px-2 py-1.5 text-xs text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30" title="${t('vmDeleteForever')}"><i class="ri-delete-bin-2-fill"></i></button>`
         : '';
       return `
         <div class="rounded-2xl border border-red-100 bg-red-50/60 p-4 dark:border-red-900/40 dark:bg-red-900/10">
-          <div class="text-sm font-semibold text-gray-800 dark:text-white truncate">${p.title || 'Untitled'}</div>
-          <div class="mt-1 text-xs text-gray-500">${p.stepsCount || 0} steps · Rev ${p.currentRevisionNumber || 0}</div>
+          <div class="text-sm font-semibold text-gray-800 dark:text-white truncate">${p.title || t('vmUntitledProject')}</div>
+          <div class="mt-1 text-xs text-gray-500">${p.stepsCount || 0} ${t('vmStepsRevLabel')} ${p.currentRevisionNumber || 0}</div>
           <div class="mt-1 text-xs text-gray-400">Deleted ${deletedDate} by ${p.deletedBy || '?'}</div>
           <div class="mt-1 text-xs ${urgentClass}">${daysRemaining} day${daysRemaining === 1 ? '' : 's'} until permanent deletion</div>
           <div class="mt-3 flex gap-2">
-            <button onclick="vm2PreviewTrashProject('${p._id}')" class="rounded-xl border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" title="Preview">
+            <button onclick="vm2PreviewTrashProject('${p._id}')" class="rounded-xl border border-gray-300 dark:border-gray-600 px-2 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" title="${t('vmPreviewBtn')}">
               <i class="ri-eye-line"></i>
             </button>
             <button onclick="vm2RestoreProject('${p._id}')" class="flex-1 rounded-xl bg-green-500 px-2 py-1.5 text-xs font-medium text-white hover:bg-green-600">
-              <i class="ri-arrow-go-back-line mr-1"></i>Restore
+              <i class="ri-arrow-go-back-line mr-1"></i>${t('vmRestore')}
             </button>
             ${permDeleteBtn}
           </div>
@@ -1023,7 +1026,7 @@ async function vm2PermanentDeleteProject(id, title) {
 async function vm2LoadPlaylists() {
   const playlistList = vm2Get('vm2-playlist-list');
   const projectList = vm2Get('vm2-browser-project-list');
-  if (playlistList) playlistList.innerHTML = '<div class="text-sm text-gray-400 py-6 text-center">Loading playlists...</div>';
+  if (playlistList) playlistList.innerHTML = `<div class="text-sm text-gray-400 py-6 text-center">${t('vmLoadingPlaylists')}</div>`;
   if (projectList) projectList.innerHTML = '';
 
   try {
@@ -1056,7 +1059,7 @@ async function vm2SelectPlaylist(id) {
 
   const projectList = vm2Get('vm2-browser-project-list');
   if (projectList) {
-    projectList.innerHTML = '<div class="text-sm text-gray-400 py-6 text-center">Loading projects...</div>';
+    projectList.innerHTML = `<div class="text-sm text-gray-400 py-6 text-center">${t('vmLoadingProjects')}</div>`;
   }
 
   try {
@@ -1100,7 +1103,7 @@ function vm2BuildPlaylistModelOptionsMarkup(models, selectedModel = '') {
   const uniqueModels = Array.isArray(models) ? Array.from(new Set(models.filter(Boolean))) : [];
   const normalizedSelectedModel = String(selectedModel || '').trim();
   const hasSelectedModel = normalizedSelectedModel && uniqueModels.includes(normalizedSelectedModel);
-  const options = ['<option value="">No model selected</option>'];
+  const options = [`<option value="">${t('vmNoModelSelected')}</option>`];
   if (normalizedSelectedModel && !hasSelectedModel) {
     options.push(`<option value="${vm2EscapeHtml(normalizedSelectedModel)}">${vm2EscapeHtml(normalizedSelectedModel)}</option>`);
   }
@@ -1191,19 +1194,19 @@ async function vm2OpenCreatePlaylistModal() {
   descInput.value = '';
   privacySelect.value = 'internal';
   errorEl.textContent = '';
-  loadingEl.textContent = 'Loading models...';
-  modelSelect.innerHTML = '<option value="">Loading models...</option>';
+  loadingEl.textContent = t('vmLoadingModels');
+  modelSelect.innerHTML = `<option value="">${t('vmLoadingModels')}</option>`;
   modelSelect.disabled = true;
   vm2.playlistCreating = false;
   vm2SyncCreatePlaylistSubmitState();
 
   try {
     const models = await vm2LoadPlaylistModelOptions();
-    modelSelect.innerHTML = ['<option value="">No model selected</option>']
+    modelSelect.innerHTML = [`<option value="">${t('vmNoModelSelected')}</option>`]
       .concat(models.map((model) => `<option value="${vm2EscapeHtml(model)}">${vm2EscapeHtml(model)}</option>`))
       .join('');
     modelSelect.disabled = false;
-    loadingEl.textContent = models.length ? `${models.length} models available` : 'No models found';
+    loadingEl.textContent = models.length ? `${models.length} ${t('vmModelsAvailable')}` : t('vmNoModelsFound');
   } catch (err) {
     modelSelect.innerHTML = '<option value="">Failed to load models</option>';
     modelSelect.disabled = true;
@@ -1230,7 +1233,7 @@ async function vm2SubmitCreatePlaylist() {
   const model = modelSelect.value.trim();
 
   if (!name) {
-    errorEl.textContent = 'Title is required.';
+    errorEl.textContent = t('vmTitleRequired');
     vm2SyncCreatePlaylistSubmitState();
     return;
   }
@@ -1285,9 +1288,9 @@ async function vm2OpenEditPlaylistModal(id) {
   const loadingEl = vm2Get('vm2-edit-playlist-model-loading');
   if (!playlist || !modal || !modelSelect || !titleInput || !descInput || !errorEl || !loadingEl) return;
   modal.dataset.playlistId = String(playlist._id);
-  modelSelect.innerHTML = '<option value="">Loading models...</option>';
+  modelSelect.innerHTML = `<option value="">${t('vmLoadingModels')}</option>`;
   modelSelect.disabled = true;
-  loadingEl.textContent = 'Loading models...';
+  loadingEl.textContent = t('vmLoadingModels');
   titleInput.value = playlist.name || '';
   titleInput.dataset.autoModel = playlist.model || '';
   titleInput.dataset.manual = playlist.model && playlist.name === playlist.model ? '0' : (playlist.name ? '1' : '0');
@@ -1302,7 +1305,7 @@ async function vm2OpenEditPlaylistModal(id) {
     modelSelect.innerHTML = vm2BuildPlaylistModelOptionsMarkup(models, playlist.model || '');
     modelSelect.value = playlist.model || '';
     modelSelect.disabled = false;
-    loadingEl.textContent = `${Array.isArray(models) ? models.length : 0} models available`;
+    loadingEl.textContent = `${Array.isArray(models) ? models.length : 0} ${t('vmModelsAvailable')}`;
   } catch (err) {
     console.error('[VM2] Load edit playlist model options error:', err);
     modelSelect.innerHTML = vm2BuildPlaylistModelOptionsMarkup([], playlist.model || '');
@@ -1325,7 +1328,7 @@ async function vm2SubmitEditPlaylist() {
   const name = titleInput.value.trim();
   const description = descInput.value.trim();
   if (!name) {
-    errorEl.textContent = 'Title is required.';
+    errorEl.textContent = t('vmTitleRequired');
     vm2SyncEditPlaylistSubmitState();
     return;
   }
@@ -1354,7 +1357,7 @@ async function vm2SubmitEditPlaylist() {
 }
 
 async function vm2DeletePlaylist(id, name) {
-  if (!confirm(`Delete playlist "${name}"?\n\nThis will permanently delete the playlist, all its projects, and all shared assets.`)) return;
+  if (!confirm(`${t('vmDeletePlaylistBtn')}: "${name}"?\n\nThis will permanently delete the playlist, all its projects, and all shared assets.`)) return;
   try {
     const res = await fetch(`${vm2BaseUrl()}api/video-playlists/${id}`, {
       method: 'DELETE',
@@ -1399,7 +1402,7 @@ function vm2CloseCreateProjectModal() {
 
 function vm2OpenCreateProjectModal() {
   if (!vm2.playlist?._id) {
-    alert('Select a playlist first.');
+    alert(t('vmSelectAPlaylist'));
     return;
   }
   const modal = vm2Get('vm2-modal-create-project');
@@ -1426,7 +1429,7 @@ async function vm2SubmitCreateProject() {
   const description = descInput.value.trim();
 
   if (!title) {
-    errorEl.textContent = 'Title is required.';
+    errorEl.textContent = t('vmTitleRequired');
     vm2SyncCreateProjectSubmitState();
     return;
   }
@@ -1504,7 +1507,7 @@ async function vm2SubmitEditProject() {
   const description = descInput.value.trim();
 
   if (!title) {
-    errorEl.textContent = 'Title is required.';
+    errorEl.textContent = t('vmTitleRequired');
     return;
   }
 
@@ -1553,17 +1556,17 @@ function vm2OpenProjectInfoModal(id) {
   const updatedEl = modal.querySelector('[data-info="updated"]');
   const creatorEl = modal.querySelector('[data-info="creator"]');
 
-  if (titleEl)   titleEl.textContent   = project.title || 'Untitled Project';
+  if (titleEl)   titleEl.textContent   = project.title || t('vmUntitledProject');
   if (descEl)    descEl.textContent    = project.description || '—';
   if (stepsEl)   stepsEl.textContent   = project.stepsCount || 0;
-  if (revEl)     revEl.textContent     = `Rev ${project.currentRevisionNumber || 0}`;
+  if (revEl)     revEl.textContent     = `${t('vmRevLabel')} ${project.currentRevisionNumber || 0}`;
   if (creatorEl) creatorEl.textContent = project.createdBy || '—';
   if (createdEl) createdEl.textContent = fmt(project.createdAt);
   if (updatedEl) updatedEl.textContent = fmt(project.updatedAt);
 
   if (statusEl) {
     const isLive = !!project.deployedRevisionId;
-    statusEl.textContent = isLive ? `LIVE · Rev ${project.deployedRevisionNumber || 0}` : 'Draft';
+    statusEl.textContent = isLive ? `${t('vmLiveRevStatus')} ${project.deployedRevisionNumber || 0}` : t('vmDraftStatusLabel');
     statusEl.className = `inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${
       isLive ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
              : 'bg-slate-100 text-slate-500 dark:bg-gray-700 dark:text-gray-300'}`;
@@ -1598,7 +1601,8 @@ function vm2HandleTitleChange(value) {
   vm2MarkDirty('Title changed');
 }
 
-function vm2SetVideoSource(url, { local = false, sourceKey = '', showLoader = false, loadingText = 'Loading video...' } = {}) {
+function vm2SetVideoSource(url, { local = false, sourceKey = '', showLoader = false, loadingText = null } = {}) {
+  if (loadingText === null) loadingText = t('vmLoadingVideo');
   if (!url) {
     vm2ClearManagedMedia(false);
     return;
@@ -1727,7 +1731,7 @@ function vm2SetReadOnlyBanner(revision) {
   if (!banner || !label) return;
   banner.classList.toggle('hidden', !revision);
   if (revision) {
-    label.textContent = `Previewing ${revision.revisionName || 'revision'} · ${new Date(revision.createdAt).toLocaleString()}`;
+    label.textContent = `${t('vmPreviewingSavedRevision')}: ${revision.revisionName || t('vmUnnamedRevision')} · ${new Date(revision.createdAt).toLocaleString()}`;
   }
 }
 
@@ -1778,7 +1782,7 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null, preserveHistor
     if (playerArea) playerArea.classList.remove('hidden');
     vm2PrimeProjectMedia(vm2.project, {
       showLoader: true,
-      loadingText: vm2.loadingProject ? 'Loading project video...' : 'Loading video...',
+      loadingText: vm2.loadingProject ? t('vmLoadingProjectVideo') : t('vmLoadingVideo'),
     });
   } else {
     if (uploadZone) uploadZone.classList.remove('hidden');
@@ -1811,23 +1815,23 @@ function vm2RenderEditorShell() {
     <!-- ═══ TOP BAR ═══ -->
     <div class="flex items-center gap-3 px-4 py-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
       <button onclick="vm2ReturnToBrowser()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
-        <i class="ri-arrow-left-line"></i>Projects
+        <i class="ri-arrow-left-line"></i>${t('vmProjectsBtn')}
       </button>
-      <button id="vm2-undo-btn" onclick="vm2Undo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Undo">
+      <button id="vm2-undo-btn" onclick="vm2Undo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="${t('vmUndoTitle')}">
         <i class="ri-arrow-go-back-line text-lg"></i>
       </button>
-      <button id="vm2-redo-btn" onclick="vm2Redo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="Redo">
+      <button id="vm2-redo-btn" onclick="vm2Redo()" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500" title="${t('vmRedoTitle')}">
         <i class="ri-arrow-go-forward-line text-lg"></i>
       </button>
       <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
       <button onclick="vm2ShowCanvasSize()" class="px-2 py-1 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 flex items-center gap-1">
-        <i class="ri-aspect-ratio-line"></i>Resize
+        <i class="ri-aspect-ratio-line"></i>${t('vmResize')}
       </button>
       <div class="flex-1"></div>
       <input id="vm2-title" type="text" value="Untitled1"
         class="text-sm font-medium bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none dark:text-white px-2 w-48 text-center"
         onchange="vm2HandleTitleChange(this.value)">
-      <span id="vm2-save-status" class="text-xs text-gray-400">Not saved</span>
+      <span id="vm2-save-status" class="text-xs text-gray-400">${t('vmNotSaved')}</span>
       <div class="flex-1"></div>
       <select id="vm2-zoom-select" onchange="vm2SetCanvasZoom(this.value)" class="text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300">
         <option value="0.5">50%</option>
@@ -1837,23 +1841,23 @@ function vm2RenderEditorShell() {
         <option value="fit" selected>Fit</option>
       </select>
       <button onclick="vm2ReturnToBrowser()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
-        <i class="ri-folder-open-line"></i>Browse
+        <i class="ri-folder-open-line"></i>${t('vmBrowse')}
       </button>
       <button onclick="vm2SaveProject()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
-        <i class="ri-save-line"></i>Save Revision
+        <i class="ri-save-line"></i>${t('vmSaveRevision')}
       </button>
       <button onclick="vm2ShowHistory()" class="px-3 py-1.5 rounded text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 text-gray-600 dark:text-gray-300 flex items-center gap-1">
-        <i class="ri-history-line"></i>History
+        <i class="ri-history-line"></i>${t('vmHistoryBtn')}
       </button>
       <button onclick="vm2Export()" class="px-3 py-1.5 rounded text-xs bg-blue-500 hover:bg-blue-600 text-white flex items-center gap-1 font-medium">
-        <i class="ri-download-line"></i>Export
+        <i class="ri-download-line"></i>${t('export')}
       </button>
     </div>
 
     <div id="vm2-readonly-banner" class="hidden px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-700 text-sm flex items-center gap-3 flex-shrink-0">
       <i class="ri-eye-line"></i>
-      <span id="vm2-readonly-label" class="flex-1">Previewing saved revision</span>
-      <button onclick="vm2ExitRevisionPreview()" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-xs font-medium">Back To Current</button>
+      <span id="vm2-readonly-label" class="flex-1">${t('vmPreviewingSavedRevision')}</span>
+      <button onclick="vm2ExitRevisionPreview()" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-xs font-medium">${t('vmBackToCurrent')}</button>
     </div>
 
     <!-- ═══ MAIN BODY (3 panels) ═══ -->
@@ -1862,13 +1866,13 @@ function vm2RenderEditorShell() {
       <!-- ── LEFT: Steps Panel ────────────────────────────── -->
       <div class="w-48 flex-shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
         <div class="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-          <span>Steps</span>
+          <span>${t('vmStepsPanel')}</span>
           <span id="vm2-step-count" class="text-gray-400 font-normal text-xs">0</span>
         </div>
         <div id="vm2-steps-list" class="flex-1 overflow-y-auto p-2 space-y-1"></div>
         <div class="p-2 border-t border-gray-100 dark:border-gray-700">
           <button onclick="vm2AddStep()" class="w-full py-1.5 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-gray-600 dark:text-gray-300 flex items-center justify-center gap-1">
-            <i class="ri-add-line"></i>Add Step
+            <i class="ri-add-line"></i>${t('vmAddStep')}
           </button>
         </div>
       </div>
@@ -1885,8 +1889,8 @@ function vm2RenderEditorShell() {
                ondragleave="this.classList.remove('border-blue-400')"
                ondrop="vm2HandleDrop(event)">
             <i class="ri-video-upload-line text-5xl text-gray-400 mb-3 block"></i>
-            <p class="text-gray-600 dark:text-gray-300 font-medium">Upload a Video</p>
-            <p class="text-gray-400 text-sm mt-1">Click or drag & drop · MP4, MOV, WebM</p>
+            <p class="text-gray-600 dark:text-gray-300 font-medium">${t('vmUploadAVideo')}</p>
+            <p class="text-gray-400 text-sm mt-1">${t('vmClickOrDragDrop')}</p>
           </div>
           <!-- Divider -->
           <div class="flex flex-col items-center gap-1 text-gray-400 dark:text-gray-600 select-none">
@@ -1898,8 +1902,8 @@ function vm2RenderEditorShell() {
           <div class="text-center p-10 rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 cursor-pointer transition-colors"
                onclick="vm2ShowAssetPicker()">
             <i class="ri-film-line text-5xl text-gray-400 mb-3 block"></i>
-            <p class="text-gray-600 dark:text-gray-300 font-medium">Pick from Library</p>
-            <p class="text-gray-400 text-sm mt-1">Reuse a shared video from this playlist</p>
+            <p class="text-gray-600 dark:text-gray-300 font-medium">${t('vmPickFromLibrary')}</p>
+            <p class="text-gray-400 text-sm mt-1">${t('vmReuseSharedVideo')}</p>
           </div>
           <input id="vm2-file-input" type="file" accept="video/*" class="hidden" onchange="vm2HandleFileSelect(event)">
         </div>
@@ -1933,8 +1937,8 @@ function vm2RenderEditorShell() {
             <div class="flex flex-col items-center gap-3 rounded-2xl bg-slate-900/90 px-6 py-5 text-white shadow-2xl">
               <div class="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-sky-400"></div>
               <div class="text-center">
-                <p class="text-sm font-medium">Preparing editor</p>
-                <p id="vm2-loading-text" class="mt-1 text-xs text-slate-300">Loading video...</p>
+                <p class="text-sm font-medium">${t('vmPreparingEditor')}</p>
+                <p id="vm2-loading-text" class="mt-1 text-xs text-slate-300">${t('vmLoadingVideo')}</p>
               </div>
             </div>
           </div>
@@ -1996,8 +2000,8 @@ function vm2RenderEditorShell() {
         
         <!-- Tab Switcher -->
         <div class="flex border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <button id="vm2-tab-elements" onclick="vm2SwitchTab('elements')" class="flex-1 py-2 text-xs font-medium text-blue-500 border-b-2 border-blue-500">Elements</button>
-          <button id="vm2-tab-properties" onclick="vm2SwitchTab('properties')" class="flex-1 py-2 text-xs font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">Properties</button>
+          <button id="vm2-tab-elements" onclick="vm2SwitchTab('elements')" class="flex-1 py-2 text-xs font-medium text-blue-500 border-b-2 border-blue-500">${t('vmElementsTab')}</button>
+          <button id="vm2-tab-properties" onclick="vm2SwitchTab('properties')" class="flex-1 py-2 text-xs font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">${t('vmPropertiesTab')}</button>
         </div>
 
         <!-- Elements Panel -->
@@ -2005,24 +2009,24 @@ function vm2RenderEditorShell() {
           
           <!-- Text -->
           <div class="mb-4">
-            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Text</p>
+            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">${t('vmTextSection')}</p>
             <div class="grid grid-cols-2 gap-2">
               <button draggable="true"
                 ondragstart="vm2ElementPanelDragStart(event,'text','title')"
                 onclick="vm2AddElement('text','title')"
                 class="py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs font-medium text-gray-700 dark:text-gray-200 cursor-grab active:cursor-grabbing select-none"
-                title="Drag onto canvas or click to add">Title</button>
+                title="Drag onto canvas or click to add">${t('vmTitleElement')}</button>
               <button draggable="true"
                 ondragstart="vm2ElementPanelDragStart(event,'text','body')"
                 onclick="vm2AddElement('text','body')"
                 class="py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs text-gray-600 dark:text-gray-300 cursor-grab active:cursor-grabbing select-none"
-                title="Drag onto canvas or click to add">Body Text</button>
+                title="Drag onto canvas or click to add">${t('vmBodyText')}</button>
             </div>
           </div>
 
           <!-- Shapes -->
           <div class="mb-4">
-            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Shapes</p>
+            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">${t('vmShapesSection')}</p>
             <div class="grid grid-cols-4 gap-2">
               <button draggable="true"
                 ondragstart="vm2ElementPanelDragStart(event,'shape','rect')"
@@ -2053,25 +2057,25 @@ function vm2RenderEditorShell() {
 
           <!-- Images -->
           <div class="mb-4">
-            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Images</p>
+            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">${t('vmImagesSection')}</p>
             <button onclick="vm2Get('vm2-image-input').click()" class="w-full py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs text-gray-600 dark:text-gray-300 flex items-center justify-center gap-2">
-              <i class="ri-image-add-line"></i>Upload Image
+              <i class="ri-image-add-line"></i>${t('vmUploadImage')}
             </button>
             <input id="vm2-image-input" type="file" accept="image/*" class="hidden" onchange="vm2HandleImageUpload(event)">
           </div>
 
           <!-- Audio -->
           <div class="mb-4">
-            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Audio</p>
+            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">${t('vmAudioSection')}</p>
             <button onclick="vm2Get('vm2-audio-input').click()" class="w-full py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded text-xs text-gray-600 dark:text-gray-300 flex items-center justify-center gap-2">
-              <i class="ri-music-add-line"></i>Upload Audio
+              <i class="ri-music-add-line"></i>${t('vmUploadAudio')}
             </button>
             <input id="vm2-audio-input" type="file" accept="audio/*" class="hidden" onchange="vm2HandleAudioUpload(event)">
           </div>
 
           <!-- Step Elements List -->
           <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mt-3">
-            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Current Step Elements</p>
+            <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">${t('vmCurrentStepElements')}</p>
             <div id="vm2-elements-list" class="space-y-1 text-xs"></div>
           </div>
         </div>
@@ -2079,7 +2083,7 @@ function vm2RenderEditorShell() {
         <!-- Properties Panel -->
         <div id="vm2-panel-properties" class="hidden flex-1 overflow-y-auto p-3">
           <div id="vm2-props-content">
-            <p class="text-xs text-gray-400 italic text-center py-8">Select an element to edit its properties</p>
+            <p class="text-xs text-gray-400 italic text-center py-8">${t('vmSelectElementToEdit')}</p>
           </div>
         </div>
       </div>
@@ -2234,7 +2238,7 @@ function vm2RenderEditorShell() {
     <div class="bg-white dark:bg-gray-800 rounded-xl p-5 w-[540px] max-h-[70vh] flex flex-col shadow-2xl">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
         <h3 class="font-semibold text-gray-800 dark:text-white flex items-center gap-2">
-          <i class="ri-history-line text-blue-500"></i>Revision History
+          <i class="ri-history-line text-blue-500"></i>${t('vmRevisionHistory')}
         </h3>
         <button onclick="vm2Get('vm2-modal-history').classList.add('hidden')" class="text-gray-400 hover:text-gray-600">
           <i class="ri-close-line text-xl"></i>
@@ -2376,7 +2380,7 @@ function vm2RenderEditorShell() {
 
   vm2InitManagedMedia();
   vm2SyncTrashUiState();
-  vm2SetSaveStatus(vm2.project?._id ? 'Loaded' : 'Not saved');
+  vm2SetSaveStatus(vm2.project?._id ? t('vmNotSaved') : t('vmNotSaved'));
   vm2UpdateUndoRedoButtons();
 }
 
@@ -2390,22 +2394,22 @@ function loadVideoManual2Page() {
         <div class="flex flex-col gap-4 rounded-[28px] border border-white/60 bg-white/90 p-6 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90">
           <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Video Manual Library</p>
-              <h2 class="mt-2 text-3xl font-semibold text-slate-900 dark:text-white">Playlists and projects</h2>
-              <p class="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">Choose a playlist first, then open one of its projects. Editing starts only after a real project exists.</p>
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">${t('vmVideoManualLibrary')}</p>
+              <h2 class="mt-2 text-3xl font-semibold text-slate-900 dark:text-white">${t('vmPlaylistsAndProjects')}</h2>
+              <p class="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">${t('vmPlaylistsAndProjectsSubtitle')}</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button onclick="vm2LoadPlaylists()" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
-                <i class="ri-refresh-line mr-1"></i>Refresh
+                <i class="ri-refresh-line mr-1"></i>${t('refresh')}
               </button>
               <button onclick="vm2ToggleTrashView()" id="vm2-trash-btn" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-                <i class="ri-delete-bin-line mr-1"></i>Recycle Bin
+                <i class="ri-delete-bin-line mr-1"></i>${t('vmRecycleBin')}
               </button>
               <button id="vm2-create-playlist-btn" onclick="vm2CreatePlaylist()" class="hidden rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-sky-500 dark:hover:bg-sky-400">
-                <i class="ri-stack-line mr-1"></i>New Playlist
+                <i class="ri-stack-line mr-1"></i>${t('vmNewPlaylist')}
               </button>
               <button id="vm2-create-project-btn" onclick="vm2CreateProject()" class="rounded-2xl bg-sky-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-gray-700">
-                <i class="ri-add-circle-line mr-1"></i>New Project
+                <i class="ri-add-circle-line mr-1"></i>${t('vmNewProject')}
               </button>
             </div>
           </div>
@@ -2415,15 +2419,15 @@ function loadVideoManual2Page() {
           <section class="rounded-[28px] border border-white/60 bg-white/90 p-5 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90">
             <div class="mb-4 flex items-center justify-between">
               <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Playlists</p>
-                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Model groups and access boundaries</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">${t('vmPlaylistsSection')}</p>
+                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">${t('vmModelGroupsSubtitle')}</p>
               </div>
             </div>
             <div class="mb-4">
               <label for="vm2-playlist-search" class="sr-only">Search playlists</label>
               <div class="relative">
                 <i class="ri-search-line pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
-                <input id="vm2-playlist-search" type="search" value="${vm2EscapeHtml(vm2.playlistSearchQuery || '')}" oninput="vm2SetPlaylistSearch(this.value)" placeholder="Search playlists..." class="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+                <input id="vm2-playlist-search" type="search" value="${vm2EscapeHtml(vm2.playlistSearchQuery || '')}" oninput="vm2SetPlaylistSearch(this.value)" placeholder="${t('vmSearchPlaylistsPlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
               </div>
             </div>
             <div id="vm2-playlist-list" class="space-y-3"></div>
@@ -2432,16 +2436,16 @@ function loadVideoManual2Page() {
           <section class="rounded-[28px] border border-white/60 bg-white/90 p-5 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90">
             <div class="mb-5 flex flex-col gap-2 border-b border-slate-200 pb-4 dark:border-gray-800 md:flex-row md:items-end md:justify-between">
               <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Projects</p>
-                <h3 id="vm2-browser-project-title" class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">Select a playlist</h3>
-                <p id="vm2-playlist-meta" class="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a playlist to browse projects</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">${t('vmProjectsSection')}</p>
+                <h3 id="vm2-browser-project-title" class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">${t('vmSelectAPlaylist')}</h3>
+                <p id="vm2-playlist-meta" class="mt-1 text-sm text-slate-500 dark:text-slate-400">${t('vmChoosePlaylistToBrowse')}</p>
                 <div id="vm2-browser-playlist-actions" class="hidden mt-3 flex flex-wrap gap-2"></div>
               </div>
             </div>
             <div id="vm2-browser-project-empty" class="rounded-[24px] border border-dashed border-slate-300 px-6 py-14 text-center dark:border-gray-700">
               <i class="ri-folder-open-line text-4xl text-slate-300 dark:text-gray-600"></i>
-              <p class="mt-4 text-base font-medium text-slate-700 dark:text-slate-200">No playlist selected</p>
-              <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Pick a playlist on the left to see its projects.</p>
+              <p class="mt-4 text-base font-medium text-slate-700 dark:text-slate-200">${t('vmNoPlaylistSelected')}</p>
+              <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">${t('vmPickPlaylistLeft')}</p>
             </div>
             <div id="vm2-browser-project-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
 
@@ -2450,8 +2454,8 @@ function loadVideoManual2Page() {
               <div class="mb-4 flex items-center gap-3">
                 <i class="ri-delete-bin-2-line text-xl text-red-400"></i>
                 <div>
-                  <p class="text-sm font-semibold text-slate-800 dark:text-white">Recycle Bin</p>
-                  <p class="text-xs text-slate-500 dark:text-slate-400">Deleted projects are kept for 30 days then permanently removed.</p>
+                  <p class="text-sm font-semibold text-slate-800 dark:text-white">${t('vmRecycleBin')}</p>
+                  <p class="text-xs text-slate-500 dark:text-slate-400">${t('vmDeletedProjectsKept')}</p>
                 </div>
               </div>
               <div id="vm2-trash-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
@@ -2466,7 +2470,7 @@ function loadVideoManual2Page() {
       <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Project Info</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">${t('vmProjectInfo')}</p>
             <h3 class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white truncate" data-info="title"></h3>
             <span data-info="status" class="mt-2 inline-block"></span>
           </div>
@@ -2477,39 +2481,39 @@ function loadVideoManual2Page() {
 
         <div class="mt-5 space-y-3">
           <div>
-            <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Description</p>
+            <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmDescriptionLabel')}</p>
             <p class="mt-1 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap" data-info="description"></p>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Current Revision</p>
+              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmCurrentRevision')}</p>
               <p class="mt-1 text-sm text-slate-700 dark:text-slate-300" data-info="revision"></p>
             </div>
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Steps</p>
+              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmStepsLabel')}</p>
               <p class="mt-1 text-sm text-slate-700 dark:text-slate-300" data-info="steps"></p>
             </div>
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Created By</p>
+              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmCreatedBy')}</p>
               <p class="mt-1 text-sm text-slate-700 dark:text-slate-300" data-info="creator"></p>
             </div>
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Created At</p>
+              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmCreatedAtLabel')}</p>
               <p class="mt-1 text-sm text-slate-700 dark:text-slate-300" data-info="created"></p>
             </div>
             <div class="col-span-2">
-              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Last Updated</p>
+              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmLastUpdated')}</p>
               <p class="mt-1 text-sm text-slate-700 dark:text-slate-300" data-info="updated"></p>
             </div>
             <div class="col-span-2">
-              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Deployed</p>
+              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmDeployedLabel')}</p>
               <p class="mt-1 text-sm text-slate-700 dark:text-slate-300" data-info="deploy"></p>
             </div>
           </div>
         </div>
 
         <div class="mt-6">
-          <button onclick="vm2CloseProjectInfoModal()" class="w-full py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Close</button>
+          <button onclick="vm2CloseProjectInfoModal()" class="w-full py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">${t('vmClose')}</button>
         </div>
       </div>
     </div>
@@ -2518,9 +2522,9 @@ function loadVideoManual2Page() {
       <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Edit Project</p>
-            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Update project details</h3>
-            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">班長 and above can edit the title and description.</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">${t('vmEditProject')}</p>
+            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">${t('vmUpdateProjectDetails')}</h3>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">${t('vmBanchoAndAbove')}</p>
           </div>
           <button onclick="vm2CloseEditProjectModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
             <i class="ri-close-line text-lg"></i>
@@ -2529,21 +2533,21 @@ function loadVideoManual2Page() {
 
         <div class="mt-6 space-y-4">
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
-            <input id="vm2-edit-project-title" type="text" oninput="vm2SyncEditProjectSubmitState()" placeholder="Project title" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmTitleLabel')}</label>
+            <input id="vm2-edit-project-title" type="text" oninput="vm2SyncEditProjectSubmitState()" placeholder="${t('vmProjectTitlePlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</label>
-            <textarea id="vm2-edit-project-description" rows="4" placeholder="Describe what this project covers, which process, which part, and any important notes for operators." class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmDescriptionLabel')}</label>
+            <textarea id="vm2-edit-project-description" rows="4" placeholder="${t('vmDescribeProjectPlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
           </div>
 
           <p id="vm2-edit-project-error" class="min-h-[1.25rem] text-sm text-red-500"></p>
         </div>
 
         <div class="mt-6 flex gap-3">
-          <button onclick="vm2CloseEditProjectModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
-          <button id="vm2-edit-project-submit" onclick="vm2SubmitEditProject()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Save Changes</button>
+          <button onclick="vm2CloseEditProjectModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">${t('cancel')}</button>
+          <button id="vm2-edit-project-submit" onclick="vm2SubmitEditProject()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>${t('vmSaveChanges')}</button>
         </div>
       </div>
     </div>
@@ -2552,9 +2556,9 @@ function loadVideoManual2Page() {
       <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">New Project</p>
-            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Create project</h3>
-            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Add a title and description so your team knows what this project covers.</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">${t('vmNewProjectLabel')}</p>
+            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">${t('vmCreateProjectSubtitle')}</h3>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">${t('vmCreateProjectInfo')}</p>
           </div>
           <button onclick="vm2CloseCreateProjectModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
             <i class="ri-close-line text-lg"></i>
@@ -2563,21 +2567,21 @@ function loadVideoManual2Page() {
 
         <div class="mt-6 space-y-4">
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
-            <input id="vm2-create-project-title" type="text" oninput="vm2SyncCreateProjectSubmitState()" placeholder="e.g. SRS Assembly Step 1" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmTitleLabel')}</label>
+            <input id="vm2-create-project-title" type="text" oninput="vm2SyncCreateProjectSubmitState()" placeholder="${t('vmProjectTitleExamplePlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</label>
-            <textarea id="vm2-create-project-description" rows="4" placeholder="Describe what this project covers, which process, which part, and any important notes for operators." class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmDescriptionLabel')}</label>
+            <textarea id="vm2-create-project-description" rows="4" placeholder="${t('vmDescribeProjectPlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
           </div>
 
           <p id="vm2-create-project-error" class="min-h-[1.25rem] text-sm text-red-500"></p>
         </div>
 
         <div class="mt-6 flex gap-3">
-          <button onclick="vm2CloseCreateProjectModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
-          <button id="vm2-create-project-submit" onclick="vm2SubmitCreateProject()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Create Project</button>
+          <button onclick="vm2CloseCreateProjectModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">${t('cancel')}</button>
+          <button id="vm2-create-project-submit" onclick="vm2SubmitCreateProject()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>${t('vmCreateProjectBtn')}</button>
         </div>
       </div>
     </div>
@@ -2586,9 +2590,9 @@ function loadVideoManual2Page() {
       <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">New Playlist</p>
-            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Create playlist</h3>
-            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Title defaults to the selected model, but you can override it.</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">${t('vmNewPlaylistLabel')}</p>
+            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">${t('vmCreatePlaylistSubtitle')}</h3>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">${t('vmCreatePlaylistInfo')}</p>
           </div>
           <button onclick="vm2CloseCreatePlaylistModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
             <i class="ri-close-line text-lg"></i>
@@ -2597,29 +2601,29 @@ function loadVideoManual2Page() {
 
         <div class="mt-6 space-y-4">
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Model</label>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmModelLabel')}</label>
             <select id="vm2-create-playlist-model" onchange="vm2OnCreatePlaylistModelChange()" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-              <option value="">Loading models...</option>
+              <option value="">${t('vmLoadingModels')}</option>
             </select>
-            <p id="vm2-create-playlist-model-loading" class="mt-2 text-xs text-slate-400">Loading models...</p>
+            <p id="vm2-create-playlist-model-loading" class="mt-2 text-xs text-slate-400">${t('vmLoadingModels')}</p>
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
-            <input id="vm2-create-playlist-title" type="text" oninput="vm2OnCreatePlaylistTitleInput()" placeholder="Playlist title" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmTitleLabel')}</label>
+            <input id="vm2-create-playlist-title" type="text" oninput="vm2OnCreatePlaylistTitleInput()" placeholder="${t('vmPlaylistTitlePlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</label>
-            <textarea id="vm2-create-playlist-description" rows="4" placeholder="Optional description" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmDescriptionLabel')}</label>
+            <textarea id="vm2-create-playlist-description" rows="4" placeholder="${t('vmOptionalDescriptionPlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Privacy</label>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmPrivacyLabel')}</label>
             <select id="vm2-create-playlist-privacy" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-              <option value="internal">Internal</option>
-              <option value="public">Public</option>
-              <option value="private">Private</option>
+              <option value="internal">${t('vmInternalOption')}</option>
+              <option value="public">${t('vmPublicOption')}</option>
+              <option value="private">${t('vmPrivateOption')}</option>
             </select>
           </div>
 
@@ -2627,8 +2631,8 @@ function loadVideoManual2Page() {
         </div>
 
         <div class="mt-6 flex gap-3">
-          <button onclick="vm2CloseCreatePlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
-          <button id="vm2-create-playlist-submit" onclick="vm2SubmitCreatePlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Create Playlist</button>
+          <button onclick="vm2CloseCreatePlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">${t('cancel')}</button>
+          <button id="vm2-create-playlist-submit" onclick="vm2SubmitCreatePlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>${t('vmCreatePlaylistBtn')}</button>
         </div>
       </div>
     </div>
@@ -2637,9 +2641,9 @@ function loadVideoManual2Page() {
       <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Edit Playlist</p>
-            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">Update playlist details</h3>
-            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">課長, 係長, 部長, and admin can edit the model, title, and description.</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">${t('vmEditPlaylistLabel')}</p>
+            <h3 class="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">${t('vmUpdatePlaylistDetails')}</h3>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">${t('vmKachoAndAbove')}</p>
           </div>
           <button onclick="vm2CloseEditPlaylistModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
             <i class="ri-close-line text-lg"></i>
@@ -2648,29 +2652,29 @@ function loadVideoManual2Page() {
 
         <div class="mt-6 space-y-4">
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Model</label>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmModelLabel')}</label>
             <select id="vm2-edit-playlist-model" onchange="vm2OnEditPlaylistModelChange()" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-              <option value="">Loading models...</option>
+              <option value="">${t('vmLoadingModels')}</option>
             </select>
-            <p id="vm2-edit-playlist-model-loading" class="mt-2 text-xs text-slate-400">Loading models...</p>
+            <p id="vm2-edit-playlist-model-loading" class="mt-2 text-xs text-slate-400">${t('vmLoadingModels')}</p>
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Title</label>
-            <input id="vm2-edit-playlist-title" type="text" oninput="vm2OnEditPlaylistTitleInput()" placeholder="Playlist title" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmTitleLabel')}</label>
+            <input id="vm2-edit-playlist-title" type="text" oninput="vm2OnEditPlaylistTitleInput()" placeholder="${t('vmPlaylistTitlePlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Description</label>
-            <textarea id="vm2-edit-playlist-description" rows="4" placeholder="Playlist description" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
+            <label class="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">${t('vmDescriptionLabel')}</label>
+            <textarea id="vm2-edit-playlist-description" rows="4" placeholder="${t('vmPlaylistDescriptionPlaceholder')}" class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"></textarea>
           </div>
 
           <p id="vm2-edit-playlist-error" class="min-h-[1.25rem] text-sm text-red-500"></p>
         </div>
 
         <div class="mt-6 flex gap-3">
-          <button onclick="vm2CloseEditPlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">Cancel</button>
-          <button id="vm2-edit-playlist-submit" onclick="vm2SubmitEditPlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>Save Changes</button>
+          <button onclick="vm2CloseEditPlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">${t('cancel')}</button>
+          <button id="vm2-edit-playlist-submit" onclick="vm2SubmitEditPlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>${t('vmSaveChanges')}</button>
         </div>
       </div>
     </div>
@@ -3103,7 +3107,7 @@ function vm2EnsureTrashPreviewModal() {
     <!-- Header -->
     <div class="flex items-center justify-between px-5 py-3 bg-gray-900 border-b border-gray-800 flex-shrink-0">
       <div class="flex items-center gap-3">
-        <span class="text-xs font-semibold uppercase tracking-widest text-red-400"><i class="ri-delete-bin-2-line mr-1"></i>Recycle Bin Preview</span>
+        <span class="text-xs font-semibold uppercase tracking-widest text-red-400"><i class="ri-delete-bin-2-line mr-1"></i>${t('vmRecycleBinPreview')}</span>
         <span id="vm2-tp-title" class="text-sm font-medium text-white truncate max-w-[320px]"></span>
       </div>
       <div class="flex items-center gap-3">
@@ -6254,7 +6258,7 @@ async function vm2ShowHistory() {
     const revisions = await res.json();
 
     if (!revisions.length) {
-      list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">No revisions yet.<br>Use Save Revision to create one.</p>';
+      list.innerHTML = `<p class="text-sm text-gray-400 text-center py-6">${t('vmNoRevisionsYet')}<br>${t('vmUseRevisionToCreate')}</p>`;
       return;
     }
 
@@ -6263,7 +6267,7 @@ async function vm2ShowHistory() {
         <div class="flex items-start gap-3">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 min-w-0">
-              <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${revision.revisionName || 'Unnamed revision'}</p>
+              <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${revision.revisionName || t('vmUnnamedRevision')}</p>
               ${revision.isDeployed ? '<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">LIVE</span>' : ''}
             </div>
             <p class="text-xs text-gray-400">Revision ${revision.revisionNumber || '?'} · ${revision.folder || 'root'} · ${new Date(revision.createdAt).toLocaleString()}</p>
