@@ -6507,7 +6507,26 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
 
                   if (state.process === proc.name && state.column) {
                     const numericCols = new Set(['Total', 'Total_NG', 'Process_Quantity', 'Remaining_Quantity', 'Cycle_Time', 'Spare', 'ショット数']);
+                    const getComputedVal = (item, col) => {
+                      if (col === 'Work_Hours') {
+                        if (item.Time_start && item.Time_end) {
+                          const s = new Date(`2000-01-01T${item.Time_start}`);
+                          const e = new Date(`2000-01-01T${item.Time_end}`);
+                          return e > s ? (e - s) / 3600000 : -1;
+                        }
+                        return -1;
+                      }
+                      if (col === 'Defect_Rate') {
+                        const pq = item.Process_Quantity ?? 0;
+                        return pq > 0 ? (item.Total_NG ?? 0) / pq : 0;
+                      }
+                      return null;
+                    };
                     sorted.sort((a, b) => {
+                      const cvA = getComputedVal(a, state.column);
+                      if (cvA !== null) {
+                        return (cvA - getComputedVal(b, state.column)) * state.direction;
+                      }
                       const valA = a[state.column] ?? "";
                       const valB = b[state.column] ?? "";
                       if (numericCols.has(state.column)) {
@@ -6557,8 +6576,9 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                             }"></div>
                             <h4 class="text-lg font-semibold">${proc.name} Process</h4>
                           </div>
-                          <div class="text-sm text-gray-600">
-                            ${totalItems} ${translations[currentLang].records || 'records'}
+                          <div class="flex items-center gap-3">
+                            <span class="text-sm text-gray-600">${totalItems} ${translations[currentLang].records || 'records'}</span>
+                            ${summary.length > 0 ? `<button onclick="(function(){var el=document.getElementById('sec-sum-${label}-${proc.name}');if(el){el.open=true;el.scrollIntoView({behavior:'smooth',block:'start'});}})();" class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-white/80 hover:bg-white border border-gray-300 rounded-lg text-gray-600 hover:text-gray-900 transition-colors shadow-sm"><i class='ri-arrow-down-line'></i> Jump to Summary</button>` : ''}
                           </div>
                         </div>
                       </div>
@@ -6592,11 +6612,13 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                                   onclick="handleSectionSort('${label}', '${proc.name}', 'Total_NG')">
                                 Total NG${arrow("Total_NG")}
                               </th>
-                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700">
-                                稼働時間
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
+                                  onclick="handleSectionSort('${label}', '${proc.name}', 'Work_Hours')">
+                                稼働時間${arrow("Work_Hours")}
                               </th>
-                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700">
-                                不良率
+                              <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
+                                  onclick="handleSectionSort('${label}', '${proc.name}', 'Defect_Rate')">
+                                不良率${arrow("Defect_Rate")}
                               </th>
                             </tr>
                           </thead>
@@ -6692,7 +6714,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                       <!-- Summary Section -->
                       ${summary.length > 0 ? `
                         <div class="px-6 py-4 border-t bg-gray-50/50">
-                          <details class="group">
+                          <details id="sec-sum-${label}-${proc.name}" class="group">
                             <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
                               <span>📊 ${label} Summary (${summary.length} items)</span>
                               <span class="group-open:rotate-180 transition-transform">▼</span>
@@ -6814,8 +6836,27 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
             if (!records.length) return "";
 
             const _numericCols = new Set(['Total', 'Total_NG', 'Process_Quantity', 'Remaining_Quantity', 'Cycle_Time', 'Spare', 'ショット数']);
+            const _getComputedVal = (item, col) => {
+              if (col === 'Work_Hours') {
+                if (item.Time_start && item.Time_end) {
+                  const s = new Date(`2000-01-01T${item.Time_start}`);
+                  const e = new Date(`2000-01-01T${item.Time_end}`);
+                  return e > s ? (e - s) / 3600000 : -1;
+                }
+                return -1;
+              }
+              if (col === 'Defect_Rate') {
+                const pq = item.Process_Quantity ?? 0;
+                return pq > 0 ? (item.Total_NG ?? 0) / pq : 0;
+              }
+              return null;
+            };
             const sorted = [...records].sort((a, b) => {
               if (sortState.process === procLabel && sortState.column) {
+                const cvA = _getComputedVal(a, sortState.column);
+                if (cvA !== null) {
+                  return (cvA - _getComputedVal(b, sortState.column)) * sortState.direction;
+                }
                 const valA = a[sortState.column] ?? "";
                 const valB = b[sortState.column] ?? "";
                 if (_numericCols.has(sortState.column)) {
@@ -6857,6 +6898,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                       }"></div>
                       <h3 class="text-xl font-semibold">${procLabel} Process (${sorted.length})</h3>
                     </div>
+                    ${summary.length > 0 ? `<button onclick="(function(){var el=document.getElementById('flt-sum-${procLabel}');if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}})();" class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-white/80 hover:bg-white border border-gray-300 rounded-lg text-gray-600 hover:text-gray-900 transition-colors shadow-sm"><i class='ri-arrow-down-line'></i> Jump to Summary</button>` : ''}
                   </div>
                 </div>
                 
@@ -6871,8 +6913,8 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
                         <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Date')">日付${arrow("Date")}</th>
                         <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total')">Total${arrow("Total")}</th>
                         <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Total_NG')">Total NG${arrow("Total_NG")}</th>
-                        <th>Work Hours</th>
-                        <th>不良率</th>
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Work_Hours')">Work Hours${arrow("Work_Hours")}</th>
+                        <th class="cursor-pointer" onclick="handleSort('${procLabel}', 'Defect_Rate')">不良率${arrow("Defect_Rate")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -6972,7 +7014,7 @@ async function loadProductionByPeriod(factory, from, to, partNumbers = [], seria
               ${summaryByProcess.map(proc => {
                 if (!proc.summary.length) return "";
                 return `
-                  <div class="mb-6">
+                  <div id="flt-sum-${proc.name}" class="mb-6">
                     <h4 class="font-semibold mb-2 border-b pb-1">${proc.name} Summary</h4>
                     <div class="overflow-x-auto">
                       <table class="w-full text-sm min-w-[500px] mb-2">
