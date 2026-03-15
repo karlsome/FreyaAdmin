@@ -866,8 +866,8 @@ function vm2RenderPlaylistBrowser() {
   if (emptyState) emptyState.classList.add('hidden');
   projectList.innerHTML = vm2.playlistProjects.map((project) => `
     <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
+      <div class="flex flex-col gap-2">
+        <div class="min-w-0">
           <div class="flex items-center gap-2 min-w-0">
             <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${project.title || t('vmUntitledProject')}</div>
             <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${project.deployedRevisionId
@@ -879,7 +879,7 @@ function vm2RenderPlaylistBrowser() {
           <div class="mt-1 text-xs ${project.deployedRevisionId ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-400'}">${vm2ProjectDeploymentLabel(project)}</div>
           <div class="mt-1 text-xs text-gray-400">${t('vmUpdatedAt')} ${new Date(project.updatedAt || project.createdAt).toLocaleDateString()}</div>
         </div>
-        <div class="flex items-center gap-1 shrink-0">
+        <div class="flex items-center gap-1">
           <button onclick="vm2LoadProject('${project._id}')" class="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-600">${t('vmOpen')}</button>
           <button onclick="vm2OpenProjectInfoModal('${project._id}')" class="rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-700" title="${t('vmProjectInfo')}"><i class="ri-information-line"></i></button>
           ${canEditProject ? `<button onclick="vm2OpenEditProjectModal('${project._id}')" class="rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-700" title="${t('vmEditProject')}"><i class="ri-pencil-line"></i></button>` : ''}
