@@ -3520,6 +3520,58 @@ async function vm2SelectPlaylistAsset(assetId, downloadUrl, name) {
   vm2RenderElements();
 }
 
+// ── Client-side H.264 Transcode (FFmpeg.wasm) ──────────────────────────────
+let _vm2FetchFile = null;
+
+async function vm2EnsureFfmpegLoaded() {
+  if (vm2.ffmpegLoaded && vm2.ffmpeg) return vm2.ffmpeg;
+  const ffmpegBase = `${window.location.origin}/vendor/ffmpeg`;
+  const { FFmpeg } = await import(`${ffmpegBase}/ffmpeg/index.js`);
+  const util = await import(`${ffmpegBase}/util/index.js`);
+  _vm2FetchFile = util.fetchFile;
+  // Use the single-threaded core package so browser encoding works without
+  // SharedArrayBuffer / COOP+COEP headers.
+  const baseURL = `${ffmpegBase}/core`;
+  const ffmpeg = new FFmpeg();
+  await ffmpeg.load({
+    coreURL: `${baseURL}/ffmpeg-core.js`,
+    wasmURL: `${baseURL}/ffmpeg-core.wasm`,
+    workerURL: '',
+  });
+  vm2.ffmpeg = ffmpeg;
+  vm2.ffmpegLoaded = true;
+  return ffmpeg;
+}
+
+async function vm2TranscodeToH264(file, onProgress) {
+  const ffmpeg = await vm2EnsureFfmpegLoaded();
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+  const inputName = `input.${ext}`;
+  const outputName = 'output.mp4';
+  const onProg = ({ progress }) => onProgress?.(Math.max(0, Math.min(1, progress)));
+  ffmpeg.on('progress', onProg);
+  try {
+    await ffmpeg.writeFile(inputName, await _vm2FetchFile(file));
+    await ffmpeg.exec([
+      '-i', inputName,
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '18',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      '-y', outputName,
+    ]);
+    const data = await ffmpeg.readFile(outputName);
+    const stem = file.name.replace(/\.[^.]+$/, '');
+    return new File([data.buffer], `${stem}.mp4`, { type: 'video/mp4' });
+  } finally {
+    ffmpeg.off('progress', onProg);
+    try { await ffmpeg.deleteFile(inputName); } catch (_) {}
+    try { await ffmpeg.deleteFile(outputName); } catch (_) {}
+  }
+}
+
 async function vm2UploadVideoAsset(file) {
   const isAppend = vm2.mediaInsertMode === 'append';
   const modal = vm2Get('vm2-modal-upload');
@@ -3528,13 +3580,44 @@ async function vm2UploadVideoAsset(file) {
   const detail = vm2Get('vm2-upload-detail');
 
   modal.classList.remove('hidden');
-  msg.textContent = 'Uploading video…';
+  msg.textContent = 'Preparing video…';
   detail.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
   bar.style.width = '5%';
   vm2.uploadInProgress = true;
-  vm2SetSaveStatus('Uploading video…', 'blue');
+  vm2SetSaveStatus('Preparing video…', 'blue');
+
+  let uploadBarStart = 5;
 
   try {
+    // Transcode to H.264 MP4 for Raspberry Pi / Chromium compatibility.
+    // Skip only if the file is already explicitly video/mp4 with a .mp4 extension.
+    const needsTranscode = !(file.type === 'video/mp4' && /\.mp4$/i.test(file.name));
+    if (needsTranscode) {
+      msg.textContent = 'Transcoding to H.264 MP4…';
+      detail.textContent = `Converting ${file.name} for device compatibility…`;
+      vm2SetSaveStatus('Transcoding video…', 'blue');
+      try {
+        file = await vm2TranscodeToH264(file, (progress) => {
+          bar.style.width = Math.round(5 + progress * 45) + '%';
+          detail.textContent = `Transcoding: ${Math.round(progress * 100)}% — this may take a moment…`;
+        });
+        uploadBarStart = 50;
+        bar.style.width = '50%';
+        msg.textContent = 'Uploading converted video…';
+        detail.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+        vm2SetSaveStatus('Uploading video…', 'blue');
+      } catch (transcodeErr) {
+        console.warn('[VM2] Transcode failed, uploading original:', transcodeErr);
+        msg.textContent = 'Uploading original video…';
+        detail.textContent = `⚠️ Transcode failed: ${transcodeErr.message}. Uploading as-is.`;
+        bar.style.width = '5%';
+        vm2SetSaveStatus('Uploading video…', 'blue');
+      }
+    } else {
+      msg.textContent = 'Uploading video…';
+      vm2SetSaveStatus('Uploading video…', 'blue');
+    }
+
     const result = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       vm2.uploadXhr = xhr;
@@ -3548,7 +3631,7 @@ async function vm2UploadVideoAsset(file) {
 
       xhr.upload.addEventListener('progress', (event) => {
         if (!event.lengthComputable) return;
-        const pct = Math.round((event.loaded / event.total) * 90) + 5;
+        const pct = uploadBarStart + Math.round((event.loaded / event.total) * (90 - uploadBarStart));
         bar.style.width = Math.min(pct, 95) + '%';
         detail.textContent = `${(event.loaded / 1024 / 1024).toFixed(1)} / ${(event.total / 1024 / 1024).toFixed(1)} MB`;
       });
