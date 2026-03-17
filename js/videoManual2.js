@@ -147,6 +147,10 @@ function vm2CreateEmptyProject(overrides = {}) {
     deployedRevisionName: null,
     deployedAt: null,
     deployedBy: null,
+    deployedVideoUrl: null,
+    deployedVideoStoragePath: null,
+    deployedVideoMimeType: null,
+    deployedVideoFileName: null,
     createdBy: authUser.username || 'admin',
     createdAt: vm2NowIso(),
     ...overrides,
@@ -1756,6 +1760,10 @@ function vm2ApplyProjectState(project, { readOnlyRevision = null, preserveHistor
     deployedRevisionName: null,
     deployedAt: null,
     deployedBy: null,
+    deployedVideoUrl: null,
+    deployedVideoStoragePath: null,
+    deployedVideoMimeType: null,
+    deployedVideoFileName: null,
     ...project,
   };
 
@@ -2146,7 +2154,7 @@ function vm2RenderEditorShell() {
   <!-- Export Modal -->
   <div id="vm2-modal-export" class="hidden fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
     <div class="bg-white dark:bg-gray-800 rounded-xl p-5 w-96 shadow-2xl">
-      <h3 class="font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+      <h3 id="vm2-export-title" class="font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
         <i class="ri-download-line text-blue-500"></i>Export Video
       </h3>
       <div id="vm2-export-progress" class="py-6 text-center">
@@ -2160,7 +2168,7 @@ function vm2RenderEditorShell() {
       <div id="vm2-export-done" class="hidden py-4">
         <div class="flex items-center gap-2 text-green-500 mb-4 justify-center">
           <i class="ri-checkbox-circle-line text-2xl"></i>
-          <span class="font-medium">Export Complete!</span>
+          <span id="vm2-export-done-label" class="font-medium">Export Complete!</span>
         </div>
         <a id="vm2-export-download" href="#" download="video-manual.mp4" class="block w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded text-center text-sm font-medium">
           <i class="ri-download-line mr-1"></i>Download Video
@@ -3557,6 +3565,7 @@ async function vm2TranscodeToH264(file, onProgress) {
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '18',
+      '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-movflags', '+faststart',
@@ -3570,6 +3579,138 @@ async function vm2TranscodeToH264(file, onProgress) {
     try { await ffmpeg.deleteFile(inputName); } catch (_) {}
     try { await ffmpeg.deleteFile(outputName); } catch (_) {}
   }
+}
+
+function vm2SetExportModalTitle(title) {
+  const titleEl = vm2Get('vm2-export-title');
+  if (titleEl) titleEl.innerHTML = `<i class="ri-download-line text-blue-500"></i>${title}`;
+}
+
+function vm2ResetExportModal(title = 'Export Video') {
+  vm2SetExportModalTitle(title);
+  vm2Get('vm2-modal-export').classList.remove('hidden');
+  vm2Get('vm2-export-progress').classList.remove('hidden');
+  vm2Get('vm2-export-done').classList.add('hidden');
+  vm2Get('vm2-export-error').classList.add('hidden');
+  vm2Get('vm2-export-bar').style.width = '0%';
+  vm2Get('vm2-export-status').textContent = 'Preparing export...';
+  vm2Get('vm2-export-detail').textContent = '';
+}
+
+function vm2SetExportProgress(status, detail = '', percent = null) {
+  const statusEl = vm2Get('vm2-export-status');
+  const detailEl = vm2Get('vm2-export-detail');
+  const bar = vm2Get('vm2-export-bar');
+  if (statusEl) statusEl.textContent = status;
+  if (detailEl) detailEl.textContent = detail;
+  if (bar && Number.isFinite(percent)) bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+}
+
+function vm2ShowExportDone({ label = 'Export Complete!', downloadUrl = '', downloadName = '', buttonLabel = 'Download Video' } = {}) {
+  vm2Get('vm2-export-progress').classList.add('hidden');
+  vm2Get('vm2-export-error').classList.add('hidden');
+  vm2Get('vm2-export-done').classList.remove('hidden');
+
+  const labelEl = vm2Get('vm2-export-done-label');
+  if (labelEl) labelEl.textContent = label;
+
+  const downloadEl = vm2Get('vm2-export-download');
+  if (downloadEl) {
+    if (downloadUrl) {
+      downloadEl.classList.remove('hidden');
+      downloadEl.href = downloadUrl;
+      downloadEl.download = downloadName || 'video-manual.mp4';
+      downloadEl.innerHTML = `<i class="ri-download-line mr-1"></i>${buttonLabel}`;
+    } else {
+      downloadEl.classList.add('hidden');
+      downloadEl.removeAttribute('href');
+    }
+  }
+}
+
+function vm2ShowExportError(message) {
+  vm2Get('vm2-export-progress').classList.add('hidden');
+  vm2Get('vm2-export-done').classList.add('hidden');
+  vm2Get('vm2-export-error').classList.remove('hidden');
+  vm2Get('vm2-export-error-msg').textContent = message;
+}
+
+function vm2GetFlattenedDeploymentSize(project) {
+  const sourceW = Math.max(2, Number(project?.width) || 1920);
+  const sourceH = Math.max(2, Number(project?.height) || 1080);
+  const scale = Math.min(1280 / sourceW, 720 / sourceH, 1);
+  const makeEven = (value) => Math.max(2, Math.round(value / 2) * 2);
+  return {
+    width: makeEven(sourceW * scale),
+    height: makeEven(sourceH * scale),
+  };
+}
+
+async function vm2PrepareProjectImagesForRender(project) {
+  if (!project?.steps?.length) return;
+
+  const imageElements = project.steps
+    .flatMap((step) => step.elements || [])
+    .filter((el) => el?.type === 'image' && el.imageUrl);
+
+  const imageCache = new Map();
+  await Promise.all(imageElements.map((el) => new Promise((resolve) => {
+    if (el._imgElement) return resolve();
+
+    const cached = imageCache.get(el.imageUrl);
+    if (cached) {
+      el._imgElement = cached;
+      return resolve();
+    }
+
+    const img = new Image();
+    if (!vm2IsBlobUrl(el.imageUrl)) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      imageCache.set(el.imageUrl, img);
+      el._imgElement = img;
+      resolve();
+    };
+    img.onerror = () => {
+      console.warn('[VM2 Export] Failed to preload image overlay:', el.imageUrl);
+      resolve();
+    };
+    img.src = vm2ResolveMediaUrl(el.imageUrl);
+  })));
+}
+
+async function vm2UploadVideoBinary(file, { playlistId = null, uploadFolder = 'videoManuals', onProgress = null } = {}) {
+  return await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    vm2.uploadXhr = xhr;
+    xhr.open('POST', `${vm2BaseUrl()}api/upload-video-manual`);
+    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+    xhr.setRequestHeader('X-File-Name', file.name);
+    xhr.setRequestHeader('X-Upload-Folder', uploadFolder);
+    if (playlistId) xhr.setRequestHeader('X-Playlist-Id', playlistId);
+    Object.entries(vm2AuthHeaders()).forEach(([header, value]) => {
+      xhr.setRequestHeader(header, value);
+    });
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (!event.lengthComputable) return;
+      onProgress?.(event.loaded, event.total, event);
+    });
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        let errorMessage = `${xhr.status} ${xhr.statusText}`;
+        try {
+          errorMessage = JSON.parse(xhr.responseText).error || errorMessage;
+        } catch (_) {}
+        reject(new Error(errorMessage));
+      }
+    };
+    xhr.onabort = () => reject(new Error('Upload canceled'));
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.send(file);
+  });
 }
 
 async function vm2UploadVideoAsset(file) {
@@ -3618,38 +3759,14 @@ async function vm2UploadVideoAsset(file) {
       vm2SetSaveStatus('Uploading video…', 'blue');
     }
 
-    const result = await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      vm2.uploadXhr = xhr;
-      xhr.open('POST', `${vm2BaseUrl()}api/upload-video-manual`);
-      xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
-      xhr.setRequestHeader('X-File-Name', file.name);
-      if (vm2.playlist?._id) xhr.setRequestHeader('X-Playlist-Id', vm2.playlist._id);
-      Object.entries(vm2AuthHeaders()).forEach(([header, value]) => {
-        xhr.setRequestHeader(header, value);
-      });
-
-      xhr.upload.addEventListener('progress', (event) => {
-        if (!event.lengthComputable) return;
-        const pct = uploadBarStart + Math.round((event.loaded / event.total) * (90 - uploadBarStart));
+    const result = await vm2UploadVideoBinary(file, {
+      playlistId: vm2.playlist?._id || null,
+      uploadFolder: 'videoManuals',
+      onProgress: (loaded, total) => {
+        const pct = uploadBarStart + Math.round((loaded / total) * (90 - uploadBarStart));
         bar.style.width = Math.min(pct, 95) + '%';
-        detail.textContent = `${(event.loaded / 1024 / 1024).toFixed(1)} / ${(event.total / 1024 / 1024).toFixed(1)} MB`;
-      });
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(JSON.parse(xhr.responseText));
-        } else {
-          let errorMessage = `${xhr.status} ${xhr.statusText}`;
-          try {
-            errorMessage = JSON.parse(xhr.responseText).error || errorMessage;
-          } catch (_) {}
-          reject(new Error(errorMessage));
-        }
-      };
-      xhr.onabort = () => reject(new Error('Upload canceled'));
-      xhr.onerror = () => reject(new Error('Network error during upload'));
-      xhr.send(file);
+        detail.textContent = `${(loaded / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`;
+      },
     });
 
     bar.style.width = '100%';
@@ -6373,11 +6490,75 @@ async function vm2ShowHistory() {
 
 async function vm2DeployRevision(revisionId) {
   if (!vm2.project?._id) return;
+  vm2ResetExportModal('Deploy Revision');
+
   try {
+    const revisionRes = await fetch(`${vm2BaseUrl()}api/video-revisions/${revisionId}`, {
+      headers: vm2AuthHeaders(),
+    });
+    if (!revisionRes.ok) {
+      const err = await revisionRes.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to load revision ${revisionId}`);
+    }
+
+    const revision = await revisionRes.json();
+    const deployProject = vm2DeepClone(revision.snapshot || {});
+    if (!deployProject?.steps?.length) {
+      throw new Error('Selected revision has no steps to deploy.');
+    }
+
+    deployProject.title = deployProject.title || vm2.project.title || 'video-manual';
+    const targetSize = vm2GetFlattenedDeploymentSize(deployProject);
+    const safeTitle = String(deployProject.title || 'video-manual').replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'video-manual';
+
+    const webmBlob = await vm2RenderProjectToWebmBlob(deployProject, {
+      width: targetSize.width,
+      height: targetSize.height,
+      onProgress: ({ percent, status, detail }) => {
+        vm2SetExportProgress(status, detail, percent * 0.55);
+      },
+    });
+
+    vm2SetExportProgress('Converting flattened video to H.264...', `${targetSize.width}x${targetSize.height} optimized for Raspberry Pi playback`, 56);
+    const flattenedFile = await vm2TranscodeToH264(
+      new File([webmBlob], `${safeTitle}-rev-${revision.revisionNumber || 'deploy'}.webm`, { type: 'video/webm' }),
+      (progress) => {
+        vm2SetExportProgress(
+          'Converting flattened video to H.264...',
+          `${Math.round(progress * 100)}% transcoded`,
+          56 + (progress * 24)
+        );
+      }
+    );
+
+    vm2.uploadInProgress = true;
+    vm2SetExportProgress('Uploading flattened deployment video...', `${flattenedFile.name} (${(flattenedFile.size / 1024 / 1024).toFixed(1)} MB)`, 80);
+    const flattenedUpload = await vm2UploadVideoBinary(flattenedFile, {
+      uploadFolder: 'videoManualDeployed',
+      onProgress: (loaded, total) => {
+        const percent = 80 + ((loaded / total) * 18);
+        vm2SetExportProgress(
+          'Uploading flattened deployment video...',
+          `${(loaded / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`,
+          percent
+        );
+      },
+    });
+
+    vm2SetExportProgress('Activating deployed revision...', 'Saving deployed playback source', 99);
     const res = await fetch(`${vm2BaseUrl()}api/video-projects/${vm2.project._id}/deploy`, {
       method: 'POST',
       headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ revisionId }),
+      body: JSON.stringify({
+        revisionId,
+        deployedVideo: {
+          url: flattenedUpload.url,
+          storagePath: flattenedUpload.storagePath,
+          mimeType: flattenedUpload.mimeType || flattenedFile.type || 'video/mp4',
+          fileName: flattenedUpload.fileName || flattenedFile.name,
+          uploadedAt: flattenedUpload.uploadedAt || vm2NowIso(),
+        },
+      }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -6391,6 +6572,10 @@ async function vm2DeployRevision(revisionId) {
     vm2.project.deployedRevisionName = data.revisionName || null;
     vm2.project.deployedAt = deployedAt;
     vm2.project.deployedBy = data.deployedBy || vm2AuthUser().username || 'unknown';
+    vm2.project.deployedVideoUrl = data.deployedVideoUrl || flattenedUpload.url;
+    vm2.project.deployedVideoStoragePath = data.deployedVideoStoragePath || flattenedUpload.storagePath || null;
+    vm2.project.deployedVideoMimeType = data.deployedVideoMimeType || flattenedUpload.mimeType || flattenedFile.type || 'video/mp4';
+    vm2.project.deployedVideoFileName = data.deployedVideoFileName || flattenedUpload.fileName || flattenedFile.name;
     vm2.project.updatedAt = deployedAt;
     vm2SyncPlaylistProjectEntry(vm2.project._id, {
       deployedRevisionId: vm2.project.deployedRevisionId,
@@ -6398,14 +6583,29 @@ async function vm2DeployRevision(revisionId) {
       deployedRevisionName: vm2.project.deployedRevisionName,
       deployedAt: vm2.project.deployedAt,
       deployedBy: vm2.project.deployedBy,
+      deployedVideoUrl: vm2.project.deployedVideoUrl,
+      deployedVideoStoragePath: vm2.project.deployedVideoStoragePath,
+      deployedVideoMimeType: vm2.project.deployedVideoMimeType,
+      deployedVideoFileName: vm2.project.deployedVideoFileName,
       updatedAt: vm2.project.updatedAt,
     });
     vm2SetSaveStatus(`Deployed ${data.revisionName || `Rev ${data.revisionNumber || '?'}`}`, 'green');
     vm2RenderPlaylistBrowser();
     await vm2ShowHistory();
+    vm2SetExportProgress('Deployment complete', 'Factory playback will now use the flattened Raspberry Pi video.', 100);
+    vm2ShowExportDone({
+      label: 'Deployment Complete!',
+      downloadUrl: vm2.project.deployedVideoUrl,
+      downloadName: vm2.project.deployedVideoFileName,
+      buttonLabel: 'Download Flattened MP4',
+    });
   } catch (err) {
     console.error('[VM2] Deploy revision error:', err);
+    vm2ShowExportError(err.message);
     alert('Failed to deploy revision: ' + err.message);
+  } finally {
+    vm2.uploadInProgress = false;
+    vm2.uploadXhr = null;
   }
 }
 
@@ -6427,6 +6627,10 @@ async function vm2UndeployProject() {
     vm2.project.deployedRevisionName = null;
     vm2.project.deployedAt = null;
     vm2.project.deployedBy = null;
+    vm2.project.deployedVideoUrl = null;
+    vm2.project.deployedVideoStoragePath = null;
+    vm2.project.deployedVideoMimeType = null;
+    vm2.project.deployedVideoFileName = null;
     vm2.project.updatedAt = vm2NowIso();
     vm2SyncPlaylistProjectEntry(vm2.project._id, {
       deployedRevisionId: null,
@@ -6625,6 +6829,7 @@ function vm2CreateExportMediaPool(project = vm2.project) {
     video.playsInline = true;
     video.preload = 'auto';
     video.crossOrigin = source.local ? '' : 'anonymous';
+    video.muted = true;
     host.appendChild(video);
 
     const entry = {
@@ -6643,6 +6848,7 @@ function vm2CreateExportMediaPool(project = vm2.project) {
         sourceNode.connect(gainNode);
         gainNode.connect(destination);
         entry.gainNode = gainNode;
+        video.muted = false;
       } catch (err) {
         console.warn('[VM2 Export] Could not create audio source for clip:', err);
       }
@@ -6659,7 +6865,7 @@ function vm2CreateExportMediaPool(project = vm2.project) {
 
     entry.status = 'loading';
     entry.readyPromise = new Promise((resolve, reject) => {
-      const onReady = () => {
+      const onLoaded = () => {
         cleanup();
         entry.status = 'ready';
         entry.readyPromise = null;
@@ -6669,112 +6875,110 @@ function vm2CreateExportMediaPool(project = vm2.project) {
         cleanup();
         entry.status = 'error';
         entry.readyPromise = null;
-        reject(new Error(`Failed to load export clip: ${entry.key}`));
+        reject(new Error('Failed to load media source'));
       };
       const cleanup = () => {
-        entry.video.removeEventListener('loadeddata', onReady);
+        entry.video.removeEventListener('loadeddata', onLoaded);
         entry.video.removeEventListener('error', onError);
       };
-      entry.video.addEventListener('loadeddata', onReady);
+
+      entry.video.addEventListener('loadeddata', onLoaded);
       entry.video.addEventListener('error', onError);
-    });
-
-    entry.video.src = entry.local ? entry.url : vm2ResolveMediaUrl(entry.url);
-    entry.video.load();
-    return entry.readyPromise;
-  };
-
-  const loadAll = async () => {
-    const sources = vm2GetUniqueProjectSources(project);
-    await Promise.all(sources.map((source) => loadEntry(ensureEntry(source))));
-    if (audioContext?.state === 'suspended') {
-      try { await audioContext.resume(); } catch (_) {}
-    }
-    return entries;
-  };
-
-  const cleanup = async () => {
-    entries.forEach((entry) => {
       entry.video.pause();
-      entry.video.removeAttribute('src');
+      entry.video.crossOrigin = entry.local ? '' : 'anonymous';
+      entry.video.src = entry.local ? entry.url : vm2ResolveMediaUrl(entry.url);
       entry.video.load();
     });
-    host.remove();
-    if (audioContext && typeof audioContext.close === 'function') {
-      try { await audioContext.close(); } catch (_) {}
-    }
+
+    return entry.readyPromise;
   };
 
   return {
     entries,
     destination,
     ensureEntry,
-    loadEntry,
-    loadAll,
-    cleanup,
+    async loadAll() {
+      const sources = vm2GetUniqueProjectSources(project);
+      const queue = sources.map((source) => loadEntry(ensureEntry(source)));
+      await Promise.all(queue);
+      if (audioContext?.state === 'suspended') {
+        try {
+          await audioContext.resume();
+        } catch (_) {}
+      }
+    },
+    async cleanup() {
+      entries.forEach((entry) => {
+        try { entry.video.pause(); } catch (_) {}
+        try { entry.video.removeAttribute('src'); } catch (_) {}
+        try { entry.video.load(); } catch (_) {}
+        try { entry.video.remove(); } catch (_) {}
+      });
+      entries.clear();
+      try { host.remove(); } catch (_) {}
+      if (audioContext && audioContext.state !== 'closed') {
+        try {
+          await audioContext.close();
+        } catch (_) {}
+      }
+    },
   };
 }
 
-async function vm2Export() {
-  if (!vm2.project || !vm2.project.steps?.length) {
-    alert('Please load a video first');
-    return;
-  }
-
-  vm2Get('vm2-modal-export').classList.remove('hidden');
-  vm2Get('vm2-export-progress').classList.remove('hidden');
-  vm2Get('vm2-export-done').classList.add('hidden');
-  vm2Get('vm2-export-error').classList.add('hidden');
-  vm2Get('vm2-export-bar').style.width = '0%';
-  vm2Get('vm2-export-status').textContent = 'Preparing export...';
+async function vm2RenderProjectToWebmBlob(project, { width, height, frameRate = 30, onProgress } = {}) {
+  if (!project?.steps?.length) throw new Error('Please load a video first');
 
   const originalStepIdx = vm2.currentStepIdx;
   let exportPool = null;
 
   try {
-    vm2Get('vm2-export-status').textContent = 'Preparing clip sources...';
-    vm2Get('vm2-export-detail').textContent = 'Loading video clips into export pool';
+    onProgress?.({ percent: 5, status: 'Preparing clip sources...', detail: 'Loading video clips into export pool' });
 
-    exportPool = vm2CreateExportMediaPool(vm2.project);
+    exportPool = vm2CreateExportMediaPool(project);
     await exportPool.loadAll();
+    await vm2PrepareProjectImagesForRender(project);
 
-    vm2Get('vm2-export-status').textContent = 'Rendering video with overlays...';
-    vm2Get('vm2-export-detail').textContent = 'Using browser-based rendering';
-    
-    const projectW = vm2.project.width;
-    const projectH = vm2.project.height;
-    
+    const projectW = Math.max(2, Number(project.width) || 1920);
+    const projectH = Math.max(2, Number(project.height) || 1080);
+    const outputW = Math.max(2, Number(width) || projectW);
+    const outputH = Math.max(2, Number(height) || projectH);
+    const scaleX = outputW / projectW;
+    const scaleY = outputH / projectH;
+    const duration = Math.max(0.01, vm2GetSequenceDuration(project));
+    const sources = vm2GetUniqueProjectSources(project);
+
+    onProgress?.({ percent: 10, status: 'Rendering video with overlays...', detail: `Rendering ${outputW}x${outputH}` });
+
     const canvas = document.createElement('canvas');
-    canvas.width  = projectW;
-    canvas.height = projectH;
+    canvas.width = outputW;
+    canvas.height = outputH;
     const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not create export canvas context');
 
-    const stream = canvas.captureStream(30);
-
+    const stream = canvas.captureStream(frameRate);
     if (exportPool.destination) {
       exportPool.destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
     }
 
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9') 
-        ? 'video/webm;codecs=vp9' 
-        : 'video/webm'
-    });
-    
-    const chunks = [];
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
+    const preferredMimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+        ? 'video/webm;codecs=vp8'
+        : 'video/webm';
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: preferredMimeType });
 
-    mediaRecorder.start();
+    const chunks = [];
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
 
     let isRecording = true;
     let isSwitching = false;
     let activeEntry = null;
 
     const setActiveEntry = async (step, { autoplay = false } = {}) => {
-      const key = vm2GetStepSourceKey(step, vm2.project);
-      const source = vm2GetUniqueProjectSources(vm2.project).find((item) => item.key === key);
+      const key = vm2GetStepSourceKey(step, project);
+      const source = sources.find((item) => item.key === key);
       const entry = key ? exportPool.entries.get(key) || (source ? exportPool.ensureEntry(source) : null) : null;
       if (!entry) return null;
 
@@ -6787,9 +6991,7 @@ async function vm2Export() {
       if (entry.gainNode) entry.gainNode.gain.value = step?.muted ? 0 : 1;
       entry.video.currentTime = vm2TpStepStart(step);
       entry.video.playbackRate = 1;
-      if (autoplay) {
-        await entry.video.play();
-      }
+      if (autoplay) await entry.video.play();
       return entry;
     };
 
@@ -6798,18 +7000,15 @@ async function vm2Export() {
 
       const video = activeEntry.video;
       const activeStepIdx = vm2.currentStepIdx;
-      const activeStep = vm2.project.steps[activeStepIdx];
-
+      const activeStep = project.steps[activeStepIdx];
       let effectiveTime = video.currentTime;
-      let shouldRender = true;
 
       if (activeStep) {
         if (video.currentTime >= (activeStep.sourceEnd ?? activeStep.endTime) - 0.05) {
-          if (activeStepIdx + 1 < vm2.project.steps.length) {
+          if (activeStepIdx + 1 < project.steps.length) {
             vm2.currentStepIdx++;
-            const nextStep = vm2.project.steps[vm2.currentStepIdx];
+            const nextStep = project.steps[vm2.currentStepIdx];
             isSwitching = true;
-            shouldRender = false;
             setActiveEntry(nextStep, { autoplay: true })
               .then(() => {
                 isSwitching = false;
@@ -6818,97 +7017,108 @@ async function vm2Export() {
               .catch((err) => {
                 isRecording = false;
                 isSwitching = false;
-                mediaRecorder.stop();
+                try {
+                  mediaRecorder.stop();
+                } catch (_) {}
                 console.error('[VM2 Export] Clip switch error:', err);
               });
             return;
-          } else {
-            isRecording = false;
-            video.pause();
-            mediaRecorder.stop();
-            return;
           }
+
+          isRecording = false;
+          video.pause();
+          try {
+            mediaRecorder.stop();
+          } catch (_) {}
+          return;
         }
 
-        if (shouldRender) {
-          const offset = video.currentTime - (activeStep.sourceStart ?? activeStep.startTime);
-          effectiveTime = activeStep.startTime + offset;
-          if (activeEntry.gainNode) activeEntry.gainNode.gain.value = activeStep.muted ? 0 : 1;
-        }
+        const offset = video.currentTime - (activeStep.sourceStart ?? activeStep.startTime);
+        effectiveTime = activeStep.startTime + offset;
+        if (activeEntry.gainNode) activeEntry.gainNode.gain.value = activeStep.muted ? 0 : 1;
       }
 
-      if (shouldRender) {
-        ctx.fillStyle = '#1a1a2e';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        const { drawX, drawY, drawW, drawH } = vm2GetVideoDrawRect(
-          video.videoWidth || projectW,
-          video.videoHeight || projectH,
-          projectW,
-          projectH
-        );
-        ctx.drawImage(video, drawX, drawY, drawW, drawH);
+      const { drawX, drawY, drawW, drawH } = vm2GetVideoDrawRect(
+        video.videoWidth || projectW,
+        video.videoHeight || projectH,
+        outputW,
+        outputH
+      );
+      ctx.drawImage(video, drawX, drawY, drawW, drawH);
 
-        const visibleElements = vm2.project.steps
-          .reduce((acc, step) => acc.concat(step.elements || []), [])
-          .filter((el) => el.type !== 'audio' && vm2IsElementVisibleAtTime(el, effectiveTime));
+      const visibleElements = project.steps
+        .reduce((acc, step) => acc.concat(step.elements || []), [])
+        .filter((el) => el.type !== 'audio' && vm2IsElementVisibleAtTime(el, effectiveTime))
+        .slice()
+        .sort((a, b) => (Number(b.layer) || 0) - (Number(a.layer) || 0));
 
-        visibleElements.forEach((el) => {
-          if (el.layer === undefined) el.layer = 0;
-        });
+      visibleElements.forEach((el) => {
+        vm2DrawElementOnCanvas(ctx, el, scaleX, scaleY, 0, 0);
+      });
 
-        // Match editor ordering: higher layer renders first (behind), layer 0 last (on top).
-        visibleElements.sort((a, b) => b.layer - a.layer);
-
-        visibleElements.forEach((el) => {
-          vm2DrawElementOnCanvas(ctx, el, 1, 1, 0, 0);
-        });
-
-        const progress = effectiveTime / vm2.duration;
-        vm2Get('vm2-export-bar').style.width = Math.min((progress * 95), 100) + '%';
-        vm2Get('vm2-export-detail').textContent = `${Math.round(progress * 100)}% rendered`;
-      }
+      const progress = effectiveTime / duration;
+      onProgress?.({
+        percent: Math.min(95, 10 + (progress * 85)),
+        status: 'Rendering video with overlays...',
+        detail: `${Math.round(progress * 100)}% rendered`,
+      });
 
       requestAnimationFrame(renderFrame);
     };
 
-    await new Promise((resolve) => {
-      mediaRecorder.onstop = async () => {
-        isRecording = false;
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        
-        vm2Get('vm2-export-bar').style.width = '100%';
-        vm2Get('vm2-export-progress').classList.add('hidden');
-        vm2Get('vm2-export-done').classList.remove('hidden');
-        vm2Get('vm2-export-download').href = url;
-        vm2Get('vm2-export-download').download = (vm2.project.title || 'video-manual') + '.webm';
+    mediaRecorder.start();
 
+    return await new Promise((resolve, reject) => {
+      mediaRecorder.onstop = () => {
         exportPool.entries.forEach((entry) => entry.video.pause());
-        resolve();
+        resolve(new Blob(chunks, { type: 'video/webm' }));
       };
 
-      if (vm2.project.steps.length > 0) {
-        vm2.currentStepIdx = 0;
-        setActiveEntry(vm2.project.steps[0], { autoplay: true }).then(() => {
+      vm2.currentStepIdx = 0;
+      setActiveEntry(project.steps[0], { autoplay: true })
+        .then(() => {
           requestAnimationFrame(renderFrame);
-        }).catch((err) => {
+        })
+        .catch((err) => {
           console.error('[VM2 Export] Initial clip start error:', err);
-          mediaRecorder.stop();
+          try {
+            mediaRecorder.stop();
+          } catch (_) {}
+          reject(err);
         });
-      } else {
-        mediaRecorder.stop();
-      }
     });
-
-  } catch (err) {
-    console.error('[VM2] Export error:', err);
-    vm2Get('vm2-export-progress').classList.add('hidden');
-    vm2Get('vm2-export-error').classList.remove('hidden');
-    vm2Get('vm2-export-error-msg').textContent = err.message;
   } finally {
     vm2.currentStepIdx = originalStepIdx;
     if (exportPool) await exportPool.cleanup();
+  }
+}
+
+async function vm2Export() {
+  if (!vm2.project?.steps?.length) {
+    alert('Please load a video first');
+    return;
+  }
+
+  vm2ResetExportModal('Export Video');
+
+  try {
+    const blob = await vm2RenderProjectToWebmBlob(vm2.project, {
+      onProgress: ({ percent, status, detail }) => vm2SetExportProgress(status, detail, percent),
+    });
+    const url = URL.createObjectURL(blob);
+    vm2SetExportProgress('Export complete', 'Your browser-rendered video is ready.', 100);
+    vm2ShowExportDone({
+      label: 'Export Complete!',
+      downloadUrl: url,
+      downloadName: (vm2.project.title || 'video-manual') + '.webm',
+      buttonLabel: 'Download Video',
+    });
+  } catch (err) {
+    console.error('[VM2] Export error:', err);
+    vm2ShowExportError(err.message);
   }
 }
 
