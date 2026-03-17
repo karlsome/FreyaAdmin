@@ -68,6 +68,8 @@ let vm2 = {
   projectCreating: false,
   projectUpdating: false,
   playlistSearchQuery: '',
+  assetLibraryItems: [],
+  assetDeleteInFlightId: null,
   _projectsList: [],
   _editorMounted: false,
 };
@@ -100,6 +102,92 @@ const vm2EscapeHtml = (value) => String(value)
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
+
+function vm2FormatFileSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function vm2ProjectUsesAsset(assetId) {
+  if (!vm2.project || !assetId) return false;
+  const normalizedId = String(assetId);
+  if (String(vm2.project.currentAssetId || '') === normalizedId) return true;
+  if ((vm2.project.assets || []).some((asset) => String(asset?.assetId || asset?._id || '') === normalizedId)) return true;
+  return (vm2.project.steps || []).some((step) => String(step?.assetId || '') === normalizedId);
+}
+
+function vm2AssetUsageLabel(asset) {
+  const usageCount = Math.max(0, Number(asset?.usageCount) || 0);
+  if (!usageCount) return 'Unused';
+  return usageCount === 1 ? 'Used by 1 project' : `Used by ${usageCount} projects`;
+}
+
+function vm2RenderAssetPickerList() {
+  const list = vm2Get('vm2-assets-list');
+  if (!list) return;
+
+  const assets = Array.isArray(vm2.assetLibraryItems) ? vm2.assetLibraryItems : [];
+  if (!assets.length) {
+    list.innerHTML = '<p class="col-span-2 text-sm text-gray-400 text-center py-8">No shared videos in this playlist yet. Upload a video to add it to the library.</p>';
+    return;
+  }
+
+  list.innerHTML = assets.map((asset) => {
+    const assetId = String(asset.assetId || asset._id || '');
+    const safeAssetId = encodeURIComponent(assetId);
+    const safeUrl = encodeURIComponent(asset.downloadUrl || asset.url || '');
+    const safeName = vm2EscapeHtml(asset.name || asset.fileName || 'Untitled');
+    const safeNameArg = encodeURIComponent(asset.name || asset.fileName || 'Untitled');
+    const uploadedAt = asset.uploadedAt ? new Date(asset.uploadedAt).toLocaleDateString() : '';
+    const sizeLabel = vm2FormatFileSize(asset.size);
+    const usageLabel = vm2AssetUsageLabel(asset);
+    const unused = Number(asset.usageCount || 0) === 0;
+    const busyDelete = vm2.assetDeleteInFlightId === assetId;
+    const deleteDisabled = !unused || vm2ProjectUsesAsset(assetId) || busyDelete;
+    const deleteLabel = vm2ProjectUsesAsset(assetId)
+      ? 'Linked in current editor'
+      : busyDelete
+        ? 'Deleting…'
+        : 'Delete Unused';
+    const usageBadgeClass = unused
+      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
+
+    return `
+      <div class="rounded-xl border border-gray-200 bg-white p-3 text-left shadow-sm transition-colors dark:border-gray-600 dark:bg-gray-800 ${unused ? 'hover:border-amber-300 dark:hover:border-amber-500' : 'hover:border-violet-400 dark:hover:border-violet-500'}">
+        <div class="flex items-start gap-3">
+          <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-gray-200 dark:bg-gray-700">
+            <i class="ri-film-line text-gray-500"></i>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-gray-800 dark:text-white">${safeName}</p>
+                <p class="mt-0.5 text-xs text-gray-400">${[uploadedAt, sizeLabel].filter(Boolean).join(' • ') || 'Shared library asset'}</p>
+              </div>
+              <span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${usageBadgeClass}">${usageLabel}</span>
+            </div>
+            <div class="mt-3 flex items-center gap-2">
+              <button
+                class="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-600"
+                onclick="vm2SelectPlaylistAsset('${safeAssetId}', decodeURIComponent('${safeUrl}'), decodeURIComponent('${safeNameArg}'))">
+                Use Video
+              </button>
+              <button
+                class="rounded-lg border px-3 py-1.5 text-xs font-medium transition ${deleteDisabled ? 'cursor-not-allowed border-gray-200 text-gray-400 dark:border-gray-700 dark:text-gray-500' : 'border-red-200 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20'}"
+                onclick="vm2DeleteUnusedAsset('${safeAssetId}', decodeURIComponent('${safeNameArg}'))"
+                ${deleteDisabled ? 'disabled' : ''}>
+                ${deleteLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
 
 function vm2EncodeBase64Unicode(value) {
   const bytes = new TextEncoder().encode(value);
@@ -2212,7 +2300,7 @@ function vm2RenderEditorShell() {
           <i class="ri-close-line text-xl"></i>
         </button>
       </div>
-      <p class="text-xs text-gray-500 dark:text-gray-400 mb-3 flex-shrink-0">Pick an existing video to use in this project. The video will be shared — it won't be re-uploaded.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mb-3 flex-shrink-0">Pick an existing video to use in this project. Shared uploads stay in the library, and unused ones can be deleted here.</p>
       <div id="vm2-assets-list" class="flex-1 overflow-y-auto grid grid-cols-2 gap-3 content-start"></div>
     </div>
   </div>
@@ -3471,34 +3559,59 @@ async function vm2ShowAssetPicker() {
       headers: vm2AuthHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const assets = await res.json();
-
-    if (!assets.length) {
-      list.innerHTML = '<p class="col-span-2 text-sm text-gray-400 text-center py-8">No shared videos in this playlist yet. Upload a video to add it to the library.</p>';
-      return;
-    }
-
-    list.innerHTML = assets.map((a) => {
-      const safeId = encodeURIComponent(a._id || a.assetId);
-      const safeUrl = encodeURIComponent(a.downloadUrl || a.url || '');
-      const safeName = (a.name || a.fileName || 'Untitled').replace(/'/g, '&#39;');
-      const uploadedAt = a.uploadedAt ? new Date(a.uploadedAt).toLocaleDateString() : '';
-      return `
-        <button
-          class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors text-left w-full"
-          onclick="vm2SelectPlaylistAsset('${safeId}', decodeURIComponent('${safeUrl}'), '${safeName}')">
-          <div class="w-10 h-10 rounded bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
-            <i class="ri-film-line text-gray-500"></i>
-          </div>
-          <div class="min-w-0">
-            <p class="text-sm font-medium text-gray-800 dark:text-white truncate">${safeName}</p>
-            <p class="text-xs text-gray-400 mt-0.5">${uploadedAt}</p>
-          </div>
-        </button>`;
-    }).join('');
+    vm2.assetLibraryItems = await res.json();
+    vm2.assetDeleteInFlightId = null;
+    vm2RenderAssetPickerList();
   } catch (err) {
     console.error('[VM2] Asset picker error:', err);
     list.innerHTML = `<p class="col-span-2 text-sm text-red-400 text-center py-8">Failed to load assets: ${err.message}</p>`;
+  }
+}
+
+async function vm2DeleteUnusedAsset(assetId, assetName) {
+  if (!vm2.playlist?._id || !vm2EnsureEditable()) return;
+
+  const normalizedId = String(decodeURIComponent(assetId || ''));
+  const decodedName = String(assetName || 'this asset');
+
+  if (vm2ProjectUsesAsset(normalizedId)) {
+    alert('This asset is still linked in the current editor. Unlink or replace it before deleting.');
+    return;
+  }
+
+  if (!confirm(`Delete unused asset "${decodedName}" from the playlist library?\n\nThis removes the Firebase file too.`)) {
+    return;
+  }
+
+  vm2.assetDeleteInFlightId = normalizedId;
+  vm2RenderAssetPickerList();
+
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-playlists/${vm2.playlist._id}/assets/${encodeURIComponent(normalizedId)}`, {
+      method: 'DELETE',
+      headers: vm2AuthHeaders(),
+    });
+
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body?.usageCount > 0) {
+          message = `Asset is still used by ${body.usageCount} active project${body.usageCount === 1 ? '' : 's'}.`;
+        } else if (body?.error) {
+          message = body.error;
+        }
+      } catch (_) {}
+      throw new Error(message);
+    }
+
+    vm2.assetLibraryItems = (vm2.assetLibraryItems || []).filter((asset) => String(asset.assetId || asset._id || '') !== normalizedId);
+    vm2.assetDeleteInFlightId = null;
+    vm2RenderAssetPickerList();
+  } catch (err) {
+    vm2.assetDeleteInFlightId = null;
+    vm2RenderAssetPickerList();
+    alert(`Failed to delete asset: ${err.message}`);
   }
 }
 
@@ -7314,6 +7427,7 @@ if (typeof window !== 'undefined') {
   window.vm2ShowAssetPicker = vm2ShowAssetPicker;
   window.vm2CloseAssetPicker = vm2CloseAssetPicker;
   window.vm2SelectPlaylistAsset = vm2SelectPlaylistAsset;
+  window.vm2DeleteUnusedAsset = vm2DeleteUnusedAsset;
   window.vm2OpenAddClipChooser = vm2OpenAddClipChooser;
   window.vm2CloseAddClipChooser = vm2CloseAddClipChooser;
   window.vm2ChooseAddClipUpload = vm2ChooseAddClipUpload;
