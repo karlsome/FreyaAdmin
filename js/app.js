@@ -873,6 +873,44 @@ function loadPage(page) {
                   </div>
                 </div>
 
+                <!-- Top 5 best 背番号 + Factory by Final Good (¥) -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div class="bg-white p-4 rounded-lg border border-green-200">
+                    <h3 class="text-sm font-semibold text-green-700 mb-3" data-i18n="top5HighestFinalGoodBan">Top 5 Highest Final Good (背番号)</h3>
+                    <table class="min-w-full text-sm">
+                      <thead class="bg-green-50 text-green-700 text-xs">
+                        <tr>
+                          <th class="px-3 py-2 text-left">#</th>
+                          <th class="px-3 py-2 text-left">背番号</th>
+                          <th class="px-3 py-2 text-left" data-i18n="model">Model</th>
+                          <th class="px-3 py-2 text-right" data-i18n="finalGoodYen">Final Good (¥)</th>
+                          <th class="px-3 py-2 text-right" data-i18n="yieldPercent">Yield %</th>
+                        </tr>
+                      </thead>
+                      <tbody id="financialsTop5ValueBody" class="divide-y divide-gray-100">
+                        <tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="bg-white p-4 rounded-lg border border-green-200">
+                    <h3 class="text-sm font-semibold text-green-700 mb-3" data-i18n="factoryFinalGoodRanking">Factory Final Good Ranking</h3>
+                    <table class="min-w-full text-sm">
+                      <thead class="bg-green-50 text-green-700 text-xs">
+                        <tr>
+                          <th class="px-3 py-2 text-left">#</th>
+                          <th class="px-3 py-2 text-left" data-i18n="factory">Factory</th>
+                          <th class="px-3 py-2 text-right" data-i18n="created">Created</th>
+                          <th class="px-3 py-2 text-right" data-i18n="finalGoodYen">Final Good (¥)</th>
+                          <th class="px-3 py-2 text-right" data-i18n="yieldPercent">Yield %</th>
+                        </tr>
+                      </thead>
+                      <tbody id="financialsFactoryFinalGoodBody" class="divide-y divide-gray-100">
+                        <tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">No data.</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
                 <div id="financialsDetailSection" class="bg-white p-4 rounded-lg border border-gray-200" style="position: relative;">
                   <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="detailBreakdown">Detail Breakdown by 品番</h3>
                   <div class="overflow-x-auto">

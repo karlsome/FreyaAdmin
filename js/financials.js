@@ -520,6 +520,8 @@ async function loadFinancialsData() {
     updateFinancialsCharts(data.scrapByProcess || {}, data.factoryTotals || {});
     renderFinancialsTop5(data.top5 || []);
     renderFinancialsFactoryRanking(data.factoryTotals || {});
+    renderFinancialsTop5Value(data.top5Value || []);
+    renderFinancialsFactoryFinalGood(data.factoryTotals || {});
     renderFinancialsTable(rowsWithRecovery);
     financialsState.totalRows = data.totalRows || 0;
     financialsState.totalPages = data.totalPages || 0;
@@ -1168,6 +1170,60 @@ function renderFinancialsTop5(top5) {
       <td class="px-3 py-2 text-right text-sm">${formatNumber(r.yieldPercent || 0)}%</td>
     </tr>
   `).join("");
+}
+
+// Render top 5 best-performing 背番号 by Final Good (¥)
+function renderFinancialsTop5Value(top5Value) {
+  const body = document.getElementById("financialsTop5ValueBody");
+  if (!body) return;
+  if (!top5Value || !top5Value.length) {
+    body.innerHTML = `<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">${(typeof t === 'function') ? t('noData') : 'No data.'}</td></tr>`;
+    return;
+  }
+  body.innerHTML = top5Value.map((r, i) => `
+    <tr class="${i === 0 ? 'bg-green-50' : ''}">
+      <td class="px-3 py-2 text-xs text-gray-500">${i + 1}</td>
+      <td class="px-3 py-2 font-medium text-sm">${r.ban || '-'}</td>
+      <td class="px-3 py-2 text-xs text-gray-500">${r.model || '-'}</td>
+      <td class="px-3 py-2 text-right text-sm font-semibold text-green-600">¥${formatNumber(r.value || 0)}</td>
+      <td class="px-3 py-2 text-right text-sm">${formatNumber(r.yieldPercent || 0)}%</td>
+    </tr>
+  `).join("");
+}
+
+// Render factory Final Good (¥) ranking table
+function renderFinancialsFactoryFinalGood(factoryTotals) {
+  const body = document.getElementById("financialsFactoryFinalGoodBody");
+  if (!body) return;
+  const factories  = factoryTotals?.factories  || [];
+  const totalValue = factoryTotals?.totalValue  || [];
+  const scrapLoss  = factoryTotals?.scrapLoss   || [];
+  const created    = factoryTotals?.created     || [];
+  const finalGood  = factoryTotals?.finalGood   || [];
+  if (!factories.length) {
+    body.innerHTML = `<tr><td colspan="5" class="px-3 py-3 text-gray-400 text-xs">${(typeof t === 'function') ? t('noData') : 'No data.'}</td></tr>`;
+    return;
+  }
+  const ranked = factories
+    .map((name, i) => ({
+      name,
+      created:       created[i]    || 0,
+      finalGoodPcs:  finalGood[i]  || 0,
+      finalGoodYen:  Number(((totalValue[i] || 0) - (scrapLoss[i] || 0)).toFixed(2))
+    }))
+    .sort((a, b) => b.finalGoodYen - a.finalGoodYen);
+  body.innerHTML = ranked.map((r, i) => {
+    const yieldPct = r.created > 0 ? ((r.finalGoodPcs / r.created) * 100).toFixed(1) : '0.0';
+    return `
+      <tr>
+        <td class="px-3 py-2 text-xs text-gray-500">${i + 1}</td>
+        <td class="px-3 py-2 font-medium text-sm">${r.name}</td>
+        <td class="px-3 py-2 text-right text-sm">${formatNumber(r.created)}</td>
+        <td class="px-3 py-2 text-right text-sm font-semibold text-green-600">¥${formatNumber(r.finalGoodYen)}</td>
+        <td class="px-3 py-2 text-right text-sm">${yieldPct}%</td>
+      </tr>
+    `;
+  }).join("");
 }
 
 // Render factory scrap loss ranking table
