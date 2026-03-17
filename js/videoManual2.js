@@ -3753,43 +3753,15 @@ async function vm2UploadVideoAsset(file) {
   vm2.uploadInProgress = true;
   vm2SetSaveStatus('Preparing video…', 'blue');
 
-  let uploadBarStart = 5;
-
   try {
-    // Transcode to H.264 MP4 for Raspberry Pi / Chromium compatibility.
-    // Skip only if the file is already explicitly video/mp4 with a .mp4 extension.
-    const needsTranscode = !(file.type === 'video/mp4' && /\.mp4$/i.test(file.name));
-    if (needsTranscode) {
-      msg.textContent = 'Transcoding to H.264 MP4…';
-      detail.textContent = `Converting ${file.name} for device compatibility…`;
-      vm2SetSaveStatus('Transcoding video…', 'blue');
-      try {
-        file = await vm2TranscodeToH264(file, (progress) => {
-          bar.style.width = Math.round(5 + progress * 45) + '%';
-          detail.textContent = `Transcoding: ${Math.round(progress * 100)}% — this may take a moment…`;
-        });
-        uploadBarStart = 50;
-        bar.style.width = '50%';
-        msg.textContent = 'Uploading converted video…';
-        detail.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
-        vm2SetSaveStatus('Uploading video…', 'blue');
-      } catch (transcodeErr) {
-        console.warn('[VM2] Transcode failed, uploading original:', transcodeErr);
-        msg.textContent = 'Uploading original video…';
-        detail.textContent = `⚠️ Transcode failed: ${transcodeErr.message}. Uploading as-is.`;
-        bar.style.width = '5%';
-        vm2SetSaveStatus('Uploading video…', 'blue');
-      }
-    } else {
-      msg.textContent = 'Uploading video…';
-      vm2SetSaveStatus('Uploading video…', 'blue');
-    }
+    msg.textContent = 'Uploading video…';
+    vm2SetSaveStatus('Uploading video…', 'blue');
 
     const result = await vm2UploadVideoBinary(file, {
       playlistId: vm2.playlist?._id || null,
       uploadFolder: 'videoManuals',
       onProgress: (loaded, total) => {
-        const pct = uploadBarStart + Math.round((loaded / total) * (90 - uploadBarStart));
+        const pct = 5 + Math.round((loaded / total) * 85);
         bar.style.width = Math.min(pct, 95) + '%';
         detail.textContent = `${(loaded / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB`;
       },
