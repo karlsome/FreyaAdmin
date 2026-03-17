@@ -3097,6 +3097,32 @@ function vm2TpAdvanceStepPlayback() {
     return;
   }
 
+  const currentStep = steps[vm2TP.stepIdx];
+  const nextStep = steps[nextIdx];
+  const sameSource = vm2GetStepSourceKey(currentStep, vm2TP.project) === vm2GetStepSourceKey(nextStep, vm2TP.project);
+
+  if (sameSource) {
+    const currentSrcEnd = vm2TpStepEnd(currentStep);
+    const nextSrcStart = vm2TpStepStart(nextStep);
+    const isContiguous = Math.abs(nextSrcStart - currentSrcEnd) < 0.08;
+    vm2TP.stepIdx = nextIdx;
+    vm2TpUpdateStepLabel();
+    vm2TpRenderElements();
+
+    if (!isContiguous) {
+      const targetTime = Math.min(
+        vm2TpStepEnd(nextStep),
+        nextSrcStart + 0.01
+      );
+      video.currentTime = targetTime;
+    }
+
+    const playPromise = video.paused ? video.play() : null;
+    vm2TpSetPlayButton(false);
+    if (playPromise?.catch) playPromise.catch(() => vm2TpSetPlayButton(true));
+    return;
+  }
+
   vm2TP.stepIdx = nextIdx;
   vm2TpUpdateStepLabel();
   vm2TpRenderElements();
@@ -3931,7 +3957,51 @@ function vm2OnTimeUpdate() {
       // Jump to the next step
       activeStepIdx++;
       if (activeStepIdx < vm2.project.steps.length) {
-        vm2SeekTo(vm2.project.steps[activeStepIdx].startTime, { autoplay: true });
+        const nextStep = vm2.project.steps[activeStepIdx];
+        const sameSource = vm2GetStepSourceKey(activeStep, vm2.project) === vm2GetStepSourceKey(nextStep, vm2.project);
+
+        if (sameSource) {
+          const currentSrcEnd = activeStep.sourceEnd ?? activeStep.endTime;
+          const nextSrcStart = nextStep.sourceStart ?? nextStep.startTime;
+          const nextSrcEnd = nextStep.sourceEnd ?? nextStep.endTime;
+          const isContiguous = Math.abs(nextSrcStart - currentSrcEnd) < 0.08;
+          vm2.currentStepIdx = activeStepIdx;
+
+          if (!isContiguous) {
+            const targetTime = Math.min(nextSrcEnd, nextSrcStart + 0.01);
+            video.currentTime = targetTime;
+          }
+
+          video.muted = !!nextStep.muted;
+          vm2.playing = true;
+          const btn = vm2Get('vm2-play-btn');
+          if (btn) btn.innerHTML = '<i class="ri-pause-fill text-lg"></i>';
+          vm2.currentTime = nextStep.startTime;
+
+          const display = vm2Get('vm2-time-display');
+          if (display) {
+            display.textContent = vm2Fmt(vm2.currentTime) + ' / ' + vm2Fmt(vm2.duration);
+          }
+
+          vm2UpdatePlayhead();
+          vm2RenderSteps();
+          vm2RenderElements();
+          vm2UpdateVisibleElements();
+
+          const playPromise = video.paused ? video.play() : null;
+          if (playPromise?.catch) {
+            playPromise.catch(() => {
+              vm2.playing = false;
+              if (btn) btn.innerHTML = '<i class="ri-play-fill text-lg"></i>';
+            });
+          }
+          return;
+        }
+
+        vm2SeekTo(vm2.project.steps[activeStepIdx].startTime, {
+          autoplay: true,
+          stepIdx: activeStepIdx,
+        });
         return;
       } else {
         // Reached the end of the entire sequence
@@ -4070,27 +4140,31 @@ function vm2TogglePlay() {
   }
 }
 
-function vm2SeekTo(timelineTime, { autoplay = false } = {}) {
+function vm2SeekTo(timelineTime, { autoplay = false, stepIdx = null } = {}) {
   let video = vm2Video();
   if (!video || !vm2.project) return;
 
   // Clamp timelineTime within total duration
   timelineTime = Math.max(0, Math.min(timelineTime, vm2.duration));
 
-  // Find the step that contains this timeline position. Boundaries belong to
-  // the next step so playback can advance continuously across adjacent clips.
-  const stepIdx = vm2FindStepIndexAtTime(timelineTime, vm2.project);
-
   let step = null;
-  if (stepIdx >= 0) {
+  if (Number.isInteger(stepIdx) && stepIdx >= 0 && stepIdx < vm2.project.steps.length) {
     step = vm2.project.steps[stepIdx];
-    vm2.currentStepIdx = stepIdx; // Update tracking!
+    vm2.currentStepIdx = stepIdx;
   } else if (vm2.project.steps.length > 0) {
-    // If exact match not found (e.g. at boundaries), snap to closest
-    step = timelineTime <= vm2.project.steps[0].startTime 
-           ? vm2.project.steps[0] 
-           : vm2.project.steps[vm2.project.steps.length - 1];
-    vm2.currentStepIdx = timelineTime <= vm2.project.steps[0].startTime ? 0 : vm2.project.steps.length - 1;
+    // Find the step that contains this timeline position. Boundaries belong to
+    // the next step so playback can advance continuously across adjacent clips.
+    const resolvedStepIdx = vm2FindStepIndexAtTime(timelineTime, vm2.project);
+    if (resolvedStepIdx >= 0) {
+      step = vm2.project.steps[resolvedStepIdx];
+      vm2.currentStepIdx = resolvedStepIdx;
+    } else {
+      // If exact match not found (e.g. at boundaries), snap to closest
+      step = timelineTime <= vm2.project.steps[0].startTime
+        ? vm2.project.steps[0]
+        : vm2.project.steps[vm2.project.steps.length - 1];
+      vm2.currentStepIdx = timelineTime <= vm2.project.steps[0].startTime ? 0 : vm2.project.steps.length - 1;
+    }
   }
 
   if (step) {
