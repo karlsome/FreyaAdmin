@@ -3290,7 +3290,7 @@ function vm2EnsureTrashPreviewModal() {
     <!-- Header -->
     <div class="flex items-center justify-between px-5 py-3 bg-gray-900 border-b border-gray-800 flex-shrink-0">
       <div class="flex items-center gap-3">
-        <span class="text-xs font-semibold uppercase tracking-widest text-red-400"><i class="ri-delete-bin-2-line mr-1"></i>${t('vmRecycleBinPreview')}</span>
+        <span id="vm2-tp-badge" class="text-xs font-semibold uppercase tracking-widest text-red-400"><i class="ri-delete-bin-2-line mr-1"></i>${t('vmRecycleBinPreview')}</span>
         <span id="vm2-tp-title" class="text-sm font-medium text-white truncate max-w-[320px]"></span>
       </div>
       <div class="flex items-center gap-3">
@@ -3331,8 +3331,34 @@ function vm2EnsureTrashPreviewModal() {
   vm2TpInitManagedMedia();
 }
 
-async function vm2PreviewTrashProject(id) {
+function vm2OpenOverlayProjectPreview(data, {
+  title = '',
+  badgeHtml = `<i class="ri-eye-line mr-1"></i>${t('vmPreviewBtn')}`,
+  badgeClass = 'text-sky-400',
+} = {}) {
   vm2EnsureTrashPreviewModal();
+  vm2TP.project = data;
+  vm2TP.stepIdx = 0;
+  vm2TP.videoRect = null;
+  vm2TP.pendingSwitch = null;
+
+  const badgeEl = vm2TpGet('vm2-tp-badge');
+  const titleEl = vm2TpGet('vm2-tp-title');
+  if (badgeEl) {
+    badgeEl.className = `text-xs font-semibold uppercase tracking-widest ${badgeClass}`;
+    badgeEl.innerHTML = badgeHtml;
+  }
+  if (titleEl) titleEl.textContent = title || data?.title || 'Untitled';
+
+  vm2TpGet('vm2-modal-trash-preview')?.classList.remove('hidden');
+  vm2TpUpdateStepLabel();
+  vm2TpRenderElements();
+  vm2TpSyncCanvasSize();
+  vm2TpPrimeMedia();
+  vm2TpStartLoop();
+}
+
+async function vm2PreviewTrashProject(id) {
   try {
     const res = await fetch(`${vm2BaseUrl()}api/video-projects/${id}`, {
       headers: vm2AuthHeaders(),
@@ -3363,23 +3389,11 @@ async function vm2PreviewTrashProject(id) {
       } catch (_) { /* fall back to working copy */ }
     }
 
-    vm2TP.project = data;
-    vm2TP.stepIdx = 0;
-    vm2TP.videoRect = null;
-    vm2TP.pendingSwitch = null;
-
-    // Populate header.
-    const titleEl = vm2TpGet('vm2-tp-title');
-    if (titleEl) titleEl.textContent = data.title || 'Untitled';
-
-    vm2TpGet('vm2-modal-trash-preview')?.classList.remove('hidden');
-    vm2TpUpdateStepLabel();
-    vm2TpRenderElements();
-    vm2TpSyncCanvasSize();
-
-    vm2TpPrimeMedia();
-
-    vm2TpStartLoop();
+    vm2OpenOverlayProjectPreview(data, {
+      title: data.title || 'Untitled',
+      badgeHtml: `<i class="ri-delete-bin-2-line mr-1"></i>${t('vmRecycleBinPreview')}`,
+      badgeClass: 'text-red-400',
+    });
   } catch (err) {
     console.error('[VM2 TrashPreview] Error:', err);
     alert('Could not load preview: ' + err.message);
@@ -6701,6 +6715,9 @@ function vm2RenderInactiveDeployedFilesPanel() {
   }
 
   list.innerHTML = visibleFiles.map((file) => {
+    const previewRevision = Array.isArray(file.revisions) && file.revisions.length
+      ? [...file.revisions].sort((a, b) => (Number(b.revisionNumber) || 0) - (Number(a.revisionNumber) || 0))[0]
+      : null;
     const revisionLabels = Array.isArray(file.revisions)
       ? file.revisions.slice(0, 3).map((revision) => vm2EscapeHtml(`${revision.projectTitle || 'Untitled Project'} · ${revision.revisionName || `Rev ${revision.revisionNumber || '?'}`}`)).join('<br>')
       : '';
@@ -6708,6 +6725,7 @@ function vm2RenderInactiveDeployedFilesPanel() {
     const deleteDisabled = vm2.inactiveDeployedFileDeletePath === file.storagePath;
     const safePath = String(file.storagePath || '').replace(/'/g, "\\'");
     const safeName = String(file.fileName || file.storagePath || 'file').replace(/'/g, "\\'");
+    const safePreviewRevisionId = String(previewRevision?.revisionId || '').replace(/'/g, "\\'");
 
     return `
       <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
@@ -6720,7 +6738,10 @@ function vm2RenderInactiveDeployedFilesPanel() {
             ${revisionLabels ? `<div class="mt-1 text-[11px] text-slate-500 dark:text-gray-400">${revisionLabels}${extraRevisionCount ? `<br>+${extraRevisionCount} more` : ''}</div>` : ''}
             <div class="mt-1 truncate text-[10px] text-slate-400 dark:text-gray-500">${vm2EscapeHtml(file.storagePath || '')}</div>
           </div>
-          <button onclick="vm2DeleteInactiveDeployedFile('${safePath}', '${safeName}')" class="rounded border border-red-200 px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20" ${deleteDisabled ? 'disabled' : ''}>${deleteDisabled ? 'Deleting…' : 'Delete'}</button>
+          <div class="flex shrink-0 items-center gap-2">
+            ${previewRevision ? `<button onclick="vm2PreviewInactiveDeployedRevision('${safePreviewRevisionId}')" class="rounded border border-sky-200 px-2 py-1 text-xs font-medium text-sky-600 transition hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-900/20">Preview</button>` : ''}
+            <button onclick="vm2DeleteInactiveDeployedFile('${safePath}', '${safeName}')" class="rounded border border-red-200 px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20" ${deleteDisabled ? 'disabled' : ''}>${deleteDisabled ? 'Deleting…' : 'Delete'}</button>
+          </div>
         </div>
       </div>
     `;
@@ -6743,6 +6764,29 @@ function vm2OpenInactiveDeployedFilesModal() {
 function vm2CloseInactiveDeployedFilesModal() {
   vm2.inactiveDeployedFilesOpen = false;
   vm2Get('vm2-modal-undeployed-files')?.classList.add('hidden');
+}
+
+async function vm2PreviewInactiveDeployedRevision(revisionId) {
+  if (!revisionId) return;
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-revisions/${revisionId}`, {
+      headers: vm2AuthHeaders(),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const revision = await res.json();
+    const snapshot = vm2DeepClone(revision.snapshot || {});
+    snapshot._id = revision.projectId;
+    snapshot.__previewRevisionId = revision._id;
+    snapshot.currentRevisionNumber = revision.revisionNumber || snapshot.currentRevisionNumber || 0;
+    vm2OpenOverlayProjectPreview(snapshot, {
+      title: revision.revisionName || snapshot.title || 'Untitled',
+      badgeHtml: '<i class="ri-eye-line mr-1"></i>Undeployed Preview',
+      badgeClass: 'text-sky-400',
+    });
+  } catch (err) {
+    console.error('[VM2] Inactive deployed preview error:', err);
+    alert('Failed to preview revision: ' + err.message);
+  }
 }
 
 async function vm2LoadInactiveDeployedFiles(force = false) {
@@ -7139,7 +7183,7 @@ async function vm2PreviewRevision(revisionId) {
     snapshot.__previewRevisionId = revision._id;
     snapshot.currentRevisionNumber = revision.revisionNumber || snapshot.currentRevisionNumber || 0;
     vm2ApplyProjectState(snapshot, { readOnlyRevision: revision });
-    vm2Get('vm2-modal-history').classList.add('hidden');
+    vm2Get('vm2-modal-history')?.classList.add('hidden');
   } catch (err) {
     console.error('[VM2] Preview revision error:', err);
     alert('Failed to preview revision: ' + err.message);
