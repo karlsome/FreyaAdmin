@@ -70,6 +70,12 @@ let vm2 = {
   playlistSearchQuery: '',
   assetLibraryItems: [],
   assetDeleteInFlightId: null,
+  inactiveDeployedFiles: [],
+  inactiveDeployedFilesRetentionDays: 60,
+  inactiveDeployedFilesLoading: false,
+  inactiveDeployedFileDeletePath: '',
+  inactiveDeployedFilesOpen: false,
+  inactiveDeployedFilesQuery: '',
   _projectsList: [],
   _editorMounted: false,
 };
@@ -248,6 +254,10 @@ function vm2CreateEmptyProject(overrides = {}) {
 function vm2CanDeployProject() {
   const role = vm2AuthUser().role || 'viewer';
   return ['admin', '班長', '課長', '部長', '係長'].includes(role);
+}
+
+function vm2CanManageDeployedFiles() {
+  return (vm2AuthUser().role || 'viewer') === 'admin';
 }
 
 function vm2ProjectDeploymentLabel(project) {
@@ -869,6 +879,7 @@ function vm2RenderPlaylistBrowser() {
   const projectTitle = vm2Get('vm2-browser-project-title');
   const emptyState = vm2Get('vm2-browser-project-empty');
   const playlistActions = vm2Get('vm2-browser-playlist-actions');
+  const undeployedFilesBtn = vm2Get('vm2-undeployed-files-btn');
   const createProjectBtn = vm2Get('vm2-create-project-btn');
   const createPlaylistBtn = vm2Get('vm2-create-playlist-btn');
   if (!playlistList || !projectList) return;
@@ -878,6 +889,7 @@ function vm2RenderPlaylistBrowser() {
   const canEditPlaylistMeta = ['admin', '課長', '部長', '係長'].includes(role);
   const canEditProject = ['admin', '課長', '部長', '係長', '班長'].includes(role);
   const canDeletePlaylists = role === 'admin';
+  const canManageDeployedFiles = vm2CanManageDeployedFiles();
   const searchQuery = (vm2.playlistSearchQuery || '').trim().toLocaleLowerCase();
   const visiblePlaylists = [...vm2.playlists]
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja', { sensitivity: 'base', numeric: true }))
@@ -889,6 +901,12 @@ function vm2RenderPlaylistBrowser() {
     });
   if (createPlaylistBtn) createPlaylistBtn.classList.toggle('hidden', !canManagePlaylists);
   if (createProjectBtn) createProjectBtn.disabled = !vm2.playlist;
+  if (!canManageDeployedFiles) {
+    vm2.inactiveDeployedFilesOpen = false;
+  }
+  if (undeployedFilesBtn) {
+    undeployedFilesBtn.classList.toggle('hidden', !canManageDeployedFiles);
+  }
   vm2SyncTrashUiState();
 
   playlistList.innerHTML = visiblePlaylists.length
@@ -936,9 +954,6 @@ function vm2RenderPlaylistBrowser() {
       const actions = [
         canEditPlaylistMeta
           ? `<button onclick="vm2OpenEditPlaylistModal('${vm2.playlist._id}')" class="rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title="Edit playlist"><i class="ri-pencil-line mr-1"></i>${t('vmEditPlaylistBtn')}</button>`
-          : '',
-        canDeletePlaylists
-          ? `<button onclick="vm2DeletePlaylist('${vm2.playlist._id}', '${vm2EscapeHtml(vm2.playlist.name || t('vmUntitledPlaylist'))}')" class="rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="Delete playlist"><i class="ri-delete-bin-line mr-1"></i>${t('vmDeletePlaylistBtn')}</button>`
           : ''
       ].filter(Boolean).join('');
       playlistActions.innerHTML = actions;
@@ -1378,8 +1393,10 @@ async function vm2OpenEditPlaylistModal(id) {
   const descInput = vm2Get('vm2-edit-playlist-description');
   const errorEl = vm2Get('vm2-edit-playlist-error');
   const loadingEl = vm2Get('vm2-edit-playlist-model-loading');
+  const deleteBtn = vm2Get('vm2-edit-playlist-delete');
   if (!playlist || !modal || !modelSelect || !titleInput || !descInput || !errorEl || !loadingEl) return;
   modal.dataset.playlistId = String(playlist._id);
+  modal.dataset.playlistName = playlist.name || t('vmUntitledPlaylist');
   modelSelect.innerHTML = `<option value="">${t('vmLoadingModels')}</option>`;
   modelSelect.disabled = true;
   loadingEl.textContent = t('vmLoadingModels');
@@ -1388,6 +1405,7 @@ async function vm2OpenEditPlaylistModal(id) {
   titleInput.dataset.manual = playlist.model && playlist.name === playlist.model ? '0' : (playlist.name ? '1' : '0');
   descInput.value = playlist.description || '';
   errorEl.textContent = '';
+  if (deleteBtn) deleteBtn.classList.toggle('hidden', (vm2AuthUser().role || '') !== 'admin');
   vm2.playlistUpdating = false;
   modal.classList.remove('hidden');
   vm2SyncEditPlaylistSubmitState();
@@ -1466,6 +1484,15 @@ async function vm2DeletePlaylist(id, name) {
     console.error('[VM2] Delete playlist error:', err);
     alert('Failed to delete playlist: ' + err.message);
   }
+}
+
+async function vm2DeletePlaylistFromEditModal() {
+  const modal = vm2Get('vm2-modal-edit-playlist');
+  const playlistId = modal?.dataset.playlistId;
+  const playlistName = modal?.dataset.playlistName || t('vmUntitledPlaylist');
+  if (!playlistId) return;
+  vm2CloseEditPlaylistModal();
+  await vm2DeletePlaylist(playlistId, playlistName);
 }
 
 async function vm2CreateProject() {
@@ -2535,7 +2562,12 @@ function loadVideoManual2Page() {
                 <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">${t('vmProjectsSection')}</p>
                 <h3 id="vm2-browser-project-title" class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">${t('vmSelectAPlaylist')}</h3>
                 <p id="vm2-playlist-meta" class="mt-1 text-sm text-slate-500 dark:text-slate-400">${t('vmChoosePlaylistToBrowse')}</p>
-                <div id="vm2-browser-playlist-actions" class="hidden mt-3 flex flex-wrap gap-2"></div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <div id="vm2-browser-playlist-actions" class="hidden flex flex-wrap gap-2"></div>
+                  <button id="vm2-undeployed-files-btn" onclick="vm2OpenInactiveDeployedFilesModal()" class="hidden rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
+                    <i class="ri-folder-warning-line mr-1"></i>Undeployed Files
+                  </button>
+                </div>
               </div>
             </div>
             <div id="vm2-browser-project-empty" class="rounded-[24px] border border-dashed border-slate-300 px-6 py-14 text-center dark:border-gray-700">
@@ -2561,6 +2593,32 @@ function loadVideoManual2Page() {
       </div>
     </div>
     <div id="vm2-editor-host" class="hidden"></div>
+
+    <div id="vm2-modal-undeployed-files" class="hidden fixed inset-0 z-[320] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="w-full max-w-4xl rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Undeployed Files</p>
+            <h3 class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">Flattened Deployment Files</h3>
+            <p id="vm2-undeployed-files-summary" class="mt-2 text-sm text-slate-500 dark:text-slate-400"></p>
+          </div>
+          <button onclick="vm2CloseInactiveDeployedFilesModal()" class="shrink-0 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+            <i class="ri-close-line text-lg"></i>
+          </button>
+        </div>
+        <div class="mt-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div class="relative flex-1">
+            <i class="ri-search-line pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input id="vm2-undeployed-files-search" type="search" value="${vm2EscapeHtml(vm2.inactiveDeployedFilesQuery || '')}" oninput="vm2SetInactiveDeployedFilesQuery(this.value)" placeholder="Search by file, path, project, or revision" class="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="vm2SetInactiveDeployedFilesQuery('')" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Clear</button>
+            <button onclick="vm2LoadInactiveDeployedFiles(true)" class="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"><i class="ri-refresh-line mr-1"></i>Refresh</button>
+          </div>
+        </div>
+        <div id="vm2-undeployed-files-list" class="mt-4 max-h-[60vh] space-y-2 overflow-y-auto pr-1"></div>
+      </div>
+    </div>
 
     <div id="vm2-modal-project-info" class="hidden fixed inset-0 z-[320] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
@@ -2769,6 +2827,9 @@ function loadVideoManual2Page() {
         </div>
 
         <div class="mt-6 flex gap-3">
+          <button id="vm2-edit-playlist-delete" onclick="vm2DeletePlaylistFromEditModal()" class="hidden py-2 rounded border border-red-200 bg-white px-4 text-sm text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:bg-gray-800 dark:hover:bg-red-900/20">
+            ${t('vmDeletePlaylistBtn')}
+          </button>
           <button onclick="vm2CloseEditPlaylistModal()" class="flex-1 py-2 rounded border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">${t('cancel')}</button>
           <button id="vm2-edit-playlist-submit" onclick="vm2SubmitEditPlaylist()" class="flex-1 py-2 rounded text-sm text-white bg-slate-300 cursor-not-allowed dark:bg-gray-700" disabled>${t('vmSaveChanges')}</button>
         </div>
@@ -6587,6 +6648,227 @@ async function vm2OpenProject() {
   await vm2ReturnToBrowser();
 }
 
+function vm2RenderInactiveDeployedFilesPanel() {
+  const panel = vm2Get('vm2-modal-undeployed-files');
+  const summary = vm2Get('vm2-undeployed-files-summary');
+  const list = vm2Get('vm2-undeployed-files-list');
+  const searchInput = vm2Get('vm2-undeployed-files-search');
+  if (!panel || !summary || !list) return;
+
+  if (!vm2CanManageDeployedFiles()) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  if (searchInput && searchInput.value !== (vm2.inactiveDeployedFilesQuery || '')) {
+    searchInput.value = vm2.inactiveDeployedFilesQuery || '';
+  }
+
+  const files = Array.isArray(vm2.inactiveDeployedFiles) ? vm2.inactiveDeployedFiles : [];
+  const normalizedQuery = String(vm2.inactiveDeployedFilesQuery || '').trim().toLocaleLowerCase();
+  const visibleFiles = normalizedQuery
+    ? files.filter((file) => {
+        const haystack = [
+          file.fileName,
+          file.storagePath,
+          ...(Array.isArray(file.revisions)
+            ? file.revisions.flatMap((revision) => [revision.projectTitle, revision.revisionName, revision.revisionNumber])
+            : []),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLocaleLowerCase();
+        return haystack.includes(normalizedQuery);
+      })
+    : files;
+  const retentionDays = Number(vm2.inactiveDeployedFilesRetentionDays) || 60;
+
+  if (vm2.inactiveDeployedFilesLoading) {
+    summary.textContent = `Loading undeployed flattened files. Auto-delete runs after ${retentionDays} days.`;
+    list.innerHTML = '<p class="py-4 text-center text-xs text-slate-500 dark:text-gray-400">Loading undeployed flattened files…</p>';
+    return;
+  }
+
+  summary.textContent = visibleFiles.length
+    ? `${visibleFiles.length}${visibleFiles.length !== files.length ? ` of ${files.length}` : ''} undeployed flattened file${visibleFiles.length === 1 ? '' : 's'}. Auto-delete runs after ${retentionDays} days.`
+    : `No undeployed flattened files. Auto-delete runs after ${retentionDays} days.`;
+
+  if (!visibleFiles.length) {
+    list.innerHTML = normalizedQuery
+      ? '<p class="py-4 text-center text-xs text-slate-500 dark:text-gray-400">No undeployed files match that search.</p>'
+      : '<p class="py-4 text-center text-xs text-slate-500 dark:text-gray-400">No undeployed flattened files.</p>';
+    return;
+  }
+
+  list.innerHTML = visibleFiles.map((file) => {
+    const revisionLabels = Array.isArray(file.revisions)
+      ? file.revisions.slice(0, 3).map((revision) => vm2EscapeHtml(`${revision.projectTitle || 'Untitled Project'} · ${revision.revisionName || `Rev ${revision.revisionNumber || '?'}`}`)).join('<br>')
+      : '';
+    const extraRevisionCount = Math.max(0, (file.revisions?.length || 0) - 3);
+    const deleteDisabled = vm2.inactiveDeployedFileDeletePath === file.storagePath;
+    const safePath = String(file.storagePath || '').replace(/'/g, "\\'");
+    const safeName = String(file.fileName || file.storagePath || 'file').replace(/'/g, "\\'");
+
+    return `
+      <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-sm font-medium text-slate-800 dark:text-white">${vm2EscapeHtml(file.fileName || file.storagePath || 'Unnamed file')}</div>
+            <div class="mt-1 text-[11px] text-slate-500 dark:text-gray-400">${vm2FormatFileSize(file.size || 0)} · ${file.createdAt ? new Date(file.createdAt).toLocaleString() : 'Unknown upload date'}${Number.isFinite(file.ageDays) ? ` · ${file.ageDays} days old` : ''}</div>
+            <div class="mt-1 text-[11px] ${file.eligibleForAutoDelete ? 'text-amber-600 dark:text-amber-300' : 'text-slate-400 dark:text-gray-500'}">${file.autoDeleteAt ? `Auto-delete ${new Date(file.autoDeleteAt).toLocaleDateString()}` : 'Auto-delete date unavailable'}</div>
+            <div class="mt-2 text-[11px] text-slate-500 dark:text-gray-400">Reusable by ${file.reusableRevisionCount || 0} revision${file.reusableRevisionCount === 1 ? '' : 's'}</div>
+            ${revisionLabels ? `<div class="mt-1 text-[11px] text-slate-500 dark:text-gray-400">${revisionLabels}${extraRevisionCount ? `<br>+${extraRevisionCount} more` : ''}</div>` : ''}
+            <div class="mt-1 truncate text-[10px] text-slate-400 dark:text-gray-500">${vm2EscapeHtml(file.storagePath || '')}</div>
+          </div>
+          <button onclick="vm2DeleteInactiveDeployedFile('${safePath}', '${safeName}')" class="rounded border border-red-200 px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20" ${deleteDisabled ? 'disabled' : ''}>${deleteDisabled ? 'Deleting…' : 'Delete'}</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function vm2SetInactiveDeployedFilesQuery(value) {
+  vm2.inactiveDeployedFilesQuery = value || '';
+  vm2RenderInactiveDeployedFilesPanel();
+}
+
+function vm2OpenInactiveDeployedFilesModal() {
+  if (!vm2CanManageDeployedFiles()) return;
+  vm2.inactiveDeployedFilesOpen = true;
+  vm2Get('vm2-modal-undeployed-files')?.classList.remove('hidden');
+  vm2RenderInactiveDeployedFilesPanel();
+  void vm2LoadInactiveDeployedFiles();
+}
+
+function vm2CloseInactiveDeployedFilesModal() {
+  vm2.inactiveDeployedFilesOpen = false;
+  vm2Get('vm2-modal-undeployed-files')?.classList.add('hidden');
+}
+
+async function vm2LoadInactiveDeployedFiles(force = false) {
+  if (!vm2CanManageDeployedFiles()) return;
+
+  vm2.inactiveDeployedFilesLoading = true;
+  if (!force) {
+    vm2RenderInactiveDeployedFilesPanel();
+  } else {
+    const list = vm2Get('vm2-undeployed-files-list');
+    const summary = vm2Get('vm2-undeployed-files-summary');
+    if (summary) summary.textContent = 'Refreshing undeployed flattened files…';
+    if (list) list.innerHTML = '<p class="py-4 text-center text-xs text-slate-500 dark:text-gray-400">Refreshing undeployed flattened files…</p>';
+  }
+
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-deployed-files`, {
+      headers: vm2AuthHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || String(res.status));
+    }
+
+    const data = await res.json();
+    vm2.inactiveDeployedFiles = Array.isArray(data.files) ? data.files : [];
+    vm2.inactiveDeployedFilesRetentionDays = Number(data.retentionDays) || 60;
+  } catch (err) {
+    vm2.inactiveDeployedFiles = [];
+    const list = vm2Get('vm2-undeployed-files-list');
+    const summary = vm2Get('vm2-undeployed-files-summary');
+    if (summary) summary.textContent = 'Failed to load undeployed flattened files.';
+    if (list) list.innerHTML = `<p class="py-4 text-center text-xs text-red-500">Failed to load undeployed flattened files: ${vm2EscapeHtml(err.message)}</p>`;
+  } finally {
+    vm2.inactiveDeployedFilesLoading = false;
+    if (vm2.inactiveDeployedFilesOpen) {
+      vm2RenderInactiveDeployedFilesPanel();
+    }
+  }
+}
+
+async function vm2DeleteInactiveDeployedFile(storagePath, fileName = 'this file') {
+  if (!vm2CanManageDeployedFiles() || !storagePath) return;
+  if (!confirm(`Delete inactive flattened file "${fileName}" from Firebase Storage?\n\nThis cannot be undone and cached redeploy for revisions using this file will be lost.`)) return;
+
+  vm2.inactiveDeployedFileDeletePath = storagePath;
+  vm2RenderInactiveDeployedFilesPanel();
+
+  try {
+    const res = await fetch(`${vm2BaseUrl()}api/video-deployed-files`, {
+      method: 'DELETE',
+      headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ storagePath }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || String(res.status));
+    }
+
+    await vm2LoadInactiveDeployedFiles(true);
+  } catch (err) {
+    alert('Failed to delete inactive flattened file: ' + err.message);
+  } finally {
+    vm2.inactiveDeployedFileDeletePath = '';
+    if (vm2.inactiveDeployedFilesOpen) {
+      vm2RenderInactiveDeployedFilesPanel();
+    }
+  }
+}
+
+function vm2ApplyDeploymentResponse(data, fallbackVideo = null) {
+  const deployedAt = data.deployedAt || vm2NowIso();
+  const fallbackUrl = fallbackVideo?.url || null;
+  const fallbackStoragePath = fallbackVideo?.storagePath || null;
+  const fallbackMimeType = fallbackVideo?.mimeType || 'video/mp4';
+  const fallbackFileName = fallbackVideo?.fileName || null;
+
+  vm2.project.deployedRevisionId = data.revisionId || null;
+  vm2.project.deployedRevisionNumber = data.revisionNumber || null;
+  vm2.project.deployedRevisionName = data.revisionName || null;
+  vm2.project.deployedAt = deployedAt;
+  vm2.project.deployedBy = data.deployedBy || vm2AuthUser().username || 'unknown';
+  vm2.project.deployedVideoUrl = data.deployedVideoUrl || fallbackUrl;
+  vm2.project.deployedVideoStoragePath = data.deployedVideoStoragePath || fallbackStoragePath;
+  vm2.project.deployedVideoMimeType = data.deployedVideoMimeType || fallbackMimeType;
+  vm2.project.deployedVideoFileName = data.deployedVideoFileName || fallbackFileName;
+  vm2.project.updatedAt = deployedAt;
+  vm2SyncPlaylistProjectEntry(vm2.project._id, {
+    deployedRevisionId: vm2.project.deployedRevisionId,
+    deployedRevisionNumber: vm2.project.deployedRevisionNumber,
+    deployedRevisionName: vm2.project.deployedRevisionName,
+    deployedAt: vm2.project.deployedAt,
+    deployedBy: vm2.project.deployedBy,
+    deployedVideoUrl: vm2.project.deployedVideoUrl,
+    deployedVideoStoragePath: vm2.project.deployedVideoStoragePath,
+    deployedVideoMimeType: vm2.project.deployedVideoMimeType,
+    deployedVideoFileName: vm2.project.deployedVideoFileName,
+    updatedAt: vm2.project.updatedAt,
+  });
+}
+
+async function vm2TryReuseFlattenedDeployment(revisionId, revision) {
+  if (!revision?.deployedVideoStoragePath && !revision?.deployedVideoUrl) return null;
+
+  vm2SetExportProgress('Checking existing flattened deployment...', 'Trying to reuse the previous flattened upload for this revision.', 10);
+  const res = await fetch(`${vm2BaseUrl()}api/video-projects/${vm2.project._id}/deploy`, {
+    method: 'POST',
+    headers: vm2AuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      revisionId,
+      reuseExistingDeployment: true,
+    }),
+  });
+
+  if (res.ok) {
+    return res.json();
+  }
+
+  const err = await res.json().catch(() => ({}));
+  if (res.status === 409 && err.code === 'DEPLOYED_VIDEO_REUSE_MISSING') {
+    return null;
+  }
+
+  throw new Error(err.error || String(res.status));
+}
+
 async function vm2ShowHistory() {
   const list = vm2Get('vm2-history-list');
   const meta = vm2Get('vm2-history-meta');
@@ -6666,6 +6948,27 @@ async function vm2DeployRevision(revisionId) {
       throw new Error('Selected revision has no steps to deploy.');
     }
 
+    const reusedDeployment = await vm2TryReuseFlattenedDeployment(revisionId, revision);
+    if (reusedDeployment) {
+      vm2ApplyDeploymentResponse(reusedDeployment, {
+        url: revision.deployedVideoUrl || null,
+        storagePath: revision.deployedVideoStoragePath || null,
+        mimeType: revision.deployedVideoMimeType || 'video/mp4',
+        fileName: revision.deployedVideoFileName || null,
+      });
+      vm2SetSaveStatus(`Deployed ${reusedDeployment.revisionName || `Rev ${reusedDeployment.revisionNumber || '?'}`}`, 'green');
+      vm2RenderPlaylistBrowser();
+      await vm2ShowHistory();
+      vm2SetExportProgress('Deployment complete', 'Reused the existing flattened MP4 for this revision.', 100);
+      vm2ShowExportDone({
+        label: 'Deployment Complete!',
+        downloadUrl: vm2.project.deployedVideoUrl,
+        downloadName: vm2.project.deployedVideoFileName,
+        buttonLabel: 'Download Flattened MP4',
+      });
+      return;
+    }
+
     deployProject.title = deployProject.title || vm2.project.title || 'video-manual';
     const targetSize = vm2GetFlattenedDeploymentSize(deployProject);
     const safeTitle = String(deployProject.title || 'video-manual').replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'video-manual';
@@ -6725,28 +7028,11 @@ async function vm2DeployRevision(revisionId) {
     }
 
     const data = await res.json();
-    const deployedAt = data.deployedAt || vm2NowIso();
-    vm2.project.deployedRevisionId = data.revisionId || revisionId;
-    vm2.project.deployedRevisionNumber = data.revisionNumber || null;
-    vm2.project.deployedRevisionName = data.revisionName || null;
-    vm2.project.deployedAt = deployedAt;
-    vm2.project.deployedBy = data.deployedBy || vm2AuthUser().username || 'unknown';
-    vm2.project.deployedVideoUrl = data.deployedVideoUrl || flattenedUpload.url;
-    vm2.project.deployedVideoStoragePath = data.deployedVideoStoragePath || flattenedUpload.storagePath || null;
-    vm2.project.deployedVideoMimeType = data.deployedVideoMimeType || flattenedUpload.mimeType || flattenedFile.type || 'video/mp4';
-    vm2.project.deployedVideoFileName = data.deployedVideoFileName || flattenedUpload.fileName || flattenedFile.name;
-    vm2.project.updatedAt = deployedAt;
-    vm2SyncPlaylistProjectEntry(vm2.project._id, {
-      deployedRevisionId: vm2.project.deployedRevisionId,
-      deployedRevisionNumber: vm2.project.deployedRevisionNumber,
-      deployedRevisionName: vm2.project.deployedRevisionName,
-      deployedAt: vm2.project.deployedAt,
-      deployedBy: vm2.project.deployedBy,
-      deployedVideoUrl: vm2.project.deployedVideoUrl,
-      deployedVideoStoragePath: vm2.project.deployedVideoStoragePath,
-      deployedVideoMimeType: vm2.project.deployedVideoMimeType,
-      deployedVideoFileName: vm2.project.deployedVideoFileName,
-      updatedAt: vm2.project.updatedAt,
+    vm2ApplyDeploymentResponse(data, {
+      url: flattenedUpload.url,
+      storagePath: flattenedUpload.storagePath || null,
+      mimeType: flattenedUpload.mimeType || flattenedFile.type || 'video/mp4',
+      fileName: flattenedUpload.fileName || flattenedFile.name,
     });
     vm2SetSaveStatus(`Deployed ${data.revisionName || `Rev ${data.revisionNumber || '?'}`}`, 'green');
     vm2RenderPlaylistBrowser();
