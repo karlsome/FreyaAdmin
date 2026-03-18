@@ -178,6 +178,11 @@ function vm2RenderAssetPickerList() {
             </div>
             <div class="mt-3 flex items-center gap-2">
               <button
+                class="rounded-lg border border-sky-200 px-3 py-1.5 text-xs font-medium text-sky-600 transition hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-900/20"
+                onclick="vm2OpenAssetPreview(decodeURIComponent('${safeUrl}'), decodeURIComponent('${safeNameArg}'))">
+                Preview
+              </button>
+              <button
                 class="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-violet-600"
                 onclick="vm2SelectPlaylistAsset('${safeAssetId}', decodeURIComponent('${safeUrl}'), decodeURIComponent('${safeNameArg}'))">
                 Use Video
@@ -2332,6 +2337,26 @@ function vm2RenderEditorShell() {
     </div>
   </div>
 
+  <div id="vm2-modal-asset-preview" class="hidden fixed inset-0 z-[310] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="w-full max-w-4xl rounded-2xl border border-white/70 bg-white p-5 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+      <div class="mb-4 flex items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Asset Preview</p>
+          <h3 id="vm2-asset-preview-title" class="mt-1 truncate text-xl font-semibold text-slate-900 dark:text-white">Video Preview</h3>
+        </div>
+        <button onclick="vm2CloseAssetPreview()" class="shrink-0 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+          <i class="ri-close-line text-lg"></i>
+        </button>
+      </div>
+      <div class="overflow-hidden rounded-2xl bg-black">
+        <video id="vm2-asset-preview-video" class="block max-h-[70vh] w-full bg-black" controls playsinline preload="metadata"></video>
+      </div>
+      <div class="mt-4 flex justify-end">
+        <button onclick="vm2CloseAssetPreview()" class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add Clip Modal -->
   <div id="vm2-modal-add-clip" class="hidden fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
     <div class="bg-white dark:bg-gray-800 rounded-xl p-5 w-[420px] shadow-2xl">
@@ -3641,6 +3666,32 @@ async function vm2ShowAssetPicker() {
     console.error('[VM2] Asset picker error:', err);
     list.innerHTML = `<p class="col-span-2 text-sm text-red-400 text-center py-8">Failed to load assets: ${err.message}</p>`;
   }
+}
+
+function vm2OpenAssetPreview(url, name = 'Video Preview') {
+  const modal = vm2Get('vm2-modal-asset-preview');
+  const title = vm2Get('vm2-asset-preview-title');
+  const video = vm2Get('vm2-asset-preview-video');
+  if (!modal || !title || !video || !url) return;
+
+  title.textContent = name || 'Video Preview';
+  video.pause();
+  video.src = vm2ResolveMediaUrl(url);
+  video.currentTime = 0;
+  modal.classList.remove('hidden');
+  const playPromise = video.play();
+  if (playPromise?.catch) playPromise.catch(() => {});
+}
+
+function vm2CloseAssetPreview() {
+  const modal = vm2Get('vm2-modal-asset-preview');
+  const video = vm2Get('vm2-asset-preview-video');
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  if (modal) modal.classList.add('hidden');
 }
 
 async function vm2DeleteUnusedAsset(assetId, assetName) {
@@ -7756,6 +7807,8 @@ if (typeof window !== 'undefined') {
   window.vm2ReturnToBrowser = vm2ReturnToBrowser;
   window.vm2ShowAssetPicker = vm2ShowAssetPicker;
   window.vm2CloseAssetPicker = vm2CloseAssetPicker;
+  window.vm2OpenAssetPreview = vm2OpenAssetPreview;
+  window.vm2CloseAssetPreview = vm2CloseAssetPreview;
   window.vm2SelectPlaylistAsset = vm2SelectPlaylistAsset;
   window.vm2DeleteUnusedAsset = vm2DeleteUnusedAsset;
   window.vm2OpenAddClipChooser = vm2OpenAddClipChooser;
