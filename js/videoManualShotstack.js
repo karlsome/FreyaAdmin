@@ -128,7 +128,7 @@ function loadVideoManualShotstackPage() {
   main.innerHTML = `
     <div class="min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-4 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950">
       <div class="mx-auto w-full max-w-[1720px]">
-        <div id="vmss-editor" class="overflow-hidden rounded-[28px] border border-white/60 bg-white/90 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] dark:border-gray-800 dark:bg-gray-900/90"></div>
+        <div id="vmss-editor" class="overflow-visible rounded-[28px] border border-white/60 bg-white/90 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] dark:border-gray-800 dark:bg-gray-900/90"></div>
       </div>
     </div>
   `;
@@ -299,6 +299,7 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
 
   vmss.controls = new Controls(vmss.edit);
   await vmss.controls.load();
+  vmssHideFloatingCanvasToolbar();
 
   vmssBindEvents();
   vmssBindPreviewDrawHandlers();
@@ -1216,7 +1217,6 @@ function vmssSetAddElementsCategory(category) {
 function vmssUpdateAddElementsUI() {
   const isOpen = !!vmss.addElementsOpen;
   const nextCategory = vmss.addElementsCategory || 'text';
-  const shell = document.getElementById('vmss-add-elements-shell');
   const content = document.getElementById('vmss-add-elements-content');
 
   document.querySelectorAll('[data-vmss-add-category]').forEach((button) => {
@@ -1233,13 +1233,13 @@ function vmssUpdateAddElementsUI() {
     button.classList.toggle('dark:hover:bg-gray-600', !isActive);
   });
 
-  if (shell) {
-    shell.classList.toggle('w-80', isOpen);
-    shell.classList.toggle('w-20', !isOpen);
-  }
-
   if (content) {
-    content.classList.toggle('hidden', !isOpen);
+    content.classList.toggle('pointer-events-none', !isOpen);
+    content.classList.toggle('opacity-0', !isOpen);
+    content.classList.toggle('translate-x-3', !isOpen);
+    content.classList.toggle('pointer-events-auto', isOpen);
+    content.classList.toggle('opacity-100', isOpen);
+    content.classList.toggle('translate-x-0', isOpen);
   }
 
   document.querySelectorAll('[data-vmss-add-panel]').forEach((panel) => {
@@ -1249,6 +1249,46 @@ function vmssUpdateAddElementsUI() {
 
 function vmssShowComingSoon(label) {
   vmssSetStatus(`${label} is coming soon`);
+}
+
+function vmssHideFloatingCanvasToolbar() {
+  document.querySelectorAll('.ss-canvas-toolbar').forEach((element) => {
+    element.style.display = 'none';
+  });
+}
+
+async function vmssSetBackgroundColor(color) {
+  if (!vmss.edit || typeof color !== 'string' || !color.trim()) return;
+
+  await vmss.edit.setTimelineBackground?.(color);
+  vmss.canvas?.refresh?.();
+  vmssMarkDirty();
+  vmssSetStatus(`Background set to ${color}`);
+}
+
+async function vmssSetOutputPreset(width, height) {
+  if (!vmss.edit) return;
+
+  const safeWidth = Number(width);
+  const safeHeight = Number(height);
+  if (!Number.isFinite(safeWidth) || !Number.isFinite(safeHeight)) return;
+
+  await vmss.edit.setOutputSize?.(safeWidth, safeHeight);
+  vmss.canvas?.resize?.();
+  vmssScheduleTimelineRelayout();
+  vmssMarkDirty();
+  vmssSetStatus(`Canvas size set to ${safeWidth} x ${safeHeight}`);
+}
+
+async function vmssSetOutputFps(fps) {
+  if (!vmss.edit) return;
+
+  const safeFps = Number(fps);
+  if (!Number.isFinite(safeFps) || safeFps <= 0) return;
+
+  await vmss.edit.setOutputFps?.(safeFps);
+  vmssMarkDirty();
+  vmssSetStatus(`Frame rate set to ${safeFps} FPS`);
 }
 
 function vmssClamp(value, min, max) {
@@ -1636,7 +1676,7 @@ function vmssRenderEditorShell(container) {
         </button>
       </div>
 
-      <div class="flex min-h-0 flex-1 overflow-hidden">
+      <div class="flex min-h-0 flex-1 overflow-visible">
         <div class="flex w-52 flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
           <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
             <span>Steps (Tracks)</span>
@@ -1674,7 +1714,7 @@ function vmssRenderEditorShell(container) {
           </div>
         </div>
 
-        <div id="vmss-add-elements-shell" class="flex w-20 flex-shrink-0 overflow-hidden border-l border-gray-200 bg-white transition-[width] duration-200 dark:border-gray-700 dark:bg-gray-800">
+        <div id="vmss-add-elements-shell" class="relative z-10 w-20 flex-shrink-0 overflow-visible border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
           <div class="flex w-20 flex-shrink-0 flex-col border-r border-gray-200 bg-slate-50 p-2 dark:border-gray-700 dark:bg-gray-900/80">
             <div class="px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-gray-400">Add</div>
             <div class="space-y-2">
@@ -1690,10 +1730,18 @@ function vmssRenderEditorShell(container) {
                 <i class="ri-clapperboard-line text-lg"></i>
                 <span>Media</span>
               </button>
+              <button data-vmss-add-category="background" onclick="vmssSetAddElementsCategory('background')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
+                <i class="ri-palette-line text-lg"></i>
+                <span>Background</span>
+              </button>
+              <button data-vmss-add-category="advanced" onclick="vmssSetAddElementsCategory('advanced')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
+                <i class="ri-settings-3-line text-lg"></i>
+                <span>Advanced</span>
+              </button>
             </div>
           </div>
 
-          <div id="vmss-add-elements-content" class="hidden flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div id="vmss-add-elements-content" class="pointer-events-none absolute left-full top-0 z-30 flex h-full w-60 translate-x-3 flex-col overflow-hidden border-l border-gray-200 bg-white opacity-0 shadow-[0_18px_48px_-28px_rgba(15,23,42,0.35)] transition-all duration-200 dark:border-gray-700 dark:bg-gray-800">
             <div class="border-b border-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Add Elements</div>
 
             <div class="flex-1 overflow-y-auto p-4">
@@ -1740,6 +1788,44 @@ function vmssRenderEditorShell(container) {
                   </div>
                   <input id="vmss-image-input" type="file" accept="image/*" class="hidden" onchange="vmssHandleImageUpload(event)">
                   <input id="vmss-video-input" type="file" accept="video/*" class="hidden" onchange="vmssHandleVideoUpload(event)">
+                </div>
+              </div>
+
+              <div data-vmss-add-panel="background" class="hidden space-y-4">
+                <div>
+                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Canvas Background</p>
+                  <input type="color" value="#ffffff" onchange="vmssSetBackgroundColor(event.target.value)" class="mb-3 h-12 w-full cursor-pointer rounded-2xl border border-gray-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-700">
+                  <div class="grid grid-cols-4 gap-2">
+                    <button onclick="vmssSetBackgroundColor('#FFFFFF')" class="h-10 rounded-full border border-gray-300 bg-white"></button>
+                    <button onclick="vmssSetBackgroundColor('#000000')" class="h-10 rounded-full border border-gray-300 bg-black"></button>
+                    <button onclick="vmssSetBackgroundColor('#F3F4F6')" class="h-10 rounded-full border border-gray-300 bg-gray-100"></button>
+                    <button onclick="vmssSetBackgroundColor('#E0F2FE')" class="h-10 rounded-full border border-gray-300 bg-sky-100"></button>
+                    <button onclick="vmssSetBackgroundColor('#DCFCE7')" class="h-10 rounded-full border border-gray-300 bg-green-100"></button>
+                    <button onclick="vmssSetBackgroundColor('#FEF3C7')" class="h-10 rounded-full border border-gray-300 bg-amber-100"></button>
+                    <button onclick="vmssSetBackgroundColor('#FCE7F3')" class="h-10 rounded-full border border-gray-300 bg-pink-100"></button>
+                    <button onclick="vmssSetBackgroundColor('#EDE9FE')" class="h-10 rounded-full border border-gray-300 bg-violet-100"></button>
+                  </div>
+                </div>
+              </div>
+
+              <div data-vmss-add-panel="advanced" class="hidden space-y-4">
+                <div>
+                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Resolution</p>
+                  <div class="grid gap-2">
+                    <button onclick="vmssSetOutputPreset(1920, 1080)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1920 x 1080</span><span class="text-xs text-gray-400">16:9</span></button>
+                    <button onclick="vmssSetOutputPreset(1280, 720)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1280 x 720</span><span class="text-xs text-gray-400">HD</span></button>
+                    <button onclick="vmssSetOutputPreset(1080, 1920)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1080 x 1920</span><span class="text-xs text-gray-400">Vertical</span></button>
+                    <button onclick="vmssSetOutputPreset(1080, 1080)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1080 x 1080</span><span class="text-xs text-gray-400">Square</span></button>
+                  </div>
+                </div>
+                <div>
+                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Frame Rate</p>
+                  <div class="grid grid-cols-2 gap-2">
+                    <button onclick="vmssSetOutputFps(24)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">24 FPS</button>
+                    <button onclick="vmssSetOutputFps(25)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">25 FPS</button>
+                    <button onclick="vmssSetOutputFps(30)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">30 FPS</button>
+                    <button onclick="vmssSetOutputFps(60)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">60 FPS</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2168,6 +2254,9 @@ window.vmssStartShapeDraw = vmssStartShapeDraw;
 window.vmssSetAddElementsCategory = vmssSetAddElementsCategory;
 window.vmssAddImageClip = vmssAddImageClip;
 window.vmssAddVideoClip = vmssAddVideoClip;
+window.vmssSetBackgroundColor = vmssSetBackgroundColor;
+window.vmssSetOutputPreset = vmssSetOutputPreset;
+window.vmssSetOutputFps = vmssSetOutputFps;
 window.vmssTrimSelectedClip = vmssTrimSelectedClip;
 window.vmssShowComingSoon = vmssShowComingSoon;
 window.vmssAddStep = vmssAddStep;
