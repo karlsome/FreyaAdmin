@@ -43,6 +43,8 @@ const vmss = {
   onPreviewDrawPointerDown: null,
   onPreviewDrawPointerMove: null,
   onPreviewDrawPointerUp: null,
+  addElementsOpen: false,
+  addElementsCategory: 'text',
 };
 
 function loadVideoManualPage() {
@@ -1197,6 +1199,56 @@ function vmssBindShellEvents() {
 
   vmssBindPreviewDrawHandlers();
   vmssUpdateDrawModeUI();
+  vmssUpdateAddElementsUI();
+}
+
+function vmssSetAddElementsCategory(category) {
+  if (vmss.addElementsOpen && vmss.addElementsCategory === category) {
+    vmss.addElementsOpen = false;
+  } else {
+    vmss.addElementsCategory = category;
+    vmss.addElementsOpen = true;
+  }
+
+  vmssUpdateAddElementsUI();
+}
+
+function vmssUpdateAddElementsUI() {
+  const isOpen = !!vmss.addElementsOpen;
+  const nextCategory = vmss.addElementsCategory || 'text';
+  const shell = document.getElementById('vmss-add-elements-shell');
+  const content = document.getElementById('vmss-add-elements-content');
+
+  document.querySelectorAll('[data-vmss-add-category]').forEach((button) => {
+    const isActive = isOpen && button.getAttribute('data-vmss-add-category') === nextCategory;
+    button.classList.toggle('bg-cyan-500', isActive);
+    button.classList.toggle('text-white', isActive);
+    button.classList.toggle('shadow-sm', isActive);
+    button.classList.toggle('dark:bg-cyan-500', isActive);
+    button.classList.toggle('bg-slate-100', !isActive);
+    button.classList.toggle('text-slate-500', !isActive);
+    button.classList.toggle('hover:bg-slate-200', !isActive);
+    button.classList.toggle('dark:bg-gray-700', !isActive);
+    button.classList.toggle('dark:text-gray-300', !isActive);
+    button.classList.toggle('dark:hover:bg-gray-600', !isActive);
+  });
+
+  if (shell) {
+    shell.classList.toggle('w-80', isOpen);
+    shell.classList.toggle('w-20', !isOpen);
+  }
+
+  if (content) {
+    content.classList.toggle('hidden', !isOpen);
+  }
+
+  document.querySelectorAll('[data-vmss-add-panel]').forEach((panel) => {
+    panel.classList.toggle('hidden', !isOpen || panel.getAttribute('data-vmss-add-panel') !== nextCategory);
+  });
+}
+
+function vmssShowComingSoon(label) {
+  vmssSetStatus(`${label} is coming soon`);
 }
 
 function vmssClamp(value, min, max) {
@@ -1622,39 +1674,79 @@ function vmssRenderEditorShell(container) {
           </div>
         </div>
 
-        <div class="flex w-56 flex-shrink-0 flex-col overflow-hidden border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-          <div class="border-b border-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Add Elements</div>
+        <div id="vmss-add-elements-shell" class="flex w-20 flex-shrink-0 overflow-hidden border-l border-gray-200 bg-white transition-[width] duration-200 dark:border-gray-700 dark:bg-gray-800">
+          <div class="flex w-20 flex-shrink-0 flex-col border-r border-gray-200 bg-slate-50 p-2 dark:border-gray-700 dark:bg-gray-900/80">
+            <div class="px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-gray-400">Add</div>
+            <div class="space-y-2">
+              <button data-vmss-add-category="text" onclick="vmssSetAddElementsCategory('text')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
+                <i class="ri-text text-lg"></i>
+                <span>Text</span>
+              </button>
+              <button data-vmss-add-category="shapes" onclick="vmssSetAddElementsCategory('shapes')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
+                <i class="ri-shape-line text-lg"></i>
+                <span>Shapes</span>
+              </button>
+              <button data-vmss-add-category="media" onclick="vmssSetAddElementsCategory('media')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
+                <i class="ri-clapperboard-line text-lg"></i>
+                <span>Media</span>
+              </button>
+            </div>
+          </div>
 
-          <div class="flex-1 overflow-y-auto p-3">
-            <div class="mb-4">
-              <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Text</p>
-              <div class="grid grid-cols-2 gap-2">
-                <button onclick="vmssAddTextClip('Title', vmss.edit?.playbackTime || 0, {fontSize: 72, fontWeight: 600})" class="rounded bg-gray-100 py-3 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">Title</button>
-                <button onclick="vmssAddTextClip('Body text', vmss.edit?.playbackTime || 0, {fontSize: 36, fontWeight: 400})" class="rounded bg-gray-100 py-3 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">Body Text</button>
+          <div id="vmss-add-elements-content" class="hidden flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div class="border-b border-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Add Elements</div>
+
+            <div class="flex-1 overflow-y-auto p-4">
+              <div data-vmss-add-panel="text" class="space-y-4">
+                <div>
+                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Text Presets</p>
+                  <div class="grid gap-2">
+                    <button onclick="vmssAddTextClip('Title', vmss.edit?.playbackTime || 0, {fontSize: 72, fontWeight: 600})" class="rounded-2xl bg-gray-100 px-4 py-4 text-left text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600">Headline Title</button>
+                    <button onclick="vmssAddTextClip('Subtitle', vmss.edit?.playbackTime || 0, {fontSize: 44, fontWeight: 500})" class="rounded-2xl bg-gray-100 px-4 py-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">Subtitle</button>
+                    <button onclick="vmssAddTextClip('Body text', vmss.edit?.playbackTime || 0, {fontSize: 36, fontWeight: 400})" class="rounded-2xl bg-gray-100 px-4 py-3 text-left text-sm text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">Paragraph</button>
+                  </div>
+                </div>
+                <div>
+                  <div class="mb-2 flex items-center justify-between">
+                    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400">Fonts</p>
+                    <button onclick="vmssShowComingSoon('Custom fonts')" class="rounded-full bg-cyan-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-cyan-600">Upload</button>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <button onclick="vmssAddTextClip('Work Sans', vmss.edit?.playbackTime || 0, {fontFamily: 'Work Sans', fontSize: 36, fontWeight: 500})" class="rounded-2xl bg-gray-100 px-3 py-6 text-center text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">Work Sans</button>
+                    <button onclick="vmssShowComingSoon('More fonts')" class="rounded-2xl bg-gray-100 px-3 py-6 text-center text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">More Fonts</button>
+                  </div>
+                </div>
+              </div>
+
+              <div data-vmss-add-panel="shapes" class="hidden space-y-4">
+                <div>
+                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Shape Tools</p>
+                  <div class="grid grid-cols-2 gap-2">
+                    <button onclick="vmssAddShapeClip('rect', vmss.edit?.playbackTime || 0)" class="flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-100 px-4 py-5 text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"><div class="h-8 w-10 rounded-sm border-2 border-gray-800 dark:border-gray-100"></div><span>Rectangle</span></button>
+                    <button onclick="vmssAddShapeClip('circle', vmss.edit?.playbackTime || 0)" class="flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-100 px-4 py-5 text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"><div class="h-10 w-10 rounded-full border-2 border-gray-800 dark:border-gray-100"></div><span>Circle</span></button>
+                    <button id="vmss-shape-arrow-btn" onclick="vmssStartShapeDraw('arrow')" class="flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-100 px-4 py-5 text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"><i class="ri-arrow-right-up-line text-2xl"></i><span>Arrow</span></button>
+                    <button onclick="vmssAddShapeClip('line', vmss.edit?.playbackTime || 0)" class="flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-100 px-4 py-5 text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"><div class="h-0.5 w-10 bg-gray-800 dark:bg-gray-100"></div><span>Line</span></button>
+                  </div>
+                </div>
+              </div>
+
+              <div data-vmss-add-panel="media" class="hidden space-y-4">
+                <div>
+                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Media Uploads</p>
+                  <div class="grid gap-2">
+                    <button onclick="document.getElementById('vmss-image-input').click()" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-image-add-line"></i>Photos</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
+                    <button onclick="document.getElementById('vmss-video-input').click()" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-video-add-line"></i>Video</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
+                    <button onclick="vmssShowComingSoon('Audio uploads')" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-volume-up-line"></i>Audio</span><span class="text-[11px] font-semibold uppercase tracking-wide text-cyan-500">Soon</span></button>
+                  </div>
+                  <input id="vmss-image-input" type="file" accept="image/*" class="hidden" onchange="vmssHandleImageUpload(event)">
+                  <input id="vmss-video-input" type="file" accept="video/*" class="hidden" onchange="vmssHandleVideoUpload(event)">
+                </div>
               </div>
             </div>
 
-            <div class="mb-4">
-              <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Shapes</p>
-              <div class="grid grid-cols-4 gap-2">
-                <button onclick="vmssAddShapeClip('rect', vmss.edit?.playbackTime || 0)" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Rectangle"><div class="h-5 w-6 rounded-sm border-2 border-gray-800 dark:border-gray-200"></div></button>
-                <button onclick="vmssAddShapeClip('circle', vmss.edit?.playbackTime || 0)" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Circle"><div class="h-6 w-6 rounded-full border-2 border-gray-800 dark:border-gray-200"></div></button>
-                <button id="vmss-shape-arrow-btn" onclick="vmssStartShapeDraw('arrow')" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Draw Arrow"><i class="ri-arrow-right-up-line text-lg text-gray-800 dark:text-gray-200"></i></button>
-                <button onclick="vmssAddShapeClip('line', vmss.edit?.playbackTime || 0)" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Line"><div class="h-0.5 w-6 rotate-45 bg-gray-800 dark:bg-gray-200"></div></button>
-              </div>
-            </div>
-
-            <div class="mb-4">
-              <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Media</p>
-              <button onclick="document.getElementById('vmss-image-input').click()" class="mb-2 flex w-full items-center justify-center gap-2 rounded bg-gray-100 py-3 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"><i class="ri-image-add-line"></i>Upload Image</button>
-              <button onclick="document.getElementById('vmss-video-input').click()" class="flex w-full items-center justify-center gap-2 rounded bg-gray-100 py-3 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"><i class="ri-video-add-line"></i>Upload Video</button>
-              <input id="vmss-image-input" type="file" accept="image/*" class="hidden" onchange="vmssHandleImageUpload(event)">
-              <input id="vmss-video-input" type="file" accept="video/*" class="hidden" onchange="vmssHandleVideoUpload(event)">
-            </div>
-
-            <div class="mb-4">
+            <div class="border-t border-gray-100 p-4 dark:border-gray-700">
               <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Quick Actions</p>
-              <button onclick="vmssDeleteSelectedClip()" class="flex w-full items-center justify-center gap-2 rounded bg-red-50 py-2 text-xs text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"><i class="ri-delete-bin-line"></i>Delete Selected</button>
+              <button onclick="vmssDeleteSelectedClip()" class="flex w-full items-center justify-center gap-2 rounded-xl bg-red-50 py-2.5 text-xs text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"><i class="ri-delete-bin-line"></i>Delete Selected</button>
             </div>
           </div>
         </div>
@@ -2073,9 +2165,11 @@ window.vmssLoadTemplate = vmssLoadTemplate;
 window.vmssAddTextClip = vmssAddTextClip;
 window.vmssAddShapeClip = vmssAddShapeClip;
 window.vmssStartShapeDraw = vmssStartShapeDraw;
+window.vmssSetAddElementsCategory = vmssSetAddElementsCategory;
 window.vmssAddImageClip = vmssAddImageClip;
 window.vmssAddVideoClip = vmssAddVideoClip;
 window.vmssTrimSelectedClip = vmssTrimSelectedClip;
+window.vmssShowComingSoon = vmssShowComingSoon;
 window.vmssAddStep = vmssAddStep;
 window.vmssDeleteStep = vmssDeleteStep;
 window.vmssSelectStep = vmssSelectStep;
