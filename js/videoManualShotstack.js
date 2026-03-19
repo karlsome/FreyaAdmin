@@ -23,6 +23,17 @@ const vmss = {
   lastRenderId: null,
   lastRenderUrl: null,
   assetSourceMap: {},
+  timelineLayoutRaf: null,
+  timelineScrollContainer: null,
+  onTimelineScroll: null,
+  onTimelineWindowResize: null,
+  workspaceScrollContainer: null,
+  workspaceScrollTopBefore: 0,
+  workspaceOverflowBefore: '',
+  debugEnabled: false,
+  debugListeners: [],
+  debugMoveThrottleMs: 120,
+  lastDebugMoveAt: 0,
 };
 
 function loadVideoManualPage() {
@@ -101,10 +112,12 @@ function loadVideoManualShotstackPage() {
   const main = document.getElementById('mainContent');
   if (!main) return;
 
+  vmssLockWorkspaceScroll();
+
   main.innerHTML = `
     <div class="min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-4 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950">
       <div class="mx-auto w-full max-w-[1720px]">
-        <div id="vmss-editor" class="overflow-hidden rounded-[28px] border border-white/60 bg-white/90 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90"></div>
+        <div id="vmss-editor" class="overflow-hidden rounded-[28px] border border-white/60 bg-white/90 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] dark:border-gray-800 dark:bg-gray-900/90"></div>
       </div>
     </div>
   `;
@@ -116,6 +129,31 @@ function loadVideoManualShotstackPage() {
       editor.innerHTML = `<div class="p-8 text-sm text-red-600 dark:text-red-400">Failed to load Shotstack editor: ${vmssEscapeHtml(error?.message || String(error))}</div>`;
     }
   });
+}
+
+function vmssLockWorkspaceScroll() {
+  const scrollContainer = document.querySelector('main.overflow-y-auto');
+  if (!scrollContainer) return;
+
+  vmss.workspaceScrollContainer = scrollContainer;
+  vmss.workspaceScrollTopBefore = scrollContainer.scrollTop || 0;
+  vmss.workspaceOverflowBefore = scrollContainer.style.overflowY || '';
+
+  // Timeline drag math should not depend on an inherited scrolled parent offset.
+  scrollContainer.scrollTop = 0;
+  scrollContainer.style.overflowY = 'hidden';
+}
+
+function vmssUnlockWorkspaceScroll() {
+  const scrollContainer = vmss.workspaceScrollContainer;
+  if (!scrollContainer) return;
+
+  scrollContainer.style.overflowY = vmss.workspaceOverflowBefore;
+  scrollContainer.scrollTop = vmss.workspaceScrollTopBefore;
+
+  vmss.workspaceScrollContainer = null;
+  vmss.workspaceScrollTopBefore = 0;
+  vmss.workspaceOverflowBefore = '';
 }
 
 async function vmssBoot() {
@@ -239,8 +277,13 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
 
   const timelineContainer = document.querySelector('[data-shotstack-timeline]');
   if (timelineContainer) {
+    vmssNeutralizeTimelineContainingBlocks();
+
     vmss.timeline = new Timeline(vmss.edit, timelineContainer, { resizable: true });
     await vmss.timeline.load();
+
+    vmssBindTimelineLayoutWatchers();
+    vmssScheduleTimelineRelayout();
   }
 
   vmss.controls = new Controls(vmss.edit);
@@ -255,11 +298,341 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmssStartClock();
 }
 
+function vmssScheduleTimelineRelayout() {
+  if (vmss.timelineLayoutRaf) return;
+
+  vmss.timelineLayoutRaf = window.requestAnimationFrame(() => {
+    vmss.timelineLayoutRaf = null;
+
+    // Keep timeline hit-testing aligned after container scroll/resize changes.
+    vmss.timeline?.resize?.();
+    vmss.timeline?.refresh?.();
+  });
+}
+
+function vmssDebugLog(label, payload = {}) {
+  if (!vmss.debugEnabled) return;
+  console.log(`[VMSS DEBUG] ${label}`, payload);
+}
+
+function vmssGetLayoutSnapshot() {
+  const timeline = document.querySelector('[data-shotstack-timeline]');
+  const timelineRect = timeline?.getBoundingClientRect?.();
+  const tracksRect = document.querySelector('.ss-timeline-tracks')?.getBoundingClientRect?.();
+  const rootRect = document.getElementById('vmss-root')?.getBoundingClientRect?.();
+  const mainRect = document.getElementById('mainContent')?.getBoundingClientRect?.();
+  const workspace = document.querySelector('main.overflow-y-auto');
+  const containingBlockAncestors = vmssGetContainingBlockAncestors(timeline);
+
+  return {
+    window: {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+    },
+    timelineRect: timelineRect
+      ? {
+          left: Math.round(timelineRect.left),
+          top: Math.round(timelineRect.top),
+          width: Math.round(timelineRect.width),
+          height: Math.round(timelineRect.height),
+        }
+      : null,
+    tracksRect: tracksRect
+      ? {
+          left: Math.round(tracksRect.left),
+          top: Math.round(tracksRect.top),
+          width: Math.round(tracksRect.width),
+          height: Math.round(tracksRect.height),
+        }
+      : null,
+    rootRect: rootRect
+      ? {
+          left: Math.round(rootRect.left),
+          top: Math.round(rootRect.top),
+          width: Math.round(rootRect.width),
+          height: Math.round(rootRect.height),
+        }
+      : null,
+    mainRect: mainRect
+      ? {
+          left: Math.round(mainRect.left),
+          top: Math.round(mainRect.top),
+          width: Math.round(mainRect.width),
+          height: Math.round(mainRect.height),
+        }
+      : null,
+    workspaceScroll: workspace
+      ? {
+          top: workspace.scrollTop,
+          left: workspace.scrollLeft,
+          overflowY: workspace.style.overflowY || '(default)',
+        }
+      : null,
+    containingBlockAncestors,
+  };
+}
+
+function vmssGetContainingBlockAncestors(element) {
+  const result = [];
+  let node = element?.parentElement;
+
+  while (node && node !== document.body) {
+    const style = window.getComputedStyle(node);
+    const hasContainingBlockEffect =
+      style.transform !== 'none' ||
+      style.filter !== 'none' ||
+      style.perspective !== 'none' ||
+      (style.backdropFilter && style.backdropFilter !== 'none') ||
+      (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none') ||
+      style.contain === 'paint' ||
+      style.willChange.includes('transform') ||
+      style.willChange.includes('filter');
+
+    if (hasContainingBlockEffect) {
+      result.push({
+        tagName: node.tagName,
+        id: node.id || null,
+        className: node.className || null,
+        transform: style.transform,
+        filter: style.filter,
+        perspective: style.perspective,
+        backdropFilter: style.backdropFilter || style.webkitBackdropFilter || 'none',
+        contain: style.contain,
+        willChange: style.willChange,
+      });
+    }
+
+    node = node.parentElement;
+  }
+
+  return result;
+}
+
+function vmssNeutralizeTimelineContainingBlocks() {
+  const timeline = document.querySelector('[data-shotstack-timeline]');
+  if (!timeline) return;
+
+  let node = timeline.parentElement;
+  while (node && node !== document.body) {
+    const style = window.getComputedStyle(node);
+    const hasBackdrop = (style.backdropFilter && style.backdropFilter !== 'none') || (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none');
+    const hasFilter = style.filter && style.filter !== 'none';
+
+    if (hasBackdrop || hasFilter) {
+      if (!node.dataset.vmssBackdropFilterBefore) {
+        node.dataset.vmssBackdropFilterBefore = node.style.backdropFilter || '';
+        node.dataset.vmssWebkitBackdropFilterBefore = node.style.webkitBackdropFilter || '';
+        node.dataset.vmssFilterBefore = node.style.filter || '';
+      }
+
+      node.style.backdropFilter = 'none';
+      node.style.webkitBackdropFilter = 'none';
+      node.style.filter = 'none';
+    }
+
+    node = node.parentElement;
+  }
+}
+
+function vmssRestoreTimelineContainingBlocks() {
+  const allNodes = document.querySelectorAll('[data-vmss-backdrop-filter-before], [data-vmss-filter-before]');
+  allNodes.forEach((node) => {
+    node.style.backdropFilter = node.dataset.vmssBackdropFilterBefore || '';
+    node.style.webkitBackdropFilter = node.dataset.vmssWebkitBackdropFilterBefore || '';
+    node.style.filter = node.dataset.vmssFilterBefore || '';
+
+    delete node.dataset.vmssBackdropFilterBefore;
+    delete node.dataset.vmssWebkitBackdropFilterBefore;
+    delete node.dataset.vmssFilterBefore;
+  });
+}
+
+function vmssGetRectSnapshot(element) {
+  if (!element?.getBoundingClientRect) return null;
+  const rect = element.getBoundingClientRect();
+  return {
+    left: Math.round(rect.left),
+    top: Math.round(rect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    right: Math.round(rect.right),
+    bottom: Math.round(rect.bottom),
+  };
+}
+
+function vmssGetSelectedClipDataSnapshot() {
+  if (!vmss.edit || vmss.currentStepIdx == null || vmss.selectedClipId == null) return null;
+
+  const edit = vmss.edit.getEdit?.();
+  const clip = edit?.timeline?.tracks?.[vmss.currentStepIdx]?.clips?.[vmss.selectedClipId];
+  if (!clip) return null;
+
+  return {
+    trackIndex: vmss.currentStepIdx,
+    clipIndex: vmss.selectedClipId,
+    start: clip.start,
+    length: clip.length,
+    offset: clip.offset || null,
+    width: clip.width || null,
+    height: clip.height || null,
+    assetType: clip.asset?.type || null,
+    assetText: typeof clip.asset?.text === 'string' ? clip.asset.text.slice(0, 40) : null,
+  };
+}
+
+function vmssGetClipVisualSnapshot(pointerEvent = null) {
+  const selectedByIndex = (vmss.currentStepIdx != null && vmss.selectedClipId != null)
+    ? document.querySelector(`.ss-clip[data-track-index="${vmss.currentStepIdx}"][data-clip-index="${vmss.selectedClipId}"]`)
+    : null;
+  const selectedByClass = document.querySelector('.ss-clip.selected');
+  const clipElement = selectedByIndex || selectedByClass;
+  const ghostElement = document.querySelector('.ss-drag-ghost');
+  const tooltipElement = document.querySelector('.ss-drag-time-tooltip');
+
+  const clipStyle = clipElement ? window.getComputedStyle(clipElement) : null;
+  const clipRect = vmssGetRectSnapshot(clipElement);
+
+  let pointerDelta = null;
+  if (pointerEvent && clipRect) {
+    pointerDelta = {
+      xFromClipLeft: Math.round((pointerEvent.clientX - clipRect.left) * 100) / 100,
+      yFromClipTop: Math.round((pointerEvent.clientY - clipRect.top) * 100) / 100,
+    };
+  }
+
+  return {
+    selectedClipData: vmssGetSelectedClipDataSnapshot(),
+    selectedClipElement: clipElement
+      ? {
+          className: clipElement.className,
+          dataset: {
+            clipId: clipElement.dataset.clipId || null,
+            trackIndex: clipElement.dataset.trackIndex || null,
+            clipIndex: clipElement.dataset.clipIndex || null,
+          },
+          rect: clipRect,
+          cssVars: {
+            clipStart: clipStyle?.getPropertyValue('--clip-start')?.trim() || null,
+            clipLength: clipStyle?.getPropertyValue('--clip-length')?.trim() || null,
+          },
+          style: {
+            left: clipStyle?.left || null,
+            top: clipStyle?.top || null,
+            transform: clipStyle?.transform || null,
+            position: clipStyle?.position || null,
+          },
+        }
+      : null,
+    dragGhost: ghostElement
+      ? {
+          className: ghostElement.className,
+          rect: vmssGetRectSnapshot(ghostElement),
+        }
+      : null,
+    dragTooltip: tooltipElement
+      ? {
+          text: tooltipElement.textContent || null,
+          rect: vmssGetRectSnapshot(tooltipElement),
+        }
+      : null,
+    pointerDelta,
+  };
+}
+
+function vmssAttachTimelineDebug(timelineContainer) {
+  vmssDetachTimelineDebug();
+
+  const makeHandler = (eventName) => (event) => {
+    if (!vmss.debugEnabled) return;
+
+    if (eventName === 'pointermove' && event.buttons !== 1) {
+      return;
+    }
+
+    if (eventName === 'pointermove') {
+      const now = performance.now();
+      if (now - vmss.lastDebugMoveAt < vmss.debugMoveThrottleMs) return;
+      vmss.lastDebugMoveAt = now;
+    }
+
+    vmssDebugLog(`timeline:${eventName}`, {
+      pointer: {
+        pointerType: event.pointerType,
+        button: event.button,
+        buttons: event.buttons,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      },
+      clipVisual: vmssGetClipVisualSnapshot(event),
+      layout: vmssGetLayoutSnapshot(),
+    });
+  };
+
+  const events = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'];
+  events.forEach((eventName) => {
+    const handler = makeHandler(eventName);
+    timelineContainer.addEventListener(eventName, handler, { passive: true });
+    vmss.debugListeners.push({ target: timelineContainer, eventName, handler });
+  });
+
+  vmssDebugLog('timeline:debug-attached', {
+    clipVisual: vmssGetClipVisualSnapshot(),
+    layout: vmssGetLayoutSnapshot(),
+  });
+}
+
+function vmssDetachTimelineDebug() {
+  vmss.debugListeners.forEach(({ target, eventName, handler }) => {
+    target.removeEventListener(eventName, handler);
+  });
+  vmss.debugListeners = [];
+}
+
+function vmssBindTimelineLayoutWatchers() {
+  vmssUnbindTimelineLayoutWatchers();
+
+  const scrollContainer = document.querySelector('main.overflow-y-auto');
+  if (scrollContainer) {
+    vmss.timelineScrollContainer = scrollContainer;
+    vmss.onTimelineScroll = () => vmssScheduleTimelineRelayout();
+    scrollContainer.addEventListener('scroll', vmss.onTimelineScroll, { passive: true });
+  }
+
+  vmss.onTimelineWindowResize = () => vmssScheduleTimelineRelayout();
+  window.addEventListener('resize', vmss.onTimelineWindowResize);
+}
+
+function vmssUnbindTimelineLayoutWatchers() {
+  if (vmss.timelineScrollContainer && vmss.onTimelineScroll) {
+    vmss.timelineScrollContainer.removeEventListener('scroll', vmss.onTimelineScroll);
+  }
+
+  if (vmss.onTimelineWindowResize) {
+    window.removeEventListener('resize', vmss.onTimelineWindowResize);
+  }
+
+  if (vmss.timelineLayoutRaf) {
+    window.cancelAnimationFrame(vmss.timelineLayoutRaf);
+    vmss.timelineLayoutRaf = null;
+  }
+
+  vmss.timelineScrollContainer = null;
+  vmss.onTimelineScroll = null;
+  vmss.onTimelineWindowResize = null;
+}
+
 function vmssDispose() {
   if (vmss.clockTimer) {
     window.clearInterval(vmss.clockTimer);
     vmss.clockTimer = null;
   }
+
+  vmssUnbindTimelineLayoutWatchers();
+  vmssDetachTimelineDebug();
+  vmssRestoreTimelineContainingBlocks();
+  vmssUnlockWorkspaceScroll();
 
   vmss.controls?.dispose?.();
   vmss.timeline?.dispose?.();
@@ -398,6 +771,13 @@ function vmssBindEvents() {
 
   vmss.edit.events.on('clip:updated', () => {
     vmssMarkDirty();
+
+    vmssDebugLog('clip:updated', {
+      selectedClipId: vmss.selectedClipId,
+      currentStepIdx: vmss.currentStepIdx,
+      playbackTime: vmss.edit?.playbackTime || 0,
+      clipVisual: vmssGetClipVisualSnapshot(),
+    });
   });
 
   vmss.edit.events.on('clip:deleted', () => {
@@ -408,6 +788,15 @@ function vmssBindEvents() {
   vmss.edit.events.on('clip:selected', (data) => {
     vmss.selectedClipId = data?.clipIndex ?? null;
     vmss.currentStepIdx = data?.trackIndex ?? 0;
+
+    vmssDebugLog('clip:selected', {
+      selectedClipId: vmss.selectedClipId,
+      currentStepIdx: vmss.currentStepIdx,
+      data,
+      clipVisual: vmssGetClipVisualSnapshot(),
+      layout: vmssGetLayoutSnapshot(),
+    });
+
     vmssRenderStepsPanel();
   });
 
@@ -759,7 +1148,7 @@ function vmssRenderEditorShell(container) {
               <button onclick="vmss.timeline?.zoomOut()" class="rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700">−</button>
               <button onclick="vmss.timeline?.zoomIn()" class="rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700">+</button>
             </div>
-            <div data-shotstack-timeline style="height: 160px; overflow: hidden;"></div>
+            <div data-shotstack-timeline style="height: 160px; position: relative;"></div>
           </div>
         </div>
 
@@ -1229,3 +1618,17 @@ window.vmssResetLocalProject = vmssResetLocalProject;
 window.vmssDeleteSelectedClip = vmssDeleteSelectedClip;
 window.vmssHandleImageUpload = vmssHandleImageUpload;
 window.vmssHandleVideoUpload = vmssHandleVideoUpload;
+window.vmssSetDebug = function vmssSetDebug(enabled) {
+  vmss.debugEnabled = Boolean(enabled);
+  console.log('[VMSS DEBUG] enabled =', vmss.debugEnabled);
+};
+window.vmssDumpLayout = function vmssDumpLayout() {
+  const snapshot = vmssGetLayoutSnapshot();
+  console.log('[VMSS DEBUG] layout snapshot', snapshot);
+  return snapshot;
+};
+window.vmssDumpClipVisual = function vmssDumpClipVisual() {
+  const snapshot = vmssGetClipVisualSnapshot();
+  console.log('[VMSS DEBUG] clip visual snapshot', snapshot);
+  return snapshot;
+};
