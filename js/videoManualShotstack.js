@@ -37,6 +37,12 @@ const vmss = {
   syncingShapeAsset: false,
   pendingShapeSyncTimer: null,
   onShapePointerRelease: null,
+  drawMode: null,
+  drawDraft: null,
+  previewDrawSurface: null,
+  onPreviewDrawPointerDown: null,
+  onPreviewDrawPointerMove: null,
+  onPreviewDrawPointerUp: null,
 };
 
 function loadVideoManualPage() {
@@ -293,6 +299,8 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   await vmss.controls.load();
 
   vmssBindEvents();
+  vmssBindPreviewDrawHandlers();
+  vmssUpdateDrawModeUI();
   vmssSyncStepsFromTracks();
   vmssRenderStepsPanel();
   vmssSetTitle(options.title || vmss.title);
@@ -670,8 +678,10 @@ function vmssDispose() {
     vmss.clockTimer = null;
   }
 
+  vmssCancelShapeDraw();
   vmssUnbindTimelineLayoutWatchers();
   vmssUnbindShapeSyncWatchers();
+  vmssUnbindPreviewDrawHandlers();
   vmssDetachTimelineDebug();
   vmssRestoreTimelineContainingBlocks();
   vmssUnlockWorkspaceScroll();
@@ -766,22 +776,31 @@ function vmssCreateShapeSvg(shapeType, width, height, options = {}) {
     }
     case 'arrow': {
       const margin = strokePadding + 6;
-      const startX = margin;
-      const startY = height - margin;
-      const endX = width - margin;
-      const endY = margin;
-      const head = Math.max(14, Math.min(width, height) * 0.14);
-      const shaftEndX = endX - (head * 0.35);
-      const shaftEndY = endY + (head * 0.35);
-      const leftHeadX = endX - head;
-      const leftHeadY = endY;
-      const rightHeadX = endX;
-      const rightHeadY = endY + head;
-      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="arrow" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><line x1="${startX}" y1="${startY}" x2="${shaftEndX}" y2="${shaftEndY}" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="butt"/><path d="M ${leftHeadX} ${leftHeadY} L ${endX} ${endY} L ${rightHeadX} ${rightHeadY}" fill="none" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="butt" stroke-linejoin="miter"/></svg>`;
+      const leftX = margin;
+      const rightX = width - margin;
+      const centerY = height / 2;
+      const usableHeight = Math.max(18, height - (margin * 2));
+      const headLength = Math.max(18, Math.min(width * 0.28, usableHeight * 1.1));
+      const shaftHalf = Math.max(4, usableHeight * 0.16);
+      const bodyRight = Math.max(leftX + 12, rightX - headLength);
+      const topY = centerY - (usableHeight / 2);
+      const bottomY = centerY + (usableHeight / 2);
+      const arrowPath = [
+        `M ${leftX} ${centerY - shaftHalf}`,
+        `L ${bodyRight} ${centerY - shaftHalf}`,
+        `L ${bodyRight} ${topY}`,
+        `L ${rightX} ${centerY}`,
+        `L ${bodyRight} ${bottomY}`,
+        `L ${bodyRight} ${centerY + shaftHalf}`,
+        `L ${leftX} ${centerY + shaftHalf}`,
+        'Z',
+      ].join(' ');
+      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="arrow" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${arrowPath}" fill="${fill}" fill-opacity="0.35" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     }
     case 'line': {
       const margin = strokePadding + 8;
-      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="line" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><line x1="${margin}" y1="${height - margin}" x2="${width - margin}" y2="${margin}" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="butt"/></svg>`;
+      const centerY = height / 2;
+      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="line" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><line x1="${margin}" y1="${centerY}" x2="${width - margin}" y2="${centerY}" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="butt"/></svg>`;
     }
     default:
       return '';
@@ -981,6 +1000,11 @@ async function vmssAddShapeClip(shapeType, startTime = 0, options = {}) {
     strokeWidth = 3,
     width = 200,
     height = 100,
+    clipLength = 5,
+    offset,
+    position,
+    transform,
+    opacity = 1,
   } = options;
 
   let clipWidth = width;
@@ -1023,12 +1047,15 @@ async function vmssAddShapeClip(shapeType, startTime = 0, options = {}) {
       asset: {
         type: 'svg',
         src: svgContent,
-        opacity: 1,
+        opacity,
       },
       start: startTime,
-      length: 5,
+      length: clipLength,
       width: clipWidth,
       height: clipHeight,
+      ...(offset ? { offset } : {}),
+      ...(position ? { position } : {}),
+      ...(transform ? { transform } : {}),
     }],
   });
 
@@ -1166,6 +1193,256 @@ function vmssBindShellEvents() {
       vmssMarkDirty();
     });
   }
+
+  vmssBindPreviewDrawHandlers();
+  vmssUpdateDrawModeUI();
+}
+
+function vmssClamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function vmssGetCanvasViewportSize() {
+  const editJson = vmss.edit?.getEdit?.();
+  const width = Number(editJson?.output?.size?.width);
+  const height = Number(editJson?.output?.size?.height);
+
+  if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    return { width, height };
+  }
+
+  const preset = editJson?.output?.resolution;
+  const presets = {
+    preview: { width: 512, height: 288 },
+    mobile: { width: 640, height: 360 },
+    sd: { width: 1024, height: 576 },
+    hd: { width: 1280, height: 720 },
+    fhd: { width: 1920, height: 1080 },
+    1080: { width: 1920, height: 1080 },
+    '4k': { width: 3840, height: 2160 },
+  };
+
+  return presets[preset] || { width: 1280, height: 720 };
+}
+
+function vmssGetDrawPointFromEvent(event, surface) {
+  const rect = surface?.getBoundingClientRect?.();
+  if (!rect || !rect.width || !rect.height) return null;
+
+  return {
+    x: vmssClamp(event.clientX - rect.left, 0, rect.width),
+    y: vmssClamp(event.clientY - rect.top, 0, rect.height),
+  };
+}
+
+function vmssClearDrawPreview() {
+  const overlay = document.getElementById('vmss-draw-overlay');
+  if (overlay) {
+    overlay.innerHTML = '';
+  }
+}
+
+function vmssRenderArrowDrawPreview() {
+  const overlay = document.getElementById('vmss-draw-overlay');
+  const draft = vmss.drawDraft;
+  if (!overlay) return;
+
+  if (!draft) {
+    overlay.innerHTML = '';
+    return;
+  }
+
+  const width = Math.max(1, overlay.clientWidth || 1);
+  const height = Math.max(1, overlay.clientHeight || 1);
+  const strokeWidth = 4;
+  const head = Math.max(12, Math.min(28, Math.hypot(draft.currentX - draft.startX, draft.currentY - draft.startY) * 0.2));
+  const tipX = draft.currentX;
+  const tipY = draft.currentY;
+  const angle = Math.atan2(draft.currentY - draft.startY, draft.currentX - draft.startX);
+  const leftX = tipX - (head * Math.cos(angle - Math.PI / 6));
+  const leftY = tipY - (head * Math.sin(angle - Math.PI / 6));
+  const rightX = tipX - (head * Math.cos(angle + Math.PI / 6));
+  const rightY = tipY - (head * Math.sin(angle + Math.PI / 6));
+
+  overlay.innerHTML = `<svg viewBox="0 0 ${width} ${height}" class="h-full w-full overflow-visible"><line x1="${draft.startX}" y1="${draft.startY}" x2="${tipX}" y2="${tipY}" stroke="#38bdf8" stroke-width="${strokeWidth}" stroke-linecap="round" opacity="0.9"/><path d="M ${leftX} ${leftY} L ${tipX} ${tipY} L ${rightX} ${rightY}" fill="none" stroke="#38bdf8" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/></svg>`;
+}
+
+function vmssUpdateDrawModeUI() {
+  const overlay = document.getElementById('vmss-draw-overlay');
+  const hint = document.getElementById('vmss-draw-hint');
+  const arrowButton = document.getElementById('vmss-shape-arrow-btn');
+  const drawingArrow = vmss.drawMode === 'arrow';
+
+  if (overlay) {
+    overlay.classList.toggle('hidden', !drawingArrow);
+    overlay.classList.toggle('pointer-events-none', !drawingArrow);
+    overlay.classList.toggle('pointer-events-auto', drawingArrow);
+    overlay.classList.toggle('cursor-crosshair', drawingArrow);
+  }
+
+  if (hint) {
+    hint.classList.toggle('hidden', !drawingArrow || !!vmss.drawDraft);
+  }
+
+  if (arrowButton) {
+    arrowButton.classList.toggle('bg-sky-100', drawingArrow);
+    arrowButton.classList.toggle('text-sky-700', drawingArrow);
+    arrowButton.classList.toggle('ring-2', drawingArrow);
+    arrowButton.classList.toggle('ring-sky-300', drawingArrow);
+    arrowButton.classList.toggle('dark:bg-sky-900/40', drawingArrow);
+    arrowButton.classList.toggle('dark:text-sky-200', drawingArrow);
+  }
+
+  if (!drawingArrow) {
+    vmssClearDrawPreview();
+  }
+}
+
+function vmssCancelShapeDraw() {
+  vmss.drawDraft = null;
+  vmss.drawMode = null;
+  vmssUpdateDrawModeUI();
+}
+
+function vmssStartShapeDraw(mode) {
+  vmss.drawDraft = null;
+  vmss.drawMode = vmss.drawMode === mode ? null : mode;
+  vmssUpdateDrawModeUI();
+}
+
+async function vmssCommitArrowDraw(draft, surface) {
+  if (!vmss.edit || !draft || !surface) return;
+
+  const rect = surface.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  const viewport = vmssGetCanvasViewportSize();
+  const scaleX = viewport.width / rect.width;
+  const scaleY = viewport.height / rect.height;
+  const deltaX = (draft.currentX - draft.startX) * scaleX;
+  const deltaY = (draft.currentY - draft.startY) * scaleY;
+  const distance = Math.hypot(deltaX, deltaY);
+
+  if (distance < 36) {
+    return;
+  }
+
+  const centerX = ((draft.startX + draft.currentX) / 2) * scaleX;
+  const centerY = ((draft.startY + draft.currentY) / 2) * scaleY;
+  const rotation = Math.round((Math.atan2(deltaY, deltaX) * 180 / Math.PI) * 10) / 10;
+  const arrowHeight = Math.max(36, Math.min(180, distance * 0.22));
+
+  await vmssAddShapeClip('arrow', vmss.edit?.playbackTime || 0, {
+    width: Math.max(80, Math.round(distance)),
+    height: Math.round(arrowHeight),
+    offset: {
+      x: Number(((centerX - (viewport.width / 2)) / viewport.width).toFixed(4)),
+      y: Number((((viewport.height / 2) - centerY) / viewport.height).toFixed(4)),
+    },
+    transform: {
+      rotate: {
+        angle: rotation,
+      },
+    },
+  });
+}
+
+function vmssBindPreviewDrawHandlers() {
+  vmssUnbindPreviewDrawHandlers();
+
+  const surface = document.getElementById('vmss-draw-overlay');
+  if (!surface) return;
+
+  vmss.previewDrawSurface = surface;
+
+  vmss.onPreviewDrawPointerDown = (event) => {
+    if (vmss.drawMode !== 'arrow' || event.button !== 0) return;
+
+    const point = vmssGetDrawPointFromEvent(event, surface);
+    if (!point) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    vmss.drawDraft = {
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      currentX: point.x,
+      currentY: point.y,
+    };
+
+    surface.setPointerCapture?.(event.pointerId);
+    vmssUpdateDrawModeUI();
+    vmssRenderArrowDrawPreview();
+  };
+
+  vmss.onPreviewDrawPointerMove = (event) => {
+    if (!vmss.drawDraft || vmss.drawDraft.pointerId !== event.pointerId) return;
+
+    const point = vmssGetDrawPointFromEvent(event, surface);
+    if (!point) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    vmss.drawDraft.currentX = point.x;
+    vmss.drawDraft.currentY = point.y;
+    vmssRenderArrowDrawPreview();
+  };
+
+  vmss.onPreviewDrawPointerUp = async (event) => {
+    if (!vmss.drawDraft || vmss.drawDraft.pointerId !== event.pointerId) return;
+
+    const isCancelled = event.type === 'pointercancel';
+    const point = vmssGetDrawPointFromEvent(event, surface);
+    if (point && !isCancelled) {
+      vmss.drawDraft.currentX = point.x;
+      vmss.drawDraft.currentY = point.y;
+    }
+
+    const draft = vmss.drawDraft;
+    vmss.drawDraft = null;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    surface.releasePointerCapture?.(event.pointerId);
+    vmssUpdateDrawModeUI();
+
+    if (!isCancelled) {
+      await vmssCommitArrowDraw(draft, surface);
+    }
+
+    vmssCancelShapeDraw();
+  };
+
+  surface.addEventListener('pointerdown', vmss.onPreviewDrawPointerDown);
+  surface.addEventListener('pointermove', vmss.onPreviewDrawPointerMove);
+  surface.addEventListener('pointerup', vmss.onPreviewDrawPointerUp);
+  surface.addEventListener('pointercancel', vmss.onPreviewDrawPointerUp);
+}
+
+function vmssUnbindPreviewDrawHandlers() {
+  if (vmss.previewDrawSurface && vmss.onPreviewDrawPointerDown) {
+    vmss.previewDrawSurface.removeEventListener('pointerdown', vmss.onPreviewDrawPointerDown);
+  }
+
+  if (vmss.previewDrawSurface && vmss.onPreviewDrawPointerMove) {
+    vmss.previewDrawSurface.removeEventListener('pointermove', vmss.onPreviewDrawPointerMove);
+  }
+
+  if (vmss.previewDrawSurface && vmss.onPreviewDrawPointerUp) {
+    vmss.previewDrawSurface.removeEventListener('pointerup', vmss.onPreviewDrawPointerUp);
+    vmss.previewDrawSurface.removeEventListener('pointercancel', vmss.onPreviewDrawPointerUp);
+  }
+
+  vmss.previewDrawSurface = null;
+  vmss.onPreviewDrawPointerDown = null;
+  vmss.onPreviewDrawPointerMove = null;
+  vmss.onPreviewDrawPointerUp = null;
+  vmss.drawDraft = null;
+  vmssClearDrawPreview();
 }
 
 function vmssStartClock() {
@@ -1228,8 +1505,10 @@ function vmssRenderEditorShell(container) {
         </div>
 
         <div class="flex min-w-0 flex-1 flex-col bg-gray-200 dark:bg-gray-950">
-          <div class="flex flex-1 items-center justify-center overflow-hidden bg-gray-800 dark:bg-black">
+          <div id="vmss-preview-surface" class="relative flex flex-1 items-center justify-center overflow-hidden bg-gray-800 dark:bg-black">
             <div data-shotstack-studio class="h-full w-full"></div>
+            <div id="vmss-draw-overlay" class="pointer-events-none absolute inset-0 z-10 hidden"></div>
+            <div id="vmss-draw-hint" class="pointer-events-none absolute left-4 top-4 z-20 hidden rounded-full bg-white/90 px-3 py-1 text-[11px] font-medium text-slate-700 shadow-sm">Drag on the preview to draw an arrow</div>
           </div>
 
           <div class="flex-shrink-0 border-t border-gray-300 bg-gray-100 dark:border-gray-700 dark:bg-gray-800">
@@ -1263,7 +1542,7 @@ function vmssRenderEditorShell(container) {
               <div class="grid grid-cols-4 gap-2">
                 <button onclick="vmssAddShapeClip('rect', vmss.edit?.playbackTime || 0)" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Rectangle"><div class="h-5 w-6 rounded-sm border-2 border-gray-800 dark:border-gray-200"></div></button>
                 <button onclick="vmssAddShapeClip('circle', vmss.edit?.playbackTime || 0)" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Circle"><div class="h-6 w-6 rounded-full border-2 border-gray-800 dark:border-gray-200"></div></button>
-                <button onclick="vmssAddShapeClip('arrow', vmss.edit?.playbackTime || 0)" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Arrow"><i class="ri-arrow-right-up-line text-lg text-gray-800 dark:text-gray-200"></i></button>
+                <button id="vmss-shape-arrow-btn" onclick="vmssStartShapeDraw('arrow')" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Draw Arrow"><i class="ri-arrow-right-up-line text-lg text-gray-800 dark:text-gray-200"></i></button>
                 <button onclick="vmssAddShapeClip('line', vmss.edit?.playbackTime || 0)" class="flex aspect-square items-center justify-center rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600" title="Line"><div class="h-0.5 w-6 rotate-45 bg-gray-800 dark:bg-gray-200"></div></button>
               </div>
             </div>
@@ -1696,6 +1975,7 @@ window.vmssInit = vmssInit;
 window.vmssLoadTemplate = vmssLoadTemplate;
 window.vmssAddTextClip = vmssAddTextClip;
 window.vmssAddShapeClip = vmssAddShapeClip;
+window.vmssStartShapeDraw = vmssStartShapeDraw;
 window.vmssAddImageClip = vmssAddImageClip;
 window.vmssAddVideoClip = vmssAddVideoClip;
 window.vmssAddStep = vmssAddStep;
