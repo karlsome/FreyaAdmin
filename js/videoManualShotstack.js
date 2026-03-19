@@ -20,6 +20,9 @@ const vmss = {
   dirty: false,
   clockTimer: null,
   title: 'Video Manual 2',
+  lastRenderId: null,
+  lastRenderUrl: null,
+  assetSourceMap: {},
 };
 
 function loadVideoManualPage() {
@@ -143,8 +146,11 @@ async function vmssBoot() {
   const storedProject = vmssReadStoredProject();
   const project = storedProject?.edit || vmssCreateDefaultTemplate();
   const title = storedProject?.title || 'Video Manual 2';
+  const assetSourceMap = storedProject?.assetSourceMap && typeof storedProject.assetSourceMap === 'object'
+    ? storedProject.assetSourceMap
+    : {};
 
-  await vmssLoadTemplate(project, { title });
+  await vmssLoadTemplate(project, { title, assetSourceMap });
 }
 
 function vmssCreateDefaultTemplate() {
@@ -238,6 +244,9 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   }
 
   vmssDispose();
+  vmss.assetSourceMap = options.assetSourceMap && typeof options.assetSourceMap === 'object'
+    ? { ...options.assetSourceMap }
+    : {};
 
   vmss.edit = new Edit(template);
   vmss.canvas = new Canvas(vmss.edit);
@@ -283,6 +292,41 @@ function vmssDispose() {
   vmss.steps = [];
   vmss.currentStepIdx = 0;
   vmss.selectedClipId = null;
+  vmss.assetSourceMap = {};
+}
+
+function vmssRememberAssetSource(previewUrl, publicUrl) {
+  if (!previewUrl || !publicUrl) return;
+  vmss.assetSourceMap[previewUrl] = publicUrl;
+}
+
+function vmssPrepareEditForRender(editJson) {
+  const preparedEdit = JSON.parse(JSON.stringify(editJson));
+  const unresolvedSources = [];
+
+  (preparedEdit.timeline?.tracks || []).forEach((track) => {
+    (track.clips || []).forEach((clip) => {
+      if (!clip?.asset?.src || typeof clip.asset.src !== 'string') return;
+
+      const currentSrc = clip.asset.src;
+      const mappedSrc = vmss.assetSourceMap[currentSrc];
+
+      if (mappedSrc) {
+        clip.asset.src = mappedSrc;
+        return;
+      }
+
+      if (currentSrc.startsWith('blob:') || currentSrc.includes('/api/video-manuals/stream/')) {
+        unresolvedSources.push(currentSrc);
+      }
+    });
+  });
+
+  if (unresolvedSources.length) {
+    throw new Error('Some uploaded assets are still using preview URLs. Wait for upload to finish, then try export again.');
+  }
+
+  return preparedEdit;
 }
 
 function vmssRegisterToolbarButtons() {
@@ -844,6 +888,7 @@ async function vmssHandleImageUpload(event) {
           }
 
           const result = await response.json();
+          vmssRememberAssetSource(url, result.downloadUrl);
           vmssSetStatus('Image added and backed up to Firebase');
           console.log('✅ Image uploaded to Firebase:', result.downloadUrl);
 
@@ -895,6 +940,8 @@ async function vmssHandleVideoUpload(event) {
 
         const result = await response.json();
         const persistentUrl = result.downloadUrl;
+        const previewUrl = `${VMSS_API_BASE_URL()}/api/video-manuals/stream/${result.documentId}`;
+        vmssRememberAssetSource(previewUrl, persistentUrl);
 
         // Add video clip with persistent Firebase URL
         await vmssAddVideoClip(persistentUrl, vmss.edit?.playbackTime || 0, {
@@ -937,11 +984,14 @@ async function vmssExport() {
     return;
   }
 
+  vmssClearRenderActions();
+  vmss.lastRenderId = null;
+  vmss.lastRenderUrl = null;
   vmssSetStatus('Preparing render request...');
 
   try {
     // Get the edit JSON from Shotstack
-    const editJson = vmss.edit.getEdit();
+    const editJson = vmssPrepareEditForRender(vmss.edit.getEdit());
 
     // Send to backend for cloud rendering
     const response = await fetch(`${VMSS_API_BASE_URL()}/api/video-manuals/render`, {
@@ -989,7 +1039,9 @@ async function vmssWaitForRender(renderId) {
     const result = await response.json();
     const { status, downloadUrl, progress } = result;
 
-    if (status === 'complete') {
+    if (status === 'done') {
+      vmss.lastRenderId = renderId;
+      vmss.lastRenderUrl = downloadUrl || null;
       vmssSetStatus('✅ Render complete!');
       vmssShowRenderComplete(renderId, downloadUrl);
       return true;
@@ -999,9 +1051,9 @@ async function vmssWaitForRender(renderId) {
       throw new Error(result.message || 'Render failed on Shotstack');
     }
 
-    if (status === 'queued' || status === 'processing') {
+    if (status === 'queued' || status === 'fetching' || status === 'rendering' || status === 'saving' || status === 'processing') {
       const progressText = progress ? ` (${progress}%)` : '';
-      vmssSetStatus(`Rendering on Shotstack${progressText}...`);
+      vmssSetStatus(`Shotstack status: ${status}${progressText}`);
       
       attempts++;
       if (attempts >= maxAttempts) {
@@ -1019,18 +1071,58 @@ async function vmssWaitForRender(renderId) {
   return await checkStatus();
 }
 
+function vmssClearRenderActions() {
+  const container = document.getElementById('vmss-render-actions');
+  if (container) {
+    container.remove();
+  }
+}
+
 function vmssShowRenderComplete(renderId, downloadUrl) {
   const status = document.getElementById('vmss-save-status');
   if (!status) return;
 
-  const button = document.createElement('button');
-  button.className = 'ml-3 inline-flex items-center gap-2 rounded bg-green-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-600';
-  button.innerHTML = '<i class="ri-download-line"></i>Download Video';
-  button.onclick = () => {
+  vmssClearRenderActions();
+
+  const actions = document.createElement('div');
+  actions.id = 'vmss-render-actions';
+  actions.className = 'ml-3 inline-flex items-center gap-2';
+
+  const downloadButton = document.createElement('button');
+  downloadButton.className = 'inline-flex items-center gap-2 rounded bg-green-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-600';
+  downloadButton.innerHTML = '<i class="ri-download-line"></i>Download Video';
+  downloadButton.onclick = () => {
     window.open(`${VMSS_API_BASE_URL()}/api/video-manuals/download/${renderId}`, '_blank');
   };
 
-  status.parentElement.appendChild(button);
+  actions.appendChild(downloadButton);
+
+  if (downloadUrl) {
+    const openButton = document.createElement('button');
+    openButton.className = 'inline-flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50';
+    openButton.innerHTML = '<i class="ri-external-link-line"></i>Open URL';
+    openButton.onclick = () => {
+      window.open(downloadUrl, '_blank');
+    };
+
+    const copyButton = document.createElement('button');
+    copyButton.className = 'inline-flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50';
+    copyButton.innerHTML = '<i class="ri-file-copy-line"></i>Copy URL';
+    copyButton.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(downloadUrl);
+        vmssSetStatus('Render URL copied');
+      } catch (error) {
+        console.error('Failed to copy render URL:', error);
+        alert(downloadUrl);
+      }
+    };
+
+    actions.appendChild(openButton);
+    actions.appendChild(copyButton);
+  }
+
+  status.parentElement.appendChild(actions);
   console.log('✅ Video ready for download:', downloadUrl);
 }
 
@@ -1043,6 +1135,7 @@ async function vmssSaveProject() {
   const payload = {
     title: vmss.title,
     edit: vmss.edit.getEdit(),
+    assetSourceMap: vmss.assetSourceMap,
     updatedAt: new Date().toISOString(),
   };
 
@@ -1084,7 +1177,10 @@ async function vmssRestoreLocalProject() {
     return;
   }
 
-  await vmssLoadTemplate(storedProject.edit, { title: storedProject.title || 'Video Manual 2' });
+  await vmssLoadTemplate(storedProject.edit, {
+    title: storedProject.title || 'Video Manual 2',
+    assetSourceMap: storedProject.assetSourceMap || {},
+  });
   vmss.dirty = false;
   vmssSetStatus('Restored local save');
 }
