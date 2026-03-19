@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  VIDEO MANUAL CREATOR v2  –  FFmpeg.wasm powered (free, client-side export)
+//  VIDEO MANUAL CREATOR v2  –  FFmpeg.wasm powered (free, client-side export) PENIS
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Database config
