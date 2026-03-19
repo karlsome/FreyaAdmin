@@ -6686,7 +6686,9 @@ function loadPage(page) {
             break;
 
         case 'videoManual':
-            if (typeof loadVideoManual2Page === 'function') {
+          if (typeof loadVideoManualPage === 'function') {
+            loadVideoManualPage();
+          } else if (typeof loadVideoManual2Page === 'function') {
                 loadVideoManual2Page();
             } else {
                 mainContent.innerHTML = '<h2 class="text-xl font-semibold">Video Manual (not loaded)</h2>';
