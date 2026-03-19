@@ -45,6 +45,8 @@ const vmss = {
   onPreviewDrawPointerUp: null,
   addElementsLayoutRaf: null,
   onAddElementsWindowResize: null,
+  onAddElementsOutsidePointerDown: null,
+  onAddElementsEscapeKeyDown: null,
   addElementsOpen: false,
   addElementsCategory: 'text',
 };
@@ -1211,13 +1213,33 @@ function vmssBindShellEvents() {
 }
 
 function vmssBindAddElementsLayoutWatchers() {
-  if (vmss.onAddElementsWindowResize) return;
+  if (vmss.onAddElementsWindowResize || vmss.onAddElementsOutsidePointerDown || vmss.onAddElementsEscapeKeyDown) return;
 
   vmss.onAddElementsWindowResize = () => {
     vmssScheduleAddElementsLayout();
   };
 
+  vmss.onAddElementsOutsidePointerDown = (event) => {
+    if (!vmss.addElementsOpen) return;
+
+    const shell = document.getElementById('vmss-add-elements-shell');
+    const target = event.target;
+    if (!shell || !(target instanceof Node) || shell.contains(target)) return;
+
+    vmss.addElementsOpen = false;
+    vmssUpdateAddElementsUI();
+  };
+
+  vmss.onAddElementsEscapeKeyDown = (event) => {
+    if (!vmss.addElementsOpen || event.key !== 'Escape') return;
+
+    vmss.addElementsOpen = false;
+    vmssUpdateAddElementsUI();
+  };
+
   window.addEventListener('resize', vmss.onAddElementsWindowResize);
+  document.addEventListener('pointerdown', vmss.onAddElementsOutsidePointerDown, true);
+  document.addEventListener('keydown', vmss.onAddElementsEscapeKeyDown, true);
 }
 
 function vmssUnbindAddElementsLayoutWatchers() {
@@ -1229,6 +1251,16 @@ function vmssUnbindAddElementsLayoutWatchers() {
   if (vmss.onAddElementsWindowResize) {
     window.removeEventListener('resize', vmss.onAddElementsWindowResize);
     vmss.onAddElementsWindowResize = null;
+  }
+
+  if (vmss.onAddElementsOutsidePointerDown) {
+    document.removeEventListener('pointerdown', vmss.onAddElementsOutsidePointerDown, true);
+    vmss.onAddElementsOutsidePointerDown = null;
+  }
+
+  if (vmss.onAddElementsEscapeKeyDown) {
+    document.removeEventListener('keydown', vmss.onAddElementsEscapeKeyDown, true);
+    vmss.onAddElementsEscapeKeyDown = null;
   }
 }
 
