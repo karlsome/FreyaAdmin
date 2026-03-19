@@ -185,7 +185,7 @@ async function vmssBoot() {
 function vmssCreateDefaultTemplate() {
   return {
     timeline: {
-      background: '#0f172a',
+      background: '#ffffff',
       tracks: [
         {
           clips: [
@@ -197,7 +197,7 @@ function vmssCreateDefaultTemplate() {
                   family: 'Work Sans',
                   size: 72,
                   weight: 700,
-                  color: '#ffffff',
+                  color: '#111111',
                   opacity: 1,
                 },
                 align: {
@@ -223,7 +223,7 @@ function vmssCreateDefaultTemplate() {
                   family: 'Work Sans',
                   size: 30,
                   weight: 400,
-                  color: '#cbd5e1',
+                  color: '#111111',
                   opacity: 1,
                 },
                 align: {
@@ -244,8 +244,8 @@ function vmssCreateDefaultTemplate() {
     output: {
       format: 'mp4',
       size: {
-        width: 1280,
-        height: 720,
+        width: 1920,
+        height: 1080,
       },
     },
   };
@@ -959,7 +959,7 @@ async function vmssAddTextClip(text, startTime = 0, options = {}) {
     fontSize = 48,
     fontWeight = 600,
     fontFamily = 'Work Sans',
-    color = '#ffffff',
+    color = '#111111',
     align = 'center',
   } = options;
 
@@ -1089,6 +1089,7 @@ async function vmssAddVideoClip(videoUrl, startTime = 0, options = {}) {
   if (!vmss.edit) return;
 
   const { trim = 0, volume = 1, firebaseDocId } = options;
+  const targetTrackIndex = vmss.steps.length;
 
   // If Firebase doc ID is provided, use the proxy endpoint to bypass CORS
   let clipVideoUrl = videoUrl;
@@ -1097,7 +1098,7 @@ async function vmssAddVideoClip(videoUrl, startTime = 0, options = {}) {
     console.log('Using proxy URL for video:', clipVideoUrl);
   }
 
-  await vmss.edit.addTrack(0, {
+  await vmss.edit.addTrack(targetTrackIndex, {
     clips: [{
       asset: {
         type: 'video',
@@ -1222,7 +1223,7 @@ function vmssGetCanvasViewportSize() {
     '4k': { width: 3840, height: 2160 },
   };
 
-  return presets[preset] || { width: 1280, height: 720 };
+  return presets[preset] || { width: 1920, height: 1080 };
 }
 
 function vmssGetDrawPointFromEvent(event, surface) {
