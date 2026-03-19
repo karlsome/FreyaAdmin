@@ -34,6 +34,9 @@ const vmss = {
   debugListeners: [],
   debugMoveThrottleMs: 120,
   lastDebugMoveAt: 0,
+  syncingShapeAsset: false,
+  pendingShapeSyncTimer: null,
+  onShapePointerRelease: null,
 };
 
 function loadVideoManualPage() {
@@ -289,7 +292,6 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmss.controls = new Controls(vmss.edit);
   await vmss.controls.load();
 
-  vmssRegisterToolbarButtons();
   vmssBindEvents();
   vmssSyncStepsFromTracks();
   vmssRenderStepsPanel();
@@ -623,6 +625,45 @@ function vmssUnbindTimelineLayoutWatchers() {
   vmss.onTimelineWindowResize = null;
 }
 
+function vmssScheduleSelectedShapeSync(delay = 0) {
+  if (vmss.pendingShapeSyncTimer) {
+    window.clearTimeout(vmss.pendingShapeSyncTimer);
+  }
+
+  vmss.pendingShapeSyncTimer = window.setTimeout(() => {
+    vmss.pendingShapeSyncTimer = null;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        vmssSyncSelectedShapeAsset();
+      });
+    });
+  }, Math.max(0, delay));
+}
+
+function vmssBindShapeSyncWatchers() {
+  vmssUnbindShapeSyncWatchers();
+
+  vmss.onShapePointerRelease = () => {
+    vmssScheduleSelectedShapeSync();
+  };
+
+  window.addEventListener('pointerup', vmss.onShapePointerRelease, true);
+  window.addEventListener('pointercancel', vmss.onShapePointerRelease, true);
+}
+
+function vmssUnbindShapeSyncWatchers() {
+  if (vmss.pendingShapeSyncTimer) {
+    window.clearTimeout(vmss.pendingShapeSyncTimer);
+    vmss.pendingShapeSyncTimer = null;
+  }
+
+  if (vmss.onShapePointerRelease) {
+    window.removeEventListener('pointerup', vmss.onShapePointerRelease, true);
+    window.removeEventListener('pointercancel', vmss.onShapePointerRelease, true);
+    vmss.onShapePointerRelease = null;
+  }
+}
+
 function vmssDispose() {
   if (vmss.clockTimer) {
     window.clearInterval(vmss.clockTimer);
@@ -630,6 +671,7 @@ function vmssDispose() {
   }
 
   vmssUnbindTimelineLayoutWatchers();
+  vmssUnbindShapeSyncWatchers();
   vmssDetachTimelineDebug();
   vmssRestoreTimelineContainingBlocks();
   vmssUnlockWorkspaceScroll();
@@ -684,75 +726,110 @@ function vmssPrepareEditForRender(editJson) {
   return preparedEdit;
 }
 
-function vmssRegisterToolbarButtons() {
-  if (!vmss.ui) return;
+function vmssExtractShapeStyle(svgSrc) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgSrc, 'image/svg+xml');
+  const root = doc.documentElement;
+  const shapeType = root?.getAttribute('data-vmss-shape');
+  const drawable = root?.querySelector('rect, ellipse, circle, line, polyline, path');
 
-  vmss.ui.registerButton({
-    id: 'add-title',
-    icon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 3H13"/><path d="M8 3V13"/><path d="M5 13H11"/></svg>`,
-    tooltip: 'Add Title',
-  });
+  return {
+    shapeType,
+    stroke: drawable?.getAttribute('stroke') || '#ef4444',
+    fill: drawable?.getAttribute('fill') || '#fecaca',
+    strokeWidth: Number(drawable?.getAttribute('stroke-width') || 3),
+  };
+}
 
-  vmss.ui.registerButton({
-    id: 'add-body-text',
-    icon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4h12M2 8h10M2 12h8"/></svg>`,
-    tooltip: 'Add Body Text',
-  });
+function vmssCreateShapeSvg(shapeType, width, height, options = {}) {
+  const fill = options.fill || '#fecaca';
+  const stroke = options.stroke || '#ef4444';
+  const safeStrokeWidth = Math.max(2, Number(options.strokeWidth) || 3);
+  const strokePadding = safeStrokeWidth + 14;
 
-  vmss.ui.registerButton({
-    id: 'add-rect',
-    icon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/></svg>`,
-    tooltip: 'Add Rectangle',
-    dividerBefore: true,
-  });
+  switch (shapeType) {
+    case 'rect': {
+      const inset = strokePadding;
+      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="rect" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="${inset}" y="${inset}" width="${Math.max(1, width - (inset * 2))}" height="${Math.max(1, height - (inset * 2))}" rx="12" fill="${fill}" fill-opacity="0.35" stroke="${stroke}" stroke-width="${safeStrokeWidth}"/></svg>`;
+    }
+    case 'circle': {
+      const radiusX = Math.max(8, (width / 2) - strokePadding);
+      const radiusY = Math.max(8, (height / 2) - strokePadding);
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const ovalPath = [
+        `M ${centerX - radiusX} ${centerY}`,
+        `A ${radiusX} ${radiusY} 0 1 0 ${centerX + radiusX} ${centerY}`,
+        `A ${radiusX} ${radiusY} 0 1 0 ${centerX - radiusX} ${centerY}`,
+      ].join(' ');
+      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="circle" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${ovalPath}" fill="${fill}" fill-opacity="0.35" stroke="${stroke}" stroke-width="${safeStrokeWidth}"/></svg>`;
+    }
+    case 'arrow': {
+      const margin = strokePadding + 6;
+      const startX = margin;
+      const startY = height - margin;
+      const endX = width - margin;
+      const endY = margin;
+      const head = Math.max(14, Math.min(width, height) * 0.14);
+      const shaftEndX = endX - (head * 0.35);
+      const shaftEndY = endY + (head * 0.35);
+      const leftHeadX = endX - head;
+      const leftHeadY = endY;
+      const rightHeadX = endX;
+      const rightHeadY = endY + head;
+      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="arrow" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><line x1="${startX}" y1="${startY}" x2="${shaftEndX}" y2="${shaftEndY}" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="butt"/><path d="M ${leftHeadX} ${leftHeadY} L ${endX} ${endY} L ${rightHeadX} ${rightHeadY}" fill="none" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="butt" stroke-linejoin="miter"/></svg>`;
+    }
+    case 'line': {
+      const margin = strokePadding + 8;
+      return `<svg xmlns="http://www.w3.org/2000/svg" data-vmss-shape="line" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><line x1="${margin}" y1="${height - margin}" x2="${width - margin}" y2="${margin}" stroke="${stroke}" stroke-width="${safeStrokeWidth}" stroke-linecap="butt"/></svg>`;
+    }
+    default:
+      return '';
+  }
+}
 
-  vmss.ui.registerButton({
-    id: 'add-circle',
-    icon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/></svg>`,
-    tooltip: 'Add Circle',
-  });
+function vmssSyncSelectedShapeAsset() {
+  if (vmss.syncingShapeAsset || !vmss.edit || vmss.currentStepIdx == null || vmss.selectedClipId == null) {
+    return;
+  }
 
-  vmss.ui.registerButton({
-    id: 'add-arrow',
-    icon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13L13 3M13 3H6M13 3v7"/></svg>`,
-    tooltip: 'Add Arrow',
-  });
+  const clipId = vmss.edit.getClipId?.(vmss.currentStepIdx, vmss.selectedClipId);
+  const resolvedClip = vmss.edit.getResolvedClip?.(vmss.currentStepIdx, vmss.selectedClipId);
+  if (!clipId || !resolvedClip || resolvedClip.asset?.type !== 'svg' || typeof resolvedClip.asset?.src !== 'string') {
+    return;
+  }
 
-  vmss.ui.registerButton({
-    id: 'add-image',
-    icon: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><circle cx="5.5" cy="6.5" r="1.5"/><path d="M14 13l-3-4-2 2.5L6 8l-4 5"/></svg>`,
-    tooltip: 'Add Image',
-    dividerBefore: true,
-  });
+  const shapeStyle = vmssExtractShapeStyle(resolvedClip.asset.src);
+  if (!shapeStyle.shapeType || !Number.isFinite(resolvedClip.width) || !Number.isFinite(resolvedClip.height)) {
+    return;
+  }
 
-  vmss.ui.on('button:add-title', ({ position }) => {
-    vmssAddTextClip('Title', position, { fontSize: 72, fontWeight: 600 });
-  });
+  const nextSvg = vmssCreateShapeSvg(
+    shapeStyle.shapeType,
+    Math.max(50, Math.round(resolvedClip.width)),
+    Math.max(50, Math.round(resolvedClip.height)),
+    shapeStyle,
+  );
 
-  vmss.ui.on('button:add-body-text', ({ position }) => {
-    vmssAddTextClip('Body text here', position, { fontSize: 36, fontWeight: 400 });
-  });
+  if (!nextSvg || nextSvg === resolvedClip.asset.src) {
+    return;
+  }
 
-  vmss.ui.on('button:add-rect', ({ position }) => {
-    vmssAddShapeClip('rect', position, { fill: '#ef4444', stroke: '#dc2626', strokeWidth: 3 });
+  vmss.syncingShapeAsset = true;
+  vmss.edit.updateClipInDocument?.(clipId, {
+    asset: {
+      ...resolvedClip.asset,
+      src: nextSvg,
+    },
   });
-
-  vmss.ui.on('button:add-circle', ({ position }) => {
-    vmssAddShapeClip('circle', position, { fill: 'none', stroke: '#ef4444', strokeWidth: 4 });
-  });
-
-  vmss.ui.on('button:add-arrow', ({ position }) => {
-    vmssAddShapeClip('arrow', position, { stroke: '#ef4444', strokeWidth: 4 });
-  });
-
-  vmss.ui.on('button:add-image', () => {
-    const input = document.getElementById('vmss-image-input');
-    if (input) input.click();
-  });
+  vmss.edit.resolveClip?.(clipId);
+  vmss.syncingShapeAsset = false;
 }
 
 function vmssBindEvents() {
   if (!vmss.edit) return;
+
+  vmssBindShapeSyncWatchers();
 
   vmss.edit.events.on('track:added', () => {
     vmssSyncStepsFromTracks();
@@ -771,6 +848,8 @@ function vmssBindEvents() {
 
   vmss.edit.events.on('clip:updated', () => {
     vmssMarkDirty();
+    vmssSyncSelectedShapeAsset();
+    vmssScheduleSelectedShapeSync(40);
 
     vmssDebugLog('clip:updated', {
       selectedClipId: vmss.selectedClipId,
@@ -788,6 +867,8 @@ function vmssBindEvents() {
   vmss.edit.events.on('clip:selected', (data) => {
     vmss.selectedClipId = data?.clipIndex ?? null;
     vmss.currentStepIdx = data?.trackIndex ?? 0;
+    vmssSyncSelectedShapeAsset();
+    vmssScheduleSelectedShapeSync();
 
     vmssDebugLog('clip:selected', {
       selectedClipId: vmss.selectedClipId,
@@ -895,34 +976,47 @@ async function vmssAddShapeClip(shapeType, startTime = 0, options = {}) {
   if (!vmss.edit) return;
 
   const {
-    fill = 'none',
+    fill = '#fecaca',
     stroke = '#ef4444',
     strokeWidth = 3,
     width = 200,
     height = 100,
   } = options;
 
-  let svgContent;
+  let clipWidth = width;
+  let clipHeight = height;
 
   switch (shapeType) {
-    case 'rect':
-      svgContent = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><rect x="${strokeWidth / 2}" y="${strokeWidth / 2}" width="${width - strokeWidth}" height="${height - strokeWidth}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" rx="4"/></svg>`;
-      break;
-    case 'circle': {
-      const radius = Math.min(width, height) / 2 - strokeWidth;
-      svgContent = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><circle cx="${width / 2}" cy="${height / 2}" r="${radius}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/></svg>`;
+    case 'rect': {
+      clipWidth = options.width ?? 220;
+      clipHeight = options.height ?? 120;
       break;
     }
-    case 'arrow':
-      svgContent = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="${stroke}"/></marker></defs><line x1="10" y1="${height - 10}" x2="${width - 20}" y2="20" stroke="${stroke}" stroke-width="${strokeWidth}" marker-end="url(#arrowhead)"/></svg>`;
+    case 'circle': {
+      clipWidth = options.width ?? 180;
+      clipHeight = options.height ?? 180;
       break;
-    case 'line':
-      svgContent = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><line x1="10" y1="${height - 10}" x2="${width - 10}" y2="10" stroke="${stroke}" stroke-width="${strokeWidth}"/></svg>`;
+    }
+    case 'arrow': {
+      clipWidth = options.width ?? 240;
+      clipHeight = options.height ?? 140;
       break;
+    }
+    case 'line': {
+      clipWidth = options.width ?? 240;
+      clipHeight = options.height ?? 120;
+      break;
+    }
     default:
       console.warn('Unknown shape type:', shapeType);
       return;
   }
+
+  const svgContent = vmssCreateShapeSvg(shapeType, clipWidth, clipHeight, {
+    fill,
+    stroke,
+    strokeWidth,
+  });
 
   await vmss.edit.addTrack(0, {
     clips: [{
@@ -933,8 +1027,8 @@ async function vmssAddShapeClip(shapeType, startTime = 0, options = {}) {
       },
       start: startTime,
       length: 5,
-      width,
-      height,
+      width: clipWidth,
+      height: clipHeight,
     }],
   });
 
