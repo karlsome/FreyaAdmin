@@ -43,6 +43,8 @@ const vmss = {
   onPreviewDrawPointerDown: null,
   onPreviewDrawPointerMove: null,
   onPreviewDrawPointerUp: null,
+  addElementsLayoutRaf: null,
+  onAddElementsWindowResize: null,
   addElementsOpen: false,
   addElementsCategory: 'text',
 };
@@ -245,6 +247,7 @@ function vmssCreateDefaultTemplate() {
     },
     output: {
       format: 'mp4',
+      fps: 24,
       size: {
         width: 1920,
         height: 1080,
@@ -303,7 +306,9 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
 
   vmssBindEvents();
   vmssBindPreviewDrawHandlers();
+  vmssBindAddElementsLayoutWatchers();
   vmssUpdateDrawModeUI();
+  vmssUpdateAddElementsUI();
   vmssSyncStepsFromTracks();
   vmssRenderStepsPanel();
   vmssSetTitle(options.title || vmss.title);
@@ -682,6 +687,7 @@ function vmssDispose() {
   }
 
   vmssCancelShapeDraw();
+  vmssUnbindAddElementsLayoutWatchers();
   vmssUnbindTimelineLayoutWatchers();
   vmssUnbindShapeSyncWatchers();
   vmssUnbindPreviewDrawHandlers();
@@ -1199,8 +1205,75 @@ function vmssBindShellEvents() {
   }
 
   vmssBindPreviewDrawHandlers();
+  vmssBindAddElementsLayoutWatchers();
   vmssUpdateDrawModeUI();
   vmssUpdateAddElementsUI();
+}
+
+function vmssBindAddElementsLayoutWatchers() {
+  if (vmss.onAddElementsWindowResize) return;
+
+  vmss.onAddElementsWindowResize = () => {
+    vmssScheduleAddElementsLayout();
+  };
+
+  window.addEventListener('resize', vmss.onAddElementsWindowResize);
+}
+
+function vmssUnbindAddElementsLayoutWatchers() {
+  if (vmss.addElementsLayoutRaf) {
+    window.cancelAnimationFrame(vmss.addElementsLayoutRaf);
+    vmss.addElementsLayoutRaf = null;
+  }
+
+  if (vmss.onAddElementsWindowResize) {
+    window.removeEventListener('resize', vmss.onAddElementsWindowResize);
+    vmss.onAddElementsWindowResize = null;
+  }
+}
+
+function vmssScheduleAddElementsLayout() {
+  if (vmss.addElementsLayoutRaf) return;
+
+  vmss.addElementsLayoutRaf = window.requestAnimationFrame(() => {
+    vmss.addElementsLayoutRaf = null;
+    vmssUpdateAddElementsLayout();
+  });
+}
+
+function vmssUpdateAddElementsLayout() {
+  const shell = document.getElementById('vmss-add-elements-shell');
+  const content = document.getElementById('vmss-add-elements-content');
+  if (!shell || !content) return;
+
+  const editorRect = document.getElementById('vmss-root')?.getBoundingClientRect?.();
+  const shellRect = shell.getBoundingClientRect();
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const gutter = 12;
+  const desiredWidth = 240;
+  const minWidth = 180;
+  const leftBoundary = Math.max(gutter, editorRect?.left ?? gutter);
+  const rightBoundary = Math.min(viewportWidth - gutter, editorRect?.right ?? (viewportWidth - gutter));
+  const availableRight = Math.max(0, rightBoundary - shellRect.right - gutter);
+  const availableLeft = Math.max(0, shellRect.left - leftBoundary - gutter);
+  const openLeft = availableRight < minWidth && availableLeft > availableRight;
+  const usableSpace = openLeft ? availableLeft : availableRight;
+  const fallbackSpace = openLeft ? availableRight : availableLeft;
+  const maxUsableSpace = Math.max(usableSpace, fallbackSpace);
+  const panelWidth = maxUsableSpace >= minWidth
+    ? Math.min(desiredWidth, maxUsableSpace)
+    : maxUsableSpace;
+
+  if (panelWidth <= 0) return;
+
+  content.style.width = `${panelWidth}px`;
+  content.style.left = openLeft ? 'auto' : '100%';
+  content.style.right = openLeft ? '100%' : 'auto';
+  content.style.borderLeftWidth = openLeft ? '0px' : '1px';
+  content.style.borderRightWidth = openLeft ? '1px' : '0px';
+  content.style.transformOrigin = openLeft ? 'right center' : 'left center';
+  content.style.marginLeft = !openLeft && vmss.addElementsOpen ? '12px' : '0px';
+  content.style.marginRight = openLeft && vmss.addElementsOpen ? '12px' : '0px';
 }
 
 function vmssSetAddElementsCategory(category) {
@@ -1218,6 +1291,9 @@ function vmssUpdateAddElementsUI() {
   const isOpen = !!vmss.addElementsOpen;
   const nextCategory = vmss.addElementsCategory || 'text';
   const content = document.getElementById('vmss-add-elements-content');
+
+  vmssScheduleAddElementsLayout();
+  vmssSyncAddElementsSelectionState();
 
   document.querySelectorAll('[data-vmss-add-category]').forEach((button) => {
     const isActive = isOpen && button.getAttribute('data-vmss-add-category') === nextCategory;
@@ -1251,6 +1327,86 @@ function vmssShowComingSoon(label) {
   vmssSetStatus(`${label} is coming soon`);
 }
 
+function vmssNormalizeHexColor(color) {
+  const value = String(color || '').trim().toUpperCase();
+  if (/^#[0-9A-F]{6}$/.test(value)) return value;
+
+  if (/^#[0-9A-F]{3}$/.test(value)) {
+    return `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`;
+  }
+
+  return null;
+}
+
+function vmssGetCurrentAddElementsState() {
+  const editJson = vmss.edit?.getEdit?.() || {};
+  const width = Number(editJson?.output?.size?.width) || 1920;
+  const height = Number(editJson?.output?.size?.height) || 1080;
+  const fps = Number(editJson?.output?.fps ?? editJson?.output?.frameRate) || 24;
+  const normalizedBackground = vmssNormalizeHexColor(editJson?.timeline?.background);
+
+  return {
+    preset: `${width}x${height}`,
+    fps: String(fps),
+    background: normalizedBackground || String(editJson?.timeline?.background || '#FFFFFF').trim().toUpperCase(),
+    normalizedBackground,
+  };
+}
+
+function vmssSyncAddElementsSelectionState() {
+  const state = vmssGetCurrentAddElementsState();
+  const backgroundInput = document.getElementById('vmss-background-color-input');
+
+  if (backgroundInput && state.normalizedBackground) {
+    backgroundInput.value = state.normalizedBackground;
+  }
+
+  document.querySelectorAll('[data-vmss-output-preset]').forEach((button) => {
+    const isActive = button.getAttribute('data-vmss-output-preset') === state.preset;
+    vmssToggleAddElementsOptionState(button, isActive);
+  });
+
+  document.querySelectorAll('[data-vmss-output-fps]').forEach((button) => {
+    const isActive = button.getAttribute('data-vmss-output-fps') === state.fps;
+    vmssToggleAddElementsOptionState(button, isActive);
+  });
+
+  document.querySelectorAll('[data-vmss-bg-color]').forEach((button) => {
+    const isActive = button.getAttribute('data-vmss-bg-color') === state.background;
+    button.classList.toggle('ring-2', isActive);
+    button.classList.toggle('ring-cyan-500', isActive);
+    button.classList.toggle('ring-offset-2', isActive);
+    button.classList.toggle('dark:ring-offset-gray-800', isActive);
+    button.classList.toggle('shadow-sm', isActive);
+
+    button.querySelectorAll('[data-vmss-current-icon]').forEach((icon) => {
+      icon.classList.toggle('hidden', !isActive);
+    });
+  });
+}
+
+function vmssToggleAddElementsOptionState(button, isActive) {
+  button.classList.toggle('border-cyan-400', isActive);
+  button.classList.toggle('bg-cyan-50', isActive);
+  button.classList.toggle('text-cyan-700', isActive);
+  button.classList.toggle('shadow-sm', isActive);
+  button.classList.toggle('dark:border-cyan-400/60', isActive);
+  button.classList.toggle('dark:bg-cyan-500/15', isActive);
+  button.classList.toggle('dark:text-cyan-200', isActive);
+
+  button.classList.toggle('border-transparent', !isActive);
+  button.classList.toggle('bg-gray-100', !isActive);
+  button.classList.toggle('text-gray-700', !isActive);
+  button.classList.toggle('dark:bg-gray-700', !isActive);
+  button.classList.toggle('dark:text-gray-200', !isActive);
+
+  button.querySelectorAll('[data-vmss-option-meta]').forEach((meta) => {
+    meta.classList.toggle('text-cyan-600', isActive);
+    meta.classList.toggle('dark:text-cyan-200', isActive);
+    meta.classList.toggle('text-gray-400', !isActive);
+  });
+}
+
 function vmssHideFloatingCanvasToolbar() {
   document.querySelectorAll('.ss-canvas-toolbar').forEach((element) => {
     element.style.display = 'none';
@@ -1263,6 +1419,7 @@ async function vmssSetBackgroundColor(color) {
   await vmss.edit.setTimelineBackground?.(color);
   vmss.canvas?.refresh?.();
   vmssMarkDirty();
+  vmssSyncAddElementsSelectionState();
   vmssSetStatus(`Background set to ${color}`);
 }
 
@@ -1277,6 +1434,7 @@ async function vmssSetOutputPreset(width, height) {
   vmss.canvas?.resize?.();
   vmssScheduleTimelineRelayout();
   vmssMarkDirty();
+  vmssSyncAddElementsSelectionState();
   vmssSetStatus(`Canvas size set to ${safeWidth} x ${safeHeight}`);
 }
 
@@ -1288,6 +1446,7 @@ async function vmssSetOutputFps(fps) {
 
   await vmss.edit.setOutputFps?.(safeFps);
   vmssMarkDirty();
+  vmssSyncAddElementsSelectionState();
   vmssSetStatus(`Frame rate set to ${safeFps} FPS`);
 }
 
@@ -1646,8 +1805,8 @@ async function vmssTrimSelectedClip() {
 
 function vmssRenderEditorShell(container) {
   container.innerHTML = `
-    <div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 150px); min-height: 860px;">
-      <div class="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
+    <div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 150px); min-height:min(860px, calc(100vh - 150px));">
+      <div class="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
         <button onclick="vmssGoBack()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
           <i class="ri-arrow-left-line"></i>Back
         </button>
@@ -1665,7 +1824,7 @@ function vmssRenderEditorShell(container) {
           <i class="ri-history-line"></i>Restore
         </button>
         <div class="flex-1"></div>
-        <input id="vmss-title" type="text" value="Video Manual 2" class="w-56 border-b border-transparent bg-transparent px-2 text-center text-sm font-medium hover:border-gray-300 focus:border-blue-400 focus:outline-none dark:text-white">
+        <input id="vmss-title" type="text" value="Video Manual 2" class="w-full max-w-[220px] border-b border-transparent bg-transparent px-2 text-center text-sm font-medium hover:border-gray-300 focus:border-blue-400 focus:outline-none dark:text-white sm:w-56 sm:max-w-none">
         <span id="vmss-save-status" class="text-xs text-gray-400">Loading...</span>
         <div class="flex-1"></div>
         <button onclick="vmssSaveProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
@@ -1677,7 +1836,7 @@ function vmssRenderEditorShell(container) {
       </div>
 
       <div class="flex min-h-0 flex-1 overflow-visible">
-        <div class="flex w-52 flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+        <div class="flex w-44 flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 xl:w-52">
           <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
             <span>Steps (Tracks)</span>
             <span id="vmss-step-count" class="text-xs font-normal text-gray-400">0</span>
@@ -1709,13 +1868,16 @@ function vmssRenderEditorShell(container) {
               <button onclick="vmssTrimSelectedClip()" class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
                 <i class="ri-scissors-cut-line"></i>Trim
               </button>
+              <button onclick="vmssDeleteSelectedClip()" class="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-xs text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40" title="Delete selected clip">
+                <i class="ri-delete-bin-line"></i>Delete
+              </button>
             </div>
             <div data-shotstack-timeline style="height: 160px; position: relative;"></div>
           </div>
         </div>
 
-        <div id="vmss-add-elements-shell" class="relative z-10 w-20 flex-shrink-0 overflow-visible border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-          <div class="flex w-20 flex-shrink-0 flex-col border-r border-gray-200 bg-slate-50 p-2 dark:border-gray-700 dark:bg-gray-900/80">
+        <div id="vmss-add-elements-shell" class="relative z-10 w-[4.5rem] flex-shrink-0 overflow-visible border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 xl:w-20">
+          <div class="flex w-[4.5rem] flex-shrink-0 flex-col border-r border-gray-200 bg-slate-50 p-2 dark:border-gray-700 dark:bg-gray-900/80 xl:w-20">
             <div class="px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-gray-400">Add</div>
             <div class="space-y-2">
               <button data-vmss-add-category="text" onclick="vmssSetAddElementsCategory('text')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
@@ -1794,16 +1956,16 @@ function vmssRenderEditorShell(container) {
               <div data-vmss-add-panel="background" class="hidden space-y-4">
                 <div>
                   <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Canvas Background</p>
-                  <input type="color" value="#ffffff" onchange="vmssSetBackgroundColor(event.target.value)" class="mb-3 h-12 w-full cursor-pointer rounded-2xl border border-gray-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-700">
+                  <input id="vmss-background-color-input" type="color" value="#ffffff" onchange="vmssSetBackgroundColor(event.target.value)" class="mb-3 h-12 w-full cursor-pointer rounded-2xl border border-gray-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-700">
                   <div class="grid grid-cols-4 gap-2">
-                    <button onclick="vmssSetBackgroundColor('#FFFFFF')" class="h-10 rounded-full border border-gray-300 bg-white"></button>
-                    <button onclick="vmssSetBackgroundColor('#000000')" class="h-10 rounded-full border border-gray-300 bg-black"></button>
-                    <button onclick="vmssSetBackgroundColor('#F3F4F6')" class="h-10 rounded-full border border-gray-300 bg-gray-100"></button>
-                    <button onclick="vmssSetBackgroundColor('#E0F2FE')" class="h-10 rounded-full border border-gray-300 bg-sky-100"></button>
-                    <button onclick="vmssSetBackgroundColor('#DCFCE7')" class="h-10 rounded-full border border-gray-300 bg-green-100"></button>
-                    <button onclick="vmssSetBackgroundColor('#FEF3C7')" class="h-10 rounded-full border border-gray-300 bg-amber-100"></button>
-                    <button onclick="vmssSetBackgroundColor('#FCE7F3')" class="h-10 rounded-full border border-gray-300 bg-pink-100"></button>
-                    <button onclick="vmssSetBackgroundColor('#EDE9FE')" class="h-10 rounded-full border border-gray-300 bg-violet-100"></button>
+                    <button data-vmss-bg-color="#FFFFFF" onclick="vmssSetBackgroundColor('#FFFFFF')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-white transition"><span data-vmss-current-icon class="hidden text-cyan-600"><i class="ri-check-line text-lg"></i></span></button>
+                    <button data-vmss-bg-color="#000000" onclick="vmssSetBackgroundColor('#000000')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-black transition"><span data-vmss-current-icon class="hidden text-white"><i class="ri-check-line text-lg"></i></span></button>
+                    <button data-vmss-bg-color="#F3F4F6" onclick="vmssSetBackgroundColor('#F3F4F6')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-gray-100 transition"><span data-vmss-current-icon class="hidden text-cyan-600"><i class="ri-check-line text-lg"></i></span></button>
+                    <button data-vmss-bg-color="#E0F2FE" onclick="vmssSetBackgroundColor('#E0F2FE')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-sky-100 transition"><span data-vmss-current-icon class="hidden text-cyan-600"><i class="ri-check-line text-lg"></i></span></button>
+                    <button data-vmss-bg-color="#DCFCE7" onclick="vmssSetBackgroundColor('#DCFCE7')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-green-100 transition"><span data-vmss-current-icon class="hidden text-cyan-600"><i class="ri-check-line text-lg"></i></span></button>
+                    <button data-vmss-bg-color="#FEF3C7" onclick="vmssSetBackgroundColor('#FEF3C7')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-amber-100 transition"><span data-vmss-current-icon class="hidden text-cyan-600"><i class="ri-check-line text-lg"></i></span></button>
+                    <button data-vmss-bg-color="#FCE7F3" onclick="vmssSetBackgroundColor('#FCE7F3')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-pink-100 transition"><span data-vmss-current-icon class="hidden text-cyan-600"><i class="ri-check-line text-lg"></i></span></button>
+                    <button data-vmss-bg-color="#EDE9FE" onclick="vmssSetBackgroundColor('#EDE9FE')" class="relative flex h-10 items-center justify-center rounded-full border border-gray-300 bg-violet-100 transition"><span data-vmss-current-icon class="hidden text-cyan-600"><i class="ri-check-line text-lg"></i></span></button>
                   </div>
                 </div>
               </div>
@@ -1812,27 +1974,22 @@ function vmssRenderEditorShell(container) {
                 <div>
                   <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Resolution</p>
                   <div class="grid gap-2">
-                    <button onclick="vmssSetOutputPreset(1920, 1080)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1920 x 1080</span><span class="text-xs text-gray-400">16:9</span></button>
-                    <button onclick="vmssSetOutputPreset(1280, 720)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1280 x 720</span><span class="text-xs text-gray-400">HD</span></button>
-                    <button onclick="vmssSetOutputPreset(1080, 1920)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1080 x 1920</span><span class="text-xs text-gray-400">Vertical</span></button>
-                    <button onclick="vmssSetOutputPreset(1080, 1080)" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1080 x 1080</span><span class="text-xs text-gray-400">Square</span></button>
+                    <button data-vmss-output-preset="1920x1080" onclick="vmssSetOutputPreset(1920, 1080)" class="flex items-center justify-between rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1920 x 1080</span><span data-vmss-option-meta class="text-xs text-gray-400">16:9</span></button>
+                    <button data-vmss-output-preset="1280x720" onclick="vmssSetOutputPreset(1280, 720)" class="flex items-center justify-between rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1280 x 720</span><span data-vmss-option-meta class="text-xs text-gray-400">HD</span></button>
+                    <button data-vmss-output-preset="1080x1920" onclick="vmssSetOutputPreset(1080, 1920)" class="flex items-center justify-between rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1080 x 1920</span><span data-vmss-option-meta class="text-xs text-gray-400">Vertical</span></button>
+                    <button data-vmss-output-preset="1080x1080" onclick="vmssSetOutputPreset(1080, 1080)" class="flex items-center justify-between rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>1080 x 1080</span><span data-vmss-option-meta class="text-xs text-gray-400">Square</span></button>
                   </div>
                 </div>
                 <div>
                   <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Frame Rate</p>
                   <div class="grid grid-cols-2 gap-2">
-                    <button onclick="vmssSetOutputFps(24)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">24 FPS</button>
-                    <button onclick="vmssSetOutputFps(25)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">25 FPS</button>
-                    <button onclick="vmssSetOutputFps(30)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">30 FPS</button>
-                    <button onclick="vmssSetOutputFps(60)" class="rounded-2xl bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">60 FPS</button>
+                    <button data-vmss-output-fps="24" onclick="vmssSetOutputFps(24)" class="flex items-center justify-center rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>24 FPS</span></button>
+                    <button data-vmss-output-fps="25" onclick="vmssSetOutputFps(25)" class="flex items-center justify-center rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>25 FPS</span></button>
+                    <button data-vmss-output-fps="30" onclick="vmssSetOutputFps(30)" class="flex items-center justify-center rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>30 FPS</span></button>
+                    <button data-vmss-output-fps="60" onclick="vmssSetOutputFps(60)" class="flex items-center justify-center rounded-2xl border border-transparent bg-gray-100 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span>60 FPS</span></button>
                   </div>
                 </div>
               </div>
-            </div>
-
-            <div class="border-t border-gray-100 p-4 dark:border-gray-700">
-              <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Quick Actions</p>
-              <button onclick="vmssDeleteSelectedClip()" class="flex w-full items-center justify-center gap-2 rounded-xl bg-red-50 py-2.5 text-xs text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40"><i class="ri-delete-bin-line"></i>Delete Selected</button>
             </div>
           </div>
         </div>
