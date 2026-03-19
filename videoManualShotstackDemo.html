@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Manual Editor - Shotstack Integration</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- RemixIcon (for icons) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.min.css">
+  
+  <style>
+    /* Shotstack timeline styling - container needs explicit height */
+    [data-shotstack-timeline] {
+      height: 180px;
+      overflow: hidden;
+    }
+    
+    /* Dark mode support */
+    .dark {
+      color-scheme: dark;
+    }
+    
+    /* Step item active state */
+    .vmss-step-item.active {
+      border-color: #3b82f6;
+      background-color: rgba(59, 130, 246, 0.1);
+    }
+  </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900">
+  
+  <!-- Header -->
+  <header class="h-[52px] bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center px-4">
+    <h1 class="text-lg font-semibold text-gray-800 dark:text-white">Video Manual Creator</h1>
+    <span class="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded">Shotstack SDK</span>
+  </header>
+
+  <!-- Editor Container -->
+  <div id="vmss-editor"></div>
+
+  <!-- Load Shotstack SDK from npm CDN (UMD build) -->
+  <!-- Option 1: From unpkg -->
+  <script src="https://unpkg.com/@shotstack/shotstack-studio@latest/dist/shotstack-studio.umd.js"></script>
+  
+  <!-- Option 2: From local build (during development) -->
+  <!-- <script src="../shotstack-studio-sdk/dist/shotstack-studio.umd.js"></script> -->
+  
+  <!-- Load the integration script -->
+  <script src="js/videoManualShotstack.js"></script>
+  
+  <script>
+    // Initialize the editor
+    (async () => {
+      // Initialize the editor shell
+      await vmssInit('#vmss-editor');
+
+      // Sample template with a video background
+      const sampleTemplate = {
+        timeline: {
+          background: '#000000',
+          tracks: [
+            {
+              // Track 0: Main video/background
+              clips: [
+                {
+                  asset: {
+                    type: 'video',
+                    src: 'https://shotstack-assets.s3.amazonaws.com/footage/beach-overhead.mp4',
+                    volume: 1,
+                  },
+                  start: 0,
+                  length: 10,
+                },
+              ],
+            },
+          ],
+        },
+        output: {
+          format: 'mp4',
+          fps: 25,
+          size: {
+            width: 1920,
+            height: 1080,
+          },
+        },
+      };
+
+      // Load the template
+      await vmssLoadTemplate(sampleTemplate);
+
+      console.log('Editor ready! Try adding elements from the right panel.');
+    })();
+
+    // Alternative: Load from a JSON URL
+    // vmssLoadTemplate('https://shotstack-assets.s3.amazonaws.com/templates/hello-world/hello.json');
+  </script>
+
+</body>
+</html>
