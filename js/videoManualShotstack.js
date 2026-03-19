@@ -102,26 +102,8 @@ function loadVideoManualShotstackPage() {
   if (!main) return;
 
   main.innerHTML = `
-    <div class="min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-5 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950">
-      <div class="mx-auto flex max-w-[1600px] flex-col gap-4">
-        <div class="rounded-[28px] border border-white/60 bg-white/90 p-5 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90">
-          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Video Manual 2</p>
-              <h2 class="mt-2 text-3xl font-semibold text-slate-900 dark:text-white">Shotstack SDK editor</h2>
-              <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">This screen uses the Shotstack browser SDK directly inside Freya Admin. No React mount is required.</p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button onclick="vmssLoadStarterProject()" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
-                <i class="ri-sparkling-line mr-1"></i>Load Starter Project
-              </button>
-              <button onclick="vmssRestoreLocalProject()" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
-                <i class="ri-history-line mr-1"></i>Restore Local Save
-              </button>
-            </div>
-          </div>
-        </div>
-
+    <div class="min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-4 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950">
+      <div class="mx-auto w-full max-w-[1720px]">
         <div id="vmss-editor" class="overflow-hidden rounded-[28px] border border-white/60 bg-white/90 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90"></div>
       </div>
     </div>
@@ -716,7 +698,7 @@ function vmssUpdateClock() {
 
 function vmssRenderEditorShell(container) {
   container.innerHTML = `
-    <div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 220px); min-height: 760px;">
+    <div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 150px); min-height: 860px;">
       <div class="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
         <button onclick="vmssGoBack()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
           <i class="ri-arrow-left-line"></i>Back
@@ -728,6 +710,12 @@ function vmssRenderEditorShell(container) {
           <i class="ri-arrow-go-forward-line text-lg"></i>
         </button>
         <div class="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
+        <button onclick="vmssLoadStarterProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+          <i class="ri-sparkling-line"></i>Starter
+        </button>
+        <button onclick="vmssRestoreLocalProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+          <i class="ri-history-line"></i>Restore
+        </button>
         <div class="flex-1"></div>
         <input id="vmss-title" type="text" value="Video Manual 2" class="w-56 border-b border-transparent bg-transparent px-2 text-center text-sm font-medium hover:border-gray-300 focus:border-blue-400 focus:outline-none dark:text-white">
         <span id="vmss-save-status" class="text-xs text-gray-400">Loading...</span>
@@ -771,7 +759,7 @@ function vmssRenderEditorShell(container) {
               <button onclick="vmss.timeline?.zoomOut()" class="rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700">−</button>
               <button onclick="vmss.timeline?.zoomIn()" class="rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700">+</button>
             </div>
-            <div data-shotstack-timeline style="height: 180px; overflow: hidden;"></div>
+            <div data-shotstack-timeline style="height: 160px; overflow: hidden;"></div>
           </div>
         </div>
 
