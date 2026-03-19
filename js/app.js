@@ -912,7 +912,13 @@ function loadPage(page) {
                 </div>
 
                 <div id="financialsDetailSection" class="bg-white p-4 rounded-lg border border-gray-200" style="position: relative;">
-                  <h3 class="text-sm font-semibold text-gray-700 mb-3" data-i18n="detailBreakdown">Detail Breakdown by 品番</h3>
+                  <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold text-gray-700" data-i18n="detailBreakdown">Detail Breakdown by 品番</h3>
+                    <button onclick="exportFinancialsCSVServerLevel()" id="financialsExportCsvBtn"
+                      class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600 hover:bg-green-700 text-white rounded shadow-sm transition-colors">
+                      <i class="ri-download-2-line"></i>Export CSV
+                    </button>
+                  </div>
                   <div class="overflow-x-auto">
                     <table class="min-w-full text-sm text-left">
                       <thead class="bg-gray-50 text-gray-600">

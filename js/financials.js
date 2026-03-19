@@ -1297,6 +1297,64 @@ function exportFinancialsPDF() {
   setTimeout(() => w.print(), 500);
 }
 
+async function exportFinancialsCSVServerLevel() {
+  const btn = document.getElementById('financialsExportCsvBtn');
+  const fromDate = document.getElementById('financialsFromDate')?.value;
+  const toDate   = document.getElementById('financialsToDate')?.value;
+
+  if (!fromDate || !toDate) {
+    alert('Please select a date range first.');
+    return;
+  }
+
+  const originalHtml = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ri-loader-4-line animate-spin"></i> Exporting...';
+  }
+
+  try {
+    const baseUrl = typeof BASE_URL !== 'undefined' ? BASE_URL : (window.BASE_URL || 'http://localhost:3000/');
+    const response = await fetch(`${baseUrl}api/financials/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fromDate,
+        toDate,
+        model:     document.getElementById('financialsModelFilter')?.value   || '',
+        factory:   document.getElementById('financialsFactoryFilter')?.value || '',
+        bans:      financialsState.selectedSebanggoArray || [],
+        sortField: financialsState.sortField,
+        sortDir:   financialsState.sortDir,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `Server error ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `financials_${fromDate}_to_${toDate}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error('CSV export failed:', error);
+    alert('Export failed: ' + error.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+}
+
 window.initFinancialsPage = initFinancialsPage;
 window.toggleFinancialsSort = toggleFinancialsSort;
 window.exportFinancialsPDF = exportFinancialsPDF;
+window.exportFinancialsCSVServerLevel = exportFinancialsCSVServerLevel;
