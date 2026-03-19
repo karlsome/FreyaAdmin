@@ -1456,6 +1456,101 @@ function vmssUpdateClock() {
   display.textContent = vmssFormatTime(vmss.edit.playbackTime || 0);
 }
 
+function vmssGetSelectedClipContext() {
+  if (!vmss.edit || vmss.currentStepIdx == null || vmss.selectedClipId == null) {
+    return null;
+  }
+
+  const editJson = vmss.edit.getEdit?.();
+  const clip = editJson?.timeline?.tracks?.[vmss.currentStepIdx]?.clips?.[vmss.selectedClipId];
+  const clipId = vmss.edit.getClipId?.(vmss.currentStepIdx, vmss.selectedClipId);
+
+  if (!clip || !clipId) {
+    return null;
+  }
+
+  return {
+    clip,
+    clipId,
+    trackIndex: vmss.currentStepIdx,
+    clipIndex: vmss.selectedClipId,
+  };
+}
+
+async function vmssTrimSelectedClip() {
+  const context = vmssGetSelectedClipContext();
+  if (!context) {
+    alert('Select a video clip to trim.');
+    return;
+  }
+
+  const { clip, trackIndex, clipIndex } = context;
+  if (clip.asset?.type !== 'video') {
+    alert('Trim is currently available for video clips only.');
+    return;
+  }
+
+  const clipStart = Number(clip.start);
+  const clipLength = Number(clip.length);
+  const playhead = Number(vmss.edit?.playbackTime);
+
+  if (!Number.isFinite(clipStart) || !Number.isFinite(clipLength) || clipLength <= 0) {
+    alert('The selected clip cannot be trimmed because its timing is not numeric.');
+    return;
+  }
+
+  if (!Number.isFinite(playhead)) {
+    alert('The timeline playhead is not available.');
+    return;
+  }
+
+  const splitOffset = playhead - clipStart;
+  if (splitOffset <= 0.05 || splitOffset >= clipLength - 0.05) {
+    alert('Move the playhead inside the selected clip to trim it.');
+    return;
+  }
+
+  const editJson = JSON.parse(JSON.stringify(vmss.edit.getEdit()));
+  const track = editJson?.timeline?.tracks?.[trackIndex];
+  if (!track?.clips?.[clipIndex]) {
+    alert('Could not find the selected clip in the timeline.');
+    return;
+  }
+
+  const sourceClip = track.clips[clipIndex];
+  const sourceTrim = Number(sourceClip.asset?.trim) || 0;
+  const firstClip = {
+    ...sourceClip,
+    length: Number(splitOffset.toFixed(3)),
+  };
+  const secondClip = {
+    ...sourceClip,
+    start: Number(playhead.toFixed(3)),
+    length: Number((clipLength - splitOffset).toFixed(3)),
+    asset: {
+      ...sourceClip.asset,
+      trim: Number((sourceTrim + splitOffset).toFixed(3)),
+    },
+  };
+
+  if (secondClip.alias) {
+    delete secondClip.alias;
+  }
+
+  track.clips.splice(clipIndex, 1, firstClip, secondClip);
+
+  await vmssLoadTemplate(editJson, {
+    title: vmss.title,
+    assetSourceMap: vmss.assetSourceMap,
+  });
+
+  vmss.edit?.seek?.(playhead + 0.001);
+  vmss.currentStepIdx = trackIndex;
+  vmss.selectedClipId = null;
+  vmssMarkDirty();
+  vmssSetStatus(`Clip split at ${vmssFormatTime(playhead)}`);
+}
+
 function vmssRenderEditorShell(container) {
   container.innerHTML = `
     <div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 150px); min-height: 860px;">
@@ -1518,8 +1613,9 @@ function vmssRenderEditorShell(container) {
               </button>
               <span id="vmss-time-display" class="w-20 font-mono text-xs text-gray-600 dark:text-gray-300">0:00.0</span>
               <div class="flex-1"></div>
-              <button onclick="vmss.timeline?.zoomOut()" class="rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700">−</button>
-              <button onclick="vmss.timeline?.zoomIn()" class="rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700">+</button>
+              <button onclick="vmssTrimSelectedClip()" class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
+                <i class="ri-scissors-cut-line"></i>Trim
+              </button>
             </div>
             <div data-shotstack-timeline style="height: 160px; position: relative;"></div>
           </div>
@@ -1978,6 +2074,7 @@ window.vmssAddShapeClip = vmssAddShapeClip;
 window.vmssStartShapeDraw = vmssStartShapeDraw;
 window.vmssAddImageClip = vmssAddImageClip;
 window.vmssAddVideoClip = vmssAddVideoClip;
+window.vmssTrimSelectedClip = vmssTrimSelectedClip;
 window.vmssAddStep = vmssAddStep;
 window.vmssDeleteStep = vmssDeleteStep;
 window.vmssSelectStep = vmssSelectStep;
