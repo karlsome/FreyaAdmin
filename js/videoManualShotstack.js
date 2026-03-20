@@ -2035,6 +2035,7 @@ function vmssBindAddElementsLayoutWatchers() {
     const shell = document.getElementById('vmss-add-elements-shell');
     const target = event.target;
     if (!shell || !(target instanceof Node) || shell.contains(target)) return;
+    if (target.closest('[data-vmss-preserve-selection]')) return;
 
     vmssCloseAddElementsPanel();
   };
@@ -3572,10 +3573,10 @@ function vmssRenderEditorShell(container) {
                 <i class="ri-play-fill text-lg"></i>
               </button>
               <span id="vmss-time-display" class="w-20 font-mono text-xs text-gray-600 dark:text-gray-300">0:00.0</span>
-              <button id="vmss-trim-selected-btn" onclick="vmssTrimSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs opacity-50 cursor-not-allowed dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
+              <button id="vmss-trim-selected-btn" data-vmss-preserve-selection="true" onclick="vmssTrimSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs opacity-50 cursor-not-allowed dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
                 <i class="ri-scissors-cut-line"></i>Trim
               </button>
-              <button id="vmss-delete-selected-btn" onclick="vmssDeleteSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-xs text-red-600 opacity-50 cursor-not-allowed dark:bg-red-900/20 dark:text-red-400" title="Delete selected clip">
+              <button id="vmss-delete-selected-btn" data-vmss-preserve-selection="true" onclick="vmssDeleteSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-xs text-red-600 opacity-50 cursor-not-allowed dark:bg-red-900/20 dark:text-red-400" title="Delete selected clip">
                 <i class="ri-delete-bin-line"></i>Delete
               </button>
               <div class="flex-1"></div>
