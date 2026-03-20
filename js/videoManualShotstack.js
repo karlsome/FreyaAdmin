@@ -1032,6 +1032,7 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmssUpdateAddElementsUI();
   vmssSyncStepsFromTracks();
   vmssRenderStepsPanel();
+  vmssSyncSelectionActionButtons();
   vmssSetTitle(options.title || vmss.title);
   vmssSetStatus('Ready');
   vmssStartClock();
@@ -1593,6 +1594,7 @@ function vmssBindEvents() {
   vmss.edit.events.on('clip:added', () => {
     vmssMarkDirty();
     vmssRenderStepsPanel();
+    vmssSyncSelectionActionButtons();
   });
 
   vmss.edit.events.on('clip:updated', () => {
@@ -1613,6 +1615,7 @@ function vmssBindEvents() {
   vmss.edit.events.on('clip:deleted', () => {
     vmssMarkDirty();
     vmssRenderStepsPanel();
+    vmssSyncSelectionActionButtons();
   });
 
   vmss.edit.events.on('clip:selected', (data) => {
@@ -1632,6 +1635,7 @@ function vmssBindEvents() {
     });
 
     vmssRenderStepsPanel();
+    vmssSyncSelectionActionButtons();
   });
 
   vmss.edit.events.on('selection:cleared', () => {
@@ -1639,6 +1643,7 @@ function vmssBindEvents() {
     vmssRenderSelectedDrawerProperties();
     vmssHideFloatingSelectionToolbars();
     vmssRenderStepsPanel();
+    vmssSyncSelectionActionButtons();
   });
 
   vmss.edit.events.on('edit:changed', () => {
@@ -1905,6 +1910,18 @@ function vmssUpdatePlayButton(isPlaying) {
   }
 }
 
+function vmssSyncSelectionActionButtons() {
+  const deleteButton = document.getElementById('vmss-delete-selected-btn');
+  if (!deleteButton) return;
+
+  const hasSelection = vmss.selectedClipId !== null && vmss.selectedClipId !== undefined;
+  deleteButton.disabled = !hasSelection;
+  deleteButton.classList.toggle('opacity-50', !hasSelection);
+  deleteButton.classList.toggle('cursor-not-allowed', !hasSelection);
+  deleteButton.classList.toggle('hover:bg-red-100', hasSelection);
+  deleteButton.classList.toggle('dark:hover:bg-red-900/40', hasSelection);
+}
+
 function vmssMarkDirty() {
   vmss.dirty = true;
   vmssSetStatus('Unsaved changes');
@@ -1999,6 +2016,7 @@ function vmssScheduleAddElementsLayout() {
 function vmssUpdateAddElementsLayout() {
   const shell = document.getElementById('vmss-add-elements-shell');
   const content = document.getElementById('vmss-add-elements-content');
+  const workspace = document.getElementById('vmss-workspace-main');
   if (!shell || !content) return;
 
   const editorRect = document.getElementById('vmss-root')?.getBoundingClientRect?.();
@@ -2019,7 +2037,13 @@ function vmssUpdateAddElementsLayout() {
     ? Math.min(desiredWidth, maxUsableSpace)
     : maxUsableSpace;
 
-  if (panelWidth <= 0) return;
+  if (panelWidth <= 0) {
+    if (workspace) {
+      workspace.style.marginRight = '0px';
+      workspace.style.marginLeft = '0px';
+    }
+    return;
+  }
 
   content.style.width = `${panelWidth}px`;
   content.style.left = openLeft ? 'auto' : '100%';
@@ -2029,6 +2053,11 @@ function vmssUpdateAddElementsLayout() {
   content.style.transformOrigin = openLeft ? 'right center' : 'left center';
   content.style.marginLeft = !openLeft && vmss.addElementsOpen ? '12px' : '0px';
   content.style.marginRight = openLeft && vmss.addElementsOpen ? '12px' : '0px';
+
+  if (workspace) {
+    workspace.style.marginRight = openLeft && vmss.addElementsOpen ? `${panelWidth + 12}px` : '0px';
+    workspace.style.marginLeft = !openLeft && vmss.addElementsOpen ? `${panelWidth + 12}px` : '0px';
+  }
 }
 
 function vmssSetAddElementsCategory(category) {
@@ -2070,6 +2099,7 @@ function vmssClearSelectedClipFocus() {
   vmssRenderSelectedDrawerProperties();
   vmssRenderStepsPanel();
   vmssHideFloatingSelectionToolbars();
+  vmssSyncSelectionActionButtons();
 }
 
 function vmssGetAddElementsCategoryForClip(clip) {
@@ -3461,7 +3491,7 @@ function vmssRenderEditorShell(container) {
           </div>
         </div>
 
-        <div class="flex min-w-0 flex-1 flex-col bg-gray-200 dark:bg-gray-950">
+        <div id="vmss-workspace-main" class="flex min-w-0 flex-1 flex-col bg-gray-200 transition-[margin] duration-200 dark:bg-gray-950">
           <div id="vmss-preview-surface" class="relative flex flex-1 items-center justify-center overflow-hidden bg-gray-800 dark:bg-black">
             <div data-shotstack-studio class="h-full w-full"></div>
             <div id="vmss-draw-overlay" class="pointer-events-none absolute inset-0 z-10 hidden"></div>
@@ -3469,18 +3499,18 @@ function vmssRenderEditorShell(container) {
           </div>
 
           <div class="flex-shrink-0 border-t border-gray-300 bg-gray-100 dark:border-gray-700 dark:bg-gray-800">
-            <div class="flex items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-700">
+            <div class="flex flex-wrap items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-700">
               <button onclick="vmssTogglePlay()" id="vmss-play-btn" class="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600">
                 <i class="ri-play-fill text-lg"></i>
               </button>
               <span id="vmss-time-display" class="w-20 font-mono text-xs text-gray-600 dark:text-gray-300">0:00.0</span>
-              <div class="flex-1"></div>
               <button onclick="vmssTrimSelectedClip()" class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
                 <i class="ri-scissors-cut-line"></i>Trim
               </button>
-              <button onclick="vmssDeleteSelectedClip()" class="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-xs text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40" title="Delete selected clip">
+              <button id="vmss-delete-selected-btn" onclick="vmssDeleteSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-xs text-red-600 opacity-50 cursor-not-allowed dark:bg-red-900/20 dark:text-red-400" title="Delete selected clip">
                 <i class="ri-delete-bin-line"></i>Delete
               </button>
+              <div class="flex-1"></div>
             </div>
             <div data-shotstack-timeline style="height: 160px; position: relative;"></div>
           </div>
