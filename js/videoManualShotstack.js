@@ -305,6 +305,7 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmss.controls = new Controls(vmss.edit);
   await vmss.controls.load();
   vmssHideFloatingCanvasToolbar();
+  vmssHideFloatingSelectionToolbars();
 
   vmssBindEvents();
   vmssBindPreviewDrawHandlers();
@@ -880,6 +881,8 @@ function vmssBindEvents() {
     vmssMarkDirty();
     vmssSyncSelectedShapeAsset();
     vmssScheduleSelectedShapeSync(40);
+    vmssRenderSelectedDrawerProperties();
+    window.requestAnimationFrame(() => vmssHideFloatingSelectionToolbars());
 
     vmssDebugLog('clip:updated', {
       selectedClipId: vmss.selectedClipId,
@@ -899,6 +902,8 @@ function vmssBindEvents() {
     vmss.currentStepIdx = data?.trackIndex ?? 0;
     vmssSyncSelectedShapeAsset();
     vmssScheduleSelectedShapeSync();
+    vmssOpenSelectedClipInDrawer();
+    window.requestAnimationFrame(() => vmssHideFloatingSelectionToolbars());
 
     vmssDebugLog('clip:selected', {
       selectedClipId: vmss.selectedClipId,
@@ -913,6 +918,8 @@ function vmssBindEvents() {
 
   vmss.edit.events.on('selection:cleared', () => {
     vmss.selectedClipId = null;
+    vmssRenderSelectedDrawerProperties();
+    vmssHideFloatingSelectionToolbars();
     vmssRenderStepsPanel();
   });
 
@@ -1319,6 +1326,59 @@ function vmssSetAddElementsCategory(category) {
   vmssUpdateAddElementsUI();
 }
 
+function vmssGetAddElementsCategoryForClip(clip) {
+  const assetType = clip?.asset?.type;
+
+  if (['rich-text', 'text', 'title', 'caption', 'rich-caption'].includes(assetType)) {
+    return 'text';
+  }
+
+  if (assetType === 'svg') {
+    return 'shapes';
+  }
+
+  if (['video', 'image', 'audio'].includes(assetType)) {
+    return 'media';
+  }
+
+  return null;
+}
+
+function vmssGetAddElementsCategoryLabel(category) {
+  const labels = {
+    text: 'Text',
+    shapes: 'Shapes',
+    media: 'Media',
+    background: 'Background',
+    advanced: 'Advanced',
+  };
+
+  return labels[category] || 'Add Elements';
+}
+
+function vmssGetSelectedInspectorContext() {
+  const context = vmssGetSelectedClipContext();
+  if (!context) return null;
+
+  const resolvedClip = vmss.edit?.getResolvedClip?.(context.trackIndex, context.clipIndex) || context.clip;
+  const category = vmssGetAddElementsCategoryForClip(resolvedClip || context.clip);
+
+  return {
+    ...context,
+    resolvedClip,
+    category,
+  };
+}
+
+function vmssOpenSelectedClipInDrawer() {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection?.category) return;
+
+  vmss.addElementsCategory = selection.category;
+  vmss.addElementsOpen = true;
+  vmssUpdateAddElementsUI();
+}
+
 function vmssUpdateAddElementsUI() {
   const isOpen = !!vmss.addElementsOpen;
   const nextCategory = vmss.addElementsCategory || 'text';
@@ -1326,6 +1386,7 @@ function vmssUpdateAddElementsUI() {
 
   vmssScheduleAddElementsLayout();
   vmssSyncAddElementsSelectionState();
+  vmssRenderSelectedDrawerProperties();
 
   document.querySelectorAll('[data-vmss-add-category]').forEach((button) => {
     const isActive = isOpen && button.getAttribute('data-vmss-add-category') === nextCategory;
@@ -1439,10 +1500,765 @@ function vmssToggleAddElementsOptionState(button, isActive) {
   });
 }
 
+function vmssRenderSelectedDrawerProperties() {
+  const selection = vmssGetSelectedInspectorContext();
+  const title = document.getElementById('vmss-add-elements-title');
+
+  if (title) {
+    title.textContent = selection?.category
+      ? `${vmssGetAddElementsCategoryLabel(selection.category)} Properties`
+      : 'Add Elements';
+  }
+
+  document.querySelectorAll('[data-vmss-selection-properties]').forEach((container) => {
+    const category = container.getAttribute('data-vmss-selection-properties');
+    const shouldShow = !!selection && !!selection.category && category === selection.category;
+
+    container.classList.toggle('hidden', !shouldShow);
+    container.innerHTML = shouldShow ? vmssBuildSelectedPropertiesMarkup(selection) : '';
+  });
+
+  document.querySelectorAll('[data-vmss-add-panel]').forEach((panel) => {
+    const panelCategory = panel.getAttribute('data-vmss-add-panel');
+    const hideAddContent = !!selection && !!selection.category && panelCategory === selection.category;
+
+    panel.querySelectorAll('[data-vmss-add-only]').forEach((section) => {
+      section.classList.toggle('hidden', hideAddContent);
+    });
+  });
+}
+
+function vmssBuildSelectedPropertiesMarkup(selection) {
+  const clip = selection.clip || {};
+  const resolvedClip = selection.resolvedClip || clip;
+  const asset = clip.asset || {};
+  const resolvedAsset = resolvedClip.asset || asset;
+  const assetType = resolvedAsset.type || asset.type || 'clip';
+  const width = vmssGetStaticNumericValue(resolvedClip.width ?? clip.width, 400);
+  const height = vmssGetStaticNumericValue(resolvedClip.height ?? clip.height, 200);
+  const start = vmssGetStaticNumericValue(clip.start, 0);
+  const length = vmssGetStaticNumericValue(clip.length, 5);
+  const opacity = vmssGetStaticNumericValue(clip.opacity ?? resolvedClip.opacity, 1);
+  const scale = vmssGetStaticNumericValue(clip.scale ?? resolvedClip.scale, 1);
+  const offsetX = vmssGetStaticNumericValue((clip.offset || resolvedClip.offset)?.x, 0);
+  const offsetY = vmssGetStaticNumericValue((clip.offset || resolvedClip.offset)?.y, 0);
+  const rotate = vmssGetStaticNumericValue((clip.transform || resolvedClip.transform)?.rotate?.angle, 0);
+  const transitionIn = clip.transition?.in || '';
+  const transitionOut = clip.transition?.out || '';
+  const effect = clip.effect || '';
+  const trackLabel = `Track ${selection.trackIndex + 1}`;
+  const header = assetType === 'video'
+    ? 'Selected Video'
+    : assetType === 'image'
+      ? 'Selected Image'
+      : assetType === 'audio'
+        ? 'Selected Audio'
+        : selection.category === 'shapes'
+          ? 'Selected Shape'
+          : 'Selected Text';
+  const keyframesValue = vmssEscapeHtml(vmssBuildSelectedKeyframePayload(selection));
+
+  const transformSection = `
+    <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+      <div>
+        <p class="text-sm font-semibold text-slate-900 dark:text-white">Transform</p>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Scale</span>
+          <input type="number" step="0.05" min="0.05" value="${scale}" onchange="vmssSetSelectedClipScale(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Opacity</span>
+          <input type="number" step="0.05" min="0" max="1" value="${opacity}" onchange="vmssSetSelectedClipOpacity(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>X Position</span>
+          <input type="number" step="0.05" min="-1" max="1" value="${offsetX}" onchange="vmssSetSelectedClipOffset('x', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Y Position</span>
+          <input type="number" step="0.05" min="-1" max="1" value="${offsetY}" onchange="vmssSetSelectedClipOffset('y', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+      </div>
+      <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+        <span>Rotation</span>
+        <input type="number" step="1" min="-360" max="360" value="${rotate}" onchange="vmssSetSelectedClipRotation(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+      </label>
+    </section>`;
+
+  const timingSection = `
+    <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+      <div>
+        <p class="text-sm font-semibold text-slate-900 dark:text-white">Timing</p>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Start</span>
+          <input type="number" step="0.1" min="0" value="${start}" onchange="vmssSetSelectedClipTiming('start', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Length</span>
+          <input type="number" step="0.1" min="0.1" value="${length}" onchange="vmssSetSelectedClipTiming('length', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Transition In</span>
+          <select onchange="vmssSetSelectedClipTransition('in', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+            ${vmssBuildSelectOptions(['', 'fade', 'zoom', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'carouselLeft', 'carouselRight', 'carouselUp', 'carouselDown', 'reveal', 'wipeRight', 'wipeLeft'], transitionIn, 'None')}
+          </select>
+        </label>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Transition Out</span>
+          <select onchange="vmssSetSelectedClipTransition('out', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+            ${vmssBuildSelectOptions(['', 'fade', 'zoom', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'carouselLeft', 'carouselRight', 'carouselUp', 'carouselDown', 'reveal', 'wipeRight', 'wipeLeft'], transitionOut, 'None')}
+          </select>
+        </label>
+      </div>
+      <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+        <span>Effect</span>
+        <select onchange="vmssSetSelectedClipEffect(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+          ${vmssBuildSelectOptions(['', 'zoomIn', 'zoomOut', 'slideLeft', 'slideRight', 'slideUp', 'slideDown'], effect, 'None')}
+        </select>
+      </label>
+    </section>`;
+
+  const sizeSection = `
+    <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+      <div>
+        <p class="text-sm font-semibold text-slate-900 dark:text-white">Size & Position</p>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Width</span>
+          <input type="number" step="1" min="1" value="${width}" onchange="vmssSetSelectedClipDimension('width', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Height</span>
+          <input type="number" step="1" min="1" value="${height}" onchange="vmssSetSelectedClipDimension('height', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+      </div>
+    </section>`;
+
+  const keyframeSection = `
+    <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+      <div>
+        <p class="text-sm font-semibold text-slate-900 dark:text-white">Keyframes</p>
+        <p class="text-xs text-slate-500 dark:text-gray-400">Edit animated values as JSON for scale, opacity, offsetX, offsetY, rotate${selection.category === 'media' ? ', volume' : ''}.</p>
+      </div>
+      <textarea rows="8" onchange="vmssSetSelectedClipKeyframes(this.value)" class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">${keyframesValue}</textarea>
+    </section>`;
+
+  let assetFields = '';
+
+  if (selection.category === 'text') {
+    const text = typeof resolvedAsset.text === 'string' ? resolvedAsset.text : '';
+    const font = resolvedAsset.font || {};
+    const fontSize = Number(font.size) || 48;
+    const fontWeight = Number(font.weight) || 400;
+    const color = vmssNormalizeHexColor(font.color) || '#111111';
+    const fontFamily = font.family || 'Work Sans';
+    const lineHeight = vmssGetStaticNumericValue(font.lineHeight, 1);
+    const horizontalAlign = asset.align?.horizontal || resolvedAsset.align?.horizontal || 'center';
+    const verticalAlign = asset.align?.vertical || resolvedAsset.align?.vertical || 'middle';
+    const backgroundColor = vmssNormalizeHexColor(asset.background?.color || resolvedAsset.background?.color) || '#FFFFFF';
+    const backgroundOpacity = vmssGetStaticNumericValue(asset.background?.opacity ?? resolvedAsset.background?.opacity, 0);
+    const strokeColor = vmssNormalizeHexColor(asset.stroke?.color || resolvedAsset.stroke?.color) || '#000000';
+    const strokeWidth = vmssGetStaticNumericValue(asset.stroke?.width ?? resolvedAsset.stroke?.width, 0);
+
+    assetFields = `
+      <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">Style</p>
+        </div>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Text</span>
+          <textarea rows="3" onchange="vmssSetSelectedTextContent(this.value)" class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">${vmssEscapeHtml(text)}</textarea>
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Font</span>
+            <select onchange="vmssSetSelectedTextFontFamily(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+              ${vmssBuildSelectOptions(['Work Sans', 'Montserrat', 'Open Sans', 'Roboto', 'Lato', 'Merriweather', 'Playfair Display', 'Oswald'], fontFamily)}
+            </select>
+          </label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Font Size</span>
+            <input type="number" step="1" min="8" value="${fontSize}" onchange="vmssSetSelectedTextFontSize(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+          </label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Weight</span>
+            <select onchange="vmssSetSelectedTextFontWeight(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+              ${[300, 400, 500, 600, 700, 800].map((value) => `<option value="${value}" ${fontWeight === value ? 'selected' : ''}>${value}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Horizontal Align</span>
+            <select onchange="vmssSetSelectedTextAlign('horizontal', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+              ${vmssBuildSelectOptions(['left', 'center', 'right'], horizontalAlign)}
+            </select>
+          </label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Vertical Align</span>
+            <select onchange="vmssSetSelectedTextAlign('vertical', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+              ${vmssBuildSelectOptions(['top', 'middle', 'bottom'], verticalAlign)}
+            </select>
+          </label>
+        </div>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Line Height</span>
+          <input type="number" step="0.1" min="0.5" value="${lineHeight}" onchange="vmssSetSelectedTextLineHeight(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+        </label>
+      </section>
+      <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">Color</p>
+        </div>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Text Color</span>
+          <input type="color" value="${color}" onchange="vmssSetSelectedTextColor(this.value)" class="h-11 w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-800">
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Background</span>
+            <input type="color" value="${backgroundColor}" onchange="vmssSetSelectedTextBackgroundColor(this.value)" class="h-11 w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-800">
+          </label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>BG Opacity</span>
+            <input type="number" step="0.05" min="0" max="1" value="${backgroundOpacity}" onchange="vmssSetSelectedTextBackgroundOpacity(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+          </label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Stroke Color</span>
+            <input type="color" value="${strokeColor}" onchange="vmssSetSelectedTextStrokeColor(this.value)" class="h-11 w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-800">
+          </label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Stroke Width</span>
+            <input type="number" step="1" min="0" value="${strokeWidth}" onchange="vmssSetSelectedTextStrokeWidth(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+          </label>
+        </div>
+      </section>`;
+  } else if (selection.category === 'media') {
+    const volume = Number(asset.volume ?? resolvedAsset.volume);
+    const trim = vmssGetStaticNumericValue(asset.trim ?? resolvedAsset.trim, 0);
+    const crop = asset.crop || resolvedAsset.crop || {};
+    const cropTop = vmssGetStaticNumericValue(crop.top, 0);
+    const cropRight = vmssGetStaticNumericValue(crop.right, 0);
+    const cropBottom = vmssGetStaticNumericValue(crop.bottom, 0);
+    const cropLeft = vmssGetStaticNumericValue(crop.left, 0);
+    const muted = volume <= 0;
+
+    assetFields = `
+      <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">Video</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Trim</span>
+            <input type="number" step="0.1" min="0" value="${trim}" onchange="vmssSetSelectedMediaTrim(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+          </label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+            <span>Volume</span>
+            <input type="number" step="0.05" min="0" max="1" value="${Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1}" onchange="vmssSetSelectedMediaVolume(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+          </label>
+        </div>
+        <button onclick="vmssToggleSelectedMediaMute()" class="inline-flex items-center justify-center gap-2 rounded-xl ${muted ? 'bg-cyan-500 text-white hover:bg-cyan-600' : 'bg-gray-100 text-slate-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'} px-3 py-2 text-xs font-semibold">
+          <i class="${muted ? 'ri-volume-mute-line' : 'ri-volume-up-line'}"></i>${muted ? 'Unmute' : 'Mute'}
+        </button>
+      </section>
+      <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">Crop</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400"><span>Top</span><input type="number" step="0.01" min="0" max="1" value="${cropTop}" onchange="vmssSetSelectedVideoCrop('top', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"></label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400"><span>Right</span><input type="number" step="0.01" min="0" max="1" value="${cropRight}" onchange="vmssSetSelectedVideoCrop('right', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"></label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400"><span>Bottom</span><input type="number" step="0.01" min="0" max="1" value="${cropBottom}" onchange="vmssSetSelectedVideoCrop('bottom', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"></label>
+          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400"><span>Left</span><input type="number" step="0.01" min="0" max="1" value="${cropLeft}" onchange="vmssSetSelectedVideoCrop('left', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"></label>
+        </div>
+      </section>`;
+  } else if (selection.category === 'shapes') {
+    const svgSource = typeof resolvedAsset.src === 'string' ? resolvedAsset.src : '';
+    const shapeStyle = vmssExtractShapeStyle(svgSource);
+    const fill = vmssNormalizeHexColor(shapeStyle.fill) || '#FECACA';
+    const stroke = vmssNormalizeHexColor(shapeStyle.stroke) || '#EF4444';
+    const strokeWidth = Number(shapeStyle.strokeWidth) || 3;
+
+    assetFields = `
+      <div class="grid grid-cols-2 gap-2">
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Fill</span>
+          <input type="color" value="${fill}" onchange="vmssSetSelectedShapeStyle('fill', this.value)" class="h-11 w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-800">
+        </label>
+        <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          <span>Stroke</span>
+          <input type="color" value="${stroke}" onchange="vmssSetSelectedShapeStyle('stroke', this.value)" class="h-11 w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-1 dark:border-gray-600 dark:bg-gray-800">
+        </label>
+      </div>
+      <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+        <span>Stroke Width</span>
+        <input type="number" min="1" step="1" value="${strokeWidth}" onchange="vmssSetSelectedShapeStyle('strokeWidth', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+      </label>`;
+  }
+
+  return `
+    <section class="mb-4 rounded-[22px] border border-cyan-100 bg-cyan-50/70 p-4 shadow-sm dark:border-cyan-500/20 dark:bg-cyan-500/10">
+      <div class="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">${header}</p>
+          <p class="text-xs text-slate-500 dark:text-gray-400">${trackLabel}</p>
+        </div>
+        <span class="rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:bg-slate-900/60 dark:text-cyan-200">${vmssEscapeHtml(vmssGetAddElementsCategoryLabel(selection.category))}</span>
+      </div>
+      <div class="space-y-3">
+        ${assetFields}
+        ${transformSection}
+        ${timingSection}
+        ${sizeSection}
+        ${keyframeSection}
+      </div>
+    </section>`;
+}
+
+function vmssApplySelectedClipUpdate(update, statusMessage = 'Clip updated') {
+  const context = vmssGetSelectedClipContext();
+  if (!context) return;
+
+  vmss.edit?.updateClipInDocument?.(context.clipId, update);
+  vmss.edit?.resolveClip?.(context.clipId);
+  vmss.canvas?.refresh?.();
+  vmss.timeline?.refresh?.();
+  vmssMarkDirty();
+  vmssRenderSelectedDrawerProperties();
+  vmssSetStatus(statusMessage);
+}
+
+function vmssGetStaticNumericValue(value, fallback = 0) {
+  return Array.isArray(value) ? fallback : (Number.isFinite(Number(value)) ? Number(value) : fallback);
+}
+
+function vmssBuildSelectOptions(values, selectedValue, emptyLabel = null) {
+  const options = [];
+
+  if (emptyLabel !== null) {
+    options.push(`<option value="" ${selectedValue === '' ? 'selected' : ''}>${emptyLabel}</option>`);
+  }
+
+  values.filter((value) => value !== '').forEach((value) => {
+    options.push(`<option value="${vmssEscapeHtml(value)}" ${selectedValue === value ? 'selected' : ''}>${vmssEscapeHtml(value)}</option>`);
+  });
+
+  return options.join('');
+}
+
+function vmssBuildSelectedKeyframePayload(selection) {
+  const clip = selection.clip || {};
+  const keyframes = {};
+
+  if (Array.isArray(clip.scale)) keyframes.scale = clip.scale;
+  if (Array.isArray(clip.opacity)) keyframes.opacity = clip.opacity;
+  if (Array.isArray(clip.offset?.x)) keyframes.offsetX = clip.offset.x;
+  if (Array.isArray(clip.offset?.y)) keyframes.offsetY = clip.offset.y;
+  if (Array.isArray(clip.transform?.rotate?.angle)) keyframes.rotate = clip.transform.rotate.angle;
+  if (selection.category === 'media' && Array.isArray(clip.asset?.volume)) keyframes.volume = clip.asset.volume;
+
+  return JSON.stringify(keyframes, null, 2);
+}
+
+function vmssSetSelectedClipTiming(field, value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return;
+
+  const safeValue = field === 'length'
+    ? Math.max(0.1, Number(numericValue.toFixed(3)))
+    : Math.max(0, Number(numericValue.toFixed(3)));
+
+  vmssApplySelectedClipUpdate({ [field]: safeValue }, `${field === 'start' ? 'Start' : 'Length'} updated`);
+}
+
+function vmssSetSelectedClipDimension(field, value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({ [field]: Math.max(1, Math.round(numericValue)) }, `${field === 'width' ? 'Width' : 'Height'} updated`);
+}
+
+function vmssSetSelectedClipOffset(field, value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    offset: {
+      ...(selection.clip.offset || {}),
+      [field]: Number(numericValue.toFixed(4)),
+    },
+  }, `${field.toUpperCase()} position updated`);
+}
+
+function vmssSetSelectedClipScale(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({ scale: Math.max(0.05, Number(numericValue.toFixed(3))) }, 'Scale updated');
+}
+
+function vmssSetSelectedClipOpacity(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({ opacity: Math.max(0, Math.min(1, Number(numericValue.toFixed(2)))) }, 'Opacity updated');
+}
+
+function vmssSetSelectedClipRotation(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    transform: {
+      ...(selection.clip.transform || {}),
+      rotate: {
+        ...((selection.clip.transform || {}).rotate || {}),
+        angle: Number(numericValue.toFixed(2)),
+      },
+    },
+  }, 'Rotation updated');
+}
+
+function vmssSetSelectedClipTransition(direction, value) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection || !['in', 'out'].includes(direction)) return;
+
+  const nextTransition = {
+    ...(selection.clip.transition || {}),
+    [direction]: value || undefined,
+  };
+
+  if (!nextTransition.in && !nextTransition.out) {
+    vmssApplySelectedClipUpdate({ transition: undefined }, 'Transition updated');
+    return;
+  }
+
+  vmssApplySelectedClipUpdate({ transition: nextTransition }, 'Transition updated');
+}
+
+function vmssSetSelectedClipEffect(value) {
+  vmssApplySelectedClipUpdate({ effect: value || undefined }, 'Effect updated');
+}
+
+function vmssSetSelectedClipKeyframes(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection) return;
+
+  try {
+    const parsed = value.trim() ? JSON.parse(value) : {};
+    const update = {};
+
+    if (Array.isArray(parsed.scale)) update.scale = parsed.scale;
+    if (Array.isArray(parsed.opacity)) update.opacity = parsed.opacity;
+    if (Array.isArray(parsed.offsetX) || Array.isArray(parsed.offsetY)) {
+      update.offset = {
+        ...(selection.clip.offset || {}),
+        ...(Array.isArray(parsed.offsetX) ? { x: parsed.offsetX } : {}),
+        ...(Array.isArray(parsed.offsetY) ? { y: parsed.offsetY } : {}),
+      };
+    }
+    if (Array.isArray(parsed.rotate)) {
+      update.transform = {
+        ...(selection.clip.transform || {}),
+        rotate: {
+          ...((selection.clip.transform || {}).rotate || {}),
+          angle: parsed.rotate,
+        },
+      };
+    }
+    if (selection.category === 'media' && Array.isArray(parsed.volume)) {
+      update.asset = {
+        ...selection.clip.asset,
+        volume: parsed.volume,
+      };
+    }
+
+    vmssApplySelectedClipUpdate(update, 'Keyframes updated');
+  } catch (error) {
+    vmssSetStatus('Keyframes JSON is invalid');
+  }
+}
+
+function vmssSetSelectedTextContent(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection || selection.category !== 'text') return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      text: value,
+    },
+  }, 'Text updated');
+}
+
+function vmssSetSelectedTextFontSize(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'text' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      font: {
+        ...(selection.clip.asset?.font || {}),
+        size: Math.max(8, Math.round(numericValue)),
+      },
+    },
+  }, 'Font size updated');
+}
+
+function vmssSetSelectedTextFontWeight(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'text' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      font: {
+        ...(selection.clip.asset?.font || {}),
+        weight: Math.max(100, Math.round(numericValue)),
+      },
+    },
+  }, 'Font weight updated');
+}
+
+function vmssSetSelectedTextFontFamily(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection || selection.category !== 'text' || !value) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      font: {
+        ...(selection.clip.asset?.font || {}),
+        family: value,
+      },
+    },
+  }, 'Font family updated');
+}
+
+function vmssSetSelectedTextColor(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const color = vmssNormalizeHexColor(value);
+  if (!selection || selection.category !== 'text' || !color) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      font: {
+        ...(selection.clip.asset?.font || {}),
+        color,
+      },
+    },
+  }, 'Text color updated');
+}
+
+function vmssSetSelectedTextAlign(axis, value) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection || selection.category !== 'text' || !['horizontal', 'vertical'].includes(axis)) return;
+
+  const currentAlign = selection.clip.asset?.align || selection.clip.asset?.alignment || {};
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      align: {
+        ...currentAlign,
+        [axis]: value,
+      },
+    },
+  }, 'Alignment updated');
+}
+
+function vmssSetSelectedTextLineHeight(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'text' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      font: {
+        ...(selection.clip.asset?.font || {}),
+        lineHeight: Math.max(0.5, Number(numericValue.toFixed(2))),
+      },
+    },
+  }, 'Line height updated');
+}
+
+function vmssSetSelectedTextBackgroundColor(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const color = vmssNormalizeHexColor(value);
+  if (!selection || selection.category !== 'text' || !color) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      background: {
+        ...(selection.clip.asset?.background || {}),
+        color,
+      },
+    },
+  }, 'Background color updated');
+}
+
+function vmssSetSelectedTextBackgroundOpacity(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'text' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      background: {
+        ...(selection.clip.asset?.background || {}),
+        opacity: Math.max(0, Math.min(1, Number(numericValue.toFixed(2)))),
+      },
+    },
+  }, 'Background opacity updated');
+}
+
+function vmssSetSelectedTextStrokeColor(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const color = vmssNormalizeHexColor(value);
+  if (!selection || selection.category !== 'text' || !color) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      stroke: {
+        ...(selection.clip.asset?.stroke || {}),
+        color,
+      },
+    },
+  }, 'Stroke color updated');
+}
+
+function vmssSetSelectedTextStrokeWidth(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'text' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      stroke: {
+        ...(selection.clip.asset?.stroke || {}),
+        width: Math.max(0, Math.round(numericValue)),
+      },
+    },
+  }, 'Stroke width updated');
+}
+
+function vmssSetSelectedMediaVolume(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'media' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      volume: Math.max(0, Math.min(1, Number(numericValue.toFixed(2)))),
+    },
+  }, 'Volume updated');
+}
+
+function vmssSetSelectedMediaTrim(value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'media' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      trim: Math.max(0, Number(numericValue.toFixed(3))),
+    },
+  }, 'Trim updated');
+}
+
+function vmssToggleSelectedMediaMute() {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection || selection.category !== 'media') return;
+
+  const currentVolume = vmssGetStaticNumericValue(selection.clip.asset?.volume ?? selection.resolvedClip?.asset?.volume, 1);
+  const nextVolume = currentVolume > 0 ? 0 : 1;
+  vmssSetSelectedMediaVolume(String(nextVolume));
+}
+
+function vmssSetSelectedVideoCrop(field, value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const numericValue = Number(value);
+  if (!selection || selection.category !== 'media' || !Number.isFinite(numericValue)) return;
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      crop: {
+        ...(selection.clip.asset?.crop || {}),
+        [field]: Math.max(0, Math.min(1, Number(numericValue.toFixed(3)))),
+      },
+    },
+  }, 'Crop updated');
+}
+
+function vmssSetSelectedShapeStyle(field, value) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection || selection.category !== 'shapes') return;
+
+  const svgSource = typeof selection.resolvedClip?.asset?.src === 'string'
+    ? selection.resolvedClip.asset.src
+    : selection.clip.asset?.src;
+  if (typeof svgSource !== 'string' || !svgSource) return;
+
+  const currentStyle = vmssExtractShapeStyle(svgSource);
+  if (!currentStyle.shapeType) return;
+
+  const nextStyle = {
+    ...currentStyle,
+    [field]: field === 'strokeWidth' ? Math.max(1, Number(value) || currentStyle.strokeWidth) : (vmssNormalizeHexColor(value) || currentStyle[field]),
+  };
+
+  const nextSvg = vmssCreateShapeSvg(
+    currentStyle.shapeType,
+    Math.max(50, Math.round(Number(selection.resolvedClip?.width ?? selection.clip.width) || 200)),
+    Math.max(50, Math.round(Number(selection.resolvedClip?.height ?? selection.clip.height) || 100)),
+    nextStyle,
+  );
+
+  vmssApplySelectedClipUpdate({
+    asset: {
+      ...selection.clip.asset,
+      src: nextSvg,
+    },
+  }, 'Shape updated');
+}
+
 function vmssHideFloatingCanvasToolbar() {
   document.querySelectorAll('.ss-canvas-toolbar').forEach((element) => {
     element.style.display = 'none';
   });
+}
+
+function vmssHideFloatingSelectionToolbars() {
+  const hideNow = () => {
+    document.querySelectorAll('.ss-toolbar, .ss-clip-toolbar, .ss-text-toolbar, .ss-rich-text-toolbar, .ss-media-toolbar, .ss-svg-toolbar, .ss-asset-toolbar, .ss-text-to-speech-toolbar, .ss-rich-caption-toolbar').forEach((element) => {
+      if (element.classList.contains('ss-canvas-toolbar')) return;
+      element.style.display = 'none';
+    });
+  };
+
+  hideNow();
+  window.setTimeout(hideNow, 0);
 }
 
 async function vmssSetBackgroundColor(color) {
@@ -1936,32 +2752,36 @@ function vmssRenderEditorShell(container) {
           </div>
 
           <div id="vmss-add-elements-content" class="pointer-events-none absolute left-full top-0 z-30 flex h-full w-60 translate-x-3 flex-col overflow-hidden border-l border-gray-200 bg-white opacity-0 shadow-[0_18px_48px_-28px_rgba(15,23,42,0.35)] transition-all duration-200 dark:border-gray-700 dark:bg-gray-800">
-            <div class="border-b border-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Add Elements</div>
+            <div id="vmss-add-elements-title" class="border-b border-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Add Elements</div>
 
             <div class="flex-1 overflow-y-auto p-4">
               <div data-vmss-add-panel="text" class="space-y-4">
-                <div>
-                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Text Presets</p>
-                  <div class="grid gap-2">
-                    <button onclick="vmssAddTextClip('Title', vmss.edit?.playbackTime || 0, {fontSize: 72, fontWeight: 600})" class="rounded-2xl bg-gray-100 px-4 py-4 text-left text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600">Headline Title</button>
-                    <button onclick="vmssAddTextClip('Subtitle', vmss.edit?.playbackTime || 0, {fontSize: 44, fontWeight: 500})" class="rounded-2xl bg-gray-100 px-4 py-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">Subtitle</button>
-                    <button onclick="vmssAddTextClip('Body text', vmss.edit?.playbackTime || 0, {fontSize: 36, fontWeight: 400})" class="rounded-2xl bg-gray-100 px-4 py-3 text-left text-sm text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">Paragraph</button>
+                <div data-vmss-selection-properties="text" class="hidden"></div>
+                <div data-vmss-add-only class="space-y-4">
+                  <div>
+                    <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Text Presets</p>
+                    <div class="grid gap-2">
+                      <button onclick="vmssAddTextClip('Title', vmss.edit?.playbackTime || 0, {fontSize: 72, fontWeight: 600})" class="rounded-2xl bg-gray-100 px-4 py-4 text-left text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600">Headline Title</button>
+                      <button onclick="vmssAddTextClip('Subtitle', vmss.edit?.playbackTime || 0, {fontSize: 44, fontWeight: 500})" class="rounded-2xl bg-gray-100 px-4 py-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">Subtitle</button>
+                      <button onclick="vmssAddTextClip('Body text', vmss.edit?.playbackTime || 0, {fontSize: 36, fontWeight: 400})" class="rounded-2xl bg-gray-100 px-4 py-3 text-left text-sm text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">Paragraph</button>
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <div class="mb-2 flex items-center justify-between">
-                    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400">Fonts</p>
-                    <button onclick="vmssShowComingSoon('Custom fonts')" class="rounded-full bg-cyan-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-cyan-600">Upload</button>
-                  </div>
-                  <div class="grid grid-cols-2 gap-2">
-                    <button onclick="vmssAddTextClip('Work Sans', vmss.edit?.playbackTime || 0, {fontFamily: 'Work Sans', fontSize: 36, fontWeight: 500})" class="rounded-2xl bg-gray-100 px-3 py-6 text-center text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">Work Sans</button>
-                    <button onclick="vmssShowComingSoon('More fonts')" class="rounded-2xl bg-gray-100 px-3 py-6 text-center text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">More Fonts</button>
+                  <div>
+                    <div class="mb-2 flex items-center justify-between">
+                      <p class="text-xs font-semibold text-gray-500 dark:text-gray-400">Fonts</p>
+                      <button onclick="vmssShowComingSoon('Custom fonts')" class="rounded-full bg-cyan-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-cyan-600">Upload</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                      <button onclick="vmssAddTextClip('Work Sans', vmss.edit?.playbackTime || 0, {fontFamily: 'Work Sans', fontSize: 36, fontWeight: 500})" class="rounded-2xl bg-gray-100 px-3 py-6 text-center text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">Work Sans</button>
+                      <button onclick="vmssShowComingSoon('More fonts')" class="rounded-2xl bg-gray-100 px-3 py-6 text-center text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">More Fonts</button>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div data-vmss-add-panel="shapes" class="hidden space-y-4">
-                <div>
+                <div data-vmss-selection-properties="shapes" class="hidden"></div>
+                <div data-vmss-add-only>
                   <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Shape Tools</p>
                   <div class="grid grid-cols-2 gap-2">
                     <button onclick="vmssAddShapeClip('rect', vmss.edit?.playbackTime || 0)" class="flex flex-col items-center justify-center gap-3 rounded-2xl bg-gray-100 px-4 py-5 text-sm font-semibold text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"><div class="h-8 w-10 rounded-sm border-2 border-gray-800 dark:border-gray-100"></div><span>Rectangle</span></button>
@@ -1973,7 +2793,8 @@ function vmssRenderEditorShell(container) {
               </div>
 
               <div data-vmss-add-panel="media" class="hidden space-y-4">
-                <div>
+                <div data-vmss-selection-properties="media" class="hidden"></div>
+                <div data-vmss-add-only>
                   <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Media Uploads</p>
                   <div class="grid gap-2">
                     <button onclick="document.getElementById('vmss-image-input').click()" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-image-add-line"></i>Photos</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
@@ -2446,6 +3267,31 @@ window.vmssAddVideoClip = vmssAddVideoClip;
 window.vmssSetBackgroundColor = vmssSetBackgroundColor;
 window.vmssSetOutputPreset = vmssSetOutputPreset;
 window.vmssSetOutputFps = vmssSetOutputFps;
+window.vmssSetSelectedClipTiming = vmssSetSelectedClipTiming;
+window.vmssSetSelectedClipDimension = vmssSetSelectedClipDimension;
+window.vmssSetSelectedClipOffset = vmssSetSelectedClipOffset;
+window.vmssSetSelectedClipScale = vmssSetSelectedClipScale;
+window.vmssSetSelectedClipOpacity = vmssSetSelectedClipOpacity;
+window.vmssSetSelectedClipRotation = vmssSetSelectedClipRotation;
+window.vmssSetSelectedClipTransition = vmssSetSelectedClipTransition;
+window.vmssSetSelectedClipEffect = vmssSetSelectedClipEffect;
+window.vmssSetSelectedClipKeyframes = vmssSetSelectedClipKeyframes;
+window.vmssSetSelectedTextContent = vmssSetSelectedTextContent;
+window.vmssSetSelectedTextFontSize = vmssSetSelectedTextFontSize;
+window.vmssSetSelectedTextFontWeight = vmssSetSelectedTextFontWeight;
+window.vmssSetSelectedTextFontFamily = vmssSetSelectedTextFontFamily;
+window.vmssSetSelectedTextColor = vmssSetSelectedTextColor;
+window.vmssSetSelectedTextAlign = vmssSetSelectedTextAlign;
+window.vmssSetSelectedTextLineHeight = vmssSetSelectedTextLineHeight;
+window.vmssSetSelectedTextBackgroundColor = vmssSetSelectedTextBackgroundColor;
+window.vmssSetSelectedTextBackgroundOpacity = vmssSetSelectedTextBackgroundOpacity;
+window.vmssSetSelectedTextStrokeColor = vmssSetSelectedTextStrokeColor;
+window.vmssSetSelectedTextStrokeWidth = vmssSetSelectedTextStrokeWidth;
+window.vmssSetSelectedMediaVolume = vmssSetSelectedMediaVolume;
+window.vmssSetSelectedMediaTrim = vmssSetSelectedMediaTrim;
+window.vmssToggleSelectedMediaMute = vmssToggleSelectedMediaMute;
+window.vmssSetSelectedVideoCrop = vmssSetSelectedVideoCrop;
+window.vmssSetSelectedShapeStyle = vmssSetSelectedShapeStyle;
 window.vmssTrimSelectedClip = vmssTrimSelectedClip;
 window.vmssShowComingSoon = vmssShowComingSoon;
 window.vmssAddStep = vmssAddStep;
