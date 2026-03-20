@@ -1912,14 +1912,26 @@ function vmssUpdatePlayButton(isPlaying) {
 
 function vmssSyncSelectionActionButtons() {
   const deleteButton = document.getElementById('vmss-delete-selected-btn');
-  if (!deleteButton) return;
+  const trimButton = document.getElementById('vmss-trim-selected-btn');
+  const selection = vmssGetSelectedClipDataSnapshot();
+  const hasSelection = !!selection;
+  const canTrim = selection?.assetType === 'video';
 
-  const hasSelection = vmss.selectedClipId !== null && vmss.selectedClipId !== undefined;
-  deleteButton.disabled = !hasSelection;
-  deleteButton.classList.toggle('opacity-50', !hasSelection);
-  deleteButton.classList.toggle('cursor-not-allowed', !hasSelection);
-  deleteButton.classList.toggle('hover:bg-red-100', hasSelection);
-  deleteButton.classList.toggle('dark:hover:bg-red-900/40', hasSelection);
+  if (deleteButton) {
+    deleteButton.disabled = !hasSelection;
+    deleteButton.classList.toggle('opacity-50', !hasSelection);
+    deleteButton.classList.toggle('cursor-not-allowed', !hasSelection);
+    deleteButton.classList.toggle('hover:bg-red-100', hasSelection);
+    deleteButton.classList.toggle('dark:hover:bg-red-900/40', hasSelection);
+  }
+
+  if (trimButton) {
+    trimButton.disabled = !canTrim;
+    trimButton.classList.toggle('opacity-50', !canTrim);
+    trimButton.classList.toggle('cursor-not-allowed', !canTrim);
+    trimButton.classList.toggle('hover:bg-gray-300', canTrim);
+    trimButton.classList.toggle('dark:hover:bg-gray-700', canTrim);
+  }
 }
 
 function vmssMarkDirty() {
@@ -3504,7 +3516,7 @@ function vmssRenderEditorShell(container) {
                 <i class="ri-play-fill text-lg"></i>
               </button>
               <span id="vmss-time-display" class="w-20 font-mono text-xs text-gray-600 dark:text-gray-300">0:00.0</span>
-              <button onclick="vmssTrimSelectedClip()" class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
+              <button id="vmss-trim-selected-btn" onclick="vmssTrimSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs opacity-50 cursor-not-allowed dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
                 <i class="ri-scissors-cut-line"></i>Trim
               </button>
               <button id="vmss-delete-selected-btn" onclick="vmssDeleteSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-xs text-red-600 opacity-50 cursor-not-allowed dark:bg-red-900/20 dark:text-red-400" title="Delete selected clip">
