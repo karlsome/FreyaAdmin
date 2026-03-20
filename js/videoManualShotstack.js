@@ -686,6 +686,35 @@ function vmssBuildWorkingProjectPayload() {
   };
 }
 
+function vmssProjectNeedsRevisionFallback(project) {
+  if (!project?.edit || typeof project.edit !== 'object') return true;
+
+  const tracks = project.edit?.timeline?.tracks || [];
+  const hasAnyClips = tracks.some((track) => (track?.clips || []).length > 0);
+  if (!hasAnyClips) return true;
+
+  const hasMediaReference = tracks.some((track) => (track?.clips || []).some((clip) => {
+    const source = clip?.asset?.src;
+    return typeof source === 'string' && source.trim().length > 0;
+  }));
+  const hasSavedAssetMap = !!project.assetSourceMap && Object.keys(project.assetSourceMap).length > 0;
+
+  return hasSavedAssetMap && !hasMediaReference;
+}
+
+async function vmssFetchRevisionSnapshot(revisionId) {
+  if (!revisionId) return null;
+
+  const revisionRes = await fetch(`${VMSS_PROJECTS_API_BASE()}/revisions/${revisionId}`, {
+    headers: vmssAuthHeaders(),
+  });
+  if (!revisionRes.ok) {
+    throw new Error(String(revisionRes.status));
+  }
+
+  return revisionRes.json();
+}
+
 function vmssSyncPlaylistProjectEntry(projectId, updates = {}) {
   const index = vmss.playlistProjects.findIndex((item) => String(item._id) === String(projectId));
   if (index < 0) return;
@@ -707,18 +736,41 @@ async function vmssLoadProject(id) {
     if (!res.ok) throw new Error(String(res.status));
     const project = await res.json();
 
-    vmss.project = project;
+    let resolvedProject = project;
     vmss.playlist = vmss.playlists.find((item) => String(item._id) === String(project.playlistId)) || vmss.playlist;
     vmss.revisionPreview = null;
 
-    await vmssLoadTemplate(project.edit || vmssCreateDefaultTemplate(), {
-      title: project.title || 'Video Manual 2',
-      assetSourceMap: project.assetSourceMap || {},
+    if (project.lastRevisionId && vmssProjectNeedsRevisionFallback(project)) {
+      try {
+        const revision = await vmssFetchRevisionSnapshot(project.lastRevisionId);
+        const snapshot = revision?.snapshot || {};
+        if (snapshot?.edit) {
+          resolvedProject = {
+            ...project,
+            ...snapshot,
+            _id: project._id,
+            playlistId: project.playlistId,
+            title: snapshot.title || project.title,
+            description: snapshot.description || project.description,
+            currentRevisionNumber: project.currentRevisionNumber,
+            lastRevisionId: project.lastRevisionId,
+          };
+        }
+      } catch (revisionError) {
+        console.warn('[VMSS] Failed to restore latest revision during load, falling back to working copy:', revisionError);
+      }
+    }
+
+    vmss.project = resolvedProject;
+
+    await vmssLoadTemplate(resolvedProject.edit || vmssCreateDefaultTemplate(), {
+      title: resolvedProject.title || 'Video Manual 2',
+      assetSourceMap: resolvedProject.assetSourceMap || {},
     });
 
     vmssLockWorkspaceScroll();
     vmss.dirty = false;
-    vmssSetStatus('Project loaded');
+    vmssSetStatus(resolvedProject !== project ? 'Restored from latest revision' : 'Project loaded');
   } catch (error) {
     console.error('[VMSS] Load project error:', error);
     alert(`Failed to load project: ${error.message}`);
@@ -776,7 +828,11 @@ async function vmssSaveRevision() {
   const revisionName = window.prompt('Revision name:', defaultRevisionName);
   if (!revisionName) return;
 
-  await vmssPersistWorkingProject({ silent: true, reason: 'Working copy saved' });
+  const workingCopySave = await vmssPersistWorkingProject({ silent: true, reason: 'Working copy saved' });
+  if (!workingCopySave) {
+    alert('Working copy could not be saved, so the revision was not created.');
+    return;
+  }
 
   try {
     const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${vmss.project._id}/revisions`, {
