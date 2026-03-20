@@ -1233,15 +1233,13 @@ function vmssBindAddElementsLayoutWatchers() {
     const target = event.target;
     if (!shell || !(target instanceof Node) || shell.contains(target)) return;
 
-    vmss.addElementsOpen = false;
-    vmssUpdateAddElementsUI();
+    vmssCloseAddElementsPanel();
   };
 
   vmss.onAddElementsEscapeKeyDown = (event) => {
     if (!vmss.addElementsOpen || event.key !== 'Escape') return;
 
-    vmss.addElementsOpen = false;
-    vmssUpdateAddElementsUI();
+    vmssCloseAddElementsPanel();
   };
 
   window.addEventListener('resize', vmss.onAddElementsWindowResize);
@@ -1333,6 +1331,15 @@ function vmssSetAddElementsCategory(category) {
     vmss.addElementsOpen = true;
   }
 
+  vmssUpdateAddElementsUI();
+}
+
+function vmssCloseAddElementsPanel() {
+  if (vmssGetSelectedInspectorContext()) {
+    vmssClearSelectedClipFocus();
+  }
+
+  vmss.addElementsOpen = false;
   vmssUpdateAddElementsUI();
 }
 
