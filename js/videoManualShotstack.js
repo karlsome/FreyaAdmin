@@ -1058,6 +1058,8 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
     ? { ...options.assetSourceMap }
     : {};
 
+  template = vmssSanitizeEditTemplate(template);
+
   vmss.edit = new Edit(template);
   vmss.canvas = new Canvas(vmss.edit);
   vmss.ui = UIController.create(vmss.edit, vmss.canvas, { mergeFields: true });
@@ -1092,6 +1094,85 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmssSetTitle(options.title || vmss.title);
   vmssSetStatus('Ready');
   vmssStartClock();
+}
+
+function vmssSanitizeEditTemplate(template) {
+  if (!template || typeof template !== 'object') {
+    return vmssCreateDefaultTemplate();
+  }
+
+  const sanitized = JSON.parse(JSON.stringify(template));
+  const tracks = sanitized?.timeline?.tracks;
+  if (Array.isArray(tracks)) {
+    sanitized.timeline.tracks = tracks.map((track) => {
+      if (!track || typeof track !== 'object') return { clips: [] };
+      const rawClips = Array.isArray(track.clips) ? track.clips : [];
+      return {
+        clips: rawClips.map((clip) => vmssNormalizeImportedClipSource(clip)),
+      };
+    });
+  }
+
+  return sanitized;
+}
+
+function vmssNormalizeImportedClipSource(clip) {
+  if (!clip || typeof clip !== 'object') return clip;
+  if (!clip.asset || typeof clip.asset !== 'object') {
+    const { transition, effect, ...baseClip } = clip;
+    return baseClip;
+  }
+
+  const { transition, effect, ...baseClip } = clip;
+  const normalizedClip = {
+    ...baseClip,
+    asset: {
+      ...baseClip.asset,
+    },
+  };
+
+  const source = normalizedClip.asset.src;
+  if (typeof source !== 'string' || !source.trim()) return normalizedClip;
+
+  const normalized = vmssNormalizePlayableMediaSource(source);
+  if (!normalized) return normalizedClip;
+
+  if (normalized.publicUrl !== normalized.previewUrl) {
+    vmssRememberAssetSource(normalized.previewUrl, normalized.publicUrl);
+  }
+
+  return {
+    ...normalizedClip,
+    asset: {
+      ...normalizedClip.asset,
+      src: normalized.previewUrl,
+    },
+  };
+}
+
+function vmssNormalizePlayableMediaSource(sourceUrl) {
+  if (typeof sourceUrl !== 'string' || !sourceUrl.trim()) return null;
+  if (sourceUrl.startsWith('blob:') || sourceUrl.startsWith('data:')) {
+    return { previewUrl: sourceUrl, publicUrl: sourceUrl };
+  }
+  if (sourceUrl.includes('/api/video-manuals/stream/') || sourceUrl.includes('/api/video-manual-media?url=')) {
+    return { previewUrl: sourceUrl, publicUrl: sourceUrl };
+  }
+
+  try {
+    const parsed = new URL(sourceUrl, window.location.href);
+    const needsProxy = parsed.hostname === 'firebasestorage.googleapis.com' || parsed.hostname === 'storage.googleapis.com';
+    if (!needsProxy) {
+      return { previewUrl: parsed.toString(), publicUrl: parsed.toString() };
+    }
+
+    return {
+      previewUrl: `${VMSS_API_BASE_URL()}/api/video-manual-media?url=${encodeURIComponent(parsed.toString())}`,
+      publicUrl: parsed.toString(),
+    };
+  } catch (_) {
+    return { previewUrl: sourceUrl, publicUrl: sourceUrl };
+  }
 }
 
 function vmssScheduleTimelineRelayout() {
@@ -2178,7 +2259,7 @@ function vmssGetAddElementsCategoryForClip(clip) {
     return 'text';
   }
 
-  if (assetType === 'svg') {
+  if (assetType === 'svg' || assetType === 'shape') {
     return 'shapes';
   }
 
@@ -2187,6 +2268,76 @@ function vmssGetAddElementsCategoryForClip(clip) {
   }
 
   return null;
+}
+
+function vmssExtractNativeShapeStyle(asset, clip) {
+  const shapeType = asset?.shape === 'rectangle'
+    ? 'rect'
+    : asset?.shape === 'circle'
+      ? 'circle'
+      : asset?.shape === 'line'
+        ? 'line'
+        : '';
+
+  return {
+    shapeType,
+    fill: asset?.fill?.opacity === 0 ? '#00000000' : (asset?.fill?.color || '#fecaca'),
+    stroke: asset?.stroke?.color || '#ef4444',
+    strokeWidth: Number(asset?.stroke?.width || 3),
+    width: Number(asset?.width || clip?.width || 200),
+    height: Number(asset?.height || clip?.height || 100),
+  };
+}
+
+function vmssBuildNativeShapeAsset(shapeType, width, height, options = {}) {
+  const clipWidth = Math.max(24, Math.round(Number(width) || 180));
+  const clipHeight = Math.max(24, Math.round(Number(height) || 100));
+  const strokeWidth = Math.max(1, Math.round(Number(options.strokeWidth) || 3));
+  const fillColor = options.fill === '#00000000' ? '#000000' : (options.fill || '#fecaca');
+  const fillOpacity = options.fill === '#00000000' ? 0 : 0.35;
+  const strokeColor = options.stroke || '#ef4444';
+
+  if (shapeType === 'rect') {
+    return {
+      type: 'shape',
+      shape: 'rectangle',
+      width: clipWidth,
+      height: clipHeight,
+      rectangle: {
+        width: Math.max(8, clipWidth - (strokeWidth * 2)),
+        height: Math.max(8, clipHeight - (strokeWidth * 2)),
+      },
+      fill: { color: fillColor, opacity: fillOpacity },
+      stroke: { color: strokeColor, width: strokeWidth },
+    };
+  }
+
+  if (shapeType === 'circle') {
+    return {
+      type: 'shape',
+      shape: 'circle',
+      width: clipWidth,
+      height: clipHeight,
+      circle: {
+        radius: Math.max(8, Math.floor((Math.min(clipWidth, clipHeight) - (strokeWidth * 2)) / 2)),
+      },
+      fill: { color: fillColor, opacity: fillOpacity },
+      stroke: { color: strokeColor, width: strokeWidth },
+    };
+  }
+
+  return {
+    type: 'shape',
+    shape: 'line',
+    width: clipWidth,
+    height: clipHeight,
+    line: {
+      length: Math.max(12, clipWidth - (strokeWidth * 2)),
+      thickness: strokeWidth,
+    },
+    fill: { color: '#000000', opacity: 0 },
+    stroke: { color: strokeColor, width: strokeWidth },
+  };
 }
 
 function vmssGetAddElementsCategoryLabel(category) {
@@ -2639,8 +2790,9 @@ function vmssBuildSelectedPropertiesMarkup(selection) {
         </div>
       </section>`;
   } else if (selection.category === 'shapes') {
-    const svgSource = typeof resolvedAsset.src === 'string' ? resolvedAsset.src : '';
-    const shapeStyle = vmssExtractShapeStyle(svgSource);
+    const shapeStyle = resolvedAsset.type === 'shape'
+      ? vmssExtractNativeShapeStyle(resolvedAsset, selection.resolvedClip)
+      : vmssExtractShapeStyle(typeof resolvedAsset.src === 'string' ? resolvedAsset.src : '');
     const fill = vmssNormalizeHexColor(shapeStyle.fill) || '#FECACA';
     const stroke = vmssNormalizeHexColor(shapeStyle.stroke) || '#EF4444';
     const strokeWidth = Number(shapeStyle.strokeWidth) || 3;
@@ -3072,6 +3224,26 @@ function vmssSetSelectedVideoCrop(field, value) {
 function vmssSetSelectedShapeStyle(field, value) {
   const selection = vmssGetSelectedInspectorContext();
   if (!selection || selection.category !== 'shapes') return;
+
+  if (selection.resolvedClip?.asset?.type === 'shape') {
+    const currentStyle = vmssExtractNativeShapeStyle(selection.resolvedClip.asset, selection.resolvedClip);
+    if (!currentStyle.shapeType) return;
+
+    const nextStyle = {
+      ...currentStyle,
+      [field]: field === 'strokeWidth' ? Math.max(1, Number(value) || currentStyle.strokeWidth) : (vmssNormalizeHexColor(value) || currentStyle[field]),
+    };
+
+    vmssApplySelectedClipUpdate({
+      asset: vmssBuildNativeShapeAsset(
+        currentStyle.shapeType,
+        Number(selection.resolvedClip?.width ?? selection.clip.width) || currentStyle.width,
+        Number(selection.resolvedClip?.height ?? selection.clip.height) || currentStyle.height,
+        nextStyle,
+      ),
+    }, 'Shape updated');
+    return;
+  }
 
   const svgSource = typeof selection.resolvedClip?.asset?.src === 'string'
     ? selection.resolvedClip.asset.src
