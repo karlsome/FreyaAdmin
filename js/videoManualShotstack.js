@@ -7,8 +7,18 @@ const VMSS_API_BASE_URL = () => {
   const base = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000';
   return base.replace(/\/$/, ''); // Remove trailing slash if present
 };
+const VMSS_PROJECTS_API_BASE = () => `${VMSS_API_BASE_URL()}/api/video-manuals-studio`;
 
 const vmss = {
+  screen: 'browser',
+  editorMounted: false,
+  playlist: null,
+  playlists: [],
+  playlistProjects: [],
+  project: null,
+  revisionPreview: null,
+  trashOpen: false,
+  playlistSearchQuery: '',
   edit: null,
   canvas: null,
   timeline: null,
@@ -51,14 +61,54 @@ const vmss = {
   addElementsCategory: 'text',
 };
 
+function vmssGet(id) {
+  return document.getElementById(id);
+}
+
+function vmssEncodeBase64Unicode(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+function vmssAuthUser() {
+  try {
+    return JSON.parse(localStorage.getItem('authUser') || '{}');
+  } catch (_) {
+    return {};
+  }
+}
+
+function vmssAuthHeaders(extraHeaders = {}) {
+  const authUser = vmssAuthUser();
+  const hasIdentity = authUser && (authUser.username || authUser.role);
+  return {
+    ...(hasIdentity ? {
+      Authorization: `Bearer ${vmssEncodeBase64Unicode(JSON.stringify({
+        username: authUser.username || 'unknown',
+        role: authUser.role || 'viewer',
+      }))}`,
+    } : {}),
+    ...extraHeaders,
+  };
+}
+
+function vmssCanManagePlaylists() {
+  return ['admin', '課長', '部長', '係長'].includes(vmssAuthUser().role || 'viewer');
+}
+
+function vmssCanEditProjects() {
+  return ['admin', '課長', '部長', '係長', '班長'].includes(vmssAuthUser().role || 'viewer');
+}
+
 function loadVideoManualPage() {
   vmssDispose();
 
   const main = document.getElementById('mainContent');
   if (!main) return;
-
-  const savedProject = vmssReadStoredProject();
-  const savedAt = savedProject?.updatedAt ? new Date(savedProject.updatedAt).toLocaleString() : 'No local save yet';
 
   main.innerHTML = `
     <div class="min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-5 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950">
@@ -71,8 +121,8 @@ function loadVideoManualPage() {
               <p class="mt-2 max-w-3xl text-sm text-slate-500 dark:text-slate-400">Freya Admin keeps the current workflow and adds a new Shotstack SDK editor as Video Manual 2. This integration stays fully vanilla JS.</p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-              <div class="font-medium text-slate-700 dark:text-white">Shotstack local save</div>
-              <div class="mt-1 text-xs">${vmssEscapeHtml(savedAt)}</div>
+              <div class="font-medium text-slate-700 dark:text-white">Shotstack project browser</div>
+              <div class="mt-1 text-xs">Playlists, projects, recycle bin, and revision history are server-backed.</div>
             </div>
           </div>
         </section>
@@ -99,15 +149,12 @@ function loadVideoManualPage() {
             <p class="mt-2 text-sm text-slate-500 dark:text-slate-300">Timeline, canvas preview, toolbar controls, and browser export backed by the local Shotstack browser bundle.</p>
             <div class="mt-5 grid gap-3 text-sm text-slate-600 dark:text-slate-300">
               <div class="rounded-2xl border border-sky-100 bg-white/80 px-4 py-3 dark:border-sky-900/50 dark:bg-slate-900/60">Vanilla JS integration with no React runtime.</div>
-              <div class="rounded-2xl border border-sky-100 bg-white/80 px-4 py-3 dark:border-sky-900/50 dark:bg-slate-900/60">Local save in browser storage so you can test immediately.</div>
-              <div class="rounded-2xl border border-sky-100 bg-white/80 px-4 py-3 dark:border-sky-900/50 dark:bg-slate-900/60">Ready for backend persistence once your API contract is defined.</div>
+              <div class="rounded-2xl border border-sky-100 bg-white/80 px-4 py-3 dark:border-sky-900/50 dark:bg-slate-900/60">Playlist and project browser before editing.</div>
+              <div class="rounded-2xl border border-sky-100 bg-white/80 px-4 py-3 dark:border-sky-900/50 dark:bg-slate-900/60">Server-backed working copies and revision history for the Shotstack JSON schema.</div>
             </div>
             <div class="mt-6 flex flex-wrap gap-3">
               <button onclick="loadVideoManualShotstackPage()" class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-600">
-                <i class="ri-arrow-right-line"></i>Open Video Manual 2
-              </button>
-              <button onclick="vmssResetLocalProject()" class="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
-                <i class="ri-delete-bin-line"></i>Reset Local Save
+                <i class="ri-arrow-right-line"></i>Open Project Browser
               </button>
             </div>
           </article>
@@ -123,27 +170,463 @@ function loadVideoManualPage() {
   }
 }
 
+function vmssBrowserRoot() {
+  return vmssGet('vmss-browser-screen');
+}
+
+function vmssEditorHost() {
+  return vmssGet('vmss-editor-host');
+}
+
+function vmssShowBrowserScreen() {
+  vmss.screen = 'browser';
+  const browser = vmssBrowserRoot();
+  const editor = vmssEditorHost();
+  if (browser) browser.classList.remove('hidden');
+  if (editor) editor.classList.add('hidden');
+  vmssUnlockWorkspaceScroll();
+}
+
+function vmssShowEditorScreen() {
+  vmss.screen = 'editor';
+  const browser = vmssBrowserRoot();
+  const editor = vmssEditorHost();
+  if (browser) browser.classList.add('hidden');
+  if (editor) editor.classList.remove('hidden');
+  vmssLockWorkspaceScroll();
+}
+
+async function vmssEnsureEditorMounted() {
+  const host = vmssEditorHost();
+  if (!host || vmss.editorMounted) return;
+
+  host.innerHTML = `
+    <div class="mx-auto w-full max-w-[1720px]">
+      <div id="vmss-editor" class="overflow-visible rounded-[28px] border border-white/60 bg-white/90 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] dark:border-gray-800 dark:bg-gray-900/90"></div>
+    </div>
+  `;
+
+  await vmssInit('#vmss-editor');
+  vmss.editorMounted = true;
+}
+
+function vmssSyncTrashUiState() {
+  const trashBtn = vmssGet('vmss-trash-btn');
+  const hasPlaylist = !!vmss.playlist;
+  if (!trashBtn) return;
+
+  trashBtn.disabled = !hasPlaylist;
+  trashBtn.classList.toggle('opacity-60', !hasPlaylist);
+  trashBtn.classList.toggle('cursor-not-allowed', !hasPlaylist);
+  trashBtn.classList.toggle('border-red-200', vmss.trashOpen && hasPlaylist);
+  trashBtn.classList.toggle('bg-red-50', vmss.trashOpen && hasPlaylist);
+  trashBtn.classList.toggle('text-red-600', vmss.trashOpen && hasPlaylist);
+}
+
+function vmssRenderProjectBrowser() {
+  const playlistList = vmssGet('vmss-playlist-list');
+  const projectList = vmssGet('vmss-browser-project-list');
+  const emptyState = vmssGet('vmss-browser-project-empty');
+  const projectTitle = vmssGet('vmss-browser-project-title');
+  const playlistMeta = vmssGet('vmss-playlist-meta');
+  const createProjectBtn = vmssGet('vmss-create-project-btn');
+  const createPlaylistBtn = vmssGet('vmss-create-playlist-btn');
+  if (!playlistList || !projectList) return;
+
+  const searchQuery = String(vmss.playlistSearchQuery || '').trim().toLocaleLowerCase();
+  const visiblePlaylists = [...vmss.playlists]
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ja', { sensitivity: 'base', numeric: true }))
+    .filter((playlist) => {
+      if (!searchQuery) return true;
+      return [playlist.name, playlist.description, playlist.model]
+        .filter(Boolean)
+        .some((value) => String(value).toLocaleLowerCase().includes(searchQuery));
+    });
+
+  if (createPlaylistBtn) createPlaylistBtn.classList.toggle('hidden', !vmssCanManagePlaylists());
+  if (createProjectBtn) createProjectBtn.disabled = !vmss.playlist || !vmssCanEditProjects();
+  vmssSyncTrashUiState();
+
+  playlistList.innerHTML = visiblePlaylists.length
+    ? visiblePlaylists.map((playlist) => {
+        const selected = vmss.playlist && String(vmss.playlist._id) === String(playlist._id);
+        const projectCount = Number.isFinite(Number(playlist.projectCount)) ? Number(playlist.projectCount) : 0;
+        return `
+          <div onclick="vmssSelectPlaylist('${playlist._id}')" class="w-full cursor-pointer text-left rounded-2xl border px-4 py-3 transition ${selected
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-400'
+            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'}">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${vmssEscapeHtml(playlist.name || 'Untitled Playlist')}</div>
+                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${vmssEscapeHtml(playlist.description || 'No description yet')}</div>
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  ${playlist.model ? `<div class="inline-flex rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold tracking-wide text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">${vmssEscapeHtml(playlist.model)}</div>` : ''}
+                </div>
+                <div class="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">Project Count: ${projectCount}</div>
+              </div>
+              <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${playlist.privacy === 'public'
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                : playlist.privacy === 'private'
+                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}">${vmssEscapeHtml(playlist.privacy || 'internal')}</span>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : `<div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">${searchQuery ? 'No playlists match that search.' : 'No playlists yet.'}</div>`;
+
+  if (projectTitle) {
+    projectTitle.textContent = vmss.playlist ? vmss.playlist.name || 'Projects' : 'Select a Playlist';
+  }
+
+  if (playlistMeta) {
+    playlistMeta.textContent = vmss.playlist
+      ? `${vmss.playlistProjects.length} project${vmss.playlistProjects.length === 1 ? '' : 's'} · ${vmss.playlist.privacy || 'internal'}`
+      : 'Choose a playlist to browse Shotstack projects.';
+  }
+
+  if (!vmss.playlist || !vmss.playlistProjects.length) {
+    projectList.innerHTML = '';
+    if (emptyState) emptyState.classList.remove('hidden');
+    return;
+  }
+
+  if (emptyState) emptyState.classList.add('hidden');
+  projectList.innerHTML = vmss.playlistProjects.map((project) => `
+    <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
+      <div class="flex flex-col gap-2">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <div class="text-sm font-semibold text-gray-900 dark:text-white truncate">${vmssEscapeHtml(project.title || 'Untitled Project')}</div>
+            <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${project.currentRevisionNumber
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+              : 'bg-slate-100 text-slate-500 dark:bg-gray-700 dark:text-gray-300'}">${project.currentRevisionNumber ? `REV ${project.currentRevisionNumber}` : 'DRAFT'}</span>
+          </div>
+          ${project.description ? `<div class="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-2">${vmssEscapeHtml(project.description)}</div>` : ''}
+          <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${project.tracksCount || 0} tracks · Updated ${new Date(project.updatedAt || project.createdAt).toLocaleDateString()}</div>
+        </div>
+        <div class="flex items-center gap-1">
+          <button onclick="vmssLoadProject('${project._id}')" class="rounded-xl bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-600">Open</button>
+          <button onclick="vmssShowHistory('${project._id}')" class="rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-500 transition hover:bg-slate-100 dark:border-gray-700 dark:hover:bg-gray-700" title="History"><i class="ri-history-line"></i></button>
+          <button onclick="vmssDeleteProject('${project._id}', '${vmssEscapeHtml((project.title || 'Untitled').replace(/'/g, '\\&#39;'))}')" class="rounded-xl border border-red-200 px-2 py-1.5 text-xs text-red-500 transition hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20" title="Move to recycle bin"><i class="ri-delete-bin-line"></i></button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function vmssLoadPlaylists() {
+  const playlistList = vmssGet('vmss-playlist-list');
+  const projectList = vmssGet('vmss-browser-project-list');
+  if (playlistList) playlistList.innerHTML = '<div class="text-sm text-gray-400 py-6 text-center">Loading playlists…</div>';
+  if (projectList) projectList.innerHTML = '';
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/playlists`, { headers: vmssAuthHeaders() });
+    if (!res.ok) throw new Error(String(res.status));
+    vmss.playlists = await res.json();
+    vmss.playlist = null;
+    vmss.playlistProjects = [];
+    vmss.trashOpen = false;
+    vmssRenderProjectBrowser();
+  } catch (error) {
+    console.error('[VMSS] Load playlists error:', error);
+    if (playlistList) playlistList.innerHTML = '<div class="text-sm text-red-400 py-6 text-center">Failed to load playlists</div>';
+  }
+}
+
+function vmssSetPlaylistSearch(value) {
+  vmss.playlistSearchQuery = value || '';
+  vmssRenderProjectBrowser();
+}
+
+async function vmssSelectPlaylist(id) {
+  vmss.playlist = vmss.playlists.find((item) => String(item._id) === String(id)) || null;
+  vmss.playlistProjects = [];
+  vmss.trashOpen = false;
+  vmssRenderProjectBrowser();
+  if (!vmss.playlist) return;
+
+  const projectList = vmssGet('vmss-browser-project-list');
+  if (projectList) {
+    projectList.innerHTML = '<div class="text-sm text-gray-400 py-6 text-center">Loading projects…</div>';
+  }
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/playlists/${id}/projects`, { headers: vmssAuthHeaders() });
+    if (!res.ok) throw new Error(String(res.status));
+    vmss.playlistProjects = await res.json();
+    if (vmss.playlist) vmss.playlist.projectCount = vmss.playlistProjects.length;
+    vmssRenderProjectBrowser();
+  } catch (error) {
+    console.error('[VMSS] Load playlist projects error:', error);
+    if (projectList) projectList.innerHTML = '<div class="text-sm text-red-400 py-6 text-center">Failed to load projects</div>';
+  }
+}
+
+async function vmssCreatePlaylist() {
+  if (!vmssCanManagePlaylists()) return;
+
+  const name = window.prompt('Playlist name');
+  if (!name || !name.trim()) return;
+  const description = window.prompt('Playlist description', '') || '';
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/playlists`, {
+      method: 'POST',
+      headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ name: name.trim(), description }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    await vmssLoadPlaylists();
+    if (data.insertedId) await vmssSelectPlaylist(String(data.insertedId));
+  } catch (error) {
+    alert(`Failed to create playlist: ${error.message}`);
+  }
+}
+
+async function vmssCreateProject() {
+  if (!vmss.playlist?._id) {
+    alert('Select a playlist first.');
+    return;
+  }
+
+  const title = window.prompt('Project title');
+  if (!title || !title.trim()) return;
+  const description = window.prompt('Project description', '') || '';
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/playlists/${vmss.playlist._id}/projects`, {
+      method: 'POST',
+      headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ title: title.trim(), description }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    await vmssSelectPlaylist(String(vmss.playlist._id));
+    if (data.insertedId) await vmssLoadProject(String(data.insertedId));
+  } catch (error) {
+    alert(`Failed to create project: ${error.message}`);
+  }
+}
+
+async function vmssDeleteProject(id, title) {
+  if (!window.confirm(`Move "${title}" to recycle bin?`)) return;
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${id}`, {
+      method: 'DELETE',
+      headers: vmssAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    if (vmss.playlist?._id) await vmssSelectPlaylist(String(vmss.playlist._id));
+  } catch (error) {
+    alert(`Failed to delete project: ${error.message}`);
+  }
+}
+
+async function vmssToggleTrashView() {
+  const projectSection = vmssGet('vmss-browser-project-list');
+  const trashPanel = vmssGet('vmss-trash-panel');
+  const emptyState = vmssGet('vmss-browser-project-empty');
+  if (!trashPanel) return;
+  if (!vmss.playlist) {
+    vmssSyncTrashUiState();
+    return;
+  }
+
+  vmss.trashOpen = !vmss.trashOpen;
+  if (vmss.trashOpen) {
+    if (projectSection) projectSection.classList.add('hidden');
+    if (emptyState) emptyState.classList.add('hidden');
+    trashPanel.classList.remove('hidden');
+    await vmssLoadTrash();
+  } else {
+    trashPanel.classList.add('hidden');
+    if (projectSection) projectSection.classList.remove('hidden');
+    if (emptyState && !vmss.playlistProjects.length) emptyState.classList.remove('hidden');
+  }
+
+  vmssSyncTrashUiState();
+}
+
+async function vmssLoadTrash() {
+  const list = vmssGet('vmss-trash-list');
+  if (!list) return;
+  if (!vmss.playlist?._id) {
+    list.innerHTML = '<p class="col-span-3 text-sm text-gray-400 text-center py-8">Select a playlist first.</p>';
+    return;
+  }
+
+  list.innerHTML = '<p class="col-span-3 text-sm text-gray-400 text-center py-6">Loading…</p>';
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/playlists/${vmss.playlist._id}/trash`, { headers: vmssAuthHeaders() });
+    if (!res.ok) throw new Error(String(res.status));
+    const items = await res.json();
+
+    if (!items.length) {
+      list.innerHTML = '<p class="col-span-3 text-sm text-gray-400 text-center py-8">Recycle bin is empty.</p>';
+      return;
+    }
+
+    const canPermDelete = new Set(['admin', '課長', '係長', '部長']).has(vmssAuthUser().role || '');
+    list.innerHTML = items.map((project) => {
+      const deletedDate = project.deletedAt ? new Date(project.deletedAt).toLocaleDateString() : '?';
+      const daysRemaining = project.daysRemaining ?? '?';
+      const safeTitle = vmssEscapeHtml(project.title || 'Untitled');
+      return `
+        <div class="rounded-2xl border border-red-100 bg-red-50/60 p-4 dark:border-red-900/40 dark:bg-red-900/10">
+          <div class="text-sm font-semibold text-gray-800 dark:text-white truncate">${safeTitle}</div>
+          <div class="mt-1 text-xs text-gray-500">${project.tracksCount || 0} tracks · Rev ${project.currentRevisionNumber || 0}</div>
+          <div class="mt-1 text-xs text-gray-400">Deleted ${deletedDate} by ${vmssEscapeHtml(project.deletedBy || '?')}</div>
+          <div class="mt-1 text-xs text-orange-500">${daysRemaining} day${daysRemaining === 1 ? '' : 's'} until permanent deletion</div>
+          <div class="mt-3 flex gap-2">
+            <button onclick="vmssRestoreProject('${project._id}')" class="flex-1 rounded-xl bg-green-500 px-2 py-1.5 text-xs font-medium text-white hover:bg-green-600"><i class="ri-arrow-go-back-line mr-1"></i>Restore</button>
+            ${canPermDelete ? `<button onclick="vmssPermanentDeleteProject('${project._id}', '${safeTitle.replace(/'/g, '\\&#39;')}')" class="rounded-xl border border-red-300 px-2 py-1.5 text-xs text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30" title="Delete forever"><i class="ri-delete-bin-2-fill"></i></button>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (error) {
+    list.innerHTML = `<p class="col-span-3 text-sm text-red-400 text-center py-8">Failed to load recycle bin: ${vmssEscapeHtml(error.message)}</p>`;
+  }
+}
+
+async function vmssRestoreProject(id) {
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${id}/restore`, {
+      method: 'POST',
+      headers: vmssAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    await vmssLoadTrash();
+    if (vmss.playlist?._id) await vmssSelectPlaylist(String(vmss.playlist._id));
+  } catch (error) {
+    alert(`Failed to restore project: ${error.message}`);
+  }
+}
+
+async function vmssPermanentDeleteProject(id, title) {
+  if (!window.confirm(`Permanently delete "${title}"? This cannot be undone.`)) return;
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${id}/permanent`, {
+      method: 'DELETE',
+      headers: vmssAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+    await vmssLoadTrash();
+    if (vmss.playlist?._id) await vmssSelectPlaylist(String(vmss.playlist._id));
+  } catch (error) {
+    alert(`Failed to permanently delete project: ${error.message}`);
+  }
+}
+
 function loadVideoManualShotstackPage() {
   const main = document.getElementById('mainContent');
   if (!main) return;
 
-  vmssLockWorkspaceScroll();
-
   main.innerHTML = `
-    <div class="min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-4 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950">
-      <div class="mx-auto w-full max-w-[1720px]">
-        <div id="vmss-editor" class="overflow-visible rounded-[28px] border border-white/60 bg-white/90 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] dark:border-gray-800 dark:bg-gray-900/90"></div>
+    <div id="vmss-browser-screen" class="min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-5 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950">
+      <div class="mx-auto flex h-full max-w-7xl flex-col gap-5">
+        <div class="flex flex-col gap-4 rounded-[28px] border border-white/60 bg-white/90 p-6 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90">
+          <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Video Manual Library</p>
+              <h2 class="mt-2 text-3xl font-semibold text-slate-900 dark:text-white">Playlists and projects</h2>
+              <p class="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">Choose a playlist first, then open one of its Shotstack projects. Editing starts only after a real project exists.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="vmssLoadPlaylists()" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
+                <i class="ri-refresh-line mr-1"></i>Refresh
+              </button>
+              <button onclick="vmssToggleTrashView()" id="vmss-trash-btn" class="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+                <i class="ri-delete-bin-line mr-1"></i>Recycle Bin
+              </button>
+              <button id="vmss-create-playlist-btn" onclick="vmssCreatePlaylist()" class="hidden rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-sky-500 dark:hover:bg-sky-400">
+                <i class="ri-stack-line mr-1"></i>New Playlist
+              </button>
+              <button id="vmss-create-project-btn" onclick="vmssCreateProject()" class="rounded-2xl bg-sky-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-gray-700">
+                <i class="ri-add-circle-line mr-1"></i>New Project
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid min-h-[620px] gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <section class="rounded-[28px] border border-white/60 bg-white/90 p-5 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90">
+            <div class="mb-4 flex items-center justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Playlists</p>
+                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Model groups and access boundaries</p>
+              </div>
+            </div>
+            <div class="mb-4">
+              <label for="vmss-playlist-search" class="sr-only">Search playlists</label>
+              <div class="relative">
+                <i class="ri-search-line pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                <input id="vmss-playlist-search" type="search" value="${vmssEscapeHtml(vmss.playlistSearchQuery || '')}" oninput="vmssSetPlaylistSearch(this.value)" placeholder="Search playlists..." class="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-800 outline-none transition focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+              </div>
+            </div>
+            <div id="vmss-playlist-list" class="space-y-3"></div>
+          </section>
+
+          <section class="rounded-[28px] border border-white/60 bg-white/90 p-5 shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)] backdrop-blur dark:border-gray-800 dark:bg-gray-900/90">
+            <div class="mb-5 flex flex-col gap-2 border-b border-slate-200 pb-4 dark:border-gray-800 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Projects</p>
+                <h3 id="vmss-browser-project-title" class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">Select a Playlist</h3>
+                <p id="vmss-playlist-meta" class="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a playlist to browse Shotstack projects.</p>
+              </div>
+            </div>
+            <div id="vmss-browser-project-empty" class="rounded-[24px] border border-dashed border-slate-300 px-6 py-14 text-center dark:border-gray-700">
+              <i class="ri-folder-open-line text-4xl text-slate-300 dark:text-gray-600"></i>
+              <p class="mt-4 text-base font-medium text-slate-700 dark:text-slate-200">No playlist selected</p>
+              <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Pick a playlist on the left to browse projects.</p>
+            </div>
+            <div id="vmss-browser-project-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+
+            <div id="vmss-trash-panel" class="hidden">
+              <div class="mb-4 flex items-center gap-3">
+                <i class="ri-delete-bin-2-line text-xl text-red-400"></i>
+                <div>
+                  <p class="text-sm font-semibold text-slate-800 dark:text-white">Recycle Bin</p>
+                  <p class="text-xs text-slate-500 dark:text-slate-400">Deleted Shotstack projects stay here temporarily before permanent removal.</p>
+                </div>
+              </div>
+              <div id="vmss-trash-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+    <div id="vmss-editor-host" class="hidden min-h-[calc(100vh-120px)] rounded-[28px] bg-gradient-to-br from-slate-50 via-white to-sky-50 p-4 dark:from-gray-900 dark:via-gray-900 dark:to-slate-950"></div>
+    <div id="vmss-modal-history" class="hidden fixed inset-0 z-[320] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div class="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+        <div class="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600 dark:text-sky-400">Revision History</p>
+            <h3 class="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">Project History</h3>
+          </div>
+          <button onclick="vmssCloseHistory()" class="shrink-0 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"><i class="ri-close-line text-lg"></i></button>
+        </div>
+        <div id="vmss-history-meta" class="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300"></div>
+        <div id="vmss-history-list" class="flex-1 space-y-2 overflow-y-auto"></div>
       </div>
     </div>
   `;
 
-  vmssBoot().catch((error) => {
-    console.error('Failed to boot Shotstack editor:', error);
-    const editor = document.getElementById('vmss-editor');
-    if (editor) {
-      editor.innerHTML = `<div class="p-8 text-sm text-red-600 dark:text-red-400">Failed to load Shotstack editor: ${vmssEscapeHtml(error?.message || String(error))}</div>`;
-    }
-  });
+  vmss.editorMounted = false;
+  vmss.screen = 'browser';
+  vmss.project = null;
+  vmss.revisionPreview = null;
+  vmssShowBrowserScreen();
+  void vmssLoadPlaylists();
 }
 
 function vmssLockWorkspaceScroll() {
@@ -186,6 +669,241 @@ async function vmssBoot() {
     : {};
 
   await vmssLoadTemplate(project, { title, assetSourceMap });
+}
+
+function vmssBuildWorkingProjectPayload() {
+  if (!vmss.edit) return null;
+
+  return {
+    title: vmss.title,
+    description: vmss.project?.description || '',
+    status: 'draft',
+    edit: vmss.edit.getEdit(),
+    assetSourceMap: vmss.assetSourceMap,
+    settings: {
+      output: vmss.edit.getEdit()?.output || null,
+    },
+  };
+}
+
+function vmssSyncPlaylistProjectEntry(projectId, updates = {}) {
+  const index = vmss.playlistProjects.findIndex((item) => String(item._id) === String(projectId));
+  if (index < 0) return;
+
+  vmss.playlistProjects[index] = {
+    ...vmss.playlistProjects[index],
+    ...updates,
+  };
+}
+
+async function vmssLoadProject(id) {
+  await vmssEnsureEditorMounted();
+  vmssShowEditorScreen();
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${id}`, {
+      headers: vmssAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const project = await res.json();
+
+    vmss.project = project;
+    vmss.playlist = vmss.playlists.find((item) => String(item._id) === String(project.playlistId)) || vmss.playlist;
+    vmss.revisionPreview = null;
+
+    await vmssLoadTemplate(project.edit || vmssCreateDefaultTemplate(), {
+      title: project.title || 'Video Manual 2',
+      assetSourceMap: project.assetSourceMap || {},
+    });
+
+    vmssLockWorkspaceScroll();
+    vmss.dirty = false;
+    vmssSetStatus('Project loaded');
+  } catch (error) {
+    console.error('[VMSS] Load project error:', error);
+    alert(`Failed to load project: ${error.message}`);
+    vmssShowBrowserScreen();
+  }
+}
+
+async function vmssPersistWorkingProject({ silent = true, reason = 'Saved' } = {}) {
+  if (!vmss.project?._id || !vmss.edit) return null;
+
+  vmssSetStatus(reason === 'Autosaved' ? 'Autosaving…' : 'Saving…');
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${vmss.project._id}`, {
+      method: 'PATCH',
+      headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(vmssBuildWorkingProjectPayload()),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+
+    vmss.project = {
+      ...vmss.project,
+      ...vmssBuildWorkingProjectPayload(),
+      currentRevisionNumber: data.currentRevisionNumber ?? vmss.project.currentRevisionNumber ?? 0,
+      lastRevisionId: data.lastRevisionId ?? vmss.project.lastRevisionId ?? null,
+      updatedAt: data.updatedAt || new Date().toISOString(),
+      lastEditedAt: data.lastEditedAt || new Date().toISOString(),
+    };
+    vmssSyncPlaylistProjectEntry(vmss.project._id, {
+      title: vmss.project.title,
+      description: vmss.project.description,
+      currentRevisionNumber: vmss.project.currentRevisionNumber,
+      updatedAt: vmss.project.updatedAt,
+      tracksCount: vmss.project.edit?.timeline?.tracks?.length || 0,
+    });
+    vmss.dirty = false;
+    vmssSetStatus(reason);
+    return data;
+  } catch (error) {
+    console.error('[VMSS] Save project error:', error);
+    vmssSetStatus('Save failed');
+    if (!silent) alert(`Failed to save project: ${error.message}`);
+    return null;
+  }
+}
+
+async function vmssSaveRevision() {
+  if (!vmss.project?._id || !vmss.edit) {
+    alert('Open a project first.');
+    return;
+  }
+
+  const defaultRevisionName = `${vmss.title || 'Untitled'} Rev ${String((vmss.project.currentRevisionNumber || 0) + 1).padStart(2, '0')}`;
+  const revisionName = window.prompt('Revision name:', defaultRevisionName);
+  if (!revisionName) return;
+
+  await vmssPersistWorkingProject({ silent: true, reason: 'Working copy saved' });
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${vmss.project._id}/revisions`, {
+      method: 'POST',
+      headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        revisionName,
+        snapshot: vmssBuildWorkingProjectPayload(),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+
+    vmss.project.currentRevisionNumber = data.revisionNumber || vmss.project.currentRevisionNumber || 0;
+    vmss.project.lastRevisionId = data.revisionId || vmss.project.lastRevisionId || null;
+    vmssSyncPlaylistProjectEntry(vmss.project._id, {
+      currentRevisionNumber: vmss.project.currentRevisionNumber,
+      updatedAt: new Date().toISOString(),
+    });
+    vmssSetStatus('Revision saved');
+    await vmssShowHistory(vmss.project._id);
+  } catch (error) {
+    console.error('[VMSS] Save revision error:', error);
+    alert(`Failed to save revision: ${error.message}`);
+  }
+}
+
+function vmssCloseHistory() {
+  vmssGet('vmss-modal-history')?.classList.add('hidden');
+}
+
+async function vmssShowHistory(projectId = vmss.project?._id) {
+  const modal = vmssGet('vmss-modal-history');
+  const list = vmssGet('vmss-history-list');
+  const meta = vmssGet('vmss-history-meta');
+  if (!modal || !list) return;
+
+  modal.classList.remove('hidden');
+  if (!projectId) {
+    if (meta) meta.textContent = 'Select a saved project to view history.';
+    list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">Save a project first.</p>';
+    return;
+  }
+
+  if (meta) {
+    meta.textContent = vmss.project && String(vmss.project._id) === String(projectId)
+      ? `Current working revision: ${vmss.project.currentRevisionNumber || 0}`
+      : 'Revision history for selected project';
+  }
+
+  list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">Loading revisions…</p>';
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${projectId}/revisions`, {
+      headers: vmssAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const revisions = await res.json();
+
+    if (!revisions.length) {
+      list.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">No revisions saved yet.</p>';
+      return;
+    }
+
+    list.innerHTML = revisions.map((revision) => `
+      <div class="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+        <div class="flex items-start gap-3">
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-medium text-gray-800 dark:text-white">${vmssEscapeHtml(revision.revisionName || 'Unnamed Revision')}</p>
+            <p class="text-xs text-gray-400">Revision ${revision.revisionNumber || '?'} · ${new Date(revision.createdAt).toLocaleString()}</p>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Saved by ${vmssEscapeHtml(revision.createdBy || 'unknown')}</p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <button onclick="vmssRestoreRevisionAsWorkingCopy('${revision._id}', '${projectId}')" class="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300">Restore</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch (error) {
+    list.innerHTML = `<p class="text-sm text-red-400 text-center py-6">Failed to load revisions: ${vmssEscapeHtml(error.message)}</p>`;
+  }
+}
+
+async function vmssRestoreRevisionAsWorkingCopy(revisionId, projectId) {
+  if (!window.confirm('Restore this revision as the current working copy?')) return;
+
+  try {
+    const revisionRes = await fetch(`${VMSS_PROJECTS_API_BASE()}/revisions/${revisionId}`, {
+      headers: vmssAuthHeaders(),
+    });
+    if (!revisionRes.ok) throw new Error(String(revisionRes.status));
+    const revision = await revisionRes.json();
+    const snapshot = revision.snapshot || {};
+
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${projectId}`, {
+      method: 'PATCH',
+      headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        title: snapshot.title || vmss.project?.title || 'Video Manual 2',
+        description: snapshot.description || vmss.project?.description || '',
+        edit: snapshot.edit || vmssCreateDefaultTemplate(),
+        assetSourceMap: snapshot.assetSourceMap || {},
+        settings: snapshot.settings || {},
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+
+    await vmssLoadProject(projectId);
+    vmssCloseHistory();
+    vmssSetStatus(`Restored ${revision.revisionName || `Rev ${revision.revisionNumber || '?'}`}`);
+  } catch (error) {
+    alert(`Failed to restore revision: ${error.message}`);
+  }
+}
+
+async function vmssReturnToBrowser() {
+  if (vmss.dirty && !window.confirm('You have unsaved changes. Return to the project browser anyway?')) {
+    return;
+  }
+
+  const selectedPlaylistId = vmss.playlist?._id ? String(vmss.playlist._id) : null;
+  vmssShowBrowserScreen();
+  await vmssLoadPlaylists();
+  if (selectedPlaylistId) {
+    await vmssSelectPlaylist(selectedPlaylistId);
+  }
 }
 
 function vmssCreateDefaultTemplate() {
@@ -2697,7 +3415,7 @@ function vmssRenderEditorShell(container) {
     <div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 150px); min-height:min(860px, calc(100vh - 150px));">
       <div class="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
         <button onclick="vmssGoBack()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
-          <i class="ri-arrow-left-line"></i>Back
+          <i class="ri-arrow-left-line"></i>Projects
         </button>
         <button onclick="vmss.edit?.undo()" class="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700" title="Undo">
           <i class="ri-arrow-go-back-line text-lg"></i>
@@ -2709,8 +3427,11 @@ function vmssRenderEditorShell(container) {
         <button onclick="vmssLoadStarterProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
           <i class="ri-sparkling-line"></i>Starter
         </button>
-        <button onclick="vmssRestoreLocalProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
-          <i class="ri-history-line"></i>Restore
+        <button onclick="vmssSaveRevision()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+          <i class="ri-git-commit-line"></i>Save Revision
+        </button>
+        <button onclick="vmssShowHistory()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+          <i class="ri-history-line"></i>History
         </button>
         <div class="flex-1"></div>
         <input id="vmss-title" type="text" value="Video Manual 2" class="w-full max-w-[220px] border-b border-transparent bg-transparent px-2 text-center text-sm font-medium hover:border-gray-300 focus:border-blue-400 focus:outline-none dark:text-white sm:w-56 sm:max-w-none">
@@ -3203,30 +3924,16 @@ function vmssShowRenderComplete(renderId, downloadUrl) {
 }
 
 async function vmssSaveProject() {
-  if (!vmss.edit) {
-    alert('No project loaded');
+  if (!vmss.project?._id) {
+    alert('Open a project first.');
     return;
   }
 
-  const payload = {
-    title: vmss.title,
-    edit: vmss.edit.getEdit(),
-    assetSourceMap: vmss.assetSourceMap,
-    updatedAt: new Date().toISOString(),
-  };
-
-  localStorage.setItem(VMSS_STORAGE_KEY, JSON.stringify(payload));
-  vmss.dirty = false;
-  vmssSetStatus('Saved locally');
-  console.log('Shotstack project JSON:', payload.edit);
+  await vmssPersistWorkingProject({ silent: false, reason: 'Saved' });
 }
 
-function vmssGoBack() {
-  if (vmss.dirty && !confirm('You have unsaved changes. Are you sure you want to leave?')) {
-    return;
-  }
-
-  loadVideoManualPage();
+async function vmssGoBack() {
+  await vmssReturnToBrowser();
 }
 
 function vmssOpenClassicEditor() {
@@ -3341,8 +4048,23 @@ window.vmssSelectStep = vmssSelectStep;
 window.vmssTogglePlay = vmssTogglePlay;
 window.vmssExport = vmssExport;
 window.vmssSaveProject = vmssSaveProject;
+window.vmssSaveRevision = vmssSaveRevision;
+window.vmssShowHistory = vmssShowHistory;
+window.vmssCloseHistory = vmssCloseHistory;
+window.vmssRestoreRevisionAsWorkingCopy = vmssRestoreRevisionAsWorkingCopy;
 window.vmssGoBack = vmssGoBack;
+window.vmssReturnToBrowser = vmssReturnToBrowser;
 window.vmssOpenClassicEditor = vmssOpenClassicEditor;
+window.vmssLoadPlaylists = vmssLoadPlaylists;
+window.vmssSetPlaylistSearch = vmssSetPlaylistSearch;
+window.vmssSelectPlaylist = vmssSelectPlaylist;
+window.vmssCreatePlaylist = vmssCreatePlaylist;
+window.vmssCreateProject = vmssCreateProject;
+window.vmssLoadProject = vmssLoadProject;
+window.vmssDeleteProject = vmssDeleteProject;
+window.vmssToggleTrashView = vmssToggleTrashView;
+window.vmssRestoreProject = vmssRestoreProject;
+window.vmssPermanentDeleteProject = vmssPermanentDeleteProject;
 window.vmssRestoreLocalProject = vmssRestoreLocalProject;
 window.vmssLoadStarterProject = vmssLoadStarterProject;
 window.vmssResetLocalProject = vmssResetLocalProject;
