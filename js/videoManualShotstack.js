@@ -1781,6 +1781,10 @@ function vmssBindEvents() {
     vmssHideFloatingSelectionToolbars();
     vmssRenderStepsPanel();
     vmssSyncSelectionActionButtons();
+    // Clicking the canvas background deselects everything — treat that as "click outside" to close the drawer
+    if (vmss.addElementsOpen) {
+      vmssCloseAddElementsPanel();
+    }
   });
 
   vmss.edit.events.on('edit:changed', () => {
@@ -2103,6 +2107,43 @@ function vmssBindShellEvents() {
   vmssUpdateAddElementsUI();
 }
 
+function vmssIsCanvasManipulationTarget(target) {
+  if (!(target instanceof Element)) return false;
+
+  // Explicit opt-in for custom controls that should not clear selection/drawer.
+  if (target.closest('[data-vmss-preserve-selection]')) return true;
+
+  const interactiveSelectors = [
+    '[class*="resize-handle"]',
+    '[class*="transform-handle"]',
+    '[class*="rotation-handle"]',
+    '[class*="scale-handle"]',
+    '[class*="drag-handle"]',
+    '[class*="selection-handle"]',
+    '[data-handle]',
+    '[data-resize]',
+    '[data-transform]',
+  ];
+
+  if (target.closest(interactiveSelectors.join(','))) {
+    return true;
+  }
+
+  // Fallback keyword heuristic for unknown/minified SDK handle classes.
+  let node = target;
+  let depth = 0;
+  while (node && depth < 5) {
+    const className = typeof node.className === 'string' ? node.className.toLowerCase() : '';
+    if (className && /(resize|handle|transform|rotate|scale)/.test(className)) {
+      return true;
+    }
+    node = node.parentElement;
+    depth += 1;
+  }
+
+  return false;
+}
+
 function vmssBindAddElementsLayoutWatchers() {
   if (vmss.onAddElementsWindowResize || vmss.onAddElementsOutsidePointerDown || vmss.onAddElementsEscapeKeyDown) return;
 
@@ -2114,9 +2155,13 @@ function vmssBindAddElementsLayoutWatchers() {
     if (!vmss.addElementsOpen) return;
 
     const shell = document.getElementById('vmss-add-elements-shell');
+    const canvas = document.getElementById('vmss-preview-surface');
     const target = event.target;
-    if (!shell || !(target instanceof Node) || shell.contains(target)) return;
-    if (target.closest('[data-vmss-preserve-selection]')) return;
+    if (!shell || !(target instanceof Node)) return;
+    // Never close from inside the panel or anywhere inside the canvas/preview —
+    // canvas background clicks are handled via the SDK 'selection:cleared' event instead.
+    if (shell.contains(target)) return;
+    if (canvas && canvas.contains(target)) return;
 
     vmssCloseAddElementsPanel();
   };
