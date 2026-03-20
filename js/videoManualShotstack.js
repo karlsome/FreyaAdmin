@@ -1289,8 +1289,8 @@ function vmssUpdateAddElementsLayout() {
   const shellRect = shell.getBoundingClientRect();
   const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
   const gutter = 12;
-  const desiredWidth = 240;
-  const minWidth = 180;
+  const desiredWidth = 312;
+  const minWidth = 220;
   const leftBoundary = Math.max(gutter, editorRect?.left ?? gutter);
   const rightBoundary = Math.min(viewportWidth - gutter, editorRect?.right ?? (viewportWidth - gutter));
   const availableRight = Math.max(0, rightBoundary - shellRect.right - gutter);
@@ -1316,7 +1316,17 @@ function vmssUpdateAddElementsLayout() {
 }
 
 function vmssSetAddElementsCategory(category) {
-  if (vmss.addElementsOpen && vmss.addElementsCategory === category) {
+  const selection = vmssGetSelectedInspectorContext();
+  const selectionCategory = selection?.category || null;
+
+  if (selection && selectionCategory === category) {
+    vmssClearSelectedClipFocus();
+    vmss.addElementsOpen = false;
+  } else if (selection && selectionCategory !== category) {
+    vmssClearSelectedClipFocus();
+    vmss.addElementsCategory = category;
+    vmss.addElementsOpen = true;
+  } else if (vmss.addElementsOpen && vmss.addElementsCategory === category) {
     vmss.addElementsOpen = false;
   } else {
     vmss.addElementsCategory = category;
@@ -1324,6 +1334,17 @@ function vmssSetAddElementsCategory(category) {
   }
 
   vmssUpdateAddElementsUI();
+}
+
+function vmssClearSelectedClipFocus() {
+  vmss.selectedClipId = null;
+  vmss.edit?.selectionManager?.clearSelection?.();
+  document.querySelectorAll('.ss-clip.selected').forEach((element) => {
+    element.classList.remove('selected');
+  });
+  vmssRenderSelectedDrawerProperties();
+  vmssRenderStepsPanel();
+  vmssHideFloatingSelectionToolbars();
 }
 
 function vmssGetAddElementsCategoryForClip(clip) {
@@ -1526,6 +1547,19 @@ function vmssRenderSelectedDrawerProperties() {
       section.classList.toggle('hidden', hideAddContent);
     });
   });
+}
+
+function vmssNormalizePropertyMarkup(markup) {
+  return markup
+    .replace('mb-4 rounded-[22px] border border-cyan-100 bg-cyan-50/70 p-4 shadow-sm dark:border-cyan-500/20 dark:bg-cyan-500/10', 'mb-4 p-1')
+    .replace('rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:bg-slate-900/60 dark:text-cyan-200', 'rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300')
+    .replaceAll('space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60', 'space-y-3 border-t border-slate-200 pt-3 dark:border-gray-700')
+    .replaceAll('text-sm font-semibold', 'text-xs font-semibold')
+    .replaceAll('text-xs font-medium', 'text-[11px] font-medium')
+    .replaceAll('px-3 py-2 text-sm', 'px-2.5 py-2 text-xs')
+    .replaceAll('focus:border-cyan-400', 'focus:border-slate-400')
+    .replaceAll('text-cyan-700', 'text-slate-700')
+    .replaceAll('bg-cyan-500 text-white hover:bg-cyan-600', 'bg-slate-700 text-white hover:bg-slate-800');
 }
 
 function vmssBuildSelectedPropertiesMarkup(selection) {
@@ -1804,7 +1838,7 @@ function vmssBuildSelectedPropertiesMarkup(selection) {
       </label>`;
   }
 
-  return `
+  return vmssNormalizePropertyMarkup(`
     <section class="mb-4 rounded-[22px] border border-cyan-100 bg-cyan-50/70 p-4 shadow-sm dark:border-cyan-500/20 dark:bg-cyan-500/10">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
@@ -1820,7 +1854,7 @@ function vmssBuildSelectedPropertiesMarkup(selection) {
         ${sizeSection}
         ${keyframeSection}
       </div>
-    </section>`;
+    </section>`);
 }
 
 function vmssApplySelectedClipUpdate(update, statusMessage = 'Clip updated') {
@@ -2751,8 +2785,8 @@ function vmssRenderEditorShell(container) {
             </div>
           </div>
 
-          <div id="vmss-add-elements-content" class="pointer-events-none absolute left-full top-0 z-30 flex h-full w-60 translate-x-3 flex-col overflow-hidden border-l border-gray-200 bg-white opacity-0 shadow-[0_18px_48px_-28px_rgba(15,23,42,0.35)] transition-all duration-200 dark:border-gray-700 dark:bg-gray-800">
-            <div id="vmss-add-elements-title" class="border-b border-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Add Elements</div>
+          <div id="vmss-add-elements-content" class="pointer-events-none absolute left-full top-0 z-30 flex h-full w-72 translate-x-3 flex-col overflow-hidden border-l border-gray-200 bg-white opacity-0 shadow-[0_16px_40px_-30px_rgba(15,23,42,0.22)] transition-all duration-200 dark:border-gray-700 dark:bg-gray-800">
+            <div id="vmss-add-elements-title" class="border-b border-gray-100 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Add Elements</div>
 
             <div class="flex-1 overflow-y-auto p-4">
               <div data-vmss-add-panel="text" class="space-y-4">
