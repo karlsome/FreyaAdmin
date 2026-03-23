@@ -3194,16 +3194,136 @@ function loadPage(page) {
           let _furyoEditMode = false;      // true when user has pressed 編集
           let _furyoOriginalDef   = {};   // snapshot before edit (JP) — used by cancel
           let _furyoOriginalDefEN = {};   // snapshot before edit (EN) — used by cancel
+          let _furyoSelectedProcess = 'kensaDB'; // currently selected process
 
           // Roles allowed to edit defect definitions
           const FURYO_EDIT_ROLES = ['admin', '部長', '課長', '係長'];
+
+          // Fixed defect definitions per process (non-kensaDB processes have fixed defect names)
+          const FURYO_PROCESS_DEFECTS = {
+            kensaDB: {
+              label: '検査 (kensaDB)',
+              icon: 'ri-search-eye-line',
+              description: 'モデルごとにカウンター1〜12の不良名を定義できます',
+              counters: null // dynamic per model
+            },
+            pressDB: {
+              label: 'プレス (pressDB)',
+              icon: 'ri-hammer-line',
+              description: '固定の不良項目（3項目）',
+              counters: [
+                { jp: '疵引不良', en: 'Scratch Defect' },
+                { jp: '加工不良', en: 'Processing Defect' },
+                { jp: 'その他', en: 'Other' }
+              ]
+            },
+            slitDB: {
+              label: 'スリット (slitDB)',
+              icon: 'ri-scissors-cut-line',
+              description: '固定の不良項目（3項目）',
+              counters: [
+                { jp: '疵引不良', en: 'Scratch Defect' },
+                { jp: '加工不良', en: 'Processing Defect' },
+                { jp: 'その他', en: 'Other' }
+              ]
+            },
+            SRSDB: {
+              label: '転写 (SRSDB)',
+              icon: 'ri-file-transfer-line',
+              description: '固定の不良項目（6項目）',
+              counters: [
+                { jp: 'くっつき・めくれ', en: 'Sticking / Peeling' },
+                { jp: 'シワ', en: 'Wrinkle' },
+                { jp: '転写位置ズレ', en: 'Transfer Position Shift' },
+                { jp: '転写不良', en: 'Transfer Defect' },
+                { jp: '文字欠け', en: 'Character Missing' },
+                { jp: 'その他', en: 'Other' }
+              ]
+            }
+          };
 
           async function loadFuryoKanri() {
             const container = document.getElementById('furyoKanriContainer');
             if (!container) return;
 
-            // Show loading
+            // Render process selector + content area
             container.innerHTML = `
+              <div class="mb-4">
+                <!-- Process Selector -->
+                <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+                  <div class="flex items-center gap-3 mb-3">
+                    <i class="ri-settings-3-line text-blue-600 text-lg"></i>
+                    <h3 class="font-semibold text-gray-800">プロセスを選択</h3>
+                  </div>
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" id="furyoProcessSelector">
+                    ${Object.entries(FURYO_PROCESS_DEFECTS).map(([key, proc]) => `
+                      <button
+                        id="furyoProcessBtn_${key}"
+                        onclick="selectFuryoProcess('${key}')"
+                        class="furyo-process-btn flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all ${
+                          _furyoSelectedProcess === key
+                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                        }"
+                      >
+                        <i class="${proc.icon} text-2xl"></i>
+                        <span class="text-sm font-medium">${proc.label}</span>
+                        <span class="text-xs opacity-70">${proc.counters ? proc.counters.length + '項目' : 'モデル別定義'}</span>
+                      </button>
+                    `).join('')}
+                  </div>
+                </div>
+              </div>
+              <div id="furyoProcessContent">
+                <div class="flex items-center justify-center h-64">
+                  <div class="text-center">
+                    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-3"></div>
+                    <p class="text-gray-500">読み込み中...</p>
+                  </div>
+                </div>
+              </div>
+            `;
+
+            // Load content for current process
+            await loadFuryoProcessContent(_furyoSelectedProcess);
+          }
+
+          window.selectFuryoProcess = async function(processKey) {
+            if (_furyoEditMode && _furyoHasChanges) {
+              if (!confirm('編集中の変更が失われます。続けますか？')) return;
+            }
+            _furyoSelectedProcess = processKey;
+            _furyoSelectedModel = null;
+            _furyoEditMode = false;
+            _furyoHasChanges = false;
+
+            // Update process selector button styles
+            document.querySelectorAll('.furyo-process-btn').forEach(btn => {
+              const id = btn.id.replace('furyoProcessBtn_', '');
+              if (id === processKey) {
+                btn.className = 'furyo-process-btn flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all border-blue-500 bg-blue-50 text-blue-700';
+              } else {
+                btn.className = 'furyo-process-btn flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-all border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50';
+              }
+            });
+
+            await loadFuryoProcessContent(processKey);
+          };
+
+          async function loadFuryoProcessContent(processKey) {
+            const contentArea = document.getElementById('furyoProcessContent');
+            if (!contentArea) return;
+
+            const proc = FURYO_PROCESS_DEFECTS[processKey];
+
+            // For non-kensaDB processes, render fixed defect list immediately
+            if (proc.counters) {
+              renderFuryoFixedDefects(contentArea, processKey, proc);
+              return;
+            }
+
+            // For kensaDB, load model-specific definitions
+            contentArea.innerHTML = `
               <div class="flex items-center justify-center h-64">
                 <div class="text-center">
                   <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-3"></div>
@@ -3212,7 +3332,6 @@ function loadPage(page) {
               </div>`;
 
             try {
-              // Fetch distinct モデル values from masterDB + existing definitions in parallel
               const [modelsRes, defsRes] = await Promise.all([
                 fetch(BASE_URL + 'queries', {
                   method: 'POST',
@@ -3237,7 +3356,6 @@ function loadPage(page) {
                 .filter(m => m && m.trim() !== '')
                 .sort();
 
-              // Index definitions by model
               _furyoDefinitions = {};
               _furyoDefinitionsEN = {};
               (defsData || []).forEach(def => {
@@ -3251,18 +3369,81 @@ function loadPage(page) {
 
             } catch (err) {
               console.error('loadFuryoKanri error:', err);
-              container.innerHTML = `<div class="p-6 text-red-500">データの読み込みに失敗しました: ${err.message}</div>`;
+              contentArea.innerHTML = `<div class="p-6 text-red-500">データの読み込みに失敗しました: ${err.message}</div>`;
             }
           }
 
+          function renderFuryoFixedDefects(contentArea, processKey, proc) {
+            const counters = proc.counters;
+            contentArea.innerHTML = `
+              <div class="bg-white rounded-lg border border-gray-200 shadow-sm">
+                <div class="p-6">
+                  <!-- Header -->
+                  <div class="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <i class="${proc.icon} text-blue-600 text-xl"></i>
+                      </div>
+                      <div>
+                        <h3 class="text-lg font-bold text-gray-900">${proc.label}</h3>
+                        <p class="text-sm text-gray-500">${proc.description}</p>
+                      </div>
+                    </div>
+                    <span class="px-3 py-1 bg-gray-100 text-gray-600 text-sm rounded-full font-medium">
+                      ${counters.length} 不良項目
+                    </span>
+                  </div>
+
+                  <!-- Defect Table -->
+                  <div class="overflow-hidden rounded-lg border border-gray-200">
+                    <table class="w-full">
+                      <thead class="bg-gray-50">
+                        <tr>
+                          <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">#</th>
+                          <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            <span class="flex items-center gap-1.5">🇯🇵 日本語</span>
+                          </th>
+                          <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            <span class="flex items-center gap-1.5">🇬🇧 English</span>
+                          </th>
+                          <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-32">DB Field</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-gray-100">
+                        ${counters.map((c, i) => `
+                          <tr class="hover:bg-gray-50 transition-colors">
+                            <td class="px-4 py-3">
+                              <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">${i + 1}</span>
+                            </td>
+                            <td class="px-4 py-3 text-sm font-medium text-gray-800">${c.jp}</td>
+                            <td class="px-4 py-3 text-sm text-gray-600">${c.en}</td>
+                            <td class="px-4 py-3"><code class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded">${c.jp}</code></td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <!-- Info Note -->
+                  <div class="mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <i class="ri-information-line text-amber-500 mt-0.5"></i>
+                    <p class="text-xs text-amber-700">
+                      このプロセスの不良項目はシステムで固定されています。変更が必要な場合は管理者にお問い合わせください。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+
           function renderFuryoKanriUI() {
-            const container = document.getElementById('furyoKanriContainer');
-            if (!container) return;
+            const contentArea = document.getElementById('furyoProcessContent');
+            if (!contentArea) return;
 
             const canEdit = FURYO_EDIT_ROLES.includes(currentUser?.role || '');
 
-            container.innerHTML = `
-              <div class="flex gap-4" style="height: calc(100vh - 180px);">
+            contentArea.innerHTML = `
+              <div class="flex gap-4" style="height: calc(100vh - 260px);">
                 <!-- Left: Model List -->
                 <div class="w-72 shrink-0 bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col h-full">
                   <div class="p-4 border-b border-gray-200 shrink-0">

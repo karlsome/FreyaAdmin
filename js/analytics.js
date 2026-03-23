@@ -1176,9 +1176,21 @@ function renderDefectDistributionChart() {
     const allDefs = analyticsData.defectDefinitions || [];
 
     // Resolve defect labels: auto model-specific or generic, language-aware
+    // For non-kensaDB processes, use server-provided defectLabels
     function getDefectLabels() {
         const lang  = localStorage.getItem('lang') || 'en';
         const useEN = lang === 'en';
+        const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
+
+        // For non-kensaDB processes, use server-provided labels from defectAnalysis
+        if (selectedCollection !== 'kensaDB' && defectAnalysis.length > 0) {
+            const analysis = defectAnalysis[0];
+            if (analysis.defectLabels && analysis.defectLabels.length > 0) {
+                return analysis.defectLabels;
+            }
+        }
+
+        // For kensaDB, use model-specific definitions
         if (activeModel) {
             const def = allDefs.find(d => d.モデル === activeModel);
             if (def) {
@@ -1364,6 +1376,20 @@ function renderDefectBarChart() {
     function getBarLabels() {
         const lang  = localStorage.getItem('lang') || 'en';
         const useEN = lang === 'en';
+        const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
+
+        // For non-kensaDB processes, use server-provided labels
+        if (selectedCollection !== 'kensaDB' && defectAnalysis.length > 0) {
+            const analysis = defectAnalysis[0];
+            if (analysis.defectLabels && analysis.defectLabels.length > 0) {
+                // Pad to 12 for consistency
+                const serverLabels = [...analysis.defectLabels];
+                while (serverLabels.length < 12) serverLabels.push(useEN ? `Counter ${serverLabels.length + 1}` : `カウンター${serverLabels.length + 1}`);
+                return serverLabels;
+            }
+        }
+
+        // For kensaDB, use model-specific definitions
         if (activeModel) {
             const def = allDefs.find(d => d.モデル === activeModel);
             if (def) {
@@ -2358,6 +2384,17 @@ function renderFactoryTop5DefectsChart() {
         : '';
 
     function getTop5Labels() {
+        const selectedCollection = document.getElementById('analyticsCollectionFilter')?.value || 'kensaDB';
+
+        // For non-kensaDB processes, use server-provided labels
+        if (selectedCollection !== 'kensaDB') {
+            if (defectAnalysis.defectLabels && defectAnalysis.defectLabels.length > 0) {
+                const serverLabels = [...defectAnalysis.defectLabels];
+                while (serverLabels.length < 12) serverLabels.push(useEN ? `Counter ${serverLabels.length + 1}` : `カウンター${serverLabels.length + 1}`);
+                return serverLabels;
+            }
+        }
+
         if (activeModel) {
             const def = allDefs.find(d => d.モデル === activeModel);
             if (def) {
