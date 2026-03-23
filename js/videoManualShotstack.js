@@ -45,6 +45,8 @@ const vmss = {
   debugMoveThrottleMs: 120,
   lastDebugMoveAt: 0,
   syncingShapeAsset: false,
+  syncingAnimatedClipUpdate: false,
+  animatedClipStateById: {},
   pendingShapeSyncTimer: null,
   onShapePointerRelease: null,
   drawMode: null,
@@ -1094,6 +1096,8 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmssSetTitle(options.title || vmss.title);
   vmssSetStatus('Ready');
   vmssStartClock();
+  // Delay to allow timeline DOM to render before injecting diamond markers
+  window.requestAnimationFrame(() => vmssRefreshTimelineKeyframeDiamonds());
 }
 
 function vmssSanitizeEditTemplate(template) {
@@ -1734,7 +1738,25 @@ function vmssBindEvents() {
     vmssSyncSelectionActionButtons();
   });
 
-  vmss.edit.events.on('clip:updated', () => {
+  vmss.edit.events.on('clip:updated', (change) => {
+    if (vmss.syncingAnimatedClipUpdate) return;
+
+    vmssSyncAnimatedClipUpdateFromEvent(change);
+    vmssRememberAnimatedClipStateByLocation(change?.current?.trackIndex, change?.current?.clipIndex);
+
+    if (change?.current?.trackIndex === vmss.currentStepIdx && change?.current?.clipIndex === vmss.selectedClipId) {
+      vmssDebugKeyframeConsole('clip:updated', {
+        changeSummary: {
+          previousOffsetX: change?.previous?.clip?.offset?.x,
+          previousOffsetY: change?.previous?.clip?.offset?.y,
+          currentOffsetX: change?.current?.clip?.offset?.x,
+          currentOffsetY: change?.current?.clip?.offset?.y,
+          previousRotate: change?.previous?.clip?.transform?.rotate?.angle,
+          currentRotate: change?.current?.clip?.transform?.rotate?.angle,
+        },
+      });
+    }
+
     vmssMarkDirty();
     vmssSyncSelectedShapeAsset();
     vmssScheduleSelectedShapeSync(40);
@@ -1745,6 +1767,7 @@ function vmssBindEvents() {
       selectedClipId: vmss.selectedClipId,
       currentStepIdx: vmss.currentStepIdx,
       playbackTime: vmss.edit?.playbackTime || 0,
+      change,
       clipVisual: vmssGetClipVisualSnapshot(),
     });
   });
@@ -1758,6 +1781,7 @@ function vmssBindEvents() {
   vmss.edit.events.on('clip:selected', (data) => {
     vmss.selectedClipId = data?.clipIndex ?? null;
     vmss.currentStepIdx = data?.trackIndex ?? 0;
+    vmssRememberAnimatedClipStateByLocation(vmss.currentStepIdx, vmss.selectedClipId);
     vmssSyncSelectedShapeAsset();
     vmssScheduleSelectedShapeSync();
     vmssOpenSelectedClipInDrawer();
@@ -2037,6 +2061,22 @@ function vmssTogglePlay() {
   if (vmss.edit.isPlaying) {
     vmss.edit.pause();
   } else {
+    const selection = vmssGetSelectedInspectorContext();
+    const selectedClip = selection?.clip;
+    const selectedClipStart = vmssGetStaticNumericValue(selectedClip?.start, 0);
+    const selectedKeyframeTimes = selectedClip ? vmssGetAllKeyframeTimesForClip(selectedClip) : [];
+    const lastSelectedKeyframeTime = selectedKeyframeTimes.length
+      ? selectedClipStart + selectedKeyframeTimes[selectedKeyframeTimes.length - 1]
+      : null;
+
+    // If the playhead is already sitting on/after the last keyframe, restart at the clip start
+    // so pressing play previews the animation from its initial state instead of showing only the end state.
+    if (lastSelectedKeyframeTime != null && (vmss.edit.playbackTime || 0) >= lastSelectedKeyframeTime - 0.01) {
+      vmss.edit.seek(selectedClipStart);
+    } else if ((vmss.edit.playbackTime || 0) >= (vmss.edit.totalDuration || 0) - 0.01) {
+      vmss.edit.seek(0);
+    }
+
     vmss.edit.play();
   }
 }
@@ -2610,7 +2650,41 @@ function vmssBuildSelectedPropertiesMarkup(selection) {
         : selection.category === 'shapes'
           ? 'Selected Shape'
           : 'Selected Text';
-  const keyframesValue = vmssEscapeHtml(vmssBuildSelectedKeyframePayload(selection));
+  const kfPoints = vmssGetClipKeyframePointsMap(clip, selection.category);
+  const hasKeyframes = Object.keys(kfPoints).length > 0;
+  const playbackTime = vmss.edit?.playbackTime || 0;
+  const clipStartTime = vmssGetStaticNumericValue(clip.start, 0);
+  const relTime = Number(Math.max(0, Math.min(length, playbackTime - clipStartTime)).toFixed(2));
+  const kfPropLabels = { scale: 'Scale', opacity: 'Opacity', offsetX: 'X Position', offsetY: 'Y Position', rotate: 'Rotation', volume: 'Volume' };
+
+  const keyframeSection = `
+    <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+      <div class="flex items-center justify-between">
+        <p class="text-sm font-semibold text-slate-900 dark:text-white">Keyframes</p>
+        ${hasKeyframes ? `<button onclick="vmssClearAllKeyframes()" class="text-xs text-red-500 hover:text-red-700 dark:text-red-400">Clear All</button>` : ''}
+      </div>
+      <button onclick="vmssAddKeyframeAtCurrentTime()" class="flex w-full items-center justify-center gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40">
+        <svg width="9" height="9" viewBox="0 0 8 8"><rect x="1" y="1" width="6" height="6" fill="currentColor" transform="rotate(45 4 4)"/></svg>
+        Record Keyframe &nbsp;T=${relTime}s
+      </button>
+      ${hasKeyframes
+        ? Object.entries(kfPoints).map(([prop, pts]) => `
+      <div class="space-y-1">
+        <p class="text-[11px] font-semibold text-slate-500 dark:text-gray-400">${kfPropLabels[prop] || prop}</p>
+        <div class="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-slate-50 dark:divide-gray-700 dark:border-gray-600 dark:bg-gray-800/60">
+          ${pts.map((pt, i) => `
+          <div class="flex items-center justify-between px-2.5 py-1.5">
+            <span class="font-mono text-xs text-slate-400 dark:text-gray-400">T=${pt.time}s</span>
+            <span class="text-xs font-semibold text-slate-700 dark:text-gray-200">${Number(pt.value.toFixed(4))}</span>
+            <button onclick="vmssDeleteKeyframePoint('${prop}', ${i})" title="Remove keyframe" class="ml-2 text-slate-300 hover:text-red-500 dark:hover:text-red-400">
+              <svg width="11" height="11" viewBox="0 0 12 12"><path d="M9 3L3 9M3 3l6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>`).join('')}
+        </div>
+      </div>`).join('')
+        : `<p class="text-center text-xs text-slate-400 dark:text-gray-500 py-1">No keyframes yet.<br>Seek the timeline then press Record.</p>`
+      }
+    </section>`;
 
   const transformSection = `
     <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
@@ -2693,15 +2767,6 @@ function vmssBuildSelectedPropertiesMarkup(selection) {
           <input type="number" step="1" min="1" value="${height}" onchange="vmssSetSelectedClipDimension('height', this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
         </label>
       </div>
-    </section>`;
-
-  const keyframeSection = `
-    <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
-      <div>
-        <p class="text-sm font-semibold text-slate-900 dark:text-white">Keyframes</p>
-        <p class="text-xs text-slate-500 dark:text-gray-400">Edit animated values as JSON for scale, opacity, offsetX, offsetY, rotate${selection.category === 'media' ? ', volume' : ''}.</p>
-      </div>
-      <textarea rows="8" onchange="vmssSetSelectedClipKeyframes(this.value)" class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">${keyframesValue}</textarea>
     </section>`;
 
   let assetFields = '';
@@ -2888,6 +2953,10 @@ function vmssApplySelectedClipUpdate(update, statusMessage = 'Clip updated') {
   vmss.timeline?.refresh?.();
   vmssMarkDirty();
   vmssRenderSelectedDrawerProperties();
+  window.requestAnimationFrame(() => {
+    vmssRememberAnimatedClipStateByLocation(context.trackIndex, context.clipIndex);
+    vmssRefreshTimelineKeyframeDiamonds();
+  });
   vmssSetStatus(statusMessage);
 }
 
@@ -2909,18 +2978,539 @@ function vmssBuildSelectOptions(values, selectedValue, emptyLabel = null) {
   return options.join('');
 }
 
-function vmssBuildSelectedKeyframePayload(selection) {
-  const clip = selection.clip || {};
-  const keyframes = {};
+// ── Keyframe helpers ─────────────────────────────────────────
+// The SDK stores animated properties as arrays of segments:
+//   [{start, length, from, to}]
+// Internally we work with simpler "points": [{time, value}]
+// converting to/from segments only when writing to the clip.
 
-  if (Array.isArray(clip.scale)) keyframes.scale = clip.scale;
-  if (Array.isArray(clip.opacity)) keyframes.opacity = clip.opacity;
-  if (Array.isArray(clip.offset?.x)) keyframes.offsetX = clip.offset.x;
-  if (Array.isArray(clip.offset?.y)) keyframes.offsetY = clip.offset.y;
-  if (Array.isArray(clip.transform?.rotate?.angle)) keyframes.rotate = clip.transform.rotate.angle;
-  if (selection.category === 'media' && Array.isArray(clip.asset?.volume)) keyframes.volume = clip.asset.volume;
+function vmssGetSelectedClipRelativePlaybackTime(selection = null) {
+  const resolvedSelection = selection || vmssGetSelectedInspectorContext();
+  if (!resolvedSelection) return 0;
 
-  return JSON.stringify(keyframes, null, 2);
+  const clipStart = vmssGetStaticNumericValue(resolvedSelection.clip?.start, 0);
+  const clipLength = vmssGetStaticNumericValue(resolvedSelection.clip?.length, 5);
+  const playbackTime = vmss.edit?.playbackTime || 0;
+
+  return Number(Math.max(0, Math.min(clipLength, playbackTime - clipStart)).toFixed(3));
+}
+
+function vmssSegmentsToKeyframePoints(segments) {
+  if (!Array.isArray(segments) || segments.length === 0) return [];
+  const sorted = [...segments].sort((a, b) => (a.start || 0) - (b.start || 0));
+  const points = [];
+  sorted.forEach((seg, i) => {
+    if (i === 0) points.push({ time: Number((seg.start || 0).toFixed(3)), value: Number(seg.from) });
+    points.push({ time: Number(((seg.start || 0) + (seg.length || 0)).toFixed(3)), value: Number(seg.to) });
+  });
+  return points;
+}
+
+function vmssSegmentsToExplicitKeyframePoints(segments, clipLength) {
+  const points = vmssSegmentsToKeyframePoints(segments);
+  if (!points.length) return points;
+
+  const tailIndex = points.length - 1;
+  const tailPoint = points[tailIndex];
+  const prevPoint = points[tailIndex - 1] || null;
+  const roundedClipLength = Number(clipLength.toFixed(3));
+
+  if (
+    tailPoint
+    && prevPoint
+    && Math.abs(tailPoint.time - roundedClipLength) <= 0.001
+    && Math.abs(tailPoint.value - prevPoint.value) <= 0.0001
+  ) {
+    points.pop();
+  }
+
+  return points;
+}
+
+function vmssKeyframePointsToSegments(points, clipLength, initialValue) {
+  const sorted = [...points].sort((a, b) => a.time - b.time);
+  const segments = [];
+
+  if (!sorted.length) return null;
+
+  const normalizedClipLength = Number(Math.max(0.001, clipLength).toFixed(3));
+  const firstPoint = sorted[0];
+
+  if (firstPoint.time > 0) {
+    segments.push({
+      start: 0,
+      length: Number(firstPoint.time.toFixed(3)),
+      from: Number(initialValue.toFixed(4)),
+      to: Number(firstPoint.value.toFixed(4)),
+    });
+  }
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const duration = Number((sorted[i + 1].time - sorted[i].time).toFixed(3));
+    if (duration <= 0) continue;
+    segments.push({
+      start: Number(sorted[i].time.toFixed(3)),
+      length: duration,
+      from: Number(sorted[i].value.toFixed(4)),
+      to: Number(sorted[i + 1].value.toFixed(4)),
+    });
+  }
+
+  const lastPoint = sorted[sorted.length - 1];
+  if (lastPoint.time < normalizedClipLength) {
+    segments.push({
+      start: Number(lastPoint.time.toFixed(3)),
+      length: Number((normalizedClipLength - lastPoint.time).toFixed(3)),
+      from: Number(lastPoint.value.toFixed(4)),
+      to: Number(lastPoint.value.toFixed(4)),
+    });
+  }
+
+  return segments.length > 0 ? segments : null;
+}
+
+function vmssInterpolateKeyframeAtTime(segments, time, fallback) {
+  if (!Array.isArray(segments) || segments.length === 0) return fallback;
+  const sorted = [...segments].sort((a, b) => (a.start || 0) - (b.start || 0));
+  for (const seg of sorted) {
+    const segEnd = (seg.start || 0) + (seg.length || 0);
+    if (time >= (seg.start || 0) && time <= segEnd) {
+      if (!seg.length) return seg.from;
+      const t = (time - (seg.start || 0)) / seg.length;
+      return seg.from + (seg.to - seg.from) * t;
+    }
+  }
+  if (time < (sorted[0].start || 0)) return sorted[0].from;
+  return sorted[sorted.length - 1].to;
+}
+
+function vmssUpsertKeyframePoint(segments, time, value) {
+  const points = vmssSegmentsToKeyframePoints(segments);
+  const tolerance = 0.05; // treat points within 50 ms as the same keyframe
+  const idx = points.findIndex(p => Math.abs(p.time - time) <= tolerance);
+  if (idx >= 0) {
+    points[idx] = { time: points[idx].time, value };
+  } else {
+    points.push({ time, value });
+  }
+  return points;
+}
+
+function vmssGetClipKeyframePointsMap(clip, category) {
+  const map = {};
+  const clipLength = vmssGetStaticNumericValue(clip.length, 5);
+  if (Array.isArray(clip.scale)) map.scale = vmssSegmentsToExplicitKeyframePoints(clip.scale, clipLength);
+  if (Array.isArray(clip.opacity)) map.opacity = vmssSegmentsToExplicitKeyframePoints(clip.opacity, clipLength);
+  if (Array.isArray(clip.offset?.x)) map.offsetX = vmssSegmentsToExplicitKeyframePoints(clip.offset.x, clipLength);
+  if (Array.isArray(clip.offset?.y)) map.offsetY = vmssSegmentsToExplicitKeyframePoints(clip.offset.y, clipLength);
+  if (Array.isArray(clip.transform?.rotate?.angle)) map.rotate = vmssSegmentsToExplicitKeyframePoints(clip.transform.rotate.angle, clipLength);
+  if (category === 'media' && Array.isArray(clip.asset?.volume)) map.volume = vmssSegmentsToExplicitKeyframePoints(clip.asset.volume, clipLength);
+  return map;
+}
+
+function vmssGetAllKeyframeTimesForClip(clip) {
+  const times = new Set();
+  const clipLength = vmssGetStaticNumericValue(clip.length, 5);
+  const addTimes = (segs) => {
+    if (!Array.isArray(segs)) return;
+    vmssSegmentsToExplicitKeyframePoints(segs, clipLength).forEach(p => times.add(Number(p.time.toFixed(2))));
+  };
+  addTimes(clip.scale);
+  addTimes(clip.opacity);
+  addTimes(clip.offset?.x);
+  addTimes(clip.offset?.y);
+  addTimes(clip.transform?.rotate?.angle);
+  addTimes(clip.asset?.volume);
+  return Array.from(times).sort((a, b) => a - b);
+}
+
+function vmssBuildKeyframedPropertyValue(existingValue, nextValue, clipLength, initialValue, time) {
+  const currentPoints = Array.isArray(existingValue)
+    ? vmssSegmentsToExplicitKeyframePoints(existingValue, clipLength)
+    : [];
+
+  const tolerance = 0.05;
+  const nextPoints = [...currentPoints];
+  const pointIndex = nextPoints.findIndex(point => Math.abs(point.time - time) <= tolerance);
+  const normalizedTime = Number(time.toFixed(3));
+  const normalizedValue = Number(nextValue.toFixed(4));
+
+  if (pointIndex >= 0) {
+    nextPoints[pointIndex] = { time: nextPoints[pointIndex].time, value: normalizedValue };
+  } else {
+    nextPoints.push({ time: normalizedTime, value: normalizedValue });
+  }
+
+  return vmssKeyframePointsToSegments(nextPoints, clipLength, initialValue);
+}
+
+function vmssBuildAnimatedSegmentsFromLiveValue(previousValue, currentValue, clipLength, relTime, fallback) {
+  if (!Array.isArray(previousValue) || Array.isArray(currentValue) || !Number.isFinite(Number(currentValue))) {
+    return null;
+  }
+
+  const initialValue = vmssInterpolateKeyframeAtTime(previousValue, 0, fallback);
+  return vmssBuildKeyframedPropertyValue(previousValue, Number(currentValue), clipLength, initialValue, relTime);
+}
+
+function vmssCreateAnimatedClipStateSnapshot(clip, category = null) {
+  if (!clip) return null;
+
+  const selectionCategory = category || vmssGetAddElementsCategoryForClip(clip);
+  const snapshot = {
+    scale: Array.isArray(clip.scale) ? structuredClone(clip.scale) : null,
+    opacity: Array.isArray(clip.opacity) ? structuredClone(clip.opacity) : null,
+    offsetX: Array.isArray(clip.offset?.x) ? structuredClone(clip.offset.x) : null,
+    offsetY: Array.isArray(clip.offset?.y) ? structuredClone(clip.offset.y) : null,
+    rotate: Array.isArray(clip.transform?.rotate?.angle) ? structuredClone(clip.transform.rotate.angle) : null,
+    volume: selectionCategory === 'media' && Array.isArray(clip.asset?.volume) ? structuredClone(clip.asset.volume) : null,
+  };
+
+  return Object.values(snapshot).some(Boolean) ? snapshot : null;
+}
+
+function vmssRememberAnimatedClipState(clipId, clip, category = null) {
+  if (!clipId) return;
+
+  const snapshot = vmssCreateAnimatedClipStateSnapshot(clip, category);
+  if (snapshot) {
+    vmss.animatedClipStateById[clipId] = snapshot;
+  } else {
+    delete vmss.animatedClipStateById[clipId];
+  }
+}
+
+function vmssRememberAnimatedClipStateByLocation(trackIndex, clipIndex, category = null) {
+  const clipId = vmss.edit?.getClipId?.(trackIndex, clipIndex);
+  const clip = vmss.edit?.getEdit?.()?.timeline?.tracks?.[trackIndex]?.clips?.[clipIndex];
+  if (!clipId || !clip) return;
+  vmssRememberAnimatedClipState(clipId, clip, category);
+}
+
+function vmssSyncAnimatedClipUpdateFromEvent(change) {
+  if (vmss.syncingAnimatedClipUpdate || !change?.previous?.clip || !change?.current?.clip) return false;
+
+  const previousClip = change.previous.clip;
+  const currentClip = change.current.clip;
+  const trackIndex = change.current.trackIndex;
+  const clipIndex = change.current.clipIndex;
+  const clipId = vmss.edit?.getClipId?.(trackIndex, clipIndex);
+  if (!clipId) return false;
+  const rememberedState = vmss.animatedClipStateById[clipId] || null;
+
+  const clipLength = vmssGetStaticNumericValue(currentClip.length ?? previousClip.length, 5);
+  const clipStart = vmssGetStaticNumericValue(currentClip.start ?? previousClip.start, 0);
+  const relTime = Number(Math.max(0, Math.min(clipLength, (vmss.edit?.playbackTime || 0) - clipStart)).toFixed(3));
+
+  const update = {};
+
+  const scaleSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.scale || rememberedState?.scale, currentClip.scale, clipLength, relTime, 1);
+  if (scaleSegs) update.scale = scaleSegs;
+
+  const opacitySegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.opacity || rememberedState?.opacity, currentClip.opacity, clipLength, relTime, 1);
+  if (opacitySegs) update.opacity = opacitySegs;
+
+  const offsetXSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.offset?.x || rememberedState?.offsetX, currentClip.offset?.x, clipLength, relTime, 0);
+  const offsetYSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.offset?.y || rememberedState?.offsetY, currentClip.offset?.y, clipLength, relTime, 0);
+  if (offsetXSegs || offsetYSegs) {
+    update.offset = {
+      ...(currentClip.offset || {}),
+      ...(offsetXSegs ? { x: offsetXSegs } : {}),
+      ...(offsetYSegs ? { y: offsetYSegs } : {}),
+    };
+  }
+
+  const rotateSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.transform?.rotate?.angle || rememberedState?.rotate, currentClip.transform?.rotate?.angle, clipLength, relTime, 0);
+  if (rotateSegs) {
+    update.transform = {
+      ...(currentClip.transform || {}),
+      rotate: {
+        ...((currentClip.transform || {}).rotate || {}),
+        angle: rotateSegs,
+      },
+    };
+  }
+
+  const volumeSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.asset?.volume || rememberedState?.volume, currentClip.asset?.volume, clipLength, relTime, 1);
+  if (volumeSegs) {
+    update.asset = {
+      ...(currentClip.asset || {}),
+      volume: volumeSegs,
+    };
+  }
+
+  if (!Object.keys(update).length) return false;
+
+  vmss.syncingAnimatedClipUpdate = true;
+  try {
+    vmss.edit?.updateClipInDocument?.(clipId, update);
+    vmss.edit?.resolveClip?.(clipId);
+    vmss.canvas?.refresh?.();
+    vmss.timeline?.refresh?.();
+    vmssRememberAnimatedClipStateByLocation(trackIndex, clipIndex);
+    window.requestAnimationFrame(() => vmssRefreshTimelineKeyframeDiamonds());
+  } finally {
+    vmss.syncingAnimatedClipUpdate = false;
+  }
+
+  return true;
+}
+
+function vmssHasAnyAnimatedProperties(clip, category = null) {
+  const selectionCategory = category || vmssGetAddElementsCategoryForClip(clip);
+  return Boolean(
+    Array.isArray(clip?.scale)
+    || Array.isArray(clip?.opacity)
+    || Array.isArray(clip?.offset?.x)
+    || Array.isArray(clip?.offset?.y)
+    || Array.isArray(clip?.transform?.rotate?.angle)
+    || (selectionCategory === 'media' && Array.isArray(clip?.asset?.volume))
+  );
+}
+
+function vmssMaybeBuildAnimatedScalarUpdate(propertyValue, nextValue, selection, fallback) {
+  const clipLength = vmssGetStaticNumericValue(selection.clip?.length, 5);
+  const relTime = vmssGetSelectedClipRelativePlaybackTime(selection);
+  const initialValue = Array.isArray(propertyValue)
+    ? vmssInterpolateKeyframeAtTime(propertyValue, 0, fallback)
+    : vmssGetStaticNumericValue(propertyValue, fallback);
+
+  if (!Array.isArray(propertyValue) && !vmssHasAnyAnimatedProperties(selection.clip, selection.category)) {
+    return null;
+  }
+
+  return vmssBuildKeyframedPropertyValue(propertyValue, nextValue, clipLength, initialValue, relTime);
+}
+
+function vmssGetSelectedClipLiveRuntimeValues(selection) {
+  const clipId = vmss.edit?.getClipId?.(selection.trackIndex, selection.clipIndex);
+  const player = clipId ? vmss.edit?.getPlayerByClipId?.(clipId) : null;
+
+  if (!player) {
+    return {
+      offsetX: vmssGetStaticNumericValue(selection.clip.offset?.x, 0),
+      offsetY: vmssGetStaticNumericValue(selection.clip.offset?.y, 0),
+      rotate: vmssGetStaticNumericValue(selection.clip.transform?.rotate?.angle, 0),
+      opacity: vmssGetStaticNumericValue(selection.clip.opacity, 1),
+      scale: vmssGetStaticNumericValue(selection.clip.scale, 1),
+      volume: vmssGetStaticNumericValue(selection.clip.asset?.volume, 1),
+    };
+  }
+
+  const liveOffset = player.calculateMoveOffset?.(0, 0) || {
+    x: vmssGetStaticNumericValue(selection.clip.offset?.x, 0),
+    y: vmssGetStaticNumericValue(selection.clip.offset?.y, 0),
+  };
+
+  return {
+    offsetX: Number((liveOffset.x ?? 0).toFixed(4)),
+    offsetY: Number((liveOffset.y ?? 0).toFixed(4)),
+    rotate: Number((player.getRotation?.() ?? vmssGetStaticNumericValue(selection.clip.transform?.rotate?.angle, 0)).toFixed(2)),
+    opacity: Number((player.getOpacity?.() ?? vmssGetStaticNumericValue(selection.clip.opacity, 1)).toFixed(4)),
+    // Scale from the raw clip config remains safer than player.getScale(), which includes fit scaling.
+    scale: vmssGetStaticNumericValue(selection.clip.scale, 1),
+    volume: vmssGetStaticNumericValue(selection.clip.asset?.volume, 1),
+  };
+}
+
+function vmssBuildKeyframeDebugSnapshot(selection = null) {
+  const resolvedSelection = selection || vmssGetSelectedInspectorContext();
+  if (!resolvedSelection) return null;
+
+  const clipId = vmss.edit?.getClipId?.(resolvedSelection.trackIndex, resolvedSelection.clipIndex);
+  const player = clipId ? vmss.edit?.getPlayerByClipId?.(clipId) : null;
+  const liveValues = vmssGetSelectedClipLiveRuntimeValues(resolvedSelection);
+
+  return {
+    playbackTime: vmss.edit?.playbackTime || 0,
+    selectedClipId: clipId,
+    trackIndex: resolvedSelection.trackIndex,
+    clipIndex: resolvedSelection.clipIndex,
+    clipStart: vmssGetStaticNumericValue(resolvedSelection.clip?.start, 0),
+    clipLength: vmssGetStaticNumericValue(resolvedSelection.clip?.length, 5),
+    documentValues: {
+      scale: resolvedSelection.clip?.scale,
+      opacity: resolvedSelection.clip?.opacity,
+      offsetX: resolvedSelection.clip?.offset?.x,
+      offsetY: resolvedSelection.clip?.offset?.y,
+      rotate: resolvedSelection.clip?.transform?.rotate?.angle,
+      volume: resolvedSelection.clip?.asset?.volume,
+    },
+    explicitKeyframes: vmssGetClipKeyframePointsMap(resolvedSelection.clip, resolvedSelection.category),
+    liveValues,
+    playerState: player ? {
+      absolutePosition: player.getPosition?.(),
+      rotation: player.getRotation?.(),
+      opacity: player.getOpacity?.(),
+      scale: player.getScale?.(),
+      size: player.getSize?.(),
+    } : null,
+  };
+}
+
+function vmssDebugKeyframeConsole(label, payload = {}) {
+  const snapshot = vmssBuildKeyframeDebugSnapshot();
+  console.groupCollapsed(`[VMSS KEYFRAME] ${label}`);
+  console.log('snapshot', snapshot);
+  if (payload && Object.keys(payload).length) {
+    console.log('payload', payload);
+  }
+  console.groupEnd();
+}
+
+function vmssAddKeyframeAtCurrentTime() {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection) return;
+
+  const clip = selection.clip;
+  const clipLength = vmssGetStaticNumericValue(clip.length, 5);
+  const relTime = vmssGetSelectedClipRelativePlaybackTime(selection);
+  const liveValues = vmssGetSelectedClipLiveRuntimeValues(selection);
+
+  const readVal = (segments, fallback) =>
+    Array.isArray(segments)
+      ? vmssInterpolateKeyframeAtTime(segments, relTime, fallback)
+      : vmssGetStaticNumericValue(segments, fallback);
+
+  const scaleVal = liveValues.scale;
+  const opacityVal = liveValues.opacity;
+  const offsetXVal = liveValues.offsetX;
+  const offsetYVal = liveValues.offsetY;
+  const rotateVal = liveValues.rotate;
+
+  const scaleSegs = vmssBuildKeyframedPropertyValue(clip.scale, scaleVal, clipLength, vmssGetStaticNumericValue(clip.scale, 1), relTime);
+  const opacitySegs = vmssBuildKeyframedPropertyValue(clip.opacity, opacityVal, clipLength, vmssGetStaticNumericValue(clip.opacity, 1), relTime);
+  const offsetXSegs = vmssBuildKeyframedPropertyValue(clip.offset?.x, offsetXVal, clipLength, vmssGetStaticNumericValue(clip.offset?.x, 0), relTime);
+  const offsetYSegs = vmssBuildKeyframedPropertyValue(clip.offset?.y, offsetYVal, clipLength, vmssGetStaticNumericValue(clip.offset?.y, 0), relTime);
+  const rotateSegs = vmssBuildKeyframedPropertyValue(clip.transform?.rotate?.angle, rotateVal, clipLength, vmssGetStaticNumericValue(clip.transform?.rotate?.angle, 0), relTime);
+
+  const update = {};
+  if (scaleSegs)   update.scale   = scaleSegs;
+  if (opacitySegs) update.opacity = opacitySegs;
+  if (offsetXSegs || offsetYSegs) {
+    update.offset = {
+      ...(clip.offset || {}),
+      ...(offsetXSegs ? { x: offsetXSegs } : {}),
+      ...(offsetYSegs ? { y: offsetYSegs } : {}),
+    };
+  }
+  if (rotateSegs) {
+    update.transform = {
+      ...(clip.transform || {}),
+      rotate: { ...((clip.transform || {}).rotate || {}), angle: rotateSegs },
+    };
+  }
+  if (selection.category === 'media') {
+    const volumeVal = liveValues.volume;
+    const volumeSegs = vmssBuildKeyframedPropertyValue(clip.asset?.volume, volumeVal, clipLength, vmssGetStaticNumericValue(clip.asset?.volume, 1), relTime);
+    if (volumeSegs) update.asset = { ...clip.asset, volume: volumeSegs };
+  }
+
+  if (!Object.keys(update).length) {
+    vmssSetStatus('Unable to record keyframe');
+    return;
+  }
+
+  vmssDebugKeyframeConsole('record:before-apply', {
+    relTime,
+    liveValues,
+    update,
+  });
+
+  vmssApplySelectedClipUpdate(update, `Keyframe recorded at T=${relTime}s`);
+  vmssRefreshTimelineKeyframeDiamonds();
+  window.requestAnimationFrame(() => vmssDebugKeyframeConsole('record:after-apply', { relTime }));
+}
+
+function vmssDeleteKeyframePoint(property, pointIndex) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection) return;
+
+  const clip = selection.clip;
+  const clipLength = vmssGetStaticNumericValue(clip.length, 5);
+
+  const collapseToStatic = (segments, fallback) => {
+    const pts = vmssSegmentsToExplicitKeyframePoints(segments, clipLength);
+    pts.splice(pointIndex, 1);
+    if (!pts.length) return fallback;
+    return vmssKeyframePointsToSegments(pts, clipLength, fallback) ?? fallback;
+  };
+
+  const update = {};
+  if (property === 'scale')   update.scale   = collapseToStatic(clip.scale,   vmssGetStaticNumericValue(clip.scale, 1));
+  if (property === 'opacity') update.opacity = collapseToStatic(clip.opacity, vmssGetStaticNumericValue(clip.opacity, 1));
+  if (property === 'offsetX') update.offset  = { ...(clip.offset || {}), x: collapseToStatic(clip.offset?.x, vmssGetStaticNumericValue(clip.offset?.x, 0)) };
+  if (property === 'offsetY') update.offset  = { ...(clip.offset || {}), y: collapseToStatic(clip.offset?.y, vmssGetStaticNumericValue(clip.offset?.y, 0)) };
+  if (property === 'rotate')  update.transform = { ...(clip.transform || {}), rotate: { ...((clip.transform || {}).rotate || {}), angle: collapseToStatic(clip.transform?.rotate?.angle, vmssGetStaticNumericValue(clip.transform?.rotate?.angle, 0)) } };
+  if (property === 'volume')  update.asset   = { ...clip.asset, volume: collapseToStatic(clip.asset?.volume, vmssGetStaticNumericValue(clip.asset?.volume, 1)) };
+
+  vmssApplySelectedClipUpdate(update, 'Keyframe removed');
+  vmssRefreshTimelineKeyframeDiamonds();
+}
+
+function vmssClearAllKeyframes() {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection) return;
+
+  const clip = selection.clip;
+  const update = {};
+
+  if (Array.isArray(clip.scale))   update.scale   = vmssGetStaticNumericValue(clip.scale, 1);
+  if (Array.isArray(clip.opacity)) update.opacity = vmssGetStaticNumericValue(clip.opacity, 1);
+  if (Array.isArray(clip.offset?.x) || Array.isArray(clip.offset?.y)) {
+    update.offset = {
+      ...(clip.offset || {}),
+      ...(Array.isArray(clip.offset?.x)  ? { x: vmssGetStaticNumericValue(clip.offset.x, 0) }  : {}),
+      ...(Array.isArray(clip.offset?.y)  ? { y: vmssGetStaticNumericValue(clip.offset.y, 0) }  : {}),
+    };
+  }
+  if (Array.isArray(clip.transform?.rotate?.angle)) {
+    update.transform = { ...(clip.transform || {}), rotate: { ...((clip.transform || {}).rotate || {}), angle: vmssGetStaticNumericValue(clip.transform.rotate.angle, 0) } };
+  }
+  if (selection.category === 'media' && Array.isArray(clip.asset?.volume)) {
+    update.asset = { ...clip.asset, volume: vmssGetStaticNumericValue(clip.asset.volume, 1) };
+  }
+
+  if (Object.keys(update).length === 0) { vmssSetStatus('No keyframes to clear'); return; }
+
+  vmssApplySelectedClipUpdate(update, 'All keyframes cleared');
+  vmssRefreshTimelineKeyframeDiamonds();
+}
+
+function vmssRefreshTimelineKeyframeDiamonds() {
+  document.querySelectorAll('.vmss-kf-diamonds').forEach(el => el.remove());
+
+  const editJson = vmss.edit?.getEdit?.();
+  if (!editJson) return;
+
+  (editJson.timeline?.tracks || []).forEach((track, trackIndex) => {
+    (track?.clips || []).forEach((clip, clipIndex) => {
+      const kfTimes = vmssGetAllKeyframeTimesForClip(clip);
+      if (kfTimes.length === 0) return;
+
+      const clipEl = document.querySelector(`.ss-clip[data-track-index="${trackIndex}"][data-clip-index="${clipIndex}"]`);
+      if (!clipEl) return;
+
+      const clipLength = vmssGetStaticNumericValue(clip.length, 5);
+      if (clipLength <= 0) return;
+
+      if (window.getComputedStyle(clipEl).position === 'static') clipEl.style.position = 'relative';
+
+      const container = document.createElement('div');
+      container.className = 'vmss-kf-diamonds pointer-events-none absolute inset-0 overflow-hidden';
+
+      kfTimes.forEach(t => {
+        const pct = Math.max(0, Math.min(1, t / clipLength)) * 100;
+        const marker = document.createElement('div');
+        marker.className = 'vmss-kf-diamond absolute top-0';
+        marker.style.cssText = `left:${pct}%;transform:translateX(-50%);`;
+        marker.innerHTML = '<svg width="8" height="8" viewBox="0 0 8 8" style="display:block"><rect x="1" y="1" width="6" height="6" fill="#f59e0b" transform="rotate(45 4 4)"/></svg>';
+        container.appendChild(marker);
+      });
+
+      clipEl.appendChild(container);
+    });
+  });
 }
 
 function vmssSetSelectedClipTiming(field, value) {
@@ -2946,26 +3536,37 @@ function vmssSetSelectedClipOffset(field, value) {
   const numericValue = Number(value);
   if (!selection || !Number.isFinite(numericValue)) return;
 
+  const nextValue = Number(numericValue.toFixed(4));
+  const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.offset?.[field], nextValue, selection, 0);
+
   vmssApplySelectedClipUpdate({
     offset: {
       ...(selection.clip.offset || {}),
-      [field]: Number(numericValue.toFixed(4)),
+      [field]: animatedValue || nextValue,
     },
   }, `${field.toUpperCase()} position updated`);
 }
 
 function vmssSetSelectedClipScale(value) {
+  const selection = vmssGetSelectedInspectorContext();
   const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) return;
+  if (!selection || !Number.isFinite(numericValue)) return;
 
-  vmssApplySelectedClipUpdate({ scale: Math.max(0.05, Number(numericValue.toFixed(3))) }, 'Scale updated');
+  const nextValue = Math.max(0.05, Number(numericValue.toFixed(3)));
+  const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.scale, nextValue, selection, 1);
+
+  vmssApplySelectedClipUpdate({ scale: animatedValue || nextValue }, 'Scale updated');
 }
 
 function vmssSetSelectedClipOpacity(value) {
+  const selection = vmssGetSelectedInspectorContext();
   const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) return;
+  if (!selection || !Number.isFinite(numericValue)) return;
 
-  vmssApplySelectedClipUpdate({ opacity: Math.max(0, Math.min(1, Number(numericValue.toFixed(2)))) }, 'Opacity updated');
+  const nextValue = Math.max(0, Math.min(1, Number(numericValue.toFixed(2))));
+  const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.opacity, nextValue, selection, 1);
+
+  vmssApplySelectedClipUpdate({ opacity: animatedValue || nextValue }, 'Opacity updated');
 }
 
 function vmssSetSelectedClipRotation(value) {
@@ -2973,12 +3574,15 @@ function vmssSetSelectedClipRotation(value) {
   const numericValue = Number(value);
   if (!selection || !Number.isFinite(numericValue)) return;
 
+  const nextValue = Number(numericValue.toFixed(2));
+  const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.transform?.rotate?.angle, nextValue, selection, 0);
+
   vmssApplySelectedClipUpdate({
     transform: {
       ...(selection.clip.transform || {}),
       rotate: {
         ...((selection.clip.transform || {}).rotate || {}),
-        angle: Number(numericValue.toFixed(2)),
+        angle: animatedValue || nextValue,
       },
     },
   }, 'Rotation updated');
@@ -3220,10 +3824,13 @@ function vmssSetSelectedMediaVolume(value) {
   const numericValue = Number(value);
   if (!selection || selection.category !== 'media' || !Number.isFinite(numericValue)) return;
 
+  const nextValue = Math.max(0, Math.min(1, Number(numericValue.toFixed(2))));
+  const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.asset?.volume, nextValue, selection, 1);
+
   vmssApplySelectedClipUpdate({
     asset: {
       ...selection.clip.asset,
-      volume: Math.max(0, Math.min(1, Number(numericValue.toFixed(2)))),
+      volume: animatedValue || nextValue,
     },
   }, 'Volume updated');
 }
@@ -4340,6 +4947,9 @@ window.vmssSetSelectedClipRotation = vmssSetSelectedClipRotation;
 window.vmssSetSelectedClipTransition = vmssSetSelectedClipTransition;
 window.vmssSetSelectedClipEffect = vmssSetSelectedClipEffect;
 window.vmssSetSelectedClipKeyframes = vmssSetSelectedClipKeyframes;
+window.vmssAddKeyframeAtCurrentTime = vmssAddKeyframeAtCurrentTime;
+window.vmssDeleteKeyframePoint = vmssDeleteKeyframePoint;
+window.vmssClearAllKeyframes = vmssClearAllKeyframes;
 window.vmssSetSelectedTextContent = vmssSetSelectedTextContent;
 window.vmssSetSelectedTextFontSize = vmssSetSelectedTextFontSize;
 window.vmssSetSelectedTextFontWeight = vmssSetSelectedTextFontWeight;
@@ -4387,6 +4997,9 @@ window.vmssResetLocalProject = vmssResetLocalProject;
 window.vmssDeleteSelectedClip = vmssDeleteSelectedClip;
 window.vmssHandleImageUpload = vmssHandleImageUpload;
 window.vmssHandleVideoUpload = vmssHandleVideoUpload;
+window.vmssDumpSelectedKeyframeDebug = function vmssDumpSelectedKeyframeDebug() {
+  vmssDebugKeyframeConsole('manual-dump');
+};
 window.vmssSetDebug = function vmssSetDebug(enabled) {
   vmss.debugEnabled = Boolean(enabled);
   console.log('[VMSS DEBUG] enabled =', vmss.debugEnabled);
