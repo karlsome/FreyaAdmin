@@ -62,11 +62,11 @@ const vmss = {
   onPreviewInteractionWheel: null,
   onPreviewInteractionPointerDown: null,
   onPreviewInteractionPointerMove: null,
+  onPreviewInteractionPointerUp: null,
   previewResizeObserver: null,
   onPreviewSurfaceTransitionEnd: null,
   previewMaskHideTimer: null,
-  previewDrawerInteractionLockUntil: 0,
-  previewDrawerInteractionLockTimer: null,
+  previewDrawerAwaitingPrimaryRelease: false,
   addElementsLayoutRaf: null,
   onAddElementsWindowResize: null,
   onAddElementsOutsidePointerDown: null,
@@ -4096,20 +4096,19 @@ function vmssHidePreviewTransitionMask(delay = 90) {
 }
 
 function vmssIsPreviewInteractionLocked() {
-  return Date.now() < (vmss.previewDrawerInteractionLockUntil || 0);
+  return !!vmss.previewDrawerAwaitingPrimaryRelease;
 }
 
-function vmssLockPreviewInteractionForDrawer(duration = 220) {
-  vmss.previewDrawerInteractionLockUntil = Date.now() + Math.max(0, duration);
+function vmssLockPreviewInteractionForDrawer() {
+  vmss.previewDrawerAwaitingPrimaryRelease = true;
+}
 
-  if (vmss.previewDrawerInteractionLockTimer) {
-    window.clearTimeout(vmss.previewDrawerInteractionLockTimer);
+function vmssReleasePreviewInteractionLock(event = null) {
+  if (event && event.button !== 0 && event.buttons !== 0) {
+    return;
   }
 
-  vmss.previewDrawerInteractionLockTimer = window.setTimeout(() => {
-    vmss.previewDrawerInteractionLockTimer = null;
-    vmss.previewDrawerInteractionLockUntil = 0;
-  }, Math.max(0, duration));
+  vmss.previewDrawerAwaitingPrimaryRelease = false;
 }
 
 function vmssGetPreviewDrawerOffsetX() {
@@ -4283,15 +4282,20 @@ function vmssBindPreviewViewportGuards() {
   };
 
   vmss.onPreviewInteractionPointerMove = (event) => {
-    if (!vmssIsPreviewInteractionLocked()) return;
+    if (!vmssIsPreviewInteractionLocked() || !(event.buttons & 1)) return;
 
     event.preventDefault();
     event.stopPropagation();
   };
 
+  vmss.onPreviewInteractionPointerUp = (event) => {
+    vmssReleasePreviewInteractionLock(event);
+  };
+
   surface.addEventListener('wheel', vmss.onPreviewInteractionWheel, { passive: false, capture: true });
   surface.addEventListener('pointerdown', vmss.onPreviewInteractionPointerDown, true);
   document.addEventListener('pointermove', vmss.onPreviewInteractionPointerMove, true);
+  document.addEventListener('pointerup', vmss.onPreviewInteractionPointerUp, true);
 }
 
 function vmssUnbindPreviewViewportGuards() {
@@ -4307,17 +4311,17 @@ function vmssUnbindPreviewViewportGuards() {
     document.removeEventListener('pointermove', vmss.onPreviewInteractionPointerMove, true);
   }
 
-  if (vmss.previewDrawerInteractionLockTimer) {
-    window.clearTimeout(vmss.previewDrawerInteractionLockTimer);
-    vmss.previewDrawerInteractionLockTimer = null;
+  if (vmss.onPreviewInteractionPointerUp) {
+    document.removeEventListener('pointerup', vmss.onPreviewInteractionPointerUp, true);
   }
 
-  vmss.previewDrawerInteractionLockUntil = 0;
+  vmss.previewDrawerAwaitingPrimaryRelease = false;
 
   vmss.previewInteractionSurface = null;
   vmss.onPreviewInteractionWheel = null;
   vmss.onPreviewInteractionPointerDown = null;
   vmss.onPreviewInteractionPointerMove = null;
+  vmss.onPreviewInteractionPointerUp = null;
 }
 
 function vmssGetCanvasViewportSize() {
