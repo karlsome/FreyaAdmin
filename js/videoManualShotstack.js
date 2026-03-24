@@ -67,6 +67,7 @@ const vmss = {
   onPreviewSurfaceTransitionEnd: null,
   previewMaskHideTimer: null,
   previewDrawerAwaitingPrimaryRelease: false,
+  closeDrawerOnNextSelectionClear: false,
   addElementsLayoutRaf: null,
   onAddElementsWindowResize: null,
   onAddElementsOutsidePointerDown: null,
@@ -1787,6 +1788,16 @@ function vmssBindEvents() {
 
   vmssBindShapeSyncWatchers();
 
+  const internalEvents = typeof vmss.edit.getInternalEvents === 'function'
+    ? vmss.edit.getInternalEvents()
+    : null;
+
+  if (internalEvents?.on) {
+    internalEvents.on('canvas:backgroundClicked', () => {
+      vmss.closeDrawerOnNextSelectionClear = true;
+    });
+  }
+
   vmss.edit.events.on('track:added', () => {
     vmssSyncStepsFromTracks();
     vmssRenderStepsPanel();
@@ -1844,6 +1855,7 @@ function vmssBindEvents() {
   });
 
   vmss.edit.events.on('clip:selected', (data) => {
+    vmss.closeDrawerOnNextSelectionClear = false;
     vmss.selectedClipId = data?.clipIndex ?? null;
     vmss.currentStepIdx = data?.trackIndex ?? 0;
     vmssRememberAnimatedClipStateByLocation(vmss.currentStepIdx, vmss.selectedClipId);
@@ -1866,13 +1878,15 @@ function vmssBindEvents() {
   });
 
   vmss.edit.events.on('selection:cleared', () => {
+    const shouldCloseDrawer = vmss.closeDrawerOnNextSelectionClear;
+    vmss.closeDrawerOnNextSelectionClear = false;
     vmss.selectedClipId = null;
     vmssRenderSelectedDrawerProperties();
     vmssHideFloatingSelectionToolbars();
     vmssRenderStepsPanel();
     vmssSyncSelectionActionButtons();
-    // Clicking the canvas background deselects everything — treat that as "click outside" to close the drawer
-    if (vmss.addElementsOpen) {
+    // Only canvas-background deselection should dismiss the drawer.
+    if (vmss.addElementsOpen && shouldCloseDrawer) {
       vmssCloseAddElementsPanel();
     }
   });
@@ -2305,10 +2319,18 @@ function vmssBindAddElementsLayoutWatchers() {
     const canvas = document.getElementById('vmss-preview-surface');
     const target = event.target;
     if (!shell || !(target instanceof Node)) return;
+
+    const targetElement = target instanceof Element ? target : null;
+    if (!canvas || !canvas.contains(target)) {
+      vmss.closeDrawerOnNextSelectionClear = false;
+    }
+
     // Never close from inside the panel or anywhere inside the canvas/preview —
     // canvas background clicks are handled via the SDK 'selection:cleared' event instead.
     if (shell.contains(target)) return;
     if (canvas && canvas.contains(target)) return;
+    if (targetElement && vmssIsCanvasManipulationTarget(targetElement)) return;
+    if (targetElement && targetElement.closest('[data-shotstack-timeline]')) return;
 
     vmssCloseAddElementsPanel();
   };
@@ -4359,6 +4381,13 @@ function vmssBindPreviewViewportGuards() {
   };
 
   vmss.onPreviewInteractionPointerMove = (event) => {
+    // START: Allow timeline interactions to bypass the preview lock
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-shotstack-timeline]')) {
+      return;
+    }
+    // END: Allow timeline interactions
+
     if (!vmssIsPreviewInteractionLocked() || !(event.buttons & 1)) return;
 
     event.preventDefault();
@@ -4841,7 +4870,7 @@ function vmssRenderEditorShell(container) {
               </button>
               <div class="flex-1"></div>
             </div>
-            <div data-shotstack-timeline style="height: 160px; position: relative;"></div>
+            <div data-shotstack-timeline data-vmss-preserve-selection="true" style="height: 160px; position: relative;"></div>
           </div>
         </div>
 
