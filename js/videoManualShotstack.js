@@ -83,6 +83,7 @@ const vmss = {
   assetLibraryDeleteInFlightId: null,
   uploadXhr: null,
   drawerSyncSignature: '',
+  animationDraft: null,
 };
 
 function vmssGet(id) {
@@ -1865,6 +1866,7 @@ function vmssBindEvents() {
     vmss.closeDrawerOnNextSelectionClear = false;
     vmss.selectedClipId = data?.clipIndex ?? null;
     vmss.currentStepIdx = data?.trackIndex ?? 0;
+    vmssResetAnimationDraft();
     vmssRememberAnimatedClipStateByLocation(vmss.currentStepIdx, vmss.selectedClipId);
     vmssSyncSelectedShapeAsset();
     vmssScheduleSelectedShapeSync();
@@ -1888,6 +1890,7 @@ function vmssBindEvents() {
     const shouldCloseDrawer = vmss.closeDrawerOnNextSelectionClear;
     vmss.closeDrawerOnNextSelectionClear = false;
     vmss.selectedClipId = null;
+    vmssResetAnimationDraft();
     vmssRenderSelectedDrawerProperties();
     vmssHideFloatingSelectionToolbars();
     vmssRenderStepsPanel();
@@ -2474,6 +2477,7 @@ function vmssCloseAddElementsPanel() {
 function vmssClearSelectedClipFocus() {
   vmss.selectedClipId = null;
   vmss.drawerSyncSignature = '';
+  vmss.animationDraft = null;
   vmss.edit?.selectionManager?.clearSelection?.();
   document.querySelectorAll('.ss-clip.selected').forEach((element) => {
     element.classList.remove('selected');
@@ -3197,21 +3201,188 @@ function vmssGetSelectedClipActiveKeyframe(selection = null, threshold = VMSS_AC
   };
 }
 
-function vmssBuildAnimationField(label, iconMarkup, value, changeHandler, inputAttrs, disabled) {
+function vmssBuildAnimationField(label, iconMarkup, value, changeHandler, inputAttrs, disabled, changed = false) {
   const disabledAttr = disabled ? 'disabled' : '';
   const valueAttr = disabled ? '' : `value="${value}"`;
   const stateClass = disabled
     ? 'border-slate-200 bg-slate-100/90 text-slate-400 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-500'
+    : changed
+      ? 'border-sky-300 bg-sky-50/70 text-slate-900 shadow-[0_0_0_1px_rgba(56,189,248,0.12)] dark:border-sky-500/60 dark:bg-sky-500/10 dark:text-white'
     : 'border-slate-300 bg-white text-slate-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white';
   const inputClass = disabled
     ? 'cursor-not-allowed text-slate-400 dark:text-gray-500'
     : 'text-slate-900 dark:text-white';
+  const iconClass = changed
+    ? 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200'
+    : 'bg-white/60 dark:bg-gray-900/50';
+  const badgeMarkup = changed
+    ? '<span class="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:bg-sky-500/20 dark:text-sky-200">Changed</span>'
+    : '';
 
   return `
-    <label class="grid grid-cols-[3rem_1fr] overflow-hidden rounded-2xl border ${stateClass}">
-      <span class="flex items-center justify-center border-r border-inherit bg-white/60 text-sm font-semibold dark:bg-gray-900/50" title="${label}">${iconMarkup}</span>
-      <input type="number" ${inputAttrs} ${valueAttr} ${disabledAttr} onchange="${changeHandler}" placeholder="${disabled ? 'No keyframe selected' : ''}" class="w-full bg-transparent px-3 py-3 text-sm font-semibold outline-none ${inputClass}">
+    <label class="grid grid-cols-[3rem_1fr] overflow-hidden rounded-2xl border transition-colors ${stateClass}">
+      <span class="flex items-center justify-center border-r border-inherit text-sm font-semibold ${iconClass}" title="${label}">${iconMarkup}</span>
+      <span class="flex items-center justify-between gap-3 px-3 py-3">
+        <input type="number" ${inputAttrs} ${valueAttr} ${disabledAttr} onchange="${changeHandler}" placeholder="${disabled ? 'No keyframe selected' : ''}" class="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none ${inputClass}">
+        ${badgeMarkup}
+      </span>
     </label>`;
+}
+
+function vmssResetAnimationDraft() {
+  vmss.animationDraft = null;
+}
+
+function vmssNormalizeAnimationDraftValue(field, value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return null;
+
+  if (field === 'offsetX' || field === 'offsetY') {
+    return Number(numericValue.toFixed(4));
+  }
+  if (field === 'scale') {
+    return Math.max(0.05, Number(numericValue.toFixed(3)));
+  }
+  if (field === 'opacity') {
+    return Math.max(0, Math.min(1, Number(numericValue.toFixed(2))));
+  }
+  if (field === 'rotate') {
+    return Number(numericValue.toFixed(2));
+  }
+
+  return null;
+}
+
+function vmssGetAnimationDraftValues(selection, activeKeyframe) {
+  if (!selection || !activeKeyframe) return null;
+
+  const clipId = vmss.edit?.getClipId?.(selection.trackIndex, selection.clipIndex);
+  if (!clipId) return activeKeyframe.values;
+
+  if (!vmss.animationDraft) {
+    return activeKeyframe.values;
+  }
+
+  const isSameTarget = vmss.animationDraft.clipId === clipId
+    && Math.abs(vmss.animationDraft.time - activeKeyframe.time) <= VMSS_KEYFRAME_SAME_TIME_TOLERANCE;
+
+  if (!isSameTarget) {
+    vmssResetAnimationDraft();
+    return activeKeyframe.values;
+  }
+
+  return {
+    ...activeKeyframe.values,
+    ...(vmss.animationDraft.values || {}),
+  };
+}
+
+function vmssIsAnimationDraftDirty(selection, activeKeyframe, draftValues = null) {
+  if (!selection || !activeKeyframe) return false;
+
+  const nextValues = draftValues || vmssGetAnimationDraftValues(selection, activeKeyframe);
+  if (!nextValues) return false;
+
+  return ['offsetX', 'offsetY', 'scale', 'opacity', 'rotate'].some((field) => {
+    const currentValue = vmssNormalizeAnimationDraftValue(field, activeKeyframe.values[field]);
+    const nextValue = vmssNormalizeAnimationDraftValue(field, nextValues[field]);
+    return currentValue !== nextValue;
+  });
+}
+
+function vmssIsAnimationDraftFieldChanged(field, activeKeyframe, draftValues = null) {
+  if (!activeKeyframe) return false;
+
+  const nextValues = draftValues || activeKeyframe.values;
+  const currentValue = vmssNormalizeAnimationDraftValue(field, activeKeyframe.values[field]);
+  const nextValue = vmssNormalizeAnimationDraftValue(field, nextValues[field]);
+  return currentValue !== nextValue;
+}
+
+function vmssSetAnimationDraftValue(field, value) {
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  if (!selection || !activeKeyframe) {
+    vmssSetStatus('Move the scrubber onto a keyframe to edit it');
+    return;
+  }
+
+  const normalizedValue = vmssNormalizeAnimationDraftValue(field, value);
+  if (normalizedValue == null) return;
+
+  const clipId = vmss.edit?.getClipId?.(selection.trackIndex, selection.clipIndex);
+  if (!clipId) return;
+
+  const currentDraftValues = vmssGetAnimationDraftValues(selection, activeKeyframe);
+  const nextDraftValues = {
+    ...currentDraftValues,
+    [field]: normalizedValue,
+  };
+
+  if (!vmssIsAnimationDraftDirty(selection, activeKeyframe, nextDraftValues)) {
+    vmssResetAnimationDraft();
+  } else {
+    vmss.animationDraft = {
+      clipId,
+      time: activeKeyframe.time,
+      values: nextDraftValues,
+    };
+  }
+
+  vmssRenderSelectedDrawerProperties();
+}
+
+function vmssUpdateSelectedKeyframeFromDraft() {
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  if (!selection || !activeKeyframe) {
+    vmssSetStatus('Move the scrubber onto a keyframe to update it');
+    return;
+  }
+
+  const draftValues = vmssGetAnimationDraftValues(selection, activeKeyframe);
+  if (!vmssIsAnimationDraftDirty(selection, activeKeyframe, draftValues)) {
+    vmssSetStatus('No keyframe changes to update');
+    return;
+  }
+
+  const clip = selection.clip;
+  const clipLength = vmssGetStaticNumericValue(clip.length, 5);
+  const targetTime = activeKeyframe.time;
+
+  const scaleSegs = vmssBuildKeyframedPropertyValue(clip.scale, draftValues.scale, clipLength, vmssGetStaticNumericValue(clip.scale, 1), targetTime);
+  const opacitySegs = vmssBuildKeyframedPropertyValue(clip.opacity, draftValues.opacity, clipLength, vmssGetStaticNumericValue(clip.opacity, 1), targetTime);
+  const offsetXSegs = vmssBuildKeyframedPropertyValue(clip.offset?.x, draftValues.offsetX, clipLength, vmssGetStaticNumericValue(clip.offset?.x, 0), targetTime);
+  const offsetYSegs = vmssBuildKeyframedPropertyValue(clip.offset?.y, draftValues.offsetY, clipLength, vmssGetStaticNumericValue(clip.offset?.y, 0), targetTime);
+  const rotateSegs = vmssBuildKeyframedPropertyValue(clip.transform?.rotate?.angle, draftValues.rotate, clipLength, vmssGetStaticNumericValue(clip.transform?.rotate?.angle, 0), targetTime);
+
+  const update = {};
+  if (scaleSegs) update.scale = scaleSegs;
+  if (opacitySegs) update.opacity = opacitySegs;
+  if (offsetXSegs || offsetYSegs) {
+    update.offset = {
+      ...(clip.offset || {}),
+      ...(offsetXSegs ? { x: offsetXSegs } : {}),
+      ...(offsetYSegs ? { y: offsetYSegs } : {}),
+    };
+  }
+  if (rotateSegs) {
+    update.transform = {
+      ...(clip.transform || {}),
+      rotate: {
+        ...((clip.transform || {}).rotate || {}),
+        angle: rotateSegs,
+      },
+    };
+  }
+
+  if (!Object.keys(update).length) {
+    vmssSetStatus('Unable to update keyframe');
+    return;
+  }
+
+  vmssResetAnimationDraft();
+  vmssApplySelectedClipUpdate(update, `Keyframe updated at T=${targetTime.toFixed(2)}s`);
 }
 
 function vmssBuildAnimationPropertiesMarkup(selection) {
@@ -3241,8 +3412,15 @@ function vmssBuildAnimationPropertiesMarkup(selection) {
     ? vmssFormatTime(vmssGetStaticNumericValue(clip.start, 0) + activeKeyframe.time)
     : 'No Keyframe';
   const disabled = !activeKeyframe;
+  const draftValues = activeKeyframe ? vmssGetAnimationDraftValues(selection, activeKeyframe) : null;
+  const isDirty = activeKeyframe ? vmssIsAnimationDraftDirty(selection, activeKeyframe, draftValues) : false;
+  const changedFieldCount = activeKeyframe
+    ? ['offsetX', 'offsetY', 'scale', 'opacity', 'rotate'].filter((field) => vmssIsAnimationDraftFieldChanged(field, activeKeyframe, draftValues)).length
+    : 0;
   const helperText = activeKeyframe
-    ? 'Values are locked to the current diamond. To move it, delete it here and record a new one from the clip properties panel.'
+    ? isDirty
+      ? 'Changes are staged for this diamond. Press Update Keyframe to replace this keyframe with the edited values.'
+      : 'Edit the values below, then press Update Keyframe to replace this diamond. To move it, delete it here and record a new one from the clip properties panel.'
     : `Move the scrubber within ${VMSS_ACTIVE_KEYFRAME_THRESHOLD.toFixed(2)}s of a diamond to load that keyframe.`;
 
   return vmssNormalizePropertyMarkup(`
@@ -3259,18 +3437,23 @@ function vmssBuildAnimationPropertiesMarkup(selection) {
           <div class="flex items-center justify-between gap-3">
             <div>
               <p class="text-sm font-semibold text-slate-900 dark:text-white">Current Diamond</p>
-              <p class="text-xs text-slate-500 dark:text-gray-400">${absoluteTime}</p>
+              <p class="text-xs text-slate-500 dark:text-gray-400">${absoluteTime}${changedFieldCount ? ` <span class="ml-2 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:bg-sky-500/20 dark:text-sky-200">${changedFieldCount} changed</span>` : ''}</p>
             </div>
-            <button onclick="vmssDeleteSelectedKeyframe()" ${disabled ? 'disabled' : ''} class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold ${disabled ? 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-gray-800 dark:text-gray-500' : 'bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/40'}">
-              <i class="ri-delete-bin-line"></i>Delete
-            </button>
+            <div class="flex items-center gap-2">
+              <button onclick="vmssUpdateSelectedKeyframeFromDraft()" ${disabled || !isDirty ? 'disabled' : ''} class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold ${disabled || !isDirty ? 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-gray-800 dark:text-gray-500' : 'bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-900/20 dark:text-sky-300 dark:hover:bg-sky-900/40'}">
+                <i class="ri-save-3-line"></i>Update
+              </button>
+              <button onclick="vmssDeleteSelectedKeyframe()" ${disabled ? 'disabled' : ''} class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold ${disabled ? 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-gray-800 dark:text-gray-500' : 'bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/40'}">
+                <i class="ri-delete-bin-line"></i>Delete
+              </button>
+            </div>
           </div>
           <div class="grid gap-3">
-            ${vmssBuildAnimationField('X Position', '<span>X</span>', activeKeyframe?.values.offsetX ?? '', `vmssSetSelectedClipOffset('x', this.value)`, 'step="0.05" min="-1" max="1"', disabled)}
-            ${vmssBuildAnimationField('Y Position', '<span>Y</span>', activeKeyframe?.values.offsetY ?? '', `vmssSetSelectedClipOffset('y', this.value)`, 'step="0.05" min="-1" max="1"', disabled)}
-            ${vmssBuildAnimationField('Scale', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', activeKeyframe?.values.scale ?? '', 'vmssSetSelectedClipScale(this.value)', 'step="0.05" min="0.05"', disabled)}
-            ${vmssBuildAnimationField('Opacity', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5c2.4 2.8 4 4.7 4 6.6A4 4 0 1 1 4 9.1c0-1.9 1.6-3.8 4-6.6Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 3v10a4 4 0 0 0 0-8.1C6.7 6.3 6 7.5 6 9.1A2 2 0 0 0 8 11" fill="currentColor" opacity="0.18"/></svg>', activeKeyframe?.values.opacity ?? '', 'vmssSetSelectedClipOpacity(this.value)', 'step="0.05" min="0" max="1"', disabled)}
-            ${vmssBuildAnimationField('Rotation', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M11.8 5.2V2.8m0 0H9.4m2.4 0A5.8 5.8 0 1 0 13.6 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', activeKeyframe?.values.rotate ?? '', 'vmssSetSelectedClipRotation(this.value)', 'step="1" min="-360" max="360"', disabled)}
+            ${vmssBuildAnimationField('X Position', '<span>X</span>', draftValues?.offsetX ?? '', `vmssSetAnimationDraftValue('offsetX', this.value)`, 'step="0.05" min="-1" max="1"', disabled, vmssIsAnimationDraftFieldChanged('offsetX', activeKeyframe, draftValues))}
+            ${vmssBuildAnimationField('Y Position', '<span>Y</span>', draftValues?.offsetY ?? '', `vmssSetAnimationDraftValue('offsetY', this.value)`, 'step="0.05" min="-1" max="1"', disabled, vmssIsAnimationDraftFieldChanged('offsetY', activeKeyframe, draftValues))}
+            ${vmssBuildAnimationField('Scale', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', draftValues?.scale ?? '', `vmssSetAnimationDraftValue('scale', this.value)`, 'step="0.05" min="0.05"', disabled, vmssIsAnimationDraftFieldChanged('scale', activeKeyframe, draftValues))}
+            ${vmssBuildAnimationField('Opacity', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5c2.4 2.8 4 4.7 4 6.6A4 4 0 1 1 4 9.1c0-1.9 1.6-3.8 4-6.6Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 3v10a4 4 0 0 0 0-8.1C6.7 6.3 6 7.5 6 9.1A2 2 0 0 0 8 11" fill="currentColor" opacity="0.18"/></svg>', draftValues?.opacity ?? '', `vmssSetAnimationDraftValue('opacity', this.value)`, 'step="0.05" min="0" max="1"', disabled, vmssIsAnimationDraftFieldChanged('opacity', activeKeyframe, draftValues))}
+            ${vmssBuildAnimationField('Rotation', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M11.8 5.2V2.8m0 0H9.4m2.4 0A5.8 5.8 0 1 0 13.6 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', draftValues?.rotate ?? '', `vmssSetAnimationDraftValue('rotate', this.value)`, 'step="1" min="-360" max="360"', disabled, vmssIsAnimationDraftFieldChanged('rotate', activeKeyframe, draftValues))}
           </div>
           <p class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">${helperText}</p>
         </section>
@@ -3321,6 +3504,7 @@ function vmssDeleteSelectedKeyframe() {
     return;
   }
 
+  vmssResetAnimationDraft();
   vmssApplySelectedClipUpdate(update, `Keyframe removed at T=${activeKeyframe.time.toFixed(2)}s`);
 }
 
@@ -3328,6 +3512,7 @@ function vmssSyncSelectionPanelsFromPlayback(force = false) {
   const selection = vmssGetSelectedInspectorContext();
   if (!selection) {
     vmss.drawerSyncSignature = '';
+    vmssResetAnimationDraft();
     return;
   }
 
