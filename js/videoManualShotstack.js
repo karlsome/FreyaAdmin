@@ -1817,10 +1817,12 @@ function vmssBindEvents() {
   vmss.edit.events.on('clip:updated', (change) => {
     if (vmss.syncingAnimatedClipUpdate) return;
 
-    vmssSyncAnimatedClipUpdateFromEvent(change);
-    vmssRememberAnimatedClipStateByLocation(change?.current?.trackIndex, change?.current?.clipIndex);
+    const didSyncKeyframes = vmssSyncAnimatedClipUpdateFromEvent(change);
+    // REMOVED: vmssRememberAnimatedClipStateByLocation - only remember on select/record
+    
+    const isSelected = change?.current?.trackIndex === vmss.currentStepIdx && change?.current?.clipIndex === vmss.selectedClipId;
 
-    if (change?.current?.trackIndex === vmss.currentStepIdx && change?.current?.clipIndex === vmss.selectedClipId) {
+    if (isSelected && didSyncKeyframes) {
       vmssDebugKeyframeConsole('clip:updated', {
         changeSummary: {
           previousOffsetX: change?.previous?.clip?.offset?.x,
@@ -3159,6 +3161,8 @@ function vmssSegmentsToExplicitKeyframePoints(segments, clipLength) {
   return points;
 }
 
+// Corrected to generate segments only between explicit points, exactly matching Shotstack JSON requirements.
+// Adds linear interpolation and 0-length anchor segments for single keyframes.
 function vmssKeyframePointsToSegments(points, clipLength, initialValue) {
   const sorted = [...points].sort((a, b) => a.time - b.time);
   const segments = [];
@@ -3168,33 +3172,54 @@ function vmssKeyframePointsToSegments(points, clipLength, initialValue) {
   const normalizedClipLength = Number(Math.max(0.001, clipLength).toFixed(3));
   const firstPoint = sorted[0];
 
+  // Head fill: Ensure the value "holds" from start (0s) up to the first keyframe time
   if (firstPoint.time > 0) {
     segments.push({
       start: 0,
       length: Number(firstPoint.time.toFixed(3)),
-      from: Number(initialValue.toFixed(4)),
-      to: Number(firstPoint.value.toFixed(4)),
+      from: Number(firstPoint.value.toFixed(4)), // HOLD the first value
+      to: Number(firstPoint.value.toFixed(4)),   // HOLD the first value
+      interpolation: 'linear'
+    });
+  }
+
+  // Single point case: create a 0-length "anchor" segment to persist the keyframe
+  // so subsequent "Record" actions can connect to it.
+  if (sorted.length === 1 && firstPoint.time <= 0) {
+    segments.push({
+      start: Number(sorted[0].time.toFixed(3)),
+      length: 0,
+      from: Number(sorted[0].value.toFixed(4)),
+      to: Number(sorted[0].value.toFixed(4)),
+      interpolation: 'linear'
     });
   }
 
   for (let i = 0; i < sorted.length - 1; i++) {
     const duration = Number((sorted[i + 1].time - sorted[i].time).toFixed(3));
-    if (duration <= 0) continue;
+    if (duration <= 0.001) continue; // Skip zero-length or extremely small gaps
+
     segments.push({
       start: Number(sorted[i].time.toFixed(3)),
       length: duration,
       from: Number(sorted[i].value.toFixed(4)),
       to: Number(sorted[i + 1].value.toFixed(4)),
+      interpolation: 'linear'
     });
   }
 
+  /* 
+   * Tail fill: Ensure the value "holds" from the last keyframe time to the end of the clip
+   * This aligns with Shotstack JSON behavior where unspecified trailing time would revert to default.
+   */
   const lastPoint = sorted[sorted.length - 1];
   if (lastPoint.time < normalizedClipLength) {
-    segments.push({
+     segments.push({
       start: Number(lastPoint.time.toFixed(3)),
       length: Number((normalizedClipLength - lastPoint.time).toFixed(3)),
-      from: Number(lastPoint.value.toFixed(4)),
-      to: Number(lastPoint.value.toFixed(4)),
+      from: Number(lastPoint.value.toFixed(4)), // HOLD the last value
+      to: Number(lastPoint.value.toFixed(4)),   // HOLD the last value
+      interpolation: 'linear'
     });
   }
 
@@ -3276,13 +3301,19 @@ function vmssBuildKeyframedPropertyValue(existingValue, nextValue, clipLength, i
   return vmssKeyframePointsToSegments(nextPoints, clipLength, initialValue);
 }
 
-function vmssBuildAnimatedSegmentsFromLiveValue(previousValue, currentValue, clipLength, relTime, fallback) {
-  if (!Array.isArray(previousValue) || Array.isArray(currentValue) || !Number.isFinite(Number(currentValue))) {
+function vmssShiftAnimatedSegments(previousSegments, newValue, relTime, fallback) {
+  if (!Array.isArray(previousSegments) || !Number.isFinite(Number(newValue))) {
     return null;
   }
 
-  const initialValue = vmssInterpolateKeyframeAtTime(previousValue, 0, fallback);
-  return vmssBuildKeyframedPropertyValue(previousValue, Number(currentValue), clipLength, initialValue, relTime);
+  const oldValue = vmssInterpolateKeyframeAtTime(previousSegments, relTime, fallback);
+  const delta = Number(newValue) - oldValue;
+
+  return previousSegments.map((seg) => ({
+    ...seg,
+    from: Number((seg.from + delta).toFixed(4)),
+    to: Number((seg.to + delta).toFixed(4)),
+  }));
 }
 
 function vmssCreateAnimatedClipStateSnapshot(clip, category = null) {
@@ -3336,14 +3367,14 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
 
   const update = {};
 
-  const scaleSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.scale || rememberedState?.scale, currentClip.scale, clipLength, relTime, 1);
+  const scaleSegs = vmssShiftAnimatedSegments(previousClip.scale || rememberedState?.scale, currentClip.scale, relTime, 1);
   if (scaleSegs) update.scale = scaleSegs;
 
-  const opacitySegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.opacity || rememberedState?.opacity, currentClip.opacity, clipLength, relTime, 1);
+  const opacitySegs = vmssShiftAnimatedSegments(previousClip.opacity || rememberedState?.opacity, currentClip.opacity, relTime, 1);
   if (opacitySegs) update.opacity = opacitySegs;
 
-  const offsetXSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.offset?.x || rememberedState?.offsetX, currentClip.offset?.x, clipLength, relTime, 0);
-  const offsetYSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.offset?.y || rememberedState?.offsetY, currentClip.offset?.y, clipLength, relTime, 0);
+  const offsetXSegs = vmssShiftAnimatedSegments(previousClip.offset?.x || rememberedState?.offsetX, currentClip.offset?.x, relTime, 0);
+  const offsetYSegs = vmssShiftAnimatedSegments(previousClip.offset?.y || rememberedState?.offsetY, currentClip.offset?.y, relTime, 0);
   if (offsetXSegs || offsetYSegs) {
     update.offset = {
       ...(currentClip.offset || {}),
@@ -3352,7 +3383,7 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
     };
   }
 
-  const rotateSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.transform?.rotate?.angle || rememberedState?.rotate, currentClip.transform?.rotate?.angle, clipLength, relTime, 0);
+  const rotateSegs = vmssShiftAnimatedSegments(previousClip.transform?.rotate?.angle || rememberedState?.rotate, currentClip.transform?.rotate?.angle, relTime, 0);
   if (rotateSegs) {
     update.transform = {
       ...(currentClip.transform || {}),
@@ -3363,7 +3394,7 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
     };
   }
 
-  const volumeSegs = vmssBuildAnimatedSegmentsFromLiveValue(previousClip.asset?.volume || rememberedState?.volume, currentClip.asset?.volume, clipLength, relTime, 1);
+  const volumeSegs = vmssShiftAnimatedSegments(previousClip.asset?.volume || rememberedState?.volume, currentClip.asset?.volume, relTime, 1);
   if (volumeSegs) {
     update.asset = {
       ...(currentClip.asset || {}),
@@ -3499,10 +3530,9 @@ function vmssAddKeyframeAtCurrentTime() {
   const relTime = vmssGetSelectedClipRelativePlaybackTime(selection);
   const liveValues = vmssGetSelectedClipLiveRuntimeValues(selection);
 
-  const readVal = (segments, fallback) =>
-    Array.isArray(segments)
-      ? vmssInterpolateKeyframeAtTime(segments, relTime, fallback)
-      : vmssGetStaticNumericValue(segments, fallback);
+  // Get the original state (before any recent drag operations) to base the new keyframe on
+  const clipId = vmss.edit?.getClipId?.(selection.trackIndex, selection.clipIndex);
+  const rememberedState = clipId ? (vmss.animatedClipStateById[clipId] || null) : null;
 
   const scaleVal = liveValues.scale;
   const opacityVal = liveValues.opacity;
@@ -3510,11 +3540,21 @@ function vmssAddKeyframeAtCurrentTime() {
   const offsetYVal = liveValues.offsetY;
   const rotateVal = liveValues.rotate;
 
-  const scaleSegs = vmssBuildKeyframedPropertyValue(clip.scale, scaleVal, clipLength, vmssGetStaticNumericValue(clip.scale, 1), relTime);
-  const opacitySegs = vmssBuildKeyframedPropertyValue(clip.opacity, opacityVal, clipLength, vmssGetStaticNumericValue(clip.opacity, 1), relTime);
-  const offsetXSegs = vmssBuildKeyframedPropertyValue(clip.offset?.x, offsetXVal, clipLength, vmssGetStaticNumericValue(clip.offset?.x, 0), relTime);
-  const offsetYSegs = vmssBuildKeyframedPropertyValue(clip.offset?.y, offsetYVal, clipLength, vmssGetStaticNumericValue(clip.offset?.y, 0), relTime);
-  const rotateSegs = vmssBuildKeyframedPropertyValue(clip.transform?.rotate?.angle, rotateVal, clipLength, vmssGetStaticNumericValue(clip.transform?.rotate?.angle, 0), relTime);
+  // Use remembered state as the baseline if available, otherwise current clip state
+  // This ensures that dragging (which shifts the whole curve) doesn't permanently shift previous keyframes
+  // when we record a new point. We want to interpolate from the old state to the new point.
+  
+  const scaleSource   = rememberedState?.scale   !== undefined ? rememberedState.scale   : clip.scale;
+  const opacitySource = rememberedState?.opacity !== undefined ? rememberedState.opacity : clip.opacity;
+  const offsetXSource = rememberedState?.offsetX !== undefined ? rememberedState.offsetX : clip.offset?.x;
+  const offsetYSource = rememberedState?.offsetY !== undefined ? rememberedState.offsetY : clip.offset?.y;
+  const rotateSource  = rememberedState?.rotate  !== undefined ? rememberedState.rotate  : clip.transform?.rotate?.angle;
+
+  const scaleSegs   = vmssBuildKeyframedPropertyValue(scaleSource,   scaleVal,   clipLength, vmssGetStaticNumericValue(scaleSource, 1),   relTime);
+  const opacitySegs = vmssBuildKeyframedPropertyValue(opacitySource, opacityVal, clipLength, vmssGetStaticNumericValue(opacitySource, 1), relTime);
+  const offsetXSegs = vmssBuildKeyframedPropertyValue(offsetXSource, offsetXVal, clipLength, vmssGetStaticNumericValue(offsetXSource, 0), relTime);
+  const offsetYSegs = vmssBuildKeyframedPropertyValue(offsetYSource, offsetYVal, clipLength, vmssGetStaticNumericValue(offsetYSource, 0), relTime);
+  const rotateSegs  = vmssBuildKeyframedPropertyValue(rotateSource,  rotateVal,  clipLength, vmssGetStaticNumericValue(rotateSource, 0),  relTime);
 
   const update = {};
   if (scaleSegs)   update.scale   = scaleSegs;
@@ -3534,7 +3574,8 @@ function vmssAddKeyframeAtCurrentTime() {
   }
   if (selection.category === 'media') {
     const volumeVal = liveValues.volume;
-    const volumeSegs = vmssBuildKeyframedPropertyValue(clip.asset?.volume, volumeVal, clipLength, vmssGetStaticNumericValue(clip.asset?.volume, 1), relTime);
+    const volumeSource = rememberedState?.volume !== undefined ? rememberedState.volume : clip.asset?.volume;
+    const volumeSegs = vmssBuildKeyframedPropertyValue(volumeSource, volumeVal, clipLength, vmssGetStaticNumericValue(volumeSource, 1), relTime);
     if (volumeSegs) update.asset = { ...clip.asset, volume: volumeSegs };
   }
 
@@ -3542,6 +3583,14 @@ function vmssAddKeyframeAtCurrentTime() {
     vmssSetStatus('Unable to record keyframe');
     return;
   }
+  
+  // Important: After recording, we must update the "remembered state" to match this new committed state
+  vmss.syncingAnimatedClipUpdate = true;
+  vmss.edit?.updateClipInDocument?.(clipId, update);
+  vmss.edit?.resolveClip?.(clipId);
+  // Update remembered state immediately so subsequent drags base off THIS new state
+  vmssRememberAnimatedClipStateByLocation(selection.trackIndex, selection.clipIndex);
+  vmss.syncingAnimatedClipUpdate = false;
 
   vmssDebugKeyframeConsole('record:before-apply', {
     relTime,
