@@ -73,6 +73,10 @@ const vmss = {
   onAddElementsEscapeKeyDown: null,
   addElementsOpen: false,
   addElementsCategory: 'text',
+  assetLibraryItems: [],
+  assetLibraryFilter: 'video',
+  assetLibraryDeleteInFlightId: null,
+  uploadXhr: null,
 };
 
 function vmssGet(id) {
@@ -116,6 +120,38 @@ function vmssCanManagePlaylists() {
 
 function vmssCanEditProjects() {
   return ['admin', '課長', '部長', '係長', '班長'].includes(vmssAuthUser().role || 'viewer');
+}
+
+function vmssFormatFileSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function vmssNormalizePlaylistAssetType(type, mimeType = '') {
+  if (type === 'image' || type === 'video' || type === 'audio') return type;
+  if (typeof mimeType === 'string' && mimeType.startsWith('image/')) return 'image';
+  if (typeof mimeType === 'string' && mimeType.startsWith('audio/')) return 'audio';
+  return 'video';
+}
+
+function vmssGetAssetLibraryTypeLabel(type) {
+  const labels = {
+    image: 'Photos',
+    video: 'Videos',
+    audio: 'Audio',
+  };
+
+  return labels[vmssNormalizePlaylistAssetType(type)] || 'Media';
+}
+
+function vmssGetAssetLibraryAccept(type) {
+  const normalizedType = vmssNormalizePlaylistAssetType(type);
+  if (normalizedType === 'image') return 'image/*';
+  if (normalizedType === 'audio') return 'audio/*';
+  return 'video/*';
 }
 
 function loadVideoManualPage() {
@@ -2003,12 +2039,18 @@ async function vmssAddImageClip(imageUrl, startTime = 0, options = {}) {
   if (!vmss.edit) return;
 
   const { width = 400, height = 300 } = options;
+  const normalizedSource = vmssNormalizePlayableMediaSource(imageUrl);
+  const clipImageUrl = normalizedSource?.previewUrl || imageUrl;
+
+  if (normalizedSource?.publicUrl && normalizedSource.previewUrl !== normalizedSource.publicUrl) {
+    vmssRememberAssetSource(normalizedSource.previewUrl, normalizedSource.publicUrl);
+  }
 
   await vmss.edit.addTrack(0, {
     clips: [{
       asset: {
         type: 'image',
-        src: imageUrl,
+        src: clipImageUrl,
       },
       start: startTime,
       length: 5,
@@ -2032,6 +2074,12 @@ async function vmssAddVideoClip(videoUrl, startTime = 0, options = {}) {
   if (firebaseDocId) {
     clipVideoUrl = `${VMSS_API_BASE_URL()}/api/video-manuals/stream/${firebaseDocId}`;
     console.log('Using proxy URL for video:', clipVideoUrl);
+  } else {
+    const normalizedSource = vmssNormalizePlayableMediaSource(videoUrl);
+    clipVideoUrl = normalizedSource?.previewUrl || videoUrl;
+    if (normalizedSource?.publicUrl && normalizedSource.previewUrl !== normalizedSource.publicUrl) {
+      vmssRememberAssetSource(normalizedSource.previewUrl, normalizedSource.publicUrl);
+    }
   }
 
   await vmss.edit.addTrack(targetTrackIndex, {
@@ -2044,6 +2092,35 @@ async function vmssAddVideoClip(videoUrl, startTime = 0, options = {}) {
       },
       start: startTime,
       length: 10,
+    }],
+  });
+
+  vmssSyncStepsFromTracks();
+  vmssRenderStepsPanel();
+}
+
+async function vmssAddAudioClip(audioUrl, startTime = 0, options = {}) {
+  if (!vmss.edit) return;
+
+  const { trim = 0, volume = 1, length = 10 } = options;
+  const targetTrackIndex = vmss.steps.length;
+  const normalizedSource = vmssNormalizePlayableMediaSource(audioUrl);
+  const clipAudioUrl = normalizedSource?.previewUrl || audioUrl;
+
+  if (normalizedSource?.publicUrl && normalizedSource.previewUrl !== normalizedSource.publicUrl) {
+    vmssRememberAssetSource(normalizedSource.previewUrl, normalizedSource.publicUrl);
+  }
+
+  await vmss.edit.addTrack(targetTrackIndex, {
+    clips: [{
+      asset: {
+        type: 'audio',
+        src: clipAudioUrl,
+        trim,
+        volume,
+      },
+      start: startTime,
+      length,
     }],
   });
 
@@ -4839,14 +4916,12 @@ function vmssRenderEditorShell(container) {
               <div data-vmss-add-panel="media" class="hidden space-y-4">
                 <div data-vmss-selection-properties="media" class="hidden"></div>
                 <div data-vmss-add-only>
-                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Media Uploads</p>
+                  <p class="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Playlist Media Library</p>
                   <div class="grid gap-2">
-                    <button onclick="document.getElementById('vmss-image-input').click()" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-image-add-line"></i>Photos</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
-                    <button onclick="document.getElementById('vmss-video-input').click()" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-video-add-line"></i>Video</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
-                    <button onclick="vmssShowComingSoon('Audio uploads')" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-volume-up-line"></i>Audio</span><span class="text-[11px] font-semibold uppercase tracking-wide text-cyan-500">Soon</span></button>
+                    <button onclick="vmssOpenPlaylistAssetLibrary('image')" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-image-add-line"></i>Photos</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
+                    <button onclick="vmssOpenPlaylistAssetLibrary('video')" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-video-add-line"></i>Videos</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
+                    <button onclick="vmssOpenPlaylistAssetLibrary('audio')" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-volume-up-line"></i>Audio</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
                   </div>
-                  <input id="vmss-image-input" type="file" accept="image/*" class="hidden" onchange="vmssHandleImageUpload(event)">
-                  <input id="vmss-video-input" type="file" accept="video/*" class="hidden" onchange="vmssHandleVideoUpload(event)">
                 </div>
               </div>
 
@@ -4892,6 +4967,28 @@ function vmssRenderEditorShell(container) {
         </div>
       </div>
     </div>
+
+    <div id="vmss-modal-assets" class="hidden fixed inset-0 z-[340] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+      <div class="flex max-h-[78vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border border-white/70 bg-white shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5 dark:border-gray-800">
+          <div class="min-w-0 flex-1">
+            <p id="vmss-assets-modal-kicker" class="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-600 dark:text-cyan-400">Playlist Media Library</p>
+            <h3 id="vmss-assets-modal-title" class="mt-1 truncate text-2xl font-semibold text-slate-900 dark:text-white">Videos</h3>
+            <p id="vmss-assets-modal-description" class="mt-2 text-sm text-slate-500 dark:text-slate-400">Browse uploads already stored for this playlist, preview them, or upload a new file.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="vmssTriggerAssetLibraryUpload()" class="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-600">
+              <i class="ri-upload-2-line mr-1"></i>Upload
+            </button>
+            <button onclick="vmssClosePlaylistAssetLibrary()" class="shrink-0 rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+              <i class="ri-close-line text-lg"></i>
+            </button>
+          </div>
+        </div>
+        <div id="vmss-assets-list" class="grid flex-1 grid-cols-1 gap-4 overflow-y-auto bg-slate-50 px-6 py-6 md:grid-cols-2 xl:grid-cols-3 dark:bg-slate-950/40"></div>
+      </div>
+      <input id="vmss-asset-library-upload-input" type="file" class="hidden" onchange="vmssHandleAssetLibraryUpload(event)">
+    </div>
   `;
 }
 
@@ -4922,128 +5019,351 @@ function vmssRenderStepsPanel() {
 
 async function vmssHandleImageUpload(event) {
   const file = event.target.files?.[0];
-  if (!file) return;
-
-  vmssSetStatus('Uploading image to Firebase...');
-
-  // For performance, we can use blob URL for preview while uploading to Firebase
-  const url = URL.createObjectURL(file);
-  const image = new Image();
-
-  image.onload = async () => {
-    const maxWidth = 600;
-    const scale = image.width > maxWidth ? maxWidth / image.width : 1;
-
-    // Add the clip with blob URL first for immediate feedback
-    await vmssAddImageClip(url, vmss.edit?.playbackTime || 0, {
-      width: Math.round(image.width * scale),
-      height: Math.round(image.height * scale),
-    });
-
-    vmssSetStatus('Image added (uploading to Firebase...)');
-
-    // Upload to Firebase in background
-    try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64Data = e.target.result;
-        
-        try {
-          const response = await fetch(`${VMSS_API_BASE_URL()}/api/video-manuals/upload-image`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageBase64: base64Data,
-              fileName: file.name,
-              projectTitle: vmss.title || 'Video Manual 2'
-            })
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            console.warn('Image backup to Firebase failed:', errorData.error);
-            vmssSetStatus('Image added (backup upload failed, but local copy retained)');
-            return;
-          }
-
-          const result = await response.json();
-          vmssRememberAssetSource(url, result.downloadUrl);
-          vmssSetStatus('Image added and backed up to Firebase');
-          console.log('✅ Image uploaded to Firebase:', result.downloadUrl);
-
-        } catch (error) {
-          console.warn('Image backup to Firebase failed:', error);
-          vmssSetStatus('Image added (backup failed, but local copy retained)');
-        }
-      };
-
-      reader.readAsDataURL(file);
-    } catch (error) {
-      console.warn('Could not upload image to Firebase:', error);
-    }
-  };
-
-  image.src = url;
   event.target.value = '';
+  if (!file) return;
+  await vmssUploadPlaylistAssetAndInsert(file, 'image');
 }
 
 async function vmssHandleVideoUpload(event) {
   const file = event.target.files?.[0];
+  event.target.value = '';
   if (!file) return;
+  await vmssUploadPlaylistAssetAndInsert(file, 'video');
+}
 
-  vmssSetStatus('Uploading video to Firebase...');
+async function vmssHandleAudioUpload(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  await vmssUploadPlaylistAssetAndInsert(file, 'audio');
+}
+
+function vmssResolveAssetLibraryMediaUrl(url) {
+  const normalized = vmssNormalizePlayableMediaSource(url);
+  return normalized?.previewUrl || url;
+}
+
+function vmssGetAssetUsageLabel(asset) {
+  const usageCount = Math.max(0, Number(asset?.usageCount) || 0);
+  if (!usageCount) return 'Playlist library';
+  return usageCount === 1 ? 'Used by 1 project' : `Used by ${usageCount} projects`;
+}
+
+function vmssGetAssetLibraryItemLabel(type) {
+  switch (vmssNormalizePlaylistAssetType(type)) {
+    case 'image':
+      return 'Photo';
+    case 'audio':
+      return 'Audio';
+    default:
+      return 'Video';
+  }
+}
+
+function vmssUpdateAssetLibraryModalCopy() {
+  const filter = vmssNormalizePlaylistAssetType(vmss.assetLibraryFilter);
+  const title = vmssGet('vmss-assets-modal-title');
+  const description = vmssGet('vmss-assets-modal-description');
+  const kicker = vmssGet('vmss-assets-modal-kicker');
+
+  if (kicker) kicker.textContent = 'Playlist Media Library';
+  if (title) title.textContent = vmssGetAssetLibraryTypeLabel(filter);
+  if (description) {
+    const noun = filter === 'image' ? 'photos' : filter === 'audio' ? 'audio files' : 'videos';
+    description.textContent = `Browse ${noun} already uploaded for this playlist, hover videos for a quick preview, or upload a new file.`;
+  }
+}
+
+function vmssPauseAssetLibraryPreviews() {
+  document.querySelectorAll('[data-vmss-asset-preview-video]').forEach((element) => {
+    if (!(element instanceof HTMLVideoElement)) return;
+    element.pause();
+    element.currentTime = 0;
+  });
+}
+
+function vmssClosePlaylistAssetLibrary() {
+  vmssPauseAssetLibraryPreviews();
+  vmssGet('vmss-modal-assets')?.classList.add('hidden');
+}
+
+async function vmssOpenPlaylistAssetLibrary(type = 'video') {
+  vmss.assetLibraryFilter = vmssNormalizePlaylistAssetType(type);
+  vmssUpdateAssetLibraryModalCopy();
+  vmssGet('vmss-modal-assets')?.classList.remove('hidden');
+  await vmssLoadPlaylistAssetLibrary();
+}
+
+async function vmssLoadPlaylistAssetLibrary(force = false) {
+  const list = vmssGet('vmss-assets-list');
+  if (!list) return;
+
+  if (!vmss.playlist?._id) {
+    vmss.assetLibraryItems = [];
+    vmssRenderPlaylistAssetLibrary();
+    return;
+  }
+
+  if (!force && Array.isArray(vmss.assetLibraryItems) && vmss.assetLibraryItems.length) {
+    vmssRenderPlaylistAssetLibrary();
+    return;
+  }
+
+  list.innerHTML = '<p class="col-span-full py-12 text-center text-sm text-slate-400">Loading playlist library...</p>';
 
   try {
-    // Convert file to base64
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const base64Data = e.target.result;
-      
-      try {
-        // Upload to Firebase via API
-        const response = await fetch(`${VMSS_API_BASE_URL()}/api/video-manuals/upload`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoBase64: base64Data,
-            fileName: file.name,
-            projectTitle: vmss.title || 'Video Manual 2',
-            factory: ''
-          })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Upload failed');
-        }
-
-        const result = await response.json();
-        const persistentUrl = result.downloadUrl;
-        const previewUrl = `${VMSS_API_BASE_URL()}/api/video-manuals/stream/${result.documentId}`;
-        vmssRememberAssetSource(previewUrl, persistentUrl);
-
-        // Add video clip with persistent Firebase URL
-        await vmssAddVideoClip(persistentUrl, vmss.edit?.playbackTime || 0, {
-          firebaseDocId: result.documentId
-        });
-
-        vmssSetStatus('Video uploaded and added');
-        console.log('✅ Video uploaded to Firebase:', persistentUrl);
-
-      } catch (error) {
-        console.error('❌ Video upload failed:', error);
-        vmssSetStatus('Video upload failed: ' + error.message);
-        alert(`Video upload failed: ${error.message}`);
-      }
-    };
-
-    reader.readAsDataURL(file);
-    event.target.value = '';
-
+    const res = await fetch(`${VMSS_API_BASE_URL()}/api/video-manuals-studio/playlists/${vmss.playlist._id}/assets`, {
+      headers: vmssAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    vmss.assetLibraryItems = await res.json();
+    vmssRenderPlaylistAssetLibrary();
   } catch (error) {
-    console.error('❌ Error reading file:', error);
-    vmssSetStatus('Error reading file');
-    alert(`Error: ${error.message}`);
+    console.error('[VMSS] Asset library load failed:', error);
+    list.innerHTML = `<p class="col-span-full py-12 text-center text-sm text-red-400">Failed to load library: ${vmssEscapeHtml(error.message)}</p>`;
+  }
+}
+
+function vmssRenderPlaylistAssetLibrary() {
+  const list = vmssGet('vmss-assets-list');
+  if (!list) return;
+
+  if (!vmss.playlist?._id) {
+    list.innerHTML = '<p class="col-span-full py-12 text-center text-sm text-slate-400">Open a project from a playlist to browse its uploaded media.</p>';
+    return;
+  }
+
+  const filter = vmssNormalizePlaylistAssetType(vmss.assetLibraryFilter);
+  const items = (Array.isArray(vmss.assetLibraryItems) ? vmss.assetLibraryItems : [])
+    .filter((asset) => vmssNormalizePlaylistAssetType(asset?.type, asset?.mimeType) === filter);
+
+  if (!items.length) {
+    list.innerHTML = `<div class="col-span-full rounded-[24px] border border-dashed border-slate-300 bg-white/70 px-6 py-12 text-center dark:border-gray-700 dark:bg-gray-900/40"><p class="text-base font-medium text-slate-700 dark:text-slate-200">No ${vmssGetAssetLibraryTypeLabel(filter).toLowerCase()} in this playlist yet.</p><p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Use Upload to add a file that stays scoped to this playlist.</p></div>`;
+    return;
+  }
+
+  list.innerHTML = items.map((asset) => {
+    const assetId = String(asset.assetId || asset._id || '');
+    const assetType = vmssNormalizePlaylistAssetType(asset.type, asset.mimeType);
+    const previewUrl = vmssResolveAssetLibraryMediaUrl(asset.downloadUrl || asset.url || '');
+    const safeName = vmssEscapeHtml(asset.name || asset.fileName || 'Untitled Asset');
+    const uploadedAt = asset.uploadedAt ? new Date(asset.uploadedAt).toLocaleDateString() : '';
+    const usageLabel = vmssEscapeHtml(vmssGetAssetUsageLabel(asset));
+    const sizeLabel = vmssEscapeHtml(vmssFormatFileSize(asset.size));
+    const metaLabel = [uploadedAt, sizeLabel].filter(Boolean).join(' | ');
+    const escapedAssetId = encodeURIComponent(assetId);
+
+    let previewMarkup = `<div class="flex h-full items-center justify-center bg-slate-100 text-slate-400 dark:bg-slate-900/70 dark:text-slate-500"><i class="ri-file-music-line text-4xl"></i></div>`;
+    if (assetType === 'image') {
+      previewMarkup = `<img src="${vmssEscapeHtml(previewUrl)}" alt="${safeName}" class="h-full w-full object-cover">`;
+    } else if (assetType === 'video') {
+      previewMarkup = `<video id="vmss-asset-preview-${escapedAssetId}" data-vmss-asset-preview-video class="h-full w-full object-cover" muted playsinline preload="metadata" src="${vmssEscapeHtml(previewUrl)}" onmouseenter="vmssStartAssetHoverPreview('${escapedAssetId}')" onmouseleave="vmssStopAssetHoverPreview('${escapedAssetId}')"></video><div class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/65 to-transparent px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-white"><span>Hover Preview</span><i class="ri-play-mini-fill text-sm"></i></div>`;
+    }
+
+    return `
+      <div class="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm transition hover:border-cyan-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-900/80 dark:hover:border-cyan-500">
+        <div class="relative aspect-video overflow-hidden bg-slate-100 dark:bg-slate-950/70">${previewMarkup}</div>
+        <div class="space-y-3 p-4">
+          <div>
+            <div class="flex items-start justify-between gap-3">
+              <p class="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800 dark:text-white">${safeName}</p>
+              <span class="shrink-0 rounded-full bg-cyan-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">${vmssEscapeHtml(vmssGetAssetLibraryTypeLabel(assetType))}</span>
+            </div>
+            <p class="mt-1 text-xs text-slate-400">${vmssEscapeHtml(metaLabel || 'Shared playlist asset')}</p>
+            <p class="mt-2 text-xs font-medium text-slate-500 dark:text-slate-400">${usageLabel}</p>
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <button onclick="vmssUsePlaylistAsset('${escapedAssetId}')" class="rounded-xl bg-cyan-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-cyan-600">Use ${vmssEscapeHtml(vmssGetAssetLibraryItemLabel(assetType))}</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function vmssStartAssetHoverPreview(encodedAssetId) {
+  const video = document.getElementById(`vmss-asset-preview-${encodedAssetId}`);
+  if (!(video instanceof HTMLVideoElement)) return;
+  const playPromise = video.play();
+  if (playPromise?.catch) playPromise.catch(() => {});
+}
+
+function vmssStopAssetHoverPreview(encodedAssetId) {
+  const video = document.getElementById(`vmss-asset-preview-${encodedAssetId}`);
+  if (!(video instanceof HTMLVideoElement)) return;
+  video.pause();
+  video.currentTime = 0;
+}
+
+function vmssTriggerAssetLibraryUpload() {
+  if (!vmss.playlist?._id) {
+    alert('Open a project from a playlist first.');
+    return;
+  }
+
+  const input = vmssGet('vmss-asset-library-upload-input');
+  if (!(input instanceof HTMLInputElement)) return;
+  input.accept = vmssGetAssetLibraryAccept(vmss.assetLibraryFilter);
+  input.click();
+}
+
+async function vmssHandleAssetLibraryUpload(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+
+  const type = vmssNormalizePlaylistAssetType(vmss.assetLibraryFilter, file.type);
+  if (type === 'image') {
+    await vmssUploadPlaylistAssetAndInsert(file, 'image');
+    return;
+  }
+
+  if (type === 'audio') {
+    await vmssUploadPlaylistAssetAndInsert(file, 'audio');
+    return;
+  }
+
+  await vmssUploadPlaylistAssetAndInsert(file, 'video');
+}
+
+async function vmssUploadPlaylistBinary(file, { onProgress = null } = {}) {
+  return await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    vmss.uploadXhr = xhr;
+    xhr.open('POST', `${VMSS_API_BASE_URL()}/api/video-manuals-studio/upload-asset`);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.setRequestHeader('X-File-Name', file.name);
+    xhr.setRequestHeader('X-Upload-Folder', 'videoManuals/shotstackAssets');
+    if (vmss.playlist?._id) xhr.setRequestHeader('X-Playlist-Id', vmss.playlist._id);
+    Object.entries(vmssAuthHeaders()).forEach(([header, value]) => {
+      xhr.setRequestHeader(header, value);
+    });
+
+    xhr.upload.addEventListener('progress', (progressEvent) => {
+      if (!progressEvent.lengthComputable) return;
+      onProgress?.(progressEvent.loaded, progressEvent.total, progressEvent);
+    });
+
+    xhr.onload = () => {
+      vmss.uploadXhr = null;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+        return;
+      }
+
+      let errorMessage = `${xhr.status} ${xhr.statusText}`;
+      try {
+        errorMessage = JSON.parse(xhr.responseText).error || errorMessage;
+      } catch (_) {}
+      reject(new Error(errorMessage));
+    };
+    xhr.onerror = () => {
+      vmss.uploadXhr = null;
+      reject(new Error('Network error during upload'));
+    };
+    xhr.onabort = () => {
+      vmss.uploadXhr = null;
+      reject(new Error('Upload canceled'));
+    };
+    xhr.send(file);
+  });
+}
+
+function vmssBuildUploadedAsset(file, result, forcedType = null) {
+  return {
+    assetId: result.assetId,
+    name: file.name,
+    fileName: result.fileName || file.name,
+    mimeType: result.mimeType || file.type || 'application/octet-stream',
+    type: vmssNormalizePlaylistAssetType(forcedType || result.type, result.mimeType || file.type),
+    storagePath: result.storagePath,
+    downloadUrl: result.url,
+    uploadedAt: result.uploadedAt || new Date().toISOString(),
+    size: file.size,
+  };
+}
+
+function vmssRememberPlaylistAsset(asset) {
+  const assetId = String(asset?.assetId || asset?._id || '');
+  vmss.assetLibraryItems = [asset, ...(Array.isArray(vmss.assetLibraryItems) ? vmss.assetLibraryItems : []).filter((item) => String(item?.assetId || item?._id || '') !== assetId)];
+}
+
+async function vmssMeasureImageClipSize(url) {
+  return await new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const maxWidth = 600;
+      const scale = image.width > maxWidth ? maxWidth / image.width : 1;
+      resolve({
+        width: Math.round(image.width * scale),
+        height: Math.round(image.height * scale),
+      });
+    };
+    image.onerror = () => resolve({ width: 400, height: 300 });
+    image.src = url;
+  });
+}
+
+async function vmssInsertPlaylistAsset(asset) {
+  if (!asset) return;
+
+  const startTime = vmss.edit?.playbackTime || 0;
+  const assetType = vmssNormalizePlaylistAssetType(asset.type, asset.mimeType);
+  const downloadUrl = asset.downloadUrl || asset.url;
+
+  if (assetType === 'image') {
+    const previewUrl = vmssResolveAssetLibraryMediaUrl(downloadUrl);
+    const size = await vmssMeasureImageClipSize(previewUrl);
+    await vmssAddImageClip(downloadUrl, startTime, size);
+    vmssSetStatus('Image added from playlist library');
+    return;
+  }
+
+  if (assetType === 'audio') {
+    await vmssAddAudioClip(downloadUrl, startTime);
+    vmssSetStatus('Audio added from playlist library');
+    return;
+  }
+
+  await vmssAddVideoClip(downloadUrl, startTime);
+  vmssSetStatus('Video added from playlist library');
+}
+
+async function vmssUsePlaylistAsset(encodedAssetId) {
+  const assetId = decodeURIComponent(encodedAssetId || '');
+  const asset = (Array.isArray(vmss.assetLibraryItems) ? vmss.assetLibraryItems : []).find((item) => String(item?.assetId || item?._id || '') === assetId);
+  if (!asset) return;
+
+  await vmssInsertPlaylistAsset(asset);
+  vmssClosePlaylistAssetLibrary();
+}
+
+async function vmssUploadPlaylistAssetAndInsert(file, forcedType = null) {
+  if (!vmss.playlist?._id) {
+    alert('Open a project from a playlist first.');
+    return;
+  }
+
+  const type = vmssNormalizePlaylistAssetType(forcedType, file.type);
+  const label = vmssGetAssetLibraryTypeLabel(type);
+  vmssSetStatus(`Uploading ${label.toLowerCase()}...`);
+
+  try {
+    const result = await vmssUploadPlaylistBinary(file, {
+      onProgress: (loaded, total) => {
+        vmssSetStatus(`Uploading ${label.toLowerCase()}... ${Math.round((loaded / total) * 100)}%`);
+      },
+    });
+
+    const asset = vmssBuildUploadedAsset(file, result, type);
+    vmssRememberPlaylistAsset(asset);
+    vmssRenderPlaylistAssetLibrary();
+    await vmssInsertPlaylistAsset(asset);
+    await vmssLoadPlaylistAssetLibrary(true);
+    vmssClosePlaylistAssetLibrary();
+  } catch (error) {
+    console.error(`[VMSS] ${label} upload failed:`, error);
+    vmssSetStatus(`${label} upload failed`);
+    alert(`${label} upload failed: ${error.message}`);
   }
 }
 
@@ -5358,6 +5678,14 @@ window.vmssResetLocalProject = vmssResetLocalProject;
 window.vmssDeleteSelectedClip = vmssDeleteSelectedClip;
 window.vmssHandleImageUpload = vmssHandleImageUpload;
 window.vmssHandleVideoUpload = vmssHandleVideoUpload;
+window.vmssHandleAudioUpload = vmssHandleAudioUpload;
+window.vmssOpenPlaylistAssetLibrary = vmssOpenPlaylistAssetLibrary;
+window.vmssClosePlaylistAssetLibrary = vmssClosePlaylistAssetLibrary;
+window.vmssTriggerAssetLibraryUpload = vmssTriggerAssetLibraryUpload;
+window.vmssHandleAssetLibraryUpload = vmssHandleAssetLibraryUpload;
+window.vmssUsePlaylistAsset = vmssUsePlaylistAsset;
+window.vmssStartAssetHoverPreview = vmssStartAssetHoverPreview;
+window.vmssStopAssetHoverPreview = vmssStopAssetHoverPreview;
 window.vmssDumpSelectedKeyframeDebug = function vmssDumpSelectedKeyframeDebug() {
   vmssDebugKeyframeConsole('manual-dump');
 };
