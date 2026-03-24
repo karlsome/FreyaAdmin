@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const VMSS_STORAGE_KEY = 'freya.videoManual.shotstack.project';
+const VMSS_PREVIEW_ZOOM_PRESETS = ['fit', '25', '50', '75', '100', '150', '200'];
 const VMSS_API_BASE_URL = () => {
   const base = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000';
   return base.replace(/\/$/, ''); // Remove trailing slash if present
@@ -55,6 +56,17 @@ const vmss = {
   onPreviewDrawPointerDown: null,
   onPreviewDrawPointerMove: null,
   onPreviewDrawPointerUp: null,
+  previewZoomPreset: 'fit',
+  previewViewportSyncRaf: null,
+  previewInteractionSurface: null,
+  onPreviewInteractionWheel: null,
+  onPreviewInteractionPointerDown: null,
+  onPreviewInteractionPointerMove: null,
+  previewResizeObserver: null,
+  onPreviewSurfaceTransitionEnd: null,
+  previewMaskHideTimer: null,
+  previewDrawerInteractionLockUntil: 0,
+  previewDrawerInteractionLockTimer: null,
   addElementsLayoutRaf: null,
   onAddElementsWindowResize: null,
   onAddElementsOutsidePointerDown: null,
@@ -196,6 +208,7 @@ function vmssShowEditorScreen() {
   if (browser) browser.classList.add('hidden');
   if (editor) editor.classList.remove('hidden');
   vmssLockWorkspaceScroll();
+  vmssSchedulePreviewViewportSync();
 }
 
 async function vmssEnsureEditorMounted() {
@@ -1086,16 +1099,20 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmssHideFloatingSelectionToolbars();
 
   vmssBindEvents();
+  vmssBindPreviewResizeWatchers();
+  vmssBindPreviewViewportGuards();
   vmssBindPreviewDrawHandlers();
   vmssBindAddElementsLayoutWatchers();
   vmssUpdateDrawModeUI();
   vmssUpdateAddElementsUI();
+  vmssUpdatePreviewZoomUi();
   vmssSyncStepsFromTracks();
   vmssRenderStepsPanel();
   vmssSyncSelectionActionButtons();
   vmssSetTitle(options.title || vmss.title);
   vmssSetStatus('Ready');
   vmssStartClock();
+  vmssSchedulePreviewViewportSync();
   // Delay to allow timeline DOM to render before injecting diamond markers
   window.requestAnimationFrame(() => vmssRefreshTimelineKeyframeDiamonds());
 }
@@ -1553,10 +1570,22 @@ function vmssDispose() {
   vmssUnbindAddElementsLayoutWatchers();
   vmssUnbindTimelineLayoutWatchers();
   vmssUnbindShapeSyncWatchers();
+  vmssUnbindPreviewResizeWatchers();
+  vmssUnbindPreviewViewportGuards();
   vmssUnbindPreviewDrawHandlers();
   vmssDetachTimelineDebug();
   vmssRestoreTimelineContainingBlocks();
   vmssUnlockWorkspaceScroll();
+
+  if (vmss.previewViewportSyncRaf) {
+    window.cancelAnimationFrame(vmss.previewViewportSyncRaf);
+    vmss.previewViewportSyncRaf = null;
+  }
+
+  if (vmss.previewMaskHideTimer) {
+    window.clearTimeout(vmss.previewMaskHideTimer);
+    vmss.previewMaskHideTimer = null;
+  }
 
   vmss.controls?.dispose?.();
   vmss.timeline?.dispose?.();
@@ -1784,6 +1813,7 @@ function vmssBindEvents() {
     vmssRememberAnimatedClipStateByLocation(vmss.currentStepIdx, vmss.selectedClipId);
     vmssSyncSelectedShapeAsset();
     vmssScheduleSelectedShapeSync();
+    vmssLockPreviewInteractionForDrawer();
     vmssOpenSelectedClipInDrawer();
     window.requestAnimationFrame(() => vmssHideFloatingSelectionToolbars());
 
@@ -2277,6 +2307,7 @@ function vmssUpdateAddElementsLayout() {
       workspace.style.marginRight = '0px';
       workspace.style.marginLeft = '0px';
     }
+    vmssSchedulePreviewViewportSync();
     return;
   }
 
@@ -2290,9 +2321,11 @@ function vmssUpdateAddElementsLayout() {
   content.style.marginRight = openLeft && vmss.addElementsOpen ? '12px' : '0px';
 
   if (workspace) {
-    workspace.style.marginRight = openLeft && vmss.addElementsOpen ? `${panelWidth + 12}px` : '0px';
-    workspace.style.marginLeft = !openLeft && vmss.addElementsOpen ? `${panelWidth + 12}px` : '0px';
+    workspace.style.marginRight = '0px';
+    workspace.style.marginLeft = '0px';
   }
+
+  vmssSchedulePreviewViewportSync();
 }
 
 function vmssSetAddElementsCategory(category) {
@@ -3961,7 +3994,7 @@ async function vmssSetOutputPreset(width, height) {
   if (!Number.isFinite(safeWidth) || !Number.isFinite(safeHeight)) return;
 
   await vmss.edit.setOutputSize?.(safeWidth, safeHeight);
-  vmss.canvas?.resize?.();
+  vmssSchedulePreviewViewportSync();
   vmssScheduleTimelineRelayout();
   vmssMarkDirty();
   vmssSyncAddElementsSelectionState();
@@ -3982,6 +4015,309 @@ async function vmssSetOutputFps(fps) {
 
 function vmssClamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function vmssNormalizePreviewZoomPreset(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'fit' || normalized === 'auto' || normalized === 'auto-fit' || normalized === 'autofit') {
+    return 'fit';
+  }
+
+  const numericValue = Number.parseInt(normalized.replace('%', ''), 10);
+  const preset = String(numericValue);
+  return VMSS_PREVIEW_ZOOM_PRESETS.includes(preset) ? preset : 'fit';
+}
+
+function vmssGetPreviewZoomPadding() {
+  const surface = vmssGet('vmss-preview-surface');
+  const controls = vmssGet('vmss-preview-zoom-controls');
+  const surfaceHeight = surface?.clientHeight || 0;
+  const controlsHeight = controls?.offsetHeight || 0;
+  const proportionalPadding = surfaceHeight > 0 ? Math.round(surfaceHeight * 0.08) : 0;
+  return Math.max(56, controlsHeight + proportionalPadding + 12);
+}
+
+function vmssUpdatePreviewZoomUi() {
+  const select = vmssGet('vmss-preview-zoom-select');
+  const normalizedPreset = vmssNormalizePreviewZoomPreset(vmss.previewZoomPreset);
+  const currentZoom = typeof vmss.canvas?.getZoom === 'function'
+    ? Math.round(vmss.canvas.getZoom() * 100)
+    : Number.parseInt(normalizedPreset, 10);
+  const title = normalizedPreset === 'fit'
+    ? `Preview zoom: Auto-Fit Page${Number.isFinite(currentZoom) ? ` (${currentZoom}%)` : ''}`
+    : `Preview zoom: ${normalizedPreset}%`;
+
+  if (select && select.value !== normalizedPreset) {
+    select.value = normalizedPreset;
+  }
+
+  if (select) {
+    select.title = title;
+  }
+}
+
+function vmssSetPreviewCanvasVisibility(isVisible) {
+  const canvas = document.querySelector('#vmss-preview-surface canvas');
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+
+  canvas.style.transition = 'opacity 160ms ease-out';
+  canvas.style.opacity = isVisible ? '1' : '0';
+}
+
+function vmssShowPreviewTransitionMask() {
+  const mask = vmssGet('vmss-preview-transition-mask');
+  if (!mask) return;
+
+  if (vmss.previewMaskHideTimer) {
+    window.clearTimeout(vmss.previewMaskHideTimer);
+    vmss.previewMaskHideTimer = null;
+  }
+
+  mask.style.transitionDuration = '0ms';
+  mask.classList.add('opacity-100');
+  void mask.offsetWidth;
+  mask.style.transitionDuration = '180ms';
+  vmssSetPreviewCanvasVisibility(false);
+}
+
+function vmssHidePreviewTransitionMask(delay = 90) {
+  const mask = vmssGet('vmss-preview-transition-mask');
+  if (!mask) return;
+
+  if (vmss.previewMaskHideTimer) {
+    window.clearTimeout(vmss.previewMaskHideTimer);
+  }
+
+  vmss.previewMaskHideTimer = window.setTimeout(() => {
+    vmss.previewMaskHideTimer = null;
+    vmssSetPreviewCanvasVisibility(true);
+    mask.classList.remove('opacity-100');
+  }, Math.max(0, delay));
+}
+
+function vmssIsPreviewInteractionLocked() {
+  return Date.now() < (vmss.previewDrawerInteractionLockUntil || 0);
+}
+
+function vmssLockPreviewInteractionForDrawer(duration = 220) {
+  vmss.previewDrawerInteractionLockUntil = Date.now() + Math.max(0, duration);
+
+  if (vmss.previewDrawerInteractionLockTimer) {
+    window.clearTimeout(vmss.previewDrawerInteractionLockTimer);
+  }
+
+  vmss.previewDrawerInteractionLockTimer = window.setTimeout(() => {
+    vmss.previewDrawerInteractionLockTimer = null;
+    vmss.previewDrawerInteractionLockUntil = 0;
+  }, Math.max(0, duration));
+}
+
+function vmssGetPreviewDrawerOffsetX() {
+  if (!vmss.addElementsOpen) return 0;
+
+  const surface = vmssGet('vmss-preview-surface');
+  const drawer = vmssGet('vmss-add-elements-content');
+  if (!surface || !drawer) return 0;
+
+  const surfaceRect = surface.getBoundingClientRect();
+  const drawerRect = drawer.getBoundingClientRect();
+  const overlapWidth = Math.max(0, Math.min(surfaceRect.right, drawerRect.right) - Math.max(surfaceRect.left, drawerRect.left));
+  if (overlapWidth <= 0) return 0;
+
+  const currentZoom = typeof vmss.canvas?.getZoom === 'function' ? vmss.canvas.getZoom() : 1;
+  const contentWidth = Number(vmss.edit?.size?.width || 0) * currentZoom;
+  const spareHorizontalRoom = Math.max(0, surfaceRect.width - contentWidth);
+  const maxLeftShift = Math.max(0, Math.floor(spareHorizontalRoom / 2));
+  const desiredShift = Math.ceil(overlapWidth + 24);
+
+  return Math.ceil(Math.min(desiredShift, maxLeftShift) / 2);
+}
+
+function vmssApplyPreviewDrawerOffset() {
+  if (!vmss.canvas) return;
+
+  const viewport = typeof vmss.canvas.getViewportContainer === 'function'
+    ? vmss.canvas.getViewportContainer()
+    : null;
+  const overlay = vmss.canvas.overlayContainer;
+  if (!viewport || !overlay) return;
+
+  const offsetX = vmssGetPreviewDrawerOffsetX();
+  viewport.position.x -= offsetX;
+  overlay.position.x = viewport.position.x;
+  overlay.position.y = viewport.position.y;
+  vmss.ui?.updateToolbarPositions?.();
+}
+
+function vmssApplyPreviewZoomPreset() {
+  if (!vmss.canvas) return;
+
+  const preset = vmssNormalizePreviewZoomPreset(vmss.previewZoomPreset);
+  vmss.previewZoomPreset = preset;
+
+  if (preset === 'fit') {
+    vmss.canvas.zoomToFit?.(vmssGetPreviewZoomPadding());
+  } else {
+    vmss.canvas.setZoom?.(Number.parseInt(preset, 10) / 100);
+    vmss.canvas.centerEdit?.();
+  }
+
+  vmssApplyPreviewDrawerOffset();
+  vmssUpdatePreviewZoomUi();
+}
+
+function vmssSyncPreviewViewport() {
+  if (!vmss.canvas) return;
+
+  vmss.canvas.resize?.();
+  vmssApplyPreviewZoomPreset();
+}
+
+function vmssSchedulePreviewViewportSync() {
+  if (!vmss.canvas || vmss.previewViewportSyncRaf) return;
+
+  vmss.previewViewportSyncRaf = window.requestAnimationFrame(() => {
+    vmss.previewViewportSyncRaf = null;
+    vmssSyncPreviewViewport();
+  });
+}
+
+function vmssSetPreviewZoomPreset(value) {
+  vmss.previewZoomPreset = vmssNormalizePreviewZoomPreset(value);
+  vmssApplyPreviewZoomPreset();
+}
+
+function vmssStepPreviewZoom(direction) {
+  const numericPresets = VMSS_PREVIEW_ZOOM_PRESETS.filter((value) => value !== 'fit');
+  const currentPreset = vmssNormalizePreviewZoomPreset(vmss.previewZoomPreset);
+
+  if (currentPreset === 'fit') {
+    vmssSetPreviewZoomPreset(direction < 0 ? '50' : '100');
+    return;
+  }
+
+  const currentIndex = Math.max(0, numericPresets.indexOf(currentPreset));
+  const nextIndex = vmssClamp(currentIndex + (direction < 0 ? -1 : 1), 0, numericPresets.length - 1);
+  vmssSetPreviewZoomPreset(numericPresets[nextIndex]);
+}
+
+
+function vmssBindPreviewResizeWatchers() {
+  vmssUnbindPreviewResizeWatchers();
+
+  const surface = vmssGet('vmss-preview-surface');
+  const workspace = vmssGet('vmss-workspace-main');
+  if (!surface) return;
+
+  if (typeof ResizeObserver === 'function') {
+    vmss.previewResizeObserver = new ResizeObserver(() => {
+      vmssSchedulePreviewViewportSync();
+    });
+    vmss.previewResizeObserver.observe(surface);
+    if (workspace) {
+      vmss.previewResizeObserver.observe(workspace);
+    }
+  }
+
+  vmss.onPreviewSurfaceTransitionEnd = (event) => {
+    if (event.propertyName !== 'margin-left' && event.propertyName !== 'margin-right' && event.propertyName !== 'width') {
+      return;
+    }
+
+    vmssSchedulePreviewViewportSync();
+  };
+
+  surface.addEventListener('transitionend', vmss.onPreviewSurfaceTransitionEnd);
+  workspace?.addEventListener('transitionend', vmss.onPreviewSurfaceTransitionEnd);
+}
+
+function vmssUnbindPreviewResizeWatchers() {
+  if (vmss.previewResizeObserver) {
+    vmss.previewResizeObserver.disconnect();
+    vmss.previewResizeObserver = null;
+  }
+
+  const surface = vmssGet('vmss-preview-surface');
+  const workspace = vmssGet('vmss-workspace-main');
+  if (vmss.onPreviewSurfaceTransitionEnd) {
+    surface?.removeEventListener('transitionend', vmss.onPreviewSurfaceTransitionEnd);
+    workspace?.removeEventListener('transitionend', vmss.onPreviewSurfaceTransitionEnd);
+    vmss.onPreviewSurfaceTransitionEnd = null;
+  }
+}
+
+function vmssBindPreviewViewportGuards() {
+  vmssUnbindPreviewViewportGuards();
+
+  const surface = vmssGet('vmss-preview-surface');
+  if (!surface) return;
+
+  vmss.previewInteractionSurface = surface;
+
+  vmss.onPreviewInteractionWheel = (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-vmss-preview-zoom-controls]')) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  vmss.onPreviewInteractionPointerDown = (event) => {
+    const target = event.target;
+    if (target instanceof Element && target.closest('[data-vmss-preview-zoom-controls]')) {
+      return;
+    }
+
+    if (vmssIsPreviewInteractionLocked()) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (event.button !== 1) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  vmss.onPreviewInteractionPointerMove = (event) => {
+    if (!vmssIsPreviewInteractionLocked()) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  surface.addEventListener('wheel', vmss.onPreviewInteractionWheel, { passive: false, capture: true });
+  surface.addEventListener('pointerdown', vmss.onPreviewInteractionPointerDown, true);
+  document.addEventListener('pointermove', vmss.onPreviewInteractionPointerMove, true);
+}
+
+function vmssUnbindPreviewViewportGuards() {
+  if (vmss.previewInteractionSurface && vmss.onPreviewInteractionWheel) {
+    vmss.previewInteractionSurface.removeEventListener('wheel', vmss.onPreviewInteractionWheel, true);
+  }
+
+  if (vmss.previewInteractionSurface && vmss.onPreviewInteractionPointerDown) {
+    vmss.previewInteractionSurface.removeEventListener('pointerdown', vmss.onPreviewInteractionPointerDown, true);
+  }
+
+  if (vmss.onPreviewInteractionPointerMove) {
+    document.removeEventListener('pointermove', vmss.onPreviewInteractionPointerMove, true);
+  }
+
+  if (vmss.previewDrawerInteractionLockTimer) {
+    window.clearTimeout(vmss.previewDrawerInteractionLockTimer);
+    vmss.previewDrawerInteractionLockTimer = null;
+  }
+
+  vmss.previewDrawerInteractionLockUntil = 0;
+
+  vmss.previewInteractionSurface = null;
+  vmss.onPreviewInteractionWheel = null;
+  vmss.onPreviewInteractionPointerDown = null;
+  vmss.onPreviewInteractionPointerMove = null;
 }
 
 function vmssGetCanvasViewportSize() {
@@ -4385,8 +4721,27 @@ function vmssRenderEditorShell(container) {
         </div>
 
         <div id="vmss-workspace-main" class="flex min-w-0 flex-1 flex-col bg-gray-200 transition-[margin] duration-200 dark:bg-gray-950">
-          <div id="vmss-preview-surface" class="relative flex flex-1 items-center justify-center overflow-hidden bg-gray-800 dark:bg-black">
+          <div id="vmss-preview-surface" class="relative flex flex-1 items-center justify-center overflow-hidden bg-gray-200 dark:bg-gray-950">
+            <div id="vmss-preview-zoom-controls" data-vmss-preview-zoom-controls data-vmss-preserve-selection="true" class="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center overflow-hidden rounded-2xl border border-white/80 bg-white/95 shadow-[0_18px_40px_-24px_rgba(15,23,42,0.45)] backdrop-blur dark:border-gray-700 dark:bg-gray-900/90">
+              <button type="button" data-vmss-preserve-selection="true" onclick="vmssStepPreviewZoom(-1)" class="flex h-11 w-11 items-center justify-center border-r border-gray-200 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white" title="Zoom out">
+                <i class="ri-zoom-out-line text-lg"></i>
+              </button>
+              <select id="vmss-preview-zoom-select" data-vmss-preserve-selection="true" onchange="vmssSetPreviewZoomPreset(event.target.value)" class="h-11 min-w-[170px] appearance-none border-0 bg-transparent px-4 text-center text-sm font-medium text-gray-700 focus:outline-none dark:text-gray-100">
+                <option value="fit">Auto-Fit Page</option>
+                <option value="25">25% Zoom</option>
+                <option value="50">50% Zoom</option>
+                <option value="75">75% Zoom</option>
+                <option value="100">100% Zoom</option>
+                <option value="150">150% Zoom</option>
+                <option value="200">200% Zoom</option>
+              </select>
+              <i class="pointer-events-none ri-arrow-down-s-line absolute right-12 top-1/2 -translate-y-1/2 text-base text-gray-400 dark:text-gray-500"></i>
+              <button type="button" data-vmss-preserve-selection="true" onclick="vmssStepPreviewZoom(1)" class="flex h-11 w-11 items-center justify-center border-l border-gray-200 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white" title="Zoom in">
+                <i class="ri-zoom-in-line text-lg"></i>
+              </button>
+            </div>
             <div data-shotstack-studio class="h-full w-full"></div>
+            <div id="vmss-preview-transition-mask" class="pointer-events-none absolute inset-0 z-20 opacity-0 transition-opacity duration-150 ease-out bg-slate-100 dark:bg-slate-900"></div>
             <div id="vmss-draw-overlay" class="pointer-events-none absolute inset-0 z-10 hidden"></div>
             <div id="vmss-draw-hint" class="pointer-events-none absolute left-4 top-4 z-20 hidden rounded-full bg-white/90 px-3 py-1 text-[11px] font-medium text-slate-700 shadow-sm">Drag on the preview to draw an arrow</div>
           </div>
@@ -4936,6 +5291,8 @@ window.vmssSetAddElementsCategory = vmssSetAddElementsCategory;
 window.vmssAddImageClip = vmssAddImageClip;
 window.vmssAddVideoClip = vmssAddVideoClip;
 window.vmssSetBackgroundColor = vmssSetBackgroundColor;
+window.vmssSetPreviewZoomPreset = vmssSetPreviewZoomPreset;
+window.vmssStepPreviewZoom = vmssStepPreviewZoom;
 window.vmssSetOutputPreset = vmssSetOutputPreset;
 window.vmssSetOutputFps = vmssSetOutputFps;
 window.vmssSetSelectedClipTiming = vmssSetSelectedClipTiming;
