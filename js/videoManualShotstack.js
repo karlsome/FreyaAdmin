@@ -4,6 +4,10 @@
 
 const VMSS_STORAGE_KEY = 'freya.videoManual.shotstack.project';
 const VMSS_PREVIEW_ZOOM_PRESETS = ['fit', '25', '50', '75', '100', '150', '200'];
+const VMSS_KEYFRAME_SAME_TIME_TOLERANCE = 0.05;
+const VMSS_KEYFRAME_MIN_SPACING = 0.25;
+const VMSS_ACTIVE_KEYFRAME_THRESHOLD = 0.1;
+const VMSS_BLOCKED_ANIMATED_UPDATE = Symbol('vmssBlockedAnimatedUpdate');
 const VMSS_API_BASE_URL = () => {
   const base = typeof BASE_URL !== 'undefined' ? BASE_URL : 'http://localhost:3000';
   return base.replace(/\/$/, ''); // Remove trailing slash if present
@@ -78,6 +82,7 @@ const vmss = {
   assetLibraryFilter: 'video',
   assetLibraryDeleteInFlightId: null,
   uploadXhr: null,
+  drawerSyncSignature: '',
 };
 
 function vmssGet(id) {
@@ -2433,7 +2438,14 @@ function vmssSetAddElementsCategory(category) {
   const selection = vmssGetSelectedInspectorContext();
   const selectionCategory = selection?.category || null;
 
-  if (selection && selectionCategory === category) {
+  if (selection && category === 'animation') {
+    if (vmss.addElementsOpen && vmss.addElementsCategory === category) {
+      vmss.addElementsOpen = false;
+    } else {
+      vmss.addElementsCategory = category;
+      vmss.addElementsOpen = true;
+    }
+  } else if (selection && selectionCategory === category) {
     vmssClearSelectedClipFocus();
     vmss.addElementsOpen = false;
   } else if (selection && selectionCategory !== category) {
@@ -2461,6 +2473,7 @@ function vmssCloseAddElementsPanel() {
 
 function vmssClearSelectedClipFocus() {
   vmss.selectedClipId = null;
+  vmss.drawerSyncSignature = '';
   vmss.edit?.selectionManager?.clearSelection?.();
   document.querySelectorAll('.ss-clip.selected').forEach((element) => {
     element.classList.remove('selected');
@@ -2564,6 +2577,7 @@ function vmssGetAddElementsCategoryLabel(category) {
     text: 'Text',
     shapes: 'Shapes',
     media: 'Media',
+    animation: 'Animation',
     background: 'Background',
     advanced: 'Advanced',
   };
@@ -2718,19 +2732,35 @@ function vmssToggleAddElementsOptionState(button, isActive) {
 function vmssRenderSelectedDrawerProperties() {
   const selection = vmssGetSelectedInspectorContext();
   const title = document.getElementById('vmss-add-elements-title');
+  const activePanelCategory = vmss.addElementsOpen ? (vmss.addElementsCategory || 'text') : null;
 
   if (title) {
-    title.textContent = selection?.category
-      ? `${vmssGetAddElementsCategoryLabel(selection.category)} Properties`
-      : 'Add Elements';
+    if (activePanelCategory === 'animation') {
+      title.textContent = 'Animation Properties';
+    } else {
+      title.textContent = selection?.category
+        ? `${vmssGetAddElementsCategoryLabel(selection.category)} Properties`
+        : activePanelCategory
+          ? vmssGetAddElementsCategoryLabel(activePanelCategory)
+          : 'Add Elements';
+    }
   }
 
   document.querySelectorAll('[data-vmss-selection-properties]').forEach((container) => {
     const category = container.getAttribute('data-vmss-selection-properties');
-    const shouldShow = !!selection && !!selection.category && category === selection.category;
+    const shouldShow = category === 'animation'
+      ? activePanelCategory === 'animation'
+      : !!selection && !!selection.category && category === selection.category;
 
     container.classList.toggle('hidden', !shouldShow);
-    container.innerHTML = shouldShow ? vmssBuildSelectedPropertiesMarkup(selection) : '';
+    if (!shouldShow) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = category === 'animation'
+      ? vmssBuildAnimationPropertiesMarkup(selection)
+      : vmssBuildSelectedPropertiesMarkup(selection);
   });
 
   document.querySelectorAll('[data-vmss-add-panel]').forEach((panel) => {
@@ -2784,40 +2814,26 @@ function vmssBuildSelectedPropertiesMarkup(selection) {
         : selection.category === 'shapes'
           ? 'Selected Shape'
           : 'Selected Text';
-  const kfPoints = vmssGetClipKeyframePointsMap(clip, selection.category);
-  const hasKeyframes = Object.keys(kfPoints).length > 0;
   const playbackTime = vmss.edit?.playbackTime || 0;
   const clipStartTime = vmssGetStaticNumericValue(clip.start, 0);
   const relTime = Number(Math.max(0, Math.min(length, playbackTime - clipStartTime)).toFixed(2));
-  const kfPropLabels = { scale: 'Scale', opacity: 'Opacity', offsetX: 'X Position', offsetY: 'Y Position', rotate: 'Rotation', volume: 'Volume' };
 
   const keyframeSection = `
     <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
       <div class="flex items-center justify-between">
-        <p class="text-sm font-semibold text-slate-900 dark:text-white">Keyframes</p>
-        ${hasKeyframes ? `<button onclick="vmssClearAllKeyframes()" class="text-xs text-red-500 hover:text-red-700 dark:text-red-400">Clear All</button>` : ''}
+        <p class="text-sm font-semibold text-slate-900 dark:text-white">Animation</p>
+        <button onclick="vmssSetAddElementsCategory('animation')" class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 9.5h2.25l1.4-2.4 1.75 1.5 2.1-4.1H10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Animation
+        </button>
       </div>
       <button onclick="vmssAddKeyframeAtCurrentTime()" class="flex w-full items-center justify-center gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40">
         <svg width="9" height="9" viewBox="0 0 8 8"><rect x="1" y="1" width="6" height="6" fill="currentColor" transform="rotate(45 4 4)"/></svg>
-        Record Keyframe &nbsp;T=${relTime}s
+        Add Keyframe &nbsp;T=${relTime}s
       </button>
-      ${hasKeyframes
-        ? Object.entries(kfPoints).map(([prop, pts]) => `
-      <div class="space-y-1">
-        <p class="text-[11px] font-semibold text-slate-500 dark:text-gray-400">${kfPropLabels[prop] || prop}</p>
-        <div class="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-slate-50 dark:divide-gray-700 dark:border-gray-600 dark:bg-gray-800/60">
-          ${pts.map((pt, i) => `
-          <div class="flex items-center justify-between px-2.5 py-1.5">
-            <span class="font-mono text-xs text-slate-400 dark:text-gray-400">T=${pt.time}s</span>
-            <span class="text-xs font-semibold text-slate-700 dark:text-gray-200">${Number(pt.value.toFixed(4))}</span>
-            <button onclick="vmssDeleteKeyframePoint('${prop}', ${i})" title="Remove keyframe" class="ml-2 text-slate-300 hover:text-red-500 dark:hover:text-red-400">
-              <svg width="11" height="11" viewBox="0 0 12 12"><path d="M9 3L3 9M3 3l6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            </button>
-          </div>`).join('')}
-        </div>
-      </div>`).join('')
-        : `<p class="text-center text-xs text-slate-400 dark:text-gray-500 py-1">No keyframes yet.<br>Seek the timeline then press Record.</p>`
-      }
+      <p class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">
+        Use the Animation panel for keyframe values and deleting the current diamond.
+      </p>
     </section>`;
 
   const transformSection = `
@@ -3098,6 +3114,12 @@ function vmssGetStaticNumericValue(value, fallback = 0) {
   return Array.isArray(value) ? fallback : (Number.isFinite(Number(value)) ? Number(value) : fallback);
 }
 
+function vmssRoundNumericValue(value, decimals = 4, fallback = 0) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return fallback;
+  return Number(numericValue.toFixed(decimals));
+}
+
 function vmssBuildSelectOptions(values, selectedValue, emptyLabel = null) {
   const options = [];
 
@@ -3127,6 +3149,203 @@ function vmssGetSelectedClipRelativePlaybackTime(selection = null) {
   const playbackTime = vmss.edit?.playbackTime || 0;
 
   return Number(Math.max(0, Math.min(clipLength, playbackTime - clipStart)).toFixed(3));
+}
+
+function vmssGetNearestKeyframe(times, targetTime, threshold = VMSS_ACTIVE_KEYFRAME_THRESHOLD) {
+  if (!Array.isArray(times) || !times.length) return null;
+
+  let nearest = null;
+  times.forEach((time) => {
+    const delta = Math.abs(time - targetTime);
+    if (!nearest || delta < nearest.delta) {
+      nearest = { time, delta };
+    }
+  });
+
+  if (!nearest || nearest.delta > threshold) return null;
+  return nearest;
+}
+
+function vmssGetKeyframedScalarValueAtTime(propertyValue, time, fallback = 0, decimals = 4) {
+  if (Array.isArray(propertyValue)) {
+    return vmssRoundNumericValue(vmssInterpolateKeyframeAtTime(propertyValue, time, fallback), decimals, fallback);
+  }
+
+  return vmssRoundNumericValue(vmssGetStaticNumericValue(propertyValue, fallback), decimals, fallback);
+}
+
+function vmssGetSelectedClipActiveKeyframe(selection = null, threshold = VMSS_ACTIVE_KEYFRAME_THRESHOLD) {
+  const resolvedSelection = selection || vmssGetSelectedInspectorContext();
+  if (!resolvedSelection) return null;
+
+  const relTime = vmssGetSelectedClipRelativePlaybackTime(resolvedSelection);
+  const keyframeTimes = vmssGetAllKeyframeTimesForClip(resolvedSelection.clip);
+  const nearest = vmssGetNearestKeyframe(keyframeTimes, relTime, threshold);
+
+  if (!nearest) return null;
+
+  return {
+    time: nearest.time,
+    delta: nearest.delta,
+    values: {
+      offsetX: vmssGetKeyframedScalarValueAtTime(resolvedSelection.clip.offset?.x, nearest.time, 0, 4),
+      offsetY: vmssGetKeyframedScalarValueAtTime(resolvedSelection.clip.offset?.y, nearest.time, 0, 4),
+      scale: vmssGetKeyframedScalarValueAtTime(resolvedSelection.clip.scale, nearest.time, 1, 3),
+      opacity: vmssGetKeyframedScalarValueAtTime(resolvedSelection.clip.opacity, nearest.time, 1, 3),
+      rotate: vmssGetKeyframedScalarValueAtTime(resolvedSelection.clip.transform?.rotate?.angle, nearest.time, 0, 2),
+    },
+  };
+}
+
+function vmssBuildAnimationField(label, iconMarkup, value, changeHandler, inputAttrs, disabled) {
+  const disabledAttr = disabled ? 'disabled' : '';
+  const valueAttr = disabled ? '' : `value="${value}"`;
+  const stateClass = disabled
+    ? 'border-slate-200 bg-slate-100/90 text-slate-400 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-500'
+    : 'border-slate-300 bg-white text-slate-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white';
+  const inputClass = disabled
+    ? 'cursor-not-allowed text-slate-400 dark:text-gray-500'
+    : 'text-slate-900 dark:text-white';
+
+  return `
+    <label class="grid grid-cols-[3rem_1fr] overflow-hidden rounded-2xl border ${stateClass}">
+      <span class="flex items-center justify-center border-r border-inherit bg-white/60 text-sm font-semibold dark:bg-gray-900/50" title="${label}">${iconMarkup}</span>
+      <input type="number" ${inputAttrs} ${valueAttr} ${disabledAttr} onchange="${changeHandler}" placeholder="${disabled ? 'No keyframe selected' : ''}" class="w-full bg-transparent px-3 py-3 text-sm font-semibold outline-none ${inputClass}">
+    </label>`;
+}
+
+function vmssBuildAnimationPropertiesMarkup(selection) {
+  if (!selection) {
+    return `
+      <section class="space-y-3 rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/60">
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">Animation</p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-gray-400">Select a clip, then move the scrubber onto a diamond to inspect or edit that keyframe.</p>
+        </div>
+      </section>`;
+  }
+
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  const clip = selection.clip || {};
+  const assetType = selection.resolvedClip?.asset?.type || clip.asset?.type || 'clip';
+  const header = assetType === 'video'
+    ? 'Selected Video'
+    : assetType === 'image'
+      ? 'Selected Image'
+      : assetType === 'audio'
+        ? 'Selected Audio'
+        : selection.category === 'shapes'
+          ? 'Selected Shape'
+          : 'Selected Text';
+  const absoluteTime = activeKeyframe
+    ? vmssFormatTime(vmssGetStaticNumericValue(clip.start, 0) + activeKeyframe.time)
+    : 'No Keyframe';
+  const disabled = !activeKeyframe;
+  const helperText = activeKeyframe
+    ? 'Values are locked to the current diamond. To move it, delete it here and record a new one from the clip properties panel.'
+    : `Move the scrubber within ${VMSS_ACTIVE_KEYFRAME_THRESHOLD.toFixed(2)}s of a diamond to load that keyframe.`;
+
+  return vmssNormalizePropertyMarkup(`
+    <section class="mb-4 rounded-[22px] border border-cyan-100 bg-cyan-50/70 p-4 shadow-sm dark:border-cyan-500/20 dark:bg-cyan-500/10">
+      <div class="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">${header}</p>
+          <p class="text-xs text-slate-500 dark:text-gray-400">Animation</p>
+        </div>
+        <span class="rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:bg-slate-900/60 dark:text-cyan-200">Animation</span>
+      </div>
+      <div class="space-y-3">
+        <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-900 dark:text-white">Current Diamond</p>
+              <p class="text-xs text-slate-500 dark:text-gray-400">${absoluteTime}</p>
+            </div>
+            <button onclick="vmssDeleteSelectedKeyframe()" ${disabled ? 'disabled' : ''} class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold ${disabled ? 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-gray-800 dark:text-gray-500' : 'bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/40'}">
+              <i class="ri-delete-bin-line"></i>Delete
+            </button>
+          </div>
+          <div class="grid gap-3">
+            ${vmssBuildAnimationField('X Position', '<span>X</span>', activeKeyframe?.values.offsetX ?? '', `vmssSetSelectedClipOffset('x', this.value)`, 'step="0.05" min="-1" max="1"', disabled)}
+            ${vmssBuildAnimationField('Y Position', '<span>Y</span>', activeKeyframe?.values.offsetY ?? '', `vmssSetSelectedClipOffset('y', this.value)`, 'step="0.05" min="-1" max="1"', disabled)}
+            ${vmssBuildAnimationField('Scale', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', activeKeyframe?.values.scale ?? '', 'vmssSetSelectedClipScale(this.value)', 'step="0.05" min="0.05"', disabled)}
+            ${vmssBuildAnimationField('Opacity', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5c2.4 2.8 4 4.7 4 6.6A4 4 0 1 1 4 9.1c0-1.9 1.6-3.8 4-6.6Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 3v10a4 4 0 0 0 0-8.1C6.7 6.3 6 7.5 6 9.1A2 2 0 0 0 8 11" fill="currentColor" opacity="0.18"/></svg>', activeKeyframe?.values.opacity ?? '', 'vmssSetSelectedClipOpacity(this.value)', 'step="0.05" min="0" max="1"', disabled)}
+            ${vmssBuildAnimationField('Rotation', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M11.8 5.2V2.8m0 0H9.4m2.4 0A5.8 5.8 0 1 0 13.6 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', activeKeyframe?.values.rotate ?? '', 'vmssSetSelectedClipRotation(this.value)', 'step="1" min="-360" max="360"', disabled)}
+          </div>
+          <p class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">${helperText}</p>
+        </section>
+      </div>
+    </section>`);
+}
+
+function vmssDeleteSelectedKeyframe() {
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  if (!selection || !activeKeyframe) {
+    vmssSetStatus('Move the scrubber onto a keyframe to delete it');
+    return;
+  }
+
+  const clip = selection.clip;
+  const clipLength = vmssGetStaticNumericValue(clip.length, 5);
+  const removeAtTime = (segments, fallback) => {
+    if (!Array.isArray(segments)) return segments;
+    const nextPoints = vmssSegmentsToExplicitKeyframePoints(segments, clipLength)
+      .filter((point) => Math.abs(point.time - activeKeyframe.time) > VMSS_KEYFRAME_SAME_TIME_TOLERANCE);
+    if (!nextPoints.length) return fallback;
+    return vmssKeyframePointsToSegments(nextPoints, clipLength, fallback) ?? fallback;
+  };
+
+  const update = {};
+  if (Array.isArray(clip.scale)) update.scale = removeAtTime(clip.scale, vmssGetStaticNumericValue(clip.scale, 1));
+  if (Array.isArray(clip.opacity)) update.opacity = removeAtTime(clip.opacity, vmssGetStaticNumericValue(clip.opacity, 1));
+  if (Array.isArray(clip.offset?.x) || Array.isArray(clip.offset?.y)) {
+    update.offset = {
+      ...(clip.offset || {}),
+      ...(Array.isArray(clip.offset?.x) ? { x: removeAtTime(clip.offset.x, vmssGetStaticNumericValue(clip.offset.x, 0)) } : {}),
+      ...(Array.isArray(clip.offset?.y) ? { y: removeAtTime(clip.offset.y, vmssGetStaticNumericValue(clip.offset.y, 0)) } : {}),
+    };
+  }
+  if (Array.isArray(clip.transform?.rotate?.angle)) {
+    update.transform = {
+      ...(clip.transform || {}),
+      rotate: {
+        ...((clip.transform || {}).rotate || {}),
+        angle: removeAtTime(clip.transform.rotate.angle, vmssGetStaticNumericValue(clip.transform.rotate.angle, 0)),
+      },
+    };
+  }
+
+  if (!Object.keys(update).length) {
+    vmssSetStatus('No keyframe to remove at the current scrubber position');
+    return;
+  }
+
+  vmssApplySelectedClipUpdate(update, `Keyframe removed at T=${activeKeyframe.time.toFixed(2)}s`);
+}
+
+function vmssSyncSelectionPanelsFromPlayback(force = false) {
+  const selection = vmssGetSelectedInspectorContext();
+  if (!selection) {
+    vmss.drawerSyncSignature = '';
+    return;
+  }
+
+  const clipId = vmss.edit?.getClipId?.(selection.trackIndex, selection.clipIndex) || 'none';
+  const relTime = vmssGetSelectedClipRelativePlaybackTime(selection).toFixed(2);
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  const signature = [
+    clipId,
+    vmss.addElementsOpen ? vmss.addElementsCategory || 'closed' : 'closed',
+    relTime,
+    activeKeyframe ? activeKeyframe.time.toFixed(2) : 'none',
+  ].join('|');
+
+  if (!force && vmss.drawerSyncSignature === signature) return;
+
+  vmss.drawerSyncSignature = signature;
+  vmssRenderSelectedDrawerProperties();
+  vmssRefreshTimelineKeyframeDiamonds();
 }
 
 function vmssSegmentsToKeyframePoints(segments) {
@@ -3243,8 +3462,7 @@ function vmssInterpolateKeyframeAtTime(segments, time, fallback) {
 
 function vmssUpsertKeyframePoint(segments, time, value) {
   const points = vmssSegmentsToKeyframePoints(segments);
-  const tolerance = 0.05; // treat points within 50 ms as the same keyframe
-  const idx = points.findIndex(p => Math.abs(p.time - time) <= tolerance);
+  const idx = points.findIndex(p => Math.abs(p.time - time) <= VMSS_KEYFRAME_SAME_TIME_TOLERANCE);
   if (idx >= 0) {
     points[idx] = { time: points[idx].time, value };
   } else {
@@ -3261,7 +3479,6 @@ function vmssGetClipKeyframePointsMap(clip, category) {
   if (Array.isArray(clip.offset?.x)) map.offsetX = vmssSegmentsToExplicitKeyframePoints(clip.offset.x, clipLength);
   if (Array.isArray(clip.offset?.y)) map.offsetY = vmssSegmentsToExplicitKeyframePoints(clip.offset.y, clipLength);
   if (Array.isArray(clip.transform?.rotate?.angle)) map.rotate = vmssSegmentsToExplicitKeyframePoints(clip.transform.rotate.angle, clipLength);
-  if (category === 'media' && Array.isArray(clip.asset?.volume)) map.volume = vmssSegmentsToExplicitKeyframePoints(clip.asset.volume, clipLength);
   return map;
 }
 
@@ -3277,7 +3494,6 @@ function vmssGetAllKeyframeTimesForClip(clip) {
   addTimes(clip.offset?.x);
   addTimes(clip.offset?.y);
   addTimes(clip.transform?.rotate?.angle);
-  addTimes(clip.asset?.volume);
   return Array.from(times).sort((a, b) => a - b);
 }
 
@@ -3319,14 +3535,12 @@ function vmssShiftAnimatedSegments(previousSegments, newValue, relTime, fallback
 function vmssCreateAnimatedClipStateSnapshot(clip, category = null) {
   if (!clip) return null;
 
-  const selectionCategory = category || vmssGetAddElementsCategoryForClip(clip);
   const snapshot = {
     scale: Array.isArray(clip.scale) ? structuredClone(clip.scale) : null,
     opacity: Array.isArray(clip.opacity) ? structuredClone(clip.opacity) : null,
     offsetX: Array.isArray(clip.offset?.x) ? structuredClone(clip.offset.x) : null,
     offsetY: Array.isArray(clip.offset?.y) ? structuredClone(clip.offset.y) : null,
     rotate: Array.isArray(clip.transform?.rotate?.angle) ? structuredClone(clip.transform.rotate.angle) : null,
-    volume: selectionCategory === 'media' && Array.isArray(clip.asset?.volume) ? structuredClone(clip.asset.volume) : null,
   };
 
   return Object.values(snapshot).some(Boolean) ? snapshot : null;
@@ -3394,14 +3608,6 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
     };
   }
 
-  const volumeSegs = vmssShiftAnimatedSegments(previousClip.asset?.volume || rememberedState?.volume, currentClip.asset?.volume, relTime, 1);
-  if (volumeSegs) {
-    update.asset = {
-      ...(currentClip.asset || {}),
-      volume: volumeSegs,
-    };
-  }
-
   if (!Object.keys(update).length) return false;
 
   vmss.syncingAnimatedClipUpdate = true;
@@ -3420,26 +3626,30 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
 }
 
 function vmssHasAnyAnimatedProperties(clip, category = null) {
-  const selectionCategory = category || vmssGetAddElementsCategoryForClip(clip);
   return Boolean(
     Array.isArray(clip?.scale)
     || Array.isArray(clip?.opacity)
     || Array.isArray(clip?.offset?.x)
     || Array.isArray(clip?.offset?.y)
     || Array.isArray(clip?.transform?.rotate?.angle)
-    || (selectionCategory === 'media' && Array.isArray(clip?.asset?.volume))
   );
 }
 
 function vmssMaybeBuildAnimatedScalarUpdate(propertyValue, nextValue, selection, fallback) {
   const clipLength = vmssGetStaticNumericValue(selection.clip?.length, 5);
-  const relTime = vmssGetSelectedClipRelativePlaybackTime(selection);
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  const relTime = activeKeyframe ? activeKeyframe.time : vmssGetSelectedClipRelativePlaybackTime(selection);
   const initialValue = Array.isArray(propertyValue)
     ? vmssInterpolateKeyframeAtTime(propertyValue, 0, fallback)
     : vmssGetStaticNumericValue(propertyValue, fallback);
 
   if (!Array.isArray(propertyValue) && !vmssHasAnyAnimatedProperties(selection.clip, selection.category)) {
     return null;
+  }
+
+  if (vmssHasAnyAnimatedProperties(selection.clip, selection.category) && !activeKeyframe) {
+    vmssSetStatus('Move the scrubber onto a keyframe, or record a new one first');
+    return VMSS_BLOCKED_ANIMATED_UPDATE;
   }
 
   return vmssBuildKeyframedPropertyValue(propertyValue, nextValue, clipLength, initialValue, relTime);
@@ -3528,6 +3738,21 @@ function vmssAddKeyframeAtCurrentTime() {
   const clip = selection.clip;
   const clipLength = vmssGetStaticNumericValue(clip.length, 5);
   const relTime = vmssGetSelectedClipRelativePlaybackTime(selection);
+  const existingKeyframeTimes = vmssGetAllKeyframeTimesForClip(clip);
+  const sameTimeKeyframe = existingKeyframeTimes.find((time) => Math.abs(time - relTime) <= VMSS_KEYFRAME_SAME_TIME_TOLERANCE);
+  const blockingKeyframe = existingKeyframeTimes.find((time) => {
+    const delta = Math.abs(time - relTime);
+    return delta > VMSS_KEYFRAME_SAME_TIME_TOLERANCE && delta < VMSS_KEYFRAME_MIN_SPACING;
+  });
+
+  if (blockingKeyframe != null) {
+    const message = `Keyframes must be at least ${VMSS_KEYFRAME_MIN_SPACING.toFixed(2)}s apart. Move farther from T=${blockingKeyframe.toFixed(2)}s.`;
+    alert(message);
+    vmssSetStatus(message);
+    return;
+  }
+
+  const targetTime = sameTimeKeyframe != null ? sameTimeKeyframe : relTime;
   const liveValues = vmssGetSelectedClipLiveRuntimeValues(selection);
 
   // Get the original state (before any recent drag operations) to base the new keyframe on
@@ -3550,11 +3775,11 @@ function vmssAddKeyframeAtCurrentTime() {
   const offsetYSource = rememberedState?.offsetY !== undefined ? rememberedState.offsetY : clip.offset?.y;
   const rotateSource  = rememberedState?.rotate  !== undefined ? rememberedState.rotate  : clip.transform?.rotate?.angle;
 
-  const scaleSegs   = vmssBuildKeyframedPropertyValue(scaleSource,   scaleVal,   clipLength, vmssGetStaticNumericValue(scaleSource, 1),   relTime);
-  const opacitySegs = vmssBuildKeyframedPropertyValue(opacitySource, opacityVal, clipLength, vmssGetStaticNumericValue(opacitySource, 1), relTime);
-  const offsetXSegs = vmssBuildKeyframedPropertyValue(offsetXSource, offsetXVal, clipLength, vmssGetStaticNumericValue(offsetXSource, 0), relTime);
-  const offsetYSegs = vmssBuildKeyframedPropertyValue(offsetYSource, offsetYVal, clipLength, vmssGetStaticNumericValue(offsetYSource, 0), relTime);
-  const rotateSegs  = vmssBuildKeyframedPropertyValue(rotateSource,  rotateVal,  clipLength, vmssGetStaticNumericValue(rotateSource, 0),  relTime);
+  const scaleSegs   = vmssBuildKeyframedPropertyValue(scaleSource,   scaleVal,   clipLength, vmssGetStaticNumericValue(scaleSource, 1),   targetTime);
+  const opacitySegs = vmssBuildKeyframedPropertyValue(opacitySource, opacityVal, clipLength, vmssGetStaticNumericValue(opacitySource, 1), targetTime);
+  const offsetXSegs = vmssBuildKeyframedPropertyValue(offsetXSource, offsetXVal, clipLength, vmssGetStaticNumericValue(offsetXSource, 0), targetTime);
+  const offsetYSegs = vmssBuildKeyframedPropertyValue(offsetYSource, offsetYVal, clipLength, vmssGetStaticNumericValue(offsetYSource, 0), targetTime);
+  const rotateSegs  = vmssBuildKeyframedPropertyValue(rotateSource,  rotateVal,  clipLength, vmssGetStaticNumericValue(rotateSource, 0),  targetTime);
 
   const update = {};
   if (scaleSegs)   update.scale   = scaleSegs;
@@ -3572,13 +3797,6 @@ function vmssAddKeyframeAtCurrentTime() {
       rotate: { ...((clip.transform || {}).rotate || {}), angle: rotateSegs },
     };
   }
-  if (selection.category === 'media') {
-    const volumeVal = liveValues.volume;
-    const volumeSource = rememberedState?.volume !== undefined ? rememberedState.volume : clip.asset?.volume;
-    const volumeSegs = vmssBuildKeyframedPropertyValue(volumeSource, volumeVal, clipLength, vmssGetStaticNumericValue(volumeSource, 1), relTime);
-    if (volumeSegs) update.asset = { ...clip.asset, volume: volumeSegs };
-  }
-
   if (!Object.keys(update).length) {
     vmssSetStatus('Unable to record keyframe');
     return;
@@ -3593,14 +3811,14 @@ function vmssAddKeyframeAtCurrentTime() {
   vmss.syncingAnimatedClipUpdate = false;
 
   vmssDebugKeyframeConsole('record:before-apply', {
-    relTime,
+    relTime: targetTime,
     liveValues,
     update,
   });
 
-  vmssApplySelectedClipUpdate(update, `Keyframe recorded at T=${relTime}s`);
+  vmssApplySelectedClipUpdate(update, `${sameTimeKeyframe != null ? 'Keyframe updated' : 'Keyframe recorded'} at T=${targetTime}s`);
   vmssRefreshTimelineKeyframeDiamonds();
-  window.requestAnimationFrame(() => vmssDebugKeyframeConsole('record:after-apply', { relTime }));
+  window.requestAnimationFrame(() => vmssDebugKeyframeConsole('record:after-apply', { relTime: targetTime }));
 }
 
 function vmssDeleteKeyframePoint(property, pointIndex) {
@@ -3664,6 +3882,9 @@ function vmssRefreshTimelineKeyframeDiamonds() {
   const editJson = vmss.edit?.getEdit?.();
   if (!editJson) return;
 
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+
   (editJson.timeline?.tracks || []).forEach((track, trackIndex) => {
     (track?.clips || []).forEach((clip, clipIndex) => {
       const kfTimes = vmssGetAllKeyframeTimesForClip(clip);
@@ -3682,10 +3903,15 @@ function vmssRefreshTimelineKeyframeDiamonds() {
 
       kfTimes.forEach(t => {
         const pct = Math.max(0, Math.min(1, t / clipLength)) * 100;
+        const isActive = selection
+          && selection.trackIndex === trackIndex
+          && selection.clipIndex === clipIndex
+          && activeKeyframe
+          && Math.abs(activeKeyframe.time - t) <= VMSS_KEYFRAME_SAME_TIME_TOLERANCE;
         const marker = document.createElement('div');
         marker.className = 'vmss-kf-diamond absolute top-0';
-        marker.style.cssText = `left:${pct}%;transform:translateX(-50%);`;
-        marker.innerHTML = '<svg width="8" height="8" viewBox="0 0 8 8" style="display:block"><rect x="1" y="1" width="6" height="6" fill="#f59e0b" transform="rotate(45 4 4)"/></svg>';
+        marker.style.cssText = `left:${pct}%;transform:translateX(-50%) scale(${isActive ? 1.25 : 1});filter:${isActive ? 'drop-shadow(0 0 4px rgba(14,165,233,0.45))' : 'none'};`;
+        marker.innerHTML = `<svg width="${isActive ? '10' : '8'}" height="${isActive ? '10' : '8'}" viewBox="0 0 8 8" style="display:block"><rect x="1" y="1" width="6" height="6" fill="${isActive ? '#0ea5e9' : '#f59e0b'}" transform="rotate(45 4 4)"/></svg>`;
         container.appendChild(marker);
       });
 
@@ -3719,11 +3945,12 @@ function vmssSetSelectedClipOffset(field, value) {
 
   const nextValue = Number(numericValue.toFixed(4));
   const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.offset?.[field], nextValue, selection, 0);
+  if (animatedValue === VMSS_BLOCKED_ANIMATED_UPDATE) return;
 
   vmssApplySelectedClipUpdate({
     offset: {
       ...(selection.clip.offset || {}),
-      [field]: animatedValue || nextValue,
+      [field]: animatedValue === null ? nextValue : animatedValue,
     },
   }, `${field.toUpperCase()} position updated`);
 }
@@ -3735,8 +3962,9 @@ function vmssSetSelectedClipScale(value) {
 
   const nextValue = Math.max(0.05, Number(numericValue.toFixed(3)));
   const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.scale, nextValue, selection, 1);
+  if (animatedValue === VMSS_BLOCKED_ANIMATED_UPDATE) return;
 
-  vmssApplySelectedClipUpdate({ scale: animatedValue || nextValue }, 'Scale updated');
+  vmssApplySelectedClipUpdate({ scale: animatedValue === null ? nextValue : animatedValue }, 'Scale updated');
 }
 
 function vmssSetSelectedClipOpacity(value) {
@@ -3746,8 +3974,9 @@ function vmssSetSelectedClipOpacity(value) {
 
   const nextValue = Math.max(0, Math.min(1, Number(numericValue.toFixed(2))));
   const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.opacity, nextValue, selection, 1);
+  if (animatedValue === VMSS_BLOCKED_ANIMATED_UPDATE) return;
 
-  vmssApplySelectedClipUpdate({ opacity: animatedValue || nextValue }, 'Opacity updated');
+  vmssApplySelectedClipUpdate({ opacity: animatedValue === null ? nextValue : animatedValue }, 'Opacity updated');
 }
 
 function vmssSetSelectedClipRotation(value) {
@@ -3757,13 +3986,14 @@ function vmssSetSelectedClipRotation(value) {
 
   const nextValue = Number(numericValue.toFixed(2));
   const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.transform?.rotate?.angle, nextValue, selection, 0);
+  if (animatedValue === VMSS_BLOCKED_ANIMATED_UPDATE) return;
 
   vmssApplySelectedClipUpdate({
     transform: {
       ...(selection.clip.transform || {}),
       rotate: {
         ...((selection.clip.transform || {}).rotate || {}),
-        angle: animatedValue || nextValue,
+        angle: animatedValue === null ? nextValue : animatedValue,
       },
     },
   }, 'Rotation updated');
@@ -4006,12 +4236,11 @@ function vmssSetSelectedMediaVolume(value) {
   if (!selection || selection.category !== 'media' || !Number.isFinite(numericValue)) return;
 
   const nextValue = Math.max(0, Math.min(1, Number(numericValue.toFixed(2))));
-  const animatedValue = vmssMaybeBuildAnimatedScalarUpdate(selection.clip.asset?.volume, nextValue, selection, 1);
 
   vmssApplySelectedClipUpdate({
     asset: {
       ...selection.clip.asset,
-      volume: animatedValue || nextValue,
+      volume: nextValue,
     },
   }, 'Volume updated');
 }
@@ -4731,6 +4960,7 @@ function vmssUpdateClock() {
   const display = document.getElementById('vmss-time-display');
   if (!display || !vmss.edit) return;
   display.textContent = vmssFormatTime(vmss.edit.playbackTime || 0);
+  vmssSyncSelectionPanelsFromPlayback();
 }
 
 function vmssGetSelectedClipContext() {
@@ -4939,6 +5169,10 @@ function vmssRenderEditorShell(container) {
                 <i class="ri-clapperboard-line text-lg"></i>
                 <span>Media</span>
               </button>
+              <button data-vmss-add-category="animation" onclick="vmssSetAddElementsCategory('animation')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
+                <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 13.5h3.3l2.1-3.5 2.4 2.2 3.7-7.1h1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>Anim</span>
+              </button>
               <button data-vmss-add-category="background" onclick="vmssSetAddElementsCategory('background')" class="flex w-full flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition">
                 <i class="ri-palette-line text-lg"></i>
                 <span>Background</span>
@@ -5001,6 +5235,10 @@ function vmssRenderEditorShell(container) {
                     <button onclick="vmssOpenPlaylistAssetLibrary('audio')" class="flex items-center justify-between rounded-2xl bg-gray-100 px-4 py-4 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><span class="inline-flex items-center gap-2"><i class="ri-volume-up-line"></i>Audio</span><i class="ri-arrow-right-line text-base text-gray-400"></i></button>
                   </div>
                 </div>
+              </div>
+
+              <div data-vmss-add-panel="animation" class="hidden space-y-4">
+                <div data-vmss-selection-properties="animation" class="hidden"></div>
               </div>
 
               <div data-vmss-add-panel="background" class="hidden space-y-4">
