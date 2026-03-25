@@ -13,7 +13,7 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 
 const roleAccess = {
-  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda", "videoManual"],
+  admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "recovery", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda", "videoManual"],
   部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda", "videoManual"], // Same as admin but no customerManagement
   課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda", "videoManual"], // Same as 部長
   係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"], // Same as 班長 but factory-limited
@@ -31,6 +31,7 @@ const navItemsConfig = {
   notifications: { icon: "ri-notification-line", label: "notifications" },
   analytics: { icon: "ri-line-chart-line", label: "analytics" },
   financials: { icon: "ri-funds-line", label: "financials" },
+  recovery: { icon: "ri-recycle-line", label: "recovery" },
   userManagement: { icon: "ri-user-settings-line", label: "userManagement" },
   approvals: { icon: "ri-checkbox-line", label: "approvals", badge: "12" },
   customerManagement: { icon: "ri-user-3-line", label: "customerManagement" },
@@ -144,6 +145,10 @@ document.addEventListener("DOMContentLoaded", () => {
 // Mock data for demonstration purposes
 function loadPage(page) {
     const mainContent = document.getElementById("mainContent");
+
+    if (!roleAccess[role]?.includes(page)) {
+      page = "dashboard";
+    }
 
     switch (page) {
         case "dashboard":
@@ -1042,6 +1047,342 @@ function loadPage(page) {
             }
             if (typeof initFinancialsPage === "function") {
               initFinancialsPage();
+            }
+            break;
+
+          case "recovery":
+            mainContent.innerHTML = `
+              <div class="space-y-6">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                  <div>
+                    <h2 class="text-3xl font-bold text-gray-900" data-i18n="recoveryTitle">Recovery</h2>
+                    <p class="mt-2 text-gray-600" data-i18n="recoverySubtitle">Detailed recovery records from recoveryDB</p>
+                    <div class="mt-2 text-sm text-blue-600" id="recoveryDateRangeDisplay">Loading...</div>
+                  </div>
+                  <div class="flex items-center space-x-3">
+                    <button id="recoveryCreateBtn" onclick="openRecoveryCreateModal()" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+                      <i class="ri-add-line mr-2"></i><span data-i18n="createNew">Create New</span>
+                    </button>
+                    <button id="recoveryRefreshBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                      <i class="ri-refresh-line mr-2"></i><span data-i18n="update">Update</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg border border-gray-200">
+                  <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-end mb-4">
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="periodSelection">Period Selection</label>
+                      <select id="recoveryRangeSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="today" data-i18n="today">Today</option>
+                        <option value="last7" data-i18n="last7Days">Last 7 Days</option>
+                        <option value="last30" selected data-i18n="last30Days">Last 30 Days</option>
+                        <option value="last90" data-i18n="last3Months">Last 3 Months</option>
+                        <option value="thisMonth" data-i18n="thisMonth">This Month</option>
+                        <option value="lastMonth" data-i18n="lastMonth">Last Month</option>
+                        <option value="custom" data-i18n="customRange">Custom Range</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="startDate">Start Date</label>
+                      <input type="date" id="recoveryFromDate" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="endDate">End Date</label>
+                      <input type="date" id="recoveryToDate" class="w-full p-2 border border-gray-300 rounded-md">
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="filterType">Filter Type</label>
+                      <select id="recoveryFilterType" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="model" data-i18n="model">モデル (Model)</option>
+                        <option value="sebanggo" data-i18n="sebanggo">背番号 (Serial Number)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory</label>
+                      <select id="recoveryFactoryFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="" data-i18n="allFactories">All Factories</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div id="recoveryModelFilterContainer">
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="model">モデル / Model</label>
+                      <select id="recoveryModelFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                        <option value="" data-i18n="selectModel">Select Model...</option>
+                      </select>
+                    </div>
+
+                    <div id="recoverySebanggoFilterContainer" style="display: none;">
+                      <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="sebanggo">背番号 / Serial Numbers</label>
+                      <button onclick="openRecoverySebanggoSelector()" class="w-full p-2 border border-gray-300 rounded-md bg-white text-left text-gray-700 hover:bg-gray-50">
+                        <span id="recoverySelectedCount" data-i18n="selectProducts">Select products...</span>
+                      </button>
+                    </div>
+
+                    <div>
+                      <div class="flex items-center justify-between mb-2">
+                        <label class="block text-sm font-medium text-gray-700" data-i18n="selectedProducts">Selected Products</label>
+                        <button onclick="openRecoverySebanggoSelector()" class="text-xs text-blue-600 hover:text-blue-700" data-i18n="showAll">Show all</button>
+                      </div>
+                      <div id="recoverySelectedProductsDisplay" class="p-2 border border-gray-300 rounded-md bg-gray-50 text-sm text-gray-700 h-[42px] overflow-y-auto" data-i18n="noneSelected">
+                        None selected
+                      </div>
+                    </div>
+                  </div>
+
+                  <div id="recoverySelectedProductsTags" class="flex flex-wrap gap-2 min-h-[1.5rem]"></div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="totalEntries">Total Entries</p>
+                    <p class="text-base font-bold text-gray-900" id="recoveryTotalEntries">0</p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-green-600" data-i18n="totalRecoveredQty">Total Recovered Qty</p>
+                    <p class="text-base font-bold text-green-700" id="recoveryTotalRecoveredQty">0</p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="affectedLots">Affected Lots</p>
+                    <p class="text-base font-bold text-gray-900" id="recoveryAffectedLots">0</p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="affectedProducts">Affected Products</p>
+                    <p class="text-base font-bold text-gray-900" id="recoveryAffectedProducts">0</p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="affectedFactories">Affected Factories</p>
+                    <p class="text-base font-bold text-gray-900" id="recoveryAffectedFactories">0</p>
+                  </div>
+                  <div class="bg-white p-3 rounded-lg border border-gray-200">
+                    <p class="text-xs font-medium text-gray-600" data-i18n="distinctDefectTypes">Distinct Defect Types</p>
+                    <p class="text-base font-bold text-gray-900" id="recoveryDistinctDefectTypes">0</p>
+                  </div>
+                </div>
+
+                <div id="recoveryDetailSection" class="bg-white p-4 rounded-lg border border-gray-200" style="position: relative;">
+                  <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold text-gray-700" data-i18n="recoveryDetailBreakdown">Recovery Detail Breakdown</h3>
+                    <div class="flex items-center gap-2">
+                      <span id="recoverySelectedRowCount" class="text-xs text-gray-500">0 selected</span>
+                      <button id="recoveryDeleteSelectedBtn" onclick="deleteSelectedRecoveryRows()" class="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <i class="ri-delete-bin-line mr-1"></i><span data-i18n="deleteSelected">Delete Selected</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm text-left">
+                      <thead class="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th class="px-4 py-2 w-12">
+                            <input type="checkbox" id="recoverySelectAllRows" onchange="toggleSelectAllRecoveryRows(this.checked)" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" title="Select all rows on this page">
+                          </th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('lotDate')"><span data-i18n="lotDate">Lot Date</span> <span id="recoverySortIcon-lotDate"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('manufacturingLot')"><span data-i18n="manufacturingLot">Manufacturing Lot</span> <span id="recoverySortIcon-manufacturingLot"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('hinban')"><span data-i18n="hinban">品番</span> <span id="recoverySortIcon-hinban"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('ban')"><span data-i18n="sebanggo">背番号</span> <span id="recoverySortIcon-ban"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('model')"><span data-i18n="model">Model</span> <span id="recoverySortIcon-model"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('factory')"><span data-i18n="factory">Factory</span> <span id="recoverySortIcon-factory"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('totalRecoveredQty')"><span data-i18n="totalRecoveredQty">Total Recovered Qty</span> <span id="recoverySortIcon-totalRecoveredQty"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('recoveryCount')"><span data-i18n="recoveryCount">Recovery Count</span> <span id="recoverySortIcon-recoveryCount"></span></button></th>
+                          <th class="px-4 py-2"><span data-i18n="defectBreakdown">Defect Breakdown</span></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('inspectionTable')"><span data-i18n="inspectionTable">Inspection Table</span> <span id="recoverySortIcon-inspectionTable"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('matchedPressQty')"><span data-i18n="matchedPressQty">Matched Press Qty</span> <span id="recoverySortIcon-matchedPressQty"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('recordedBy')"><span data-i18n="recordedBy">Recorded By</span> <span id="recoverySortIcon-recordedBy"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('recordedAt')"><span data-i18n="recordedAt">Recorded At</span> <span id="recoverySortIcon-recordedAt"></span></button></th>
+                        </tr>
+                      </thead>
+                      <tbody id="recoveryDetailBody" class="divide-y divide-gray-100">
+                        <tr>
+                          <td class="px-4 py-3 text-gray-500" colspan="14" data-i18n="noRecoveryData">No recovery data loaded.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div class="text-sm text-gray-600" id="recoveryPageInfo">0件中 0-0件を表示</div>
+                    <div class="flex items-center gap-2">
+                      <button id="recoveryPrevPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" data-i18n="prev" disabled>Prev</button>
+                      <button id="recoveryNextPageBtn" class="px-3 py-1 border rounded hover:bg-gray-50" data-i18n="next" disabled>Next</button>
+                      <select id="recoveryPageSizeSelect" class="p-1 border rounded text-sm">
+                        <option value="10" selected>10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="recoverySebanggoSelectorModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+                <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+                  <div class="p-4 border-b">
+                    <div class="flex items-center justify-between">
+                      <h3 class="text-base font-semibold text-gray-900" data-i18n="selectProductsSebanggo">Select Products (背番号)</h3>
+                      <button onclick="closeRecoverySebanggoSelector()" class="text-gray-500 hover:text-gray-700">
+                        <i class="ri-close-line text-2xl"></i>
+                      </button>
+                    </div>
+                    <input type="text" id="recoverySebanggoSearch" oninput="filterRecoverySebanggoList()" data-i18n-placeholder="searchProducts" placeholder="Search..." class="w-full mt-3 p-2 text-sm border rounded bg-white" />
+                  </div>
+                  <div class="p-3 overflow-y-auto max-h-[55vh]" id="recoverySebanggoListContainer">
+                    <p class="text-gray-500" data-i18n="loadingProducts">Loading products...</p>
+                  </div>
+                  <div class="p-4 border-t flex items-center justify-between gap-2">
+                    <div class="flex gap-2">
+                      <button onclick="checkAllRecoverySebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700" data-i18n="checkAll">Check all</button>
+                      <button onclick="uncheckAllRecoverySebanggo()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700" data-i18n="uncheckAll">Uncheck all</button>
+                    </div>
+                    <div class="flex gap-2">
+                      <button onclick="closeRecoverySebanggoSelector()" class="px-3 py-1.5 text-sm border rounded hover:bg-gray-100 text-gray-700" data-i18n="cancel">Cancel</button>
+                      <button onclick="confirmRecoverySebanggoSelection()" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded" data-i18n="confirmSelection">Confirm Selection</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="recoveryDetailModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+                  <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <div>
+                      <h3 class="text-lg font-semibold text-gray-900" data-i18n="recoveryRecordDetails">Recovery Record Details</h3>
+                      <p id="recoveryDetailModalSubtitle" class="text-sm text-gray-500">-</p>
+                    </div>
+                    <button onclick="closeRecoveryDetailModal()" class="text-gray-500 hover:text-gray-700">
+                      <i class="ri-close-line text-2xl"></i>
+                    </button>
+                  </div>
+
+                  <div id="recoveryDetailModalBody" class="flex-1 overflow-y-auto p-6 bg-gray-50"></div>
+
+                  <div class="px-6 py-4 border-t border-gray-200 bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div class="text-xs text-gray-500" id="recoveryDetailModalStatus"></div>
+                    <div class="flex items-center gap-2 justify-end">
+                      <button id="recoveryEditBtn" onclick="enterRecoveryEditMode()" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors hidden">
+                        <i class="ri-edit-line mr-1"></i><span data-i18n="edit">Edit</span>
+                      </button>
+                      <button id="recoveryCancelEditBtn" onclick="exitRecoveryEditMode()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors hidden">
+                        <span data-i18n="cancel">Cancel</span>
+                      </button>
+                      <button id="recoverySaveEditBtn" onclick="saveRecoveryDetailChanges()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors hidden">
+                        <i class="ri-save-line mr-1"></i><span data-i18n="saveChanges">Save Changes</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="recoveryCreateModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
+                  <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <div>
+                      <h3 class="text-lg font-semibold text-gray-900" data-i18n="createRecoveryRecord">Create Recovery Record</h3>
+                      <p class="text-sm text-gray-500" data-i18n="createRecoverySubtitle">Admin input form for recoveryDB using the existing recovery API</p>
+                    </div>
+                    <button onclick="closeRecoveryCreateModal()" class="text-gray-500 hover:text-gray-700">
+                      <i class="ri-close-line text-2xl"></i>
+                    </button>
+                  </div>
+
+                  <div class="flex-1 overflow-y-auto p-6 bg-gray-50 space-y-6">
+                    <div class="bg-white rounded-xl border border-gray-200 p-5">
+                      <h4 class="text-sm font-semibold text-gray-700 mb-4" data-i18n="recoveryInputBasics">Basic Information</h4>
+                      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <label class="block">
+                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="sebanggoOrHinban">背番号 or 品番</span>
+                          <div class="relative">
+                            <input id="recoveryCreateProductInput" autocomplete="off" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="Enter 背番号 or 品番">
+                            <div id="recoveryCreateProductSuggestions" class="hidden absolute z-20 mt-2 w-full max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"></div>
+                          </div>
+                        </label>
+                        <label class="block">
+                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="manufacturingLot">Manufacturing Lot</span>
+                          <input id="recoveryCreateLotInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="e.g. 260310 or 2026-03-10">
+                        </label>
+                        <label class="block">
+                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory</span>
+                          <select id="recoveryCreateFactoryInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm">
+                            <option value="" data-i18n="selectFactory">Select Factory...</option>
+                          </select>
+                        </label>
+                        <label class="block">
+                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="recordedBy">Recorded By</span>
+                          <input id="recoveryCreateUserInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="Worker / user name">
+                        </label>
+                        <label class="block">
+                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="inspectionTable">Inspection Table</span>
+                          <input id="recoveryCreateInspectionTableInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="e.g. 検査テーブル 2">
+                        </label>
+                      </div>
+
+                      <div class="mt-4 p-4 rounded-lg border border-blue-200 bg-blue-50">
+                        <div class="flex items-center justify-between gap-3">
+                          <div>
+                            <div class="text-sm font-medium text-blue-900" data-i18n="resolvedProduct">Resolved Product</div>
+                            <div id="recoveryCreateResolvedProduct" class="mt-1 text-sm text-blue-700">-</div>
+                          </div>
+                          <div id="recoveryCreateExistingNotice" class="text-xs text-amber-700 hidden"></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="bg-white rounded-xl border border-gray-200 p-5">
+                      <div class="flex items-center justify-between gap-3 mb-4">
+                        <h4 class="text-sm font-semibold text-gray-700" data-i18n="recoveryItems">Recovery Items</h4>
+                        <button onclick="addRecoveryCreateItemRow()" class="px-3 py-2 text-sm border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">
+                          <i class="ri-add-line mr-1"></i><span data-i18n="addItem">Add Item</span>
+                        </button>
+                      </div>
+                      <div id="recoveryCreateItemsContainer" class="space-y-3"></div>
+                    </div>
+
+                    <div class="bg-white rounded-xl border border-gray-200 p-5">
+                      <div class="flex items-center justify-between gap-3 mb-4">
+                        <h4 class="text-sm font-semibold text-gray-700" data-i18n="matchedPressRecord">Matched Press Record</h4>
+                        <button onclick="runRecoveryCreatePressLookup()" class="px-3 py-2 text-sm bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors">
+                          <i class="ri-search-line mr-1"></i><span data-i18n="lookupPressRecord">Lookup Press Record</span>
+                        </button>
+                      </div>
+                      <div id="recoveryCreatePressLookupStatus" class="text-sm text-gray-500 mb-4">No lookup run yet.</div>
+                      <div id="recoveryCreatePressMatchCard" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                      <div id="recoveryCreatePressCandidates" class="mt-4 space-y-2"></div>
+                    </div>
+                  </div>
+
+                  <div class="px-6 py-4 border-t border-gray-200 bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div id="recoveryCreateStatus" class="text-xs text-gray-500"></div>
+                    <div class="flex items-center gap-2 justify-end">
+                      <button id="recoveryCreateCancelBtn" onclick="closeRecoveryCreateModal()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors" data-i18n="cancel">Cancel</button>
+                      <button id="recoveryCreateSubmitBtn" onclick="submitRecoveryCreateForm()" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+                        <i class="ri-save-line mr-1"></i><span data-i18n="createRecoveryRecord">Create Recovery Record</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="recoveryCreateSubmitModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+                <div class="bg-white rounded-xl shadow-2xl w-full max-w-md border border-gray-200 overflow-hidden">
+                  <div class="p-6 text-center">
+                    <div id="recoveryCreateSubmitIcon" class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+                      <div class="animate-spin rounded-full h-7 w-7 border-2 border-blue-600 border-t-transparent"></div>
+                    </div>
+                    <h3 id="recoveryCreateSubmitTitle" class="text-lg font-semibold text-gray-900">Submitting in progress...</h3>
+                    <p id="recoveryCreateSubmitMessage" class="mt-2 text-sm text-gray-600">Please wait while the recovery record is being submitted.</p>
+                  </div>
+                  <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end">
+                    <button id="recoveryCreateSubmitCloseBtn" onclick="closeRecoveryCreateSubmitModal()" class="hidden px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors" data-i18n="close">Close</button>
+                  </div>
+                </div>
+              </div>
+            `;
+            if (typeof applyLanguage === "function") {
+              applyLanguage();
+            }
+            if (typeof initRecoveryPage === "function") {
+              initRecoveryPage();
             }
             break;
 
