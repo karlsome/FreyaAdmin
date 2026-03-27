@@ -30,6 +30,7 @@ const vmss = {
   controls: null,
   ui: null,
   steps: [],
+  stepMetadata: {},
   currentStepIdx: 0,
   selectedClipId: null,
   dirty: false,
@@ -744,6 +745,7 @@ function vmssBuildWorkingProjectPayload() {
     status: 'draft',
     edit: vmss.edit.getEdit(),
     assetSourceMap: vmss.assetSourceMap,
+    stepMetadata: vmss.stepMetadata,
     settings: {
       output: vmss.edit.getEdit()?.output || null,
     },
@@ -830,6 +832,7 @@ async function vmssLoadProject(id) {
     await vmssLoadTemplate(resolvedProject.edit || vmssCreateDefaultTemplate(), {
       title: resolvedProject.title || 'Video Manual 2',
       assetSourceMap: resolvedProject.assetSourceMap || {},
+      stepMetadata: resolvedProject.stepMetadata || {},
     });
 
     vmssLockWorkspaceScroll();
@@ -1490,6 +1493,9 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   vmss.assetSourceMap = options.assetSourceMap && typeof options.assetSourceMap === 'object'
     ? { ...options.assetSourceMap }
     : {};
+  vmss.stepMetadata = options.stepMetadata && typeof options.stepMetadata === 'object'
+    ? { ...options.stepMetadata }
+    : {};
 
   template = vmssSanitizeEditTemplate(template);
 
@@ -2016,6 +2022,7 @@ function vmssDispose() {
   vmss.controls = null;
   vmss.ui = null;
   vmss.steps = [];
+  vmss.stepMetadata = {};
   vmss.currentStepIdx = 0;
   vmss.selectedClipId = null;
   vmss.assetSourceMap = {};
@@ -2298,27 +2305,31 @@ function vmssSyncStepsFromTracks() {
   const edit = vmss.edit.getEdit();
   const tracks = edit?.timeline?.tracks || [];
 
-  vmss.steps = tracks.map((track, index) => {
-    const clips = track.clips || [];
-    const firstClip = clips[0];
-    const lastClip = clips[clips.length - 1];
-    const startTime = firstClip?.start ?? 0;
-    const endTime = lastClip ? lastClip.start + (lastClip.length || 0) : 5;
-    const clipText = firstClip?.asset?.text;
-    const assetType = firstClip?.asset?.type;
-    const derivedLabel = typeof clipText === 'string' && clipText.trim()
-      ? clipText.trim().slice(0, 32)
-      : assetType
-        ? `${assetType.charAt(0).toUpperCase()}${assetType.slice(1)} ${index + 1}`
-        : `Step ${index + 1}`;
+  // Collect all video clips across all tracks, sorted by start time
+  const videoClips = [];
+  tracks.forEach((track, trackIndex) => {
+    (track.clips || []).forEach((clip, clipIndex) => {
+      if (clip?.asset?.type === 'video') {
+        videoClips.push({ trackIndex, clipIndex, clip });
+      }
+    });
+  });
+  videoClips.sort((a, b) => (a.clip.start ?? 0) - (b.clip.start ?? 0));
+
+  vmss.steps = videoClips.map(({ trackIndex, clipIndex, clip }, index) => {
+    const metaKey = `${trackIndex}:${clipIndex}`;
+    const meta = vmss.stepMetadata[metaKey] || {};
+    const startTime = clip.start ?? 0;
+    const endTime = startTime + (clip.length ?? 0);
 
     return {
-      trackIndex: index,
-      label: derivedLabel,
-      description: '',
+      trackIndex,
+      clipIndex,
+      metaKey,
+      label: meta.label ?? `Step ${index + 1}`,
+      description: meta.description ?? '',
       startTime,
       endTime,
-      clipCount: clips.length,
     };
   });
 }
@@ -2538,10 +2549,23 @@ async function vmssAddStep() {
 async function vmssDeleteStep(stepIndex) {
   if (!vmss.edit || stepIndex < 0 || stepIndex >= vmss.steps.length) return;
 
-  await vmss.edit.deleteTrack(stepIndex);
+  const step = vmss.steps[stepIndex];
+  const edit = vmss.edit.getEdit();
+  const trackClips = edit?.timeline?.tracks?.[step.trackIndex]?.clips || [];
 
-  if (vmss.currentStepIdx >= vmss.steps.length - 1) {
-    vmss.currentStepIdx = Math.max(0, vmss.steps.length - 2);
+  // Delete just the clip; if it's the only clip in the track, delete the whole track
+  if (trackClips.length <= 1) {
+    await vmss.edit.deleteTrack(step.trackIndex);
+  } else {
+    await vmss.edit.deleteClip(step.trackIndex, step.clipIndex);
+  }
+
+  // Clean up persisted metadata for this clip
+  delete vmss.stepMetadata[step.metaKey];
+
+  if (vmss.currentStepIdx === step.trackIndex) {
+    vmss.currentStepIdx = 0;
+    vmss.selectedClipId = null;
   }
 
   vmssSyncStepsFromTracks();
@@ -2551,8 +2575,9 @@ async function vmssDeleteStep(stepIndex) {
 function vmssSelectStep(stepIndex) {
   if (stepIndex < 0 || stepIndex >= vmss.steps.length) return;
 
-  vmss.currentStepIdx = stepIndex;
   const step = vmss.steps[stepIndex];
+  vmss.currentStepIdx = step.trackIndex;
+  vmss.selectedClipId = step.clipIndex;
 
   if (vmss.edit && step) {
     vmss.edit.seek(step.startTime + 0.001);
@@ -5779,7 +5804,7 @@ function vmssRenderEditorShell(container) {
       <div class="flex min-h-0 flex-1 overflow-visible">
         <div class="flex w-44 flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 xl:w-52">
           <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            <span>Steps (Tracks)</span>
+            <span>Steps</span>
             <span id="vmss-step-count" class="text-xs font-normal text-gray-400">0</span>
           </div>
           <div id="vmss-steps-list" class="flex-1 space-y-1 overflow-y-auto p-2">
@@ -6032,21 +6057,37 @@ function vmssRenderStepsPanel() {
   if (count) count.textContent = String(vmss.steps.length);
 
   if (!vmss.steps.length) {
-    list.innerHTML = '<p class="py-4 text-center text-xs text-gray-400">No tracks or steps yet</p>';
+    list.innerHTML = '<p class="py-4 text-center text-xs text-gray-400">No video clips yet</p>';
     return;
   }
 
-  list.innerHTML = vmss.steps.map((step, index) => `
-    <div class="group relative cursor-pointer rounded border p-2 hover:bg-gray-50 dark:hover:bg-gray-700 ${index === vmss.currentStepIdx ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-600'}" onclick="vmssSelectStep(${index})">
+  list.innerHTML = vmss.steps.map((step, index) => {
+    const isActive = step.trackIndex === vmss.currentStepIdx && step.clipIndex === vmss.selectedClipId;
+    return `
+    <div class="group relative rounded border p-2 hover:bg-gray-50 dark:hover:bg-gray-700 ${isActive ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-600'}" onclick="vmssSelectStep(${index})">
       <div class="flex items-center gap-2">
         <span class="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-blue-100 text-xs font-medium text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">${index + 1}</span>
-        <span class="flex-1 truncate text-xs font-medium dark:text-white">${vmssEscapeHtml(step.label)}</span>
-        <span class="text-[10px] text-gray-400">${step.clipCount} clip${step.clipCount !== 1 ? 's' : ''}</span>
+        <input type="text" value="${vmssEscapeHtml(step.label)}"
+               class="flex-1 truncate bg-transparent border-none text-xs font-medium focus:outline-none dark:text-white cursor-text"
+               onclick="event.stopPropagation()"
+               onchange="vmssSelectStep(${index}); vmssUpdateStepMeta('${step.metaKey}', 'label', this.value)">
       </div>
-      <div class="mt-1 pl-7 text-[10px] text-gray-400">${vmssFormatTime(step.startTime)} - ${vmssFormatTime(step.endTime)}</div>
+      <div class="mt-1 pl-7 text-[10px] text-gray-400">${vmssFormatTime(step.startTime)} – ${vmssFormatTime(step.endTime)}</div>
+      <input type="text" value="${vmssEscapeHtml(step.description || '')}"
+             placeholder="Add description..."
+             class="mt-0.5 ml-7 w-[calc(100%-1.75rem)] bg-transparent border-none text-[10px] text-gray-500 dark:text-gray-400 focus:outline-none placeholder-gray-300 dark:placeholder-gray-600 truncate cursor-text"
+             onclick="event.stopPropagation()"
+             onchange="vmssSelectStep(${index}); vmssUpdateStepMeta('${step.metaKey}', 'description', this.value)">
       ${vmss.steps.length > 1 ? `<button onclick="event.stopPropagation(); vmssDeleteStep(${index})" class="absolute right-1 top-1 text-gray-400 opacity-0 hover:text-red-500 group-hover:opacity-100"><i class="ri-close-line text-sm"></i></button>` : ''}
     </div>
-  `).join('');
+  `}).join('');
+}
+
+function vmssUpdateStepMeta(metaKey, prop, value) {
+  if (!vmss.stepMetadata[metaKey]) vmss.stepMetadata[metaKey] = {};
+  vmss.stepMetadata[metaKey][prop] = value;
+  vmssSyncStepsFromTracks();
+  vmssMarkDirty();
 }
 
 async function vmssHandleImageUpload(event) {
@@ -6661,6 +6702,7 @@ async function vmssRestoreLocalProject() {
   await vmssLoadTemplate(storedProject.edit, {
     title: storedProject.title || 'Video Manual 2',
     assetSourceMap: storedProject.assetSourceMap || {},
+    stepMetadata: storedProject.stepMetadata || {},
   });
   vmss.dirty = false;
   vmssSetStatus('Restored local save');
