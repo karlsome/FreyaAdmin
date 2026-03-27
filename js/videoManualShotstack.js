@@ -5852,7 +5852,7 @@ function vmssRenderEditorShell(container) {
               </button>
               <div class="flex-1"></div>
             </div>
-            <div data-shotstack-timeline data-vmss-preserve-selection="true" style="height: 160px; position: relative;"></div>
+            <div data-shotstack-timeline data-vmss-preserve-selection="true" style="height: 260px; position: relative;"></div>
           </div>
         </div>
 
