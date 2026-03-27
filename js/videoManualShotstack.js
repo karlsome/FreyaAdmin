@@ -82,6 +82,8 @@ const vmss = {
   assetLibraryFilter: 'video',
   assetLibraryDeleteInFlightId: null,
   uploadXhr: null,
+  progressModalHideTimer: null,
+  progressModalSuppressed: false,
   drawerSyncSignature: '',
   animationDraft: null,
 };
@@ -126,6 +128,10 @@ function vmssCanManagePlaylists() {
 }
 
 function vmssCanEditProjects() {
+  return ['admin', '課長', '部長', '係長', '班長'].includes(vmssAuthUser().role || 'viewer');
+}
+
+function vmssCanDeployProjects() {
   return ['admin', '課長', '部長', '係長', '班長'].includes(vmssAuthUser().role || 'viewer');
 }
 
@@ -837,6 +843,10 @@ async function vmssLoadProject(id) {
 }
 
 async function vmssPersistWorkingProject({ silent = true, reason = 'Saved' } = {}) {
+  if (vmss.revisionPreview) {
+    if (!silent) alert('Exit revision preview before saving the working copy.');
+    return null;
+  }
   if (!vmss.project?._id || !vmss.edit) return null;
 
   vmssSetStatus(reason === 'Autosaved' ? 'Autosaving…' : 'Saving…');
@@ -876,9 +886,54 @@ async function vmssPersistWorkingProject({ silent = true, reason = 'Saved' } = {
   }
 }
 
+async function vmssCreateRevision({ revisionName, showHistory = true, statusMessage = 'Revision saved' } = {}) {
+  if (vmss.revisionPreview) {
+    throw new Error('Exit revision preview before saving a revision.');
+  }
+  if (!vmss.project?._id || !vmss.edit) {
+    throw new Error('Open a project first.');
+  }
+
+  const resolvedRevisionName = String(revisionName || '').trim();
+  if (!resolvedRevisionName) {
+    throw new Error('Revision name is required.');
+  }
+
+  const workingCopySave = await vmssPersistWorkingProject({ silent: true, reason: 'Working copy saved' });
+  if (!workingCopySave) {
+    throw new Error('Working copy could not be saved.');
+  }
+
+  const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${vmss.project._id}/revisions`, {
+    method: 'POST',
+    headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      revisionName: resolvedRevisionName,
+      snapshot: vmssBuildWorkingProjectPayload(),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || String(res.status));
+
+  vmss.project.currentRevisionNumber = data.revisionNumber || vmss.project.currentRevisionNumber || 0;
+  vmss.project.lastRevisionId = data.revisionId || vmss.project.lastRevisionId || null;
+  vmss.project.updatedAt = new Date().toISOString();
+  vmssSyncPlaylistProjectEntry(vmss.project._id, {
+    currentRevisionNumber: vmss.project.currentRevisionNumber,
+    updatedAt: vmss.project.updatedAt,
+  });
+  vmssSetStatus(statusMessage);
+  if (showHistory) await vmssShowHistory(vmss.project._id);
+  return data;
+}
+
 async function vmssSaveRevision() {
   if (!vmss.project?._id || !vmss.edit) {
     alert('Open a project first.');
+    return;
+  }
+  if (vmss.revisionPreview) {
+    alert('Exit revision preview before saving a new revision.');
     return;
   }
 
@@ -886,32 +941,8 @@ async function vmssSaveRevision() {
   const revisionName = window.prompt('Revision name:', defaultRevisionName);
   if (!revisionName) return;
 
-  const workingCopySave = await vmssPersistWorkingProject({ silent: true, reason: 'Working copy saved' });
-  if (!workingCopySave) {
-    alert('Working copy could not be saved, so the revision was not created.');
-    return;
-  }
-
   try {
-    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${vmss.project._id}/revisions`, {
-      method: 'POST',
-      headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        revisionName,
-        snapshot: vmssBuildWorkingProjectPayload(),
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || String(res.status));
-
-    vmss.project.currentRevisionNumber = data.revisionNumber || vmss.project.currentRevisionNumber || 0;
-    vmss.project.lastRevisionId = data.revisionId || vmss.project.lastRevisionId || null;
-    vmssSyncPlaylistProjectEntry(vmss.project._id, {
-      currentRevisionNumber: vmss.project.currentRevisionNumber,
-      updatedAt: new Date().toISOString(),
-    });
-    vmssSetStatus('Revision saved');
-    await vmssShowHistory(vmss.project._id);
+    await vmssCreateRevision({ revisionName, showHistory: true, statusMessage: 'Revision saved' });
   } catch (error) {
     console.error('[VMSS] Save revision error:', error);
     alert(`Failed to save revision: ${error.message}`);
@@ -936,8 +967,18 @@ async function vmssShowHistory(projectId = vmss.project?._id) {
   }
 
   if (meta) {
-    meta.textContent = vmss.project && String(vmss.project._id) === String(projectId)
-      ? `Current working revision: ${vmss.project.currentRevisionNumber || 0}`
+    const isCurrentProject = vmss.project && String(vmss.project._id) === String(projectId);
+    const liveRevisionText = vmss.project?.deployedRevisionId
+      ? `Factory live revision: ${vmss.project.deployedRevisionName || `Rev ${vmss.project.deployedRevisionNumber || '?'}`} · Deployed ${new Date(vmss.project.deployedAt || Date.now()).toLocaleString()}`
+      : 'Factory live revision: Not deployed';
+    const previewButton = vmss.revisionPreview
+      ? '<button onclick="vmssExitRevisionPreview()" class="rounded border border-sky-200 px-2 py-1 text-[11px] font-medium text-sky-600 transition hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-900/20">Back to Current</button>'
+      : '';
+    const undeployButton = vmssCanDeployProjects() && vmss.project?.deployedRevisionId && !vmss.revisionPreview
+      ? '<button onclick="vmssUndeployProject()" class="rounded border border-amber-200 px-2 py-1 text-[11px] font-medium text-amber-700 transition hover:bg-amber-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-900/20">Undeploy</button>'
+      : '';
+    meta.innerHTML = isCurrentProject
+      ? `<div class="flex items-center justify-between gap-3"><span>${vmssEscapeHtml(liveRevisionText)}</span><div class="flex items-center gap-2">${previewButton}${undeployButton}</div></div>`
       : 'Revision history for selected project';
   }
 
@@ -959,12 +1000,20 @@ async function vmssShowHistory(projectId = vmss.project?._id) {
       <div class="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
         <div class="flex items-start gap-3">
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium text-gray-800 dark:text-white">${vmssEscapeHtml(revision.revisionName || 'Unnamed Revision')}</p>
+            <div class="flex items-center gap-2 min-w-0">
+              <p class="truncate text-sm font-medium text-gray-800 dark:text-white">${vmssEscapeHtml(revision.revisionName || 'Unnamed Revision')}</p>
+              ${revision.isDeployed ? '<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">LIVE</span>' : ''}
+            </div>
             <p class="text-xs text-gray-400">Revision ${revision.revisionNumber || '?'} · ${new Date(revision.createdAt).toLocaleString()}</p>
             <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Saved by ${vmssEscapeHtml(revision.createdBy || 'unknown')}</p>
           </div>
           <div class="flex shrink-0 items-center gap-2">
-            <button onclick="vmssRestoreRevisionAsWorkingCopy('${revision._id}', '${projectId}')" class="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300">Restore</button>
+            <button onclick="vmssPreviewRevision('${revision._id}', '${projectId}')" class="rounded bg-blue-50 px-2 py-1 text-xs text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300">Preview</button>
+            ${!vmss.revisionPreview ? `<button onclick="vmssRestoreRevisionAsWorkingCopy('${revision._id}', '${projectId}')" class="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300">Restore</button>` : ''}
+            ${vmssCanDeployProjects() && !vmss.revisionPreview ? (revision.isDeployed
+              ? '<span class="rounded bg-emerald-100 px-2 py-1 text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">Deployed</span>'
+              : `<button onclick="vmssDeployRevision('${revision._id}', '${projectId}')" class="rounded bg-emerald-50 px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-300">Deploy</button>`)
+              : ''}
           </div>
         </div>
       </div>
@@ -972,6 +1021,28 @@ async function vmssShowHistory(projectId = vmss.project?._id) {
   } catch (error) {
     list.innerHTML = `<p class="text-sm text-red-400 text-center py-6">Failed to load revisions: ${vmssEscapeHtml(error.message)}</p>`;
   }
+}
+
+async function vmssPreviewRevision(revisionId, projectId = vmss.project?._id) {
+  try {
+    const revision = await vmssFetchRevisionSnapshot(revisionId);
+    const snapshot = revision?.snapshot || {};
+    vmss.revisionPreview = revision;
+    await vmssLoadTemplate(snapshot.edit || vmssCreateDefaultTemplate(), {
+      title: snapshot.title || vmss.project?.title || 'Video Manual 2',
+      assetSourceMap: snapshot.assetSourceMap || {},
+    });
+    vmssSetStatus(`Previewing ${revision.revisionName || `Rev ${revision.revisionNumber || '?'}`}`);
+    if (projectId) await vmssShowHistory(projectId);
+  } catch (error) {
+    console.error('[VMSS] Preview revision error:', error);
+    alert(`Failed to preview revision: ${error.message}`);
+  }
+}
+
+function vmssExitRevisionPreview() {
+  if (!vmss.revisionPreview || !vmss.project?._id) return;
+  vmssLoadProject(vmss.project._id);
 }
 
 async function vmssRestoreRevisionAsWorkingCopy(revisionId, projectId) {
@@ -1005,6 +1076,310 @@ async function vmssRestoreRevisionAsWorkingCopy(revisionId, projectId) {
   } catch (error) {
     alert(`Failed to restore revision: ${error.message}`);
   }
+}
+
+function vmssApplyDeploymentResponse(data) {
+  if (!vmss.project) return;
+  const deployedAt = data.deployedAt || new Date().toISOString();
+  vmss.project.deployedRevisionId = data.revisionId || null;
+  vmss.project.deployedRevisionNumber = data.revisionNumber || null;
+  vmss.project.deployedRevisionName = data.revisionName || null;
+  vmss.project.deployedAt = deployedAt;
+  vmss.project.deployedBy = data.deployedBy || vmssAuthUser().username || 'unknown';
+  vmss.project.deployedVideoUrl = data.deployedVideoUrl || null;
+  vmss.project.deployedVideoStoragePath = data.deployedVideoStoragePath || null;
+  vmss.project.deployedVideoMimeType = data.deployedVideoMimeType || 'video/mp4';
+  vmss.project.deployedVideoFileName = data.deployedVideoFileName || null;
+  vmss.project.updatedAt = deployedAt;
+  vmssSyncPlaylistProjectEntry(vmss.project._id, {
+    deployedRevisionId: vmss.project.deployedRevisionId,
+    deployedRevisionNumber: vmss.project.deployedRevisionNumber,
+    deployedRevisionName: vmss.project.deployedRevisionName,
+    deployedAt: vmss.project.deployedAt,
+    deployedBy: vmss.project.deployedBy,
+    deployedVideoUrl: vmss.project.deployedVideoUrl,
+    deployedVideoStoragePath: vmss.project.deployedVideoStoragePath,
+    deployedVideoMimeType: vmss.project.deployedVideoMimeType,
+    deployedVideoFileName: vmss.project.deployedVideoFileName,
+    updatedAt: vmss.project.updatedAt,
+  });
+}
+
+function vmssShowDeploymentComplete(downloadUrl, fileName = null, label = 'Deployment Complete') {
+  vmss.lastRenderUrl = downloadUrl || null;
+  vmss.lastRenderId = null;
+  vmssUpdateProgressModal({
+    title: label,
+    message: 'The flattened deployed video is ready in Firebase Storage.',
+    detail: downloadUrl ? 'You can download the MP4, open the URL, or copy the link.' : 'Deployment finished successfully.',
+    progress: 100,
+    status: 'Complete',
+    iconClass: 'ri-checkbox-circle-line',
+    spinIcon: false,
+    actions: [
+      ...(downloadUrl ? [{
+        label: 'Download Video',
+        tone: 'primary',
+        onClick: () => window.open(downloadUrl, '_blank'),
+      }] : []),
+      ...(downloadUrl ? [{
+        label: 'Open URL',
+        tone: 'secondary',
+        onClick: () => window.open(downloadUrl, '_blank'),
+      }] : []),
+      ...(downloadUrl ? [{
+        label: 'Copy URL',
+        tone: 'secondary',
+        onClick: async () => {
+          try {
+            await navigator.clipboard.writeText(downloadUrl);
+            vmssSetStatus('Render URL copied');
+          } catch (error) {
+            console.error('Failed to copy render URL:', error);
+            alert(downloadUrl);
+          }
+        },
+      }] : []),
+    ],
+    dismissLabel: 'Close',
+    showDismiss: true,
+    forceOpen: true,
+  });
+
+  vmssClearRenderActions();
+  const status = document.getElementById('vmss-save-status');
+  if (!status || !downloadUrl) return;
+  const actions = document.createElement('div');
+  actions.id = 'vmss-render-actions';
+  actions.className = 'ml-3 inline-flex items-center gap-2';
+
+  const downloadButton = document.createElement('button');
+  downloadButton.className = 'inline-flex items-center gap-2 rounded bg-green-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-600';
+  downloadButton.innerHTML = '<i class="ri-download-line"></i>Download Video';
+  downloadButton.onclick = () => window.open(downloadUrl, '_blank');
+  actions.appendChild(downloadButton);
+
+  const copyButton = document.createElement('button');
+  copyButton.className = 'inline-flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50';
+  copyButton.innerHTML = '<i class="ri-file-copy-line"></i>Copy URL';
+  copyButton.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(downloadUrl);
+      vmssSetStatus('Render URL copied');
+    } catch (error) {
+      console.error('Failed to copy render URL:', error);
+      alert(downloadUrl);
+    }
+  };
+  actions.appendChild(copyButton);
+
+  status.parentElement?.appendChild(actions);
+}
+
+async function vmssTryReuseRevisionDeployment(projectId, revision) {
+  const reuseRes = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${projectId}/deploy`, {
+    method: 'POST',
+    headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      revisionId: revision._id,
+      reuseExistingDeployment: true,
+    }),
+  });
+
+  if (reuseRes.ok) {
+    return reuseRes.json();
+  }
+
+  const err = await reuseRes.json().catch(() => ({}));
+  if (reuseRes.status === 409 && err.code === 'DEPLOYED_VIDEO_REUSE_MISSING') {
+    return null;
+  }
+
+  throw new Error(err.error || String(reuseRes.status));
+}
+
+async function vmssRenderAndDeployRevision(revision, { reasonLabel = 'Export', showHistoryAfter = false } = {}) {
+  const projectId = vmss.project?._id;
+  if (!projectId) throw new Error('Open a project first.');
+
+  vmssUpdateProgressModal({
+    title: 'Preparing Deployment',
+    message: `${reasonLabel} is checking for an existing flattened video for this revision.`,
+    detail: 'If the revision already has a video in /videoManualDeployed, it will be reused instead of rendering again.',
+    progress: null,
+    status: 'Checking',
+    iconClass: 'ri-loader-4-line',
+    spinIcon: true,
+    actions: [],
+    dismissLabel: 'Hide',
+    showDismiss: true,
+    forceOpen: true,
+  });
+
+  const reusedDeployment = await vmssTryReuseRevisionDeployment(projectId, revision);
+  if (reusedDeployment) {
+    vmssApplyDeploymentResponse(reusedDeployment);
+    vmssSetStatus(`Using existing deployed video for ${reusedDeployment.revisionName || `Rev ${reusedDeployment.revisionNumber || '?'}`}`);
+    if (showHistoryAfter) await vmssShowHistory(projectId);
+    vmssShowDeploymentComplete(vmss.project.deployedVideoUrl, vmss.project.deployedVideoFileName, 'Deployment Complete');
+    return reusedDeployment;
+  }
+
+  vmssUpdateProgressModal({
+    title: 'Rendering Video',
+    message: 'Shotstack is creating a new render for this revision.',
+    detail: 'A new flattened MP4 will be uploaded to /videoManualDeployed when rendering finishes.',
+    progress: null,
+    status: 'Submitting',
+    iconClass: 'ri-loader-4-line',
+    spinIcon: true,
+    actions: [],
+    dismissLabel: 'Hide',
+    showDismiss: true,
+    forceOpen: true,
+  });
+
+  const editJson = vmssPrepareEditForRender(revision?.snapshot?.edit || vmss.edit?.getEdit());
+  const response = await fetch(`${VMSS_API_BASE_URL()}/api/video-manuals/render`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      editJson,
+      projectTitle: vmss.title || vmss.project?.title || 'Video Manual 2',
+    })
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'Render request failed');
+  }
+
+  const renderStart = await response.json();
+  const renderId = renderStart.renderId;
+  vmss.lastRenderId = renderId;
+  const renderResult = await vmssWaitForRender(renderId, { deferCompletionUi: true });
+
+  vmssUpdateProgressModal({
+    title: 'Uploading Render',
+    message: 'Shotstack finished rendering. Saving the final MP4 to Firebase Storage.',
+    detail: 'The file will be stored in /videoManualDeployed and tied to this revision for future reuse.',
+    progress: null,
+    status: 'Uploading',
+    iconClass: 'ri-upload-cloud-2-line',
+    spinIcon: true,
+    actions: [],
+    dismissLabel: 'Hide',
+    showDismiss: true,
+    forceOpen: true,
+  });
+
+  const deployResponse = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${projectId}/deploy-render`, {
+    method: 'POST',
+    headers: vmssAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      revisionId: revision._id,
+      renderId,
+      downloadUrl: renderResult?.downloadUrl || null,
+    }),
+  });
+  const deployData = await deployResponse.json().catch(() => ({}));
+  if (!deployResponse.ok) {
+    throw new Error(deployData.error || String(deployResponse.status));
+  }
+
+  vmssApplyDeploymentResponse(deployData);
+  vmssSetStatus(`Deployed ${deployData.revisionName || `Rev ${deployData.revisionNumber || '?'}`}`);
+  if (showHistoryAfter) await vmssShowHistory(projectId);
+  vmssShowDeploymentComplete(vmss.project.deployedVideoUrl, vmss.project.deployedVideoFileName, 'Deployment Complete');
+  return deployData;
+}
+
+async function vmssDeployRevision(revisionId, projectId = vmss.project?._id) {
+  if (!projectId) return;
+  try {
+    const revision = await vmssFetchRevisionSnapshot(revisionId);
+    await vmssRenderAndDeployRevision(revision, { reasonLabel: 'Deploy Revision', showHistoryAfter: true });
+  } catch (error) {
+    console.error('[VMSS] Deploy revision error:', error);
+    vmssUpdateProgressModal({
+      title: 'Deployment Failed',
+      message: 'The revision could not be deployed.',
+      detail: error.message || 'Please try again.',
+      progress: null,
+      status: 'Failed',
+      iconClass: 'ri-error-warning-line',
+      spinIcon: false,
+      actions: [],
+      dismissLabel: 'Close',
+      showDismiss: true,
+      forceOpen: true,
+    });
+    alert(`Failed to deploy revision: ${error.message}`);
+  }
+}
+
+async function vmssUndeployProject() {
+  if (!vmss.project?._id) return;
+  if (!window.confirm(`Hide "${vmss.project.title || 'Untitled Project'}" from the factory side?`)) return;
+
+  try {
+    const res = await fetch(`${VMSS_PROJECTS_API_BASE()}/projects/${vmss.project._id}/undeploy`, {
+      method: 'POST',
+      headers: vmssAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || String(res.status));
+
+    vmss.project.deployedRevisionId = null;
+    vmss.project.deployedRevisionNumber = null;
+    vmss.project.deployedRevisionName = null;
+    vmss.project.deployedAt = null;
+    vmss.project.deployedBy = null;
+    vmss.project.deployedVideoUrl = null;
+    vmss.project.deployedVideoStoragePath = null;
+    vmss.project.deployedVideoMimeType = null;
+    vmss.project.deployedVideoFileName = null;
+    vmss.project.updatedAt = new Date().toISOString();
+    vmssSyncPlaylistProjectEntry(vmss.project._id, {
+      deployedRevisionId: null,
+      deployedRevisionNumber: null,
+      deployedRevisionName: null,
+      deployedAt: null,
+      deployedBy: null,
+      deployedVideoUrl: null,
+      deployedVideoStoragePath: null,
+      deployedVideoMimeType: null,
+      deployedVideoFileName: null,
+      updatedAt: vmss.project.updatedAt,
+    });
+    vmssSetStatus('Undeployed');
+    await vmssShowHistory(vmss.project._id);
+  } catch (error) {
+    console.error('[VMSS] Undeploy project error:', error);
+    alert(`Failed to undeploy project: ${error.message}`);
+  }
+}
+
+async function vmssEnsureRevisionForExport() {
+  if (vmss.revisionPreview) {
+    throw new Error('Exit revision preview before exporting.');
+  }
+  if (!vmss.project?._id || !vmss.edit) {
+    throw new Error('Open a project first.');
+  }
+
+  if (!vmss.dirty && vmss.project.lastRevisionId) {
+    return vmssFetchRevisionSnapshot(vmss.project.lastRevisionId);
+  }
+
+  const defaultRevisionName = `${vmss.title || 'Untitled'} Rev ${String((vmss.project.currentRevisionNumber || 0) + 1).padStart(2, '0')}`;
+  const revisionName = window.prompt('Export requires a saved revision. Revision name:', defaultRevisionName);
+  if (!revisionName) return null;
+  const revisionData = await vmssCreateRevision({
+    revisionName,
+    showHistory: false,
+    statusMessage: 'Revision saved for export',
+  });
+  return vmssFetchRevisionSnapshot(revisionData.revisionId);
 }
 
 async function vmssReturnToBrowser() {
@@ -2249,6 +2624,129 @@ function vmssSyncSelectionActionButtons() {
 function vmssMarkDirty() {
   vmss.dirty = true;
   vmssSetStatus('Unsaved changes');
+}
+
+function vmssClearProgressModalTimer() {
+  if (!vmss.progressModalHideTimer) return;
+  clearTimeout(vmss.progressModalHideTimer);
+  vmss.progressModalHideTimer = null;
+}
+
+function vmssRenderProgressModalActions(actions = []) {
+  const container = vmssGet('vmss-progress-actions');
+  if (!container) return;
+
+  container.innerHTML = '';
+  actions.forEach((action) => {
+    const button = document.createElement('button');
+    const tone = action?.tone || 'secondary';
+    button.type = 'button';
+    button.className = tone === 'primary'
+      ? 'rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-600'
+      : tone === 'danger'
+        ? 'rounded-2xl border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-900/20'
+        : 'rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-gray-700 dark:bg-transparent dark:text-slate-200 dark:hover:bg-gray-800';
+    button.textContent = action?.label || 'Action';
+    button.disabled = !!action?.disabled;
+    if (button.disabled) {
+      button.classList.add('cursor-not-allowed', 'opacity-60');
+    }
+    button.addEventListener('click', () => {
+      if (button.disabled) return;
+      action?.onClick?.();
+    });
+    container.appendChild(button);
+  });
+}
+
+function vmssUpdateProgressModal({
+  title = 'Working',
+  message = '',
+  detail = '',
+  progress = null,
+  status = '',
+  iconClass = 'ri-loader-4-line',
+  spinIcon = false,
+  actions = [],
+  dismissLabel = 'Hide',
+  showDismiss = true,
+  forceOpen = false,
+} = {}) {
+  vmssClearProgressModalTimer();
+
+  const modal = vmssGet('vmss-progress-modal');
+  const titleEl = vmssGet('vmss-progress-title');
+  const messageEl = vmssGet('vmss-progress-message');
+  const detailEl = vmssGet('vmss-progress-detail');
+  const badgeEl = vmssGet('vmss-progress-badge');
+  const iconEl = vmssGet('vmss-progress-icon');
+  const trackEl = vmssGet('vmss-progress-track');
+  const barEl = vmssGet('vmss-progress-bar');
+  const percentEl = vmssGet('vmss-progress-percent');
+  const dismissButton = vmssGet('vmss-progress-dismiss');
+  if (!modal || !titleEl || !messageEl || !detailEl || !badgeEl || !iconEl || !trackEl || !barEl || !percentEl || !dismissButton) return;
+
+  titleEl.textContent = title;
+  messageEl.textContent = message;
+  detailEl.textContent = detail;
+  detailEl.classList.toggle('hidden', !detail);
+  badgeEl.textContent = status || 'In progress';
+  iconEl.className = `${iconClass}${spinIcon ? ' animate-spin' : ''}`;
+  dismissButton.textContent = dismissLabel;
+  dismissButton.classList.toggle('hidden', !showDismiss);
+
+  if (typeof progress === 'number' && Number.isFinite(progress)) {
+    const clamped = Math.max(0, Math.min(100, Math.round(progress)));
+    barEl.style.width = `${clamped}%`;
+    barEl.classList.remove('animate-pulse');
+    percentEl.textContent = `${clamped}%`;
+  } else {
+    barEl.style.width = '38%';
+    barEl.classList.add('animate-pulse');
+    percentEl.textContent = 'Working';
+  }
+
+  vmssRenderProgressModalActions(actions);
+  if (forceOpen) {
+    vmss.progressModalSuppressed = false;
+  }
+  if (!vmss.progressModalSuppressed || forceOpen) {
+    modal.classList.remove('hidden');
+  }
+}
+
+function vmssCloseProgressModal() {
+  vmssClearProgressModalTimer();
+  vmss.progressModalSuppressed = true;
+  vmssGet('vmss-progress-modal')?.classList.add('hidden');
+}
+
+function vmssScheduleProgressModalClose(delay = 900) {
+  vmssClearProgressModalTimer();
+  vmss.progressModalHideTimer = window.setTimeout(() => {
+    vmssCloseProgressModal();
+  }, delay);
+}
+
+function vmssBuildRenderStatusDetail(status, progress = null) {
+  const label = String(status || '').toLowerCase();
+  const progressText = typeof progress === 'number' && Number.isFinite(progress) ? ` ${Math.round(progress)}% complete.` : '';
+  switch (label) {
+    case 'queued':
+      return `Shotstack accepted the render and is waiting for a worker.${progressText}`;
+    case 'fetching':
+      return `Shotstack is fetching source media and fonts before rendering.${progressText}`;
+    case 'rendering':
+      return `Shotstack is compositing the final video frames now.${progressText}`;
+    case 'saving':
+      return `Shotstack finished rendering and is writing the output file.${progressText}`;
+    case 'processing':
+      return `Shotstack is still processing the render request.${progressText}`;
+    case 'done':
+      return 'Shotstack finished the render and the output URL is ready.';
+    default:
+      return progressText.trim() || 'Shotstack is processing the render request.';
+  }
 }
 
 function vmssSetStatus(message) {
@@ -5490,6 +5988,39 @@ function vmssRenderEditorShell(container) {
       </div>
       <input id="vmss-asset-library-upload-input" type="file" class="hidden" onchange="vmssHandleAssetLibraryUpload(event)">
     </div>
+
+    <div id="vmss-progress-modal" class="hidden fixed inset-0 z-[360] flex items-center justify-center bg-slate-950/45 backdrop-blur-sm">
+      <div class="w-full max-w-lg rounded-[28px] border border-white/70 bg-white p-6 shadow-[0_30px_120px_-40px_rgba(15,23,42,0.45)] dark:border-gray-700 dark:bg-gray-900">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex items-start gap-4">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-300">
+              <i id="vmss-progress-icon" class="ri-loader-4-line animate-spin text-2xl"></i>
+            </div>
+            <div class="min-w-0">
+              <div id="vmss-progress-badge" class="inline-flex rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:bg-gray-800 dark:text-slate-300">In progress</div>
+              <h3 id="vmss-progress-title" class="mt-3 text-xl font-semibold text-slate-900 dark:text-white">Working</h3>
+              <p id="vmss-progress-message" class="mt-2 text-sm text-slate-600 dark:text-slate-300">Please wait.</p>
+              <p id="vmss-progress-detail" class="mt-2 text-xs text-slate-400 dark:text-slate-500"></p>
+            </div>
+          </div>
+          <button id="vmss-progress-dismiss" type="button" onclick="vmssCloseProgressModal()" class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-gray-800 dark:hover:text-gray-200">
+            <i class="ri-close-line text-lg"></i>
+          </button>
+        </div>
+
+        <div class="mt-6">
+          <div class="mb-2 flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span>Progress</span>
+            <span id="vmss-progress-percent">Working</span>
+          </div>
+          <div id="vmss-progress-track" class="h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-gray-800">
+            <div id="vmss-progress-bar" class="h-full rounded-full bg-gradient-to-r from-cyan-500 to-sky-500 transition-[width] duration-300 ease-out"></div>
+          </div>
+        </div>
+
+        <div id="vmss-progress-actions" class="mt-6 flex flex-wrap justify-end gap-2"></div>
+      </div>
+    </div>
   `;
 }
 
@@ -5847,24 +6378,88 @@ async function vmssUploadPlaylistAssetAndInsert(file, forcedType = null) {
   const type = vmssNormalizePlaylistAssetType(forcedType, file.type);
   const label = vmssGetAssetLibraryTypeLabel(type);
   vmssSetStatus(`Uploading ${label.toLowerCase()}...`);
+  vmssUpdateProgressModal({
+    title: `Uploading ${label}`,
+    message: `${file.name} is being uploaded to the playlist library.`,
+    detail: 'You can hide this window while the upload continues. Video, audio, and image uploads all report progress here.',
+    progress: 0,
+    status: 'Uploading',
+    iconClass: 'ri-upload-cloud-2-line',
+    actions: [
+      {
+        label: 'Cancel Upload',
+        tone: 'danger',
+        onClick: () => vmss.uploadXhr?.abort(),
+      },
+    ],
+    dismissLabel: 'Hide',
+    showDismiss: true,
+    forceOpen: true,
+  });
 
   try {
     const result = await vmssUploadPlaylistBinary(file, {
       onProgress: (loaded, total) => {
-        vmssSetStatus(`Uploading ${label.toLowerCase()}... ${Math.round((loaded / total) * 100)}%`);
+        const percent = total > 0 ? Math.round((loaded / total) * 100) : null;
+        vmssSetStatus(`Uploading ${label.toLowerCase()}... ${percent ?? 0}%`);
+        vmssUpdateProgressModal({
+          title: `Uploading ${label}`,
+          message: `${file.name} is being uploaded to the playlist library.`,
+          detail: `${vmssFormatFileSize(loaded)} of ${vmssFormatFileSize(total)} transferred.`,
+          progress: percent,
+          status: 'Uploading',
+          iconClass: 'ri-upload-cloud-2-line',
+          actions: [
+            {
+              label: 'Cancel Upload',
+              tone: 'danger',
+              onClick: () => vmss.uploadXhr?.abort(),
+            },
+          ],
+          dismissLabel: 'Hide',
+          showDismiss: true,
+          forceOpen: false,
+        });
       },
     });
 
     const asset = vmssBuildUploadedAsset(file, result, type);
+    vmssUpdateProgressModal({
+      title: `${label} Uploaded`,
+      message: `${file.name} uploaded successfully. Adding it to the canvas now.`,
+      detail: 'The playlist library will refresh automatically.',
+      progress: 100,
+      status: 'Complete',
+      iconClass: 'ri-checkbox-circle-line',
+      actions: [],
+      dismissLabel: 'Close',
+      showDismiss: true,
+      forceOpen: true,
+    });
     vmssRememberPlaylistAsset(asset);
     vmssRenderPlaylistAssetLibrary();
     await vmssInsertPlaylistAsset(asset);
     await vmssLoadPlaylistAssetLibrary(true);
     vmssClosePlaylistAssetLibrary();
+    vmssScheduleProgressModalClose(900);
   } catch (error) {
     console.error(`[VMSS] ${label} upload failed:`, error);
-    vmssSetStatus(`${label} upload failed`);
-    alert(`${label} upload failed: ${error.message}`);
+    const wasCanceled = String(error?.message || '').toLowerCase().includes('canceled');
+    const failureMessage = wasCanceled ? `${label} upload canceled` : `${label} upload failed`;
+    vmssSetStatus(failureMessage);
+    vmssUpdateProgressModal({
+      title: wasCanceled ? `${label} Upload Canceled` : `${label} Upload Failed`,
+      message: wasCanceled ? `${file.name} was not uploaded.` : `${file.name} could not be uploaded.`,
+      detail: error.message || 'Please try again.',
+      progress: null,
+      status: wasCanceled ? 'Canceled' : 'Failed',
+      iconClass: wasCanceled ? 'ri-close-circle-line' : 'ri-error-warning-line',
+      actions: [],
+      dismissLabel: 'Close',
+      showDismiss: true,
+      forceOpen: true,
+    });
+    if (!wasCanceled) alert(`${label} upload failed: ${error.message}`);
   }
 }
 
@@ -5879,52 +6474,37 @@ async function vmssDeleteSelectedClip() {
 }
 
 async function vmssExport() {
-  if (!vmss.edit) {
-    alert('No project loaded');
-    return;
-  }
-
-  vmssClearRenderActions();
-  vmss.lastRenderId = null;
-  vmss.lastRenderUrl = null;
-  vmssSetStatus('Preparing render request...');
-
   try {
-    // Get the edit JSON from Shotstack
-    const editJson = vmssPrepareEditForRender(vmss.edit.getEdit());
+    const revision = await vmssEnsureRevisionForExport();
+    if (!revision) return;
 
-    // Send to backend for cloud rendering
-    const response = await fetch(`${VMSS_API_BASE_URL()}/api/video-manuals/render`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        editJson: editJson,
-        projectTitle: vmss.title || 'Video Manual 2'
-      })
-    });
+    vmssClearRenderActions();
+    vmss.lastRenderId = null;
+    vmss.lastRenderUrl = null;
+    vmssSetStatus('Preparing export...');
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Render request failed');
-    }
-
-    const result = await response.json();
-    const renderId = result.renderId;
-
-    vmssSetStatus('Render queued on Shotstack Sandbox (Free)...');
-    console.log('✅ Render queued:', renderId);
-
-    // Poll for render status
-    await vmssWaitForRender(renderId);
-
+    await vmssRenderAndDeployRevision(revision, { reasonLabel: 'Export', showHistoryAfter: false });
   } catch (error) {
     console.error('❌ Export failed:', error);
     vmssSetStatus('Export failed: ' + error.message);
+    vmssUpdateProgressModal({
+      title: 'Export Failed',
+      message: 'The video could not be exported.',
+      detail: error.message || 'Please try again.',
+      progress: null,
+      status: 'Failed',
+      iconClass: 'ri-error-warning-line',
+      spinIcon: false,
+      actions: [],
+      dismissLabel: 'Close',
+      showDismiss: true,
+      forceOpen: true,
+    });
     alert(`Export failed: ${error.message}`);
   }
 }
 
-async function vmssWaitForRender(renderId) {
+async function vmssWaitForRender(renderId, { deferCompletionUi = false } = {}) {
   const maxAttempts = 120; // 10 minutes with 5-second intervals
   let attempts = 0;
 
@@ -5942,9 +6522,11 @@ async function vmssWaitForRender(renderId) {
     if (status === 'done') {
       vmss.lastRenderId = renderId;
       vmss.lastRenderUrl = downloadUrl || null;
-      vmssSetStatus('✅ Render complete!');
-      vmssShowRenderComplete(renderId, downloadUrl);
-      return true;
+      if (!deferCompletionUi) {
+        vmssSetStatus('✅ Render complete!');
+        vmssShowRenderComplete(renderId, downloadUrl);
+      }
+      return { renderId, downloadUrl, status };
     }
 
     if (status === 'failed') {
@@ -5954,6 +6536,19 @@ async function vmssWaitForRender(renderId) {
     if (status === 'queued' || status === 'fetching' || status === 'rendering' || status === 'saving' || status === 'processing') {
       const progressText = progress ? ` (${progress}%)` : '';
       vmssSetStatus(`Shotstack status: ${status}${progressText}`);
+      vmssUpdateProgressModal({
+        title: 'Rendering Video',
+        message: `Shotstack status: ${status}${progressText}`,
+        detail: vmssBuildRenderStatusDetail(status, progress),
+        progress: typeof progress === 'number' ? progress : null,
+        status: String(status || 'processing').toUpperCase(),
+        iconClass: 'ri-loader-4-line',
+        spinIcon: true,
+        actions: [],
+        dismissLabel: 'Hide',
+        showDismiss: true,
+        forceOpen: false,
+      });
       
       attempts++;
       if (attempts >= maxAttempts) {
