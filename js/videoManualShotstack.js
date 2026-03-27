@@ -5114,12 +5114,7 @@ function vmssNormalizePreviewZoomPreset(value) {
 }
 
 function vmssGetPreviewZoomPadding() {
-  const surface = vmssGet('vmss-preview-surface');
-  const controls = vmssGet('vmss-preview-zoom-controls');
-  const surfaceHeight = surface?.clientHeight || 0;
-  const controlsHeight = controls?.offsetHeight || 0;
-  const proportionalPadding = surfaceHeight > 0 ? Math.round(surfaceHeight * 0.08) : 0;
-  return Math.max(56, controlsHeight + proportionalPadding + 12);
+  return 16;
 }
 
 function vmssUpdatePreviewZoomUi() {
@@ -5793,6 +5788,24 @@ function vmssRenderEditorShell(container) {
         <input id="vmss-title" type="text" value="Video Manual 2" class="w-full max-w-[220px] border-b border-transparent bg-transparent px-2 text-center text-sm font-medium hover:border-gray-300 focus:border-blue-400 focus:outline-none dark:text-white sm:w-56 sm:max-w-none">
         <span id="vmss-save-status" class="text-xs text-gray-400">Loading...</span>
         <div class="flex-1"></div>
+        <div id="vmss-preview-zoom-controls" data-vmss-preview-zoom-controls data-vmss-preserve-selection="true" class="flex items-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-700">
+          <button type="button" data-vmss-preserve-selection="true" onclick="vmssStepPreviewZoom(-1)" class="flex h-7 w-7 items-center justify-center border-r border-gray-200 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600 dark:hover:text-white" title="Zoom out">
+            <i class="ri-zoom-out-line text-sm"></i>
+          </button>
+          <select id="vmss-preview-zoom-select" data-vmss-preserve-selection="true" onchange="vmssSetPreviewZoomPreset(event.target.value)" class="h-7 appearance-none border-0 bg-transparent px-2 text-center text-xs font-medium text-gray-700 focus:outline-none dark:text-gray-100" style="min-width:120px">
+            <option value="fit">Auto-Fit Page</option>
+            <option value="25">25%</option>
+            <option value="50">50%</option>
+            <option value="75">75%</option>
+            <option value="100">100%</option>
+            <option value="150">150%</option>
+            <option value="200">200%</option>
+          </select>
+          <button type="button" data-vmss-preserve-selection="true" onclick="vmssStepPreviewZoom(1)" class="flex h-7 w-7 items-center justify-center border-l border-gray-200 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-600 dark:hover:text-white" title="Zoom in">
+            <i class="ri-zoom-in-line text-sm"></i>
+          </button>
+        </div>
+        <div class="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
         <button onclick="vmssSaveProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
           <i class="ri-save-line"></i>Save
         </button>
@@ -5819,24 +5832,6 @@ function vmssRenderEditorShell(container) {
 
         <div id="vmss-workspace-main" class="flex min-w-0 flex-1 flex-col bg-gray-200 transition-[margin] duration-200 dark:bg-gray-950">
           <div id="vmss-preview-surface" class="relative flex flex-1 items-center justify-center overflow-hidden bg-gray-200 dark:bg-gray-950">
-            <div id="vmss-preview-zoom-controls" data-vmss-preview-zoom-controls data-vmss-preserve-selection="true" class="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center overflow-hidden rounded-2xl border border-white/80 bg-white/95 shadow-[0_18px_40px_-24px_rgba(15,23,42,0.45)] backdrop-blur dark:border-gray-700 dark:bg-gray-900/90">
-              <button type="button" data-vmss-preserve-selection="true" onclick="vmssStepPreviewZoom(-1)" class="flex h-11 w-11 items-center justify-center border-r border-gray-200 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white" title="Zoom out">
-                <i class="ri-zoom-out-line text-lg"></i>
-              </button>
-              <select id="vmss-preview-zoom-select" data-vmss-preserve-selection="true" onchange="vmssSetPreviewZoomPreset(event.target.value)" class="h-11 min-w-[170px] appearance-none border-0 bg-transparent px-4 text-center text-sm font-medium text-gray-700 focus:outline-none dark:text-gray-100">
-                <option value="fit">Auto-Fit Page</option>
-                <option value="25">25% Zoom</option>
-                <option value="50">50% Zoom</option>
-                <option value="75">75% Zoom</option>
-                <option value="100">100% Zoom</option>
-                <option value="150">150% Zoom</option>
-                <option value="200">200% Zoom</option>
-              </select>
-              <i class="pointer-events-none ri-arrow-down-s-line absolute right-12 top-1/2 -translate-y-1/2 text-base text-gray-400 dark:text-gray-500"></i>
-              <button type="button" data-vmss-preserve-selection="true" onclick="vmssStepPreviewZoom(1)" class="flex h-11 w-11 items-center justify-center border-l border-gray-200 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white" title="Zoom in">
-                <i class="ri-zoom-in-line text-lg"></i>
-              </button>
-            </div>
             <div data-shotstack-studio class="h-full w-full"></div>
             <div id="vmss-preview-transition-mask" class="pointer-events-none absolute inset-0 z-20 opacity-0 transition-opacity duration-150 ease-out bg-slate-100 dark:bg-slate-900"></div>
             <div id="vmss-draw-overlay" class="pointer-events-none absolute inset-0 z-10 hidden"></div>
