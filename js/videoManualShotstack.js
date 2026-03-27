@@ -5763,7 +5763,7 @@ async function vmssTrimSelectedClip() {
 
 function vmssRenderEditorShell(container) {
   container.innerHTML = `
-    <div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 150px); min-height:min(860px, calc(100vh - 150px));">
+<div id="vmss-root" class="flex flex-col bg-gray-100 dark:bg-gray-900" style="height:calc(100vh - 150px); min-height:min(860px, calc(100vh - 150px));">
       <div class="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800">
         <button onclick="vmssGoBack()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
           <i class="ri-arrow-left-line"></i>Projects
@@ -5840,10 +5840,6 @@ function vmssRenderEditorShell(container) {
 
           <div class="flex-shrink-0 border-t border-gray-300 bg-gray-100 dark:border-gray-700 dark:bg-gray-800">
             <div class="flex flex-wrap items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-700">
-              <button onclick="vmssTogglePlay()" id="vmss-play-btn" class="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600">
-                <i class="ri-play-fill text-lg"></i>
-              </button>
-              <span id="vmss-time-display" class="w-20 font-mono text-xs text-gray-600 dark:text-gray-300">0:00.0</span>
               <button id="vmss-trim-selected-btn" data-vmss-preserve-selection="true" onclick="vmssTrimSelectedClip()" disabled class="inline-flex items-center gap-1 rounded bg-gray-200 px-2 py-1 text-xs opacity-50 cursor-not-allowed dark:bg-gray-700 dark:text-gray-200" title="Trim selected video clip">
                 <i class="ri-scissors-cut-line"></i>Trim
               </button>
