@@ -6149,9 +6149,6 @@ function vmssRenderEditorShell(container) {
           <i class="ri-arrow-go-forward-line text-lg"></i>
         </button>
         <div class="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
-        <button onclick="vmssLoadStarterProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
-          <i class="ri-sparkling-line"></i>Starter
-        </button>
         <button onclick="vmssSaveRevision()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
           <i class="ri-git-commit-line"></i>Save Revision
         </button>
@@ -6180,9 +6177,6 @@ function vmssRenderEditorShell(container) {
           </button>
         </div>
         <div class="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
-        <button onclick="vmssSaveProject()" class="flex items-center gap-1 rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300">
-          <i class="ri-save-line"></i>Save
-        </button>
         <button onclick="vmssExport()" class="flex items-center gap-1 rounded bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600">
           <i class="ri-download-line"></i>Export
         </button>
