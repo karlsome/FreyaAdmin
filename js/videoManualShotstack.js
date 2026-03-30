@@ -1480,6 +1480,23 @@ async function vmssInit(containerSelector = '#vmss-editor') {
   vmssBindShellEvents();
 }
 
+function vmssBindSeekRefresh() {
+  if (!vmss.edit || typeof vmss.edit.seek !== 'function' || vmss.edit.__vmssSeekWrapped) {
+    return;
+  }
+
+  const originalSeek = vmss.edit.seek.bind(vmss.edit);
+  vmss.edit.seek = (...args) => {
+    const result = originalSeek(...args);
+    window.requestAnimationFrame(() => {
+      vmssUpdateClock();
+      vmssSyncSelectionPanelsFromPlayback(true);
+    });
+    return result;
+  };
+  vmss.edit.__vmssSeekWrapped = true;
+}
+
 async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   const { Edit, Canvas, Timeline, Controls, UIController } = window.ShotstackStudio;
 
@@ -1500,6 +1517,7 @@ async function vmssLoadTemplate(templateJsonOrUrl, options = {}) {
   template = vmssSanitizeEditTemplate(template);
 
   vmss.edit = new Edit(template);
+  vmssBindSeekRefresh();
   vmss.canvas = new Canvas(vmss.edit);
   vmss.ui = UIController.create(vmss.edit, vmss.canvas, { mergeFields: true });
 
@@ -4085,13 +4103,85 @@ function vmssSegmentsToExplicitKeyframePoints(segments, clipLength) {
     points.pop();
   }
 
-  return points;
+  return vmssNormalizeKeyframePoints(points, clipLength);
+}
+
+function vmssNormalizeKeyframePoints(points, clipLength) {
+  if (!Array.isArray(points) || !points.length) return [];
+
+  const normalizedClipLength = Number(Math.max(0.001, clipLength).toFixed(3));
+  const sorted = points
+    .map((point) => ({
+      time: Number(Math.max(0, Math.min(normalizedClipLength, Number(point?.time) || 0)).toFixed(3)),
+      value: Number((Number(point?.value) || 0).toFixed(4)),
+    }))
+    .sort((a, b) => a.time - b.time);
+
+  const deduped = [];
+  sorted.forEach((point) => {
+    const previous = deduped[deduped.length - 1] || null;
+    if (previous && Math.abs(previous.time - point.time) <= VMSS_KEYFRAME_SAME_TIME_TOLERANCE) {
+      deduped[deduped.length - 1] = point;
+      return;
+    }
+    deduped.push(point);
+  });
+
+  return deduped;
+}
+
+function vmssSanitizeGeneratedKeyframes(segments, clipLength) {
+  if (!Array.isArray(segments) || !segments.length) return null;
+
+  const normalizedClipLength = Number(Math.max(0.001, clipLength).toFixed(3));
+  const sorted = segments
+    .map((segment) => {
+      const start = Number(Math.max(0, Math.min(normalizedClipLength, Number(segment?.start) || 0)).toFixed(3));
+      const rawLength = Math.max(0, Number(segment?.length) || 0);
+      const maxLength = Math.max(0, normalizedClipLength - start);
+      const length = Number(Math.min(rawLength, maxLength).toFixed(3));
+      return {
+        start,
+        length,
+        from: Number((Number(segment?.from) || 0).toFixed(4)),
+        to: Number((Number(segment?.to) || 0).toFixed(4)),
+        interpolation: segment?.interpolation,
+        easing: segment?.easing,
+      };
+    })
+    .sort((a, b) => a.start - b.start || a.length - b.length);
+
+  const sanitized = [];
+  sorted.forEach((segment) => {
+    const previous = sanitized[sanitized.length - 1] || null;
+    if (previous) {
+      const previousEnd = Number((previous.start + previous.length).toFixed(3));
+      if (previousEnd > segment.start) {
+        previous.length = Number(Math.max(0, segment.start - previous.start).toFixed(3));
+      }
+    }
+
+    const last = sanitized[sanitized.length - 1] || null;
+    if (
+      last
+      && Math.abs(last.start - segment.start) <= 0.001
+      && Math.abs(last.length - segment.length) <= 0.001
+      && Math.abs(last.from - segment.from) <= 0.0001
+      && Math.abs(last.to - segment.to) <= 0.0001
+    ) {
+      return;
+    }
+
+    sanitized.push(segment);
+  });
+
+  return sanitized;
 }
 
 // Corrected to generate segments only between explicit points, exactly matching Shotstack JSON requirements.
 // Adds linear interpolation and 0-length anchor segments for single keyframes.
 function vmssKeyframePointsToSegments(points, clipLength, initialValue) {
-  const sorted = [...points].sort((a, b) => a.time - b.time);
+  const sorted = vmssNormalizeKeyframePoints(points, clipLength);
   const segments = [];
 
   if (!sorted.length) return null;
@@ -4150,7 +4240,7 @@ function vmssKeyframePointsToSegments(points, clipLength, initialValue) {
     });
   }
 
-  return segments.length > 0 ? segments : null;
+  return segments.length > 0 ? vmssSanitizeGeneratedKeyframes(segments, clipLength) : null;
 }
 
 function vmssInterpolateKeyframeAtTime(segments, time, fallback) {
@@ -4225,7 +4315,7 @@ function vmssBuildKeyframedPropertyValue(existingValue, nextValue, clipLength, i
   return vmssKeyframePointsToSegments(nextPoints, clipLength, initialValue);
 }
 
-function vmssShiftAnimatedSegments(previousSegments, newValue, relTime, fallback) {
+function vmssShiftAnimatedSegments(previousSegments, newValue, relTime, fallback, clipLength = null) {
   if (!Array.isArray(previousSegments) || !Number.isFinite(Number(newValue))) {
     return null;
   }
@@ -4233,11 +4323,14 @@ function vmssShiftAnimatedSegments(previousSegments, newValue, relTime, fallback
   const oldValue = vmssInterpolateKeyframeAtTime(previousSegments, relTime, fallback);
   const delta = Number(newValue) - oldValue;
 
-  return previousSegments.map((seg) => ({
+  const shifted = previousSegments.map((seg) => ({
     ...seg,
     from: Number((seg.from + delta).toFixed(4)),
     to: Number((seg.to + delta).toFixed(4)),
   }));
+
+  const resolvedClipLength = Number.isFinite(Number(clipLength)) ? Number(clipLength) : Math.max(...shifted.map((seg) => (Number(seg.start) || 0) + (Number(seg.length) || 0)), 0.001);
+  return vmssSanitizeGeneratedKeyframes(shifted, resolvedClipLength);
 }
 
 function vmssCreateAnimatedClipStateSnapshot(clip, category = null) {
@@ -4289,14 +4382,14 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
 
   const update = {};
 
-  const scaleSegs = vmssShiftAnimatedSegments(previousClip.scale || rememberedState?.scale, currentClip.scale, relTime, 1);
+  const scaleSegs = vmssShiftAnimatedSegments(previousClip.scale || rememberedState?.scale, currentClip.scale, relTime, 1, clipLength);
   if (scaleSegs) update.scale = scaleSegs;
 
-  const opacitySegs = vmssShiftAnimatedSegments(previousClip.opacity || rememberedState?.opacity, currentClip.opacity, relTime, 1);
+  const opacitySegs = vmssShiftAnimatedSegments(previousClip.opacity || rememberedState?.opacity, currentClip.opacity, relTime, 1, clipLength);
   if (opacitySegs) update.opacity = opacitySegs;
 
-  const offsetXSegs = vmssShiftAnimatedSegments(previousClip.offset?.x || rememberedState?.offsetX, currentClip.offset?.x, relTime, 0);
-  const offsetYSegs = vmssShiftAnimatedSegments(previousClip.offset?.y || rememberedState?.offsetY, currentClip.offset?.y, relTime, 0);
+  const offsetXSegs = vmssShiftAnimatedSegments(previousClip.offset?.x || rememberedState?.offsetX, currentClip.offset?.x, relTime, 0, clipLength);
+  const offsetYSegs = vmssShiftAnimatedSegments(previousClip.offset?.y || rememberedState?.offsetY, currentClip.offset?.y, relTime, 0, clipLength);
   if (offsetXSegs || offsetYSegs) {
     update.offset = {
       ...(currentClip.offset || {}),
@@ -4305,7 +4398,7 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
     };
   }
 
-  const rotateSegs = vmssShiftAnimatedSegments(previousClip.transform?.rotate?.angle || rememberedState?.rotate, currentClip.transform?.rotate?.angle, relTime, 0);
+  const rotateSegs = vmssShiftAnimatedSegments(previousClip.transform?.rotate?.angle || rememberedState?.rotate, currentClip.transform?.rotate?.angle, relTime, 0, clipLength);
   if (rotateSegs) {
     update.transform = {
       ...(currentClip.transform || {}),
