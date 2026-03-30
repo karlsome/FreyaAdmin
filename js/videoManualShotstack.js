@@ -87,6 +87,8 @@ const vmss = {
   progressModalSuppressed: false,
   drawerSyncSignature: '',
   animationDraft: null,
+  keyframeEditMode: null,
+  keyframeEditModeHasChanges: false,
 };
 
 function vmssGet(id) {
@@ -2223,10 +2225,16 @@ function vmssBindEvents() {
   vmss.edit.events.on('clip:updated', (change) => {
     if (vmss.syncingAnimatedClipUpdate) return;
 
+    const isSelected = change?.current?.trackIndex === vmss.currentStepIdx && change?.current?.clipIndex === vmss.selectedClipId;
+    if (isSelected) {
+      const selectedClipId = vmss.edit?.getClipId?.(change.current.trackIndex, change.current.clipIndex);
+      if (selectedClipId && vmss.keyframeEditMode?.clipId === selectedClipId) {
+        vmss.keyframeEditModeHasChanges = true;
+      }
+    }
+
     const didSyncKeyframes = vmssSyncAnimatedClipUpdateFromEvent(change);
     // REMOVED: vmssRememberAnimatedClipStateByLocation - only remember on select/record
-    
-    const isSelected = change?.current?.trackIndex === vmss.currentStepIdx && change?.current?.clipIndex === vmss.selectedClipId;
 
     if (isSelected && didSyncKeyframes) {
       vmssDebugKeyframeConsole('clip:updated', {
@@ -3742,9 +3750,10 @@ function vmssGetSelectedClipActiveKeyframe(selection = null, threshold = VMSS_AC
   };
 }
 
-function vmssBuildAnimationField(label, iconMarkup, value, changeHandler, inputAttrs, disabled, changed = false) {
+function vmssBuildAnimationField(label, iconMarkup, value, changeHandler, inputAttrs, disabled, changed = false, readOnly = false) {
   const disabledAttr = disabled ? 'disabled' : '';
-  const valueAttr = disabled ? '' : `value="${value}"`;
+  const readOnlyAttr = !disabled && readOnly ? 'readonly' : '';
+  const valueAttr = disabled || value == null || value === '' ? '' : `value="${value}"`;
   const stateClass = disabled
     ? 'border-slate-200 bg-slate-100/90 text-slate-400 dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-500'
     : changed
@@ -3752,6 +3761,8 @@ function vmssBuildAnimationField(label, iconMarkup, value, changeHandler, inputA
     : 'border-slate-300 bg-white text-slate-900 dark:border-gray-600 dark:bg-gray-900 dark:text-white';
   const inputClass = disabled
     ? 'cursor-not-allowed text-slate-400 dark:text-gray-500'
+    : readOnly
+      ? 'cursor-default text-slate-900 dark:text-white'
     : 'text-slate-900 dark:text-white';
   const iconClass = changed
     ? 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200'
@@ -3764,14 +3775,160 @@ function vmssBuildAnimationField(label, iconMarkup, value, changeHandler, inputA
     <label class="grid grid-cols-[3rem_1fr] overflow-hidden rounded-2xl border transition-colors ${stateClass}">
       <span class="flex items-center justify-center border-r border-inherit text-sm font-semibold ${iconClass}" title="${label}">${iconMarkup}</span>
       <span class="flex items-center justify-between gap-3 px-3 py-3">
-        <input type="number" ${inputAttrs} ${valueAttr} ${disabledAttr} onchange="${changeHandler}" placeholder="${disabled ? 'No keyframe selected' : ''}" class="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none ${inputClass}">
+        <input type="number" ${inputAttrs} ${valueAttr} ${disabledAttr} ${readOnlyAttr} onchange="${changeHandler}" placeholder="${disabled ? 'No keyframe selected' : ''}" class="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none ${inputClass}">
         ${badgeMarkup}
       </span>
     </label>`;
 }
 
+function vmssCountChangedAnimationFields(baseValues = null, nextValues = null) {
+  if (!baseValues || !nextValues) return 0;
+
+  return ['offsetX', 'offsetY', 'scale', 'opacity', 'rotate'].filter((field) => {
+    const currentValue = vmssNormalizeAnimationDraftValue(field, baseValues[field]);
+    const nextValue = vmssNormalizeAnimationDraftValue(field, nextValues[field]);
+    return currentValue !== nextValue;
+  }).length;
+}
+
+function vmssExitKeyframeEditMode() {
+  vmss.keyframeEditMode = null;
+  vmss.keyframeEditModeHasChanges = false;
+}
+
+function vmssGetKeyframeEditModeContext(selection = null, activeKeyframe = null) {
+  const resolvedSelection = selection || vmssGetSelectedInspectorContext();
+  const resolvedKeyframe = activeKeyframe || vmssGetSelectedClipActiveKeyframe(resolvedSelection);
+  if (!resolvedSelection || !resolvedKeyframe || !vmss.keyframeEditMode) return null;
+
+  const clipId = vmss.edit?.getClipId?.(resolvedSelection.trackIndex, resolvedSelection.clipIndex);
+  if (!clipId || clipId !== vmss.keyframeEditMode.clipId) return null;
+  if (Math.abs(vmss.keyframeEditMode.time - resolvedKeyframe.time) > VMSS_KEYFRAME_SAME_TIME_TOLERANCE) return null;
+
+  return {
+    clipId,
+    time: vmss.keyframeEditMode.time,
+    baseline: vmss.keyframeEditMode.baseline,
+  };
+}
+
+function vmssGetAnimationInspectorDisplayValues(selection, activeKeyframe, { editModeContext = null, draftValues = null } = {}) {
+  if (!activeKeyframe) return null;
+
+  const values = {
+    ...activeKeyframe.values,
+  };
+
+  if (editModeContext && selection) {
+    const liveValues = vmssGetSelectedClipLiveRuntimeValues(selection);
+    values.offsetX = vmssNormalizeAnimationDraftValue('offsetX', liveValues.offsetX);
+    values.offsetY = vmssNormalizeAnimationDraftValue('offsetY', liveValues.offsetY);
+    values.scale = vmssNormalizeAnimationDraftValue('scale', liveValues.scale);
+    values.opacity = vmssNormalizeAnimationDraftValue('opacity', liveValues.opacity);
+    values.rotate = vmssNormalizeAnimationDraftValue('rotate', liveValues.rotate);
+  }
+
+  if (draftValues) {
+    return {
+      ...values,
+      ...draftValues,
+    };
+  }
+
+  return values;
+}
+
 function vmssResetAnimationDraft() {
   vmss.animationDraft = null;
+  vmssExitKeyframeEditMode();
+}
+
+function vmssEnterKeyframeEditMode() {
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  if (!selection || !activeKeyframe) {
+    vmssSetStatus('Move the scrubber onto a keyframe to edit it');
+    return;
+  }
+
+  const clipId = vmss.edit?.getClipId?.(selection.trackIndex, selection.clipIndex);
+  if (!clipId) return;
+
+  vmss.animationDraft = null;
+  vmss.keyframeEditMode = {
+    clipId,
+    time: activeKeyframe.time,
+    baseline: { ...activeKeyframe.values },
+    sourceState: vmssCreateAnimatedClipStateSnapshot(selection.clip),
+    sourceClip: structuredClone(selection.clip),
+  };
+  vmss.keyframeEditModeHasChanges = false;
+  vmssRenderSelectedDrawerProperties();
+  vmssSetStatus('Edit mode enabled. Drag, scale, rotate, or type new values for this keyframe, then press Record.');
+}
+
+function vmssCancelKeyframeEditMode() {
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  const editModeContext = vmssGetKeyframeEditModeContext(selection, activeKeyframe);
+  const sourceClip = editModeContext?.sourceClip || vmss.keyframeEditMode?.sourceClip || null;
+
+  if (selection && sourceClip) {
+    const update = {};
+
+    if (Object.prototype.hasOwnProperty.call(sourceClip, 'scale')) {
+      update.scale = structuredClone(sourceClip.scale);
+    }
+    if (Object.prototype.hasOwnProperty.call(sourceClip, 'opacity')) {
+      update.opacity = structuredClone(sourceClip.opacity);
+    }
+    if (sourceClip.offset || selection.clip?.offset) {
+      update.offset = structuredClone(sourceClip.offset || {});
+    }
+    if (sourceClip.transform || selection.clip?.transform) {
+      update.transform = structuredClone(sourceClip.transform || {});
+    }
+
+    if (Object.keys(update).length) {
+      vmssApplySelectedClipUpdate(update, `Keyframe edit cancelled at T=${(activeKeyframe?.time ?? editModeContext?.time ?? 0).toFixed(2)}s`);
+    }
+  }
+
+  vmss.animationDraft = null;
+  vmssExitKeyframeEditMode();
+  vmssRenderSelectedDrawerProperties();
+  vmssSetStatus('Keyframe edit cancelled');
+}
+
+function vmssSaveKeyframeEditMode() {
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  const editModeContext = vmssGetKeyframeEditModeContext(selection, activeKeyframe);
+  if (!selection || !activeKeyframe || !editModeContext) {
+    vmssSetStatus('Move the scrubber onto the same keyframe before saving');
+    return;
+  }
+
+  const draftValues = vmssGetAnimationDraftValues(selection, activeKeyframe);
+  const displayValues = vmssGetAnimationInspectorDisplayValues(selection, activeKeyframe, {
+    editModeContext,
+    draftValues,
+  });
+  const update = vmssBuildKeyframeUpdatePayload(selection.clip, activeKeyframe.time, displayValues);
+  if (update) {
+    vmss.animationDraft = null;
+    vmssApplySelectedClipUpdate(update, `Keyframe recorded at T=${activeKeyframe.time.toFixed(2)}s`);
+  }
+
+  vmssRememberAnimatedClipStateByLocation(selection.trackIndex, selection.clipIndex);
+  vmss.animationDraft = null;
+  vmssExitKeyframeEditMode();
+  vmssRenderSelectedDrawerProperties();
+  vmssSetStatus(`Keyframe recorded at T=${activeKeyframe.time.toFixed(2)}s`);
+}
+
+function vmssRecordKeyframeEditMode() {
+  vmssSaveKeyframeEditMode();
 }
 
 function vmssNormalizeAnimationDraftValue(field, value) {
@@ -3848,6 +4005,11 @@ function vmssSetAnimationDraftValue(field, value) {
     return;
   }
 
+  if (!vmssGetKeyframeEditModeContext(selection, activeKeyframe)) {
+    vmssSetStatus('Press Edit before changing keyframe values');
+    return;
+  }
+
   const normalizedValue = vmssNormalizeAnimationDraftValue(field, value);
   if (normalizedValue == null) return;
 
@@ -3861,7 +4023,7 @@ function vmssSetAnimationDraftValue(field, value) {
   };
 
   if (!vmssIsAnimationDraftDirty(selection, activeKeyframe, nextDraftValues)) {
-    vmssResetAnimationDraft();
+    vmss.animationDraft = null;
   } else {
     vmss.animationDraft = {
       clipId,
@@ -3873,29 +4035,22 @@ function vmssSetAnimationDraftValue(field, value) {
   vmssRenderSelectedDrawerProperties();
 }
 
-function vmssUpdateSelectedKeyframeFromDraft() {
-  const selection = vmssGetSelectedInspectorContext();
-  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
-  if (!selection || !activeKeyframe) {
-    vmssSetStatus('Move the scrubber onto a keyframe to update it');
-    return;
-  }
+function vmssBuildKeyframeUpdatePayload(clip, targetTime, values) {
+  if (!clip || !values) return null;
 
-  const draftValues = vmssGetAnimationDraftValues(selection, activeKeyframe);
-  if (!vmssIsAnimationDraftDirty(selection, activeKeyframe, draftValues)) {
-    vmssSetStatus('No keyframe changes to update');
-    return;
-  }
-
-  const clip = selection.clip;
   const clipLength = vmssGetStaticNumericValue(clip.length, 5);
-  const targetTime = activeKeyframe.time;
+  const sourceState = vmss.keyframeEditMode?.sourceState || null;
+  const scaleSource = sourceState?.scale ?? clip.scale;
+  const opacitySource = sourceState?.opacity ?? clip.opacity;
+  const offsetXSource = sourceState?.offsetX ?? clip.offset?.x;
+  const offsetYSource = sourceState?.offsetY ?? clip.offset?.y;
+  const rotateSource = sourceState?.rotate ?? clip.transform?.rotate?.angle;
 
-  const scaleSegs = vmssBuildKeyframedPropertyValue(clip.scale, draftValues.scale, clipLength, vmssGetStaticNumericValue(clip.scale, 1), targetTime);
-  const opacitySegs = vmssBuildKeyframedPropertyValue(clip.opacity, draftValues.opacity, clipLength, vmssGetStaticNumericValue(clip.opacity, 1), targetTime);
-  const offsetXSegs = vmssBuildKeyframedPropertyValue(clip.offset?.x, draftValues.offsetX, clipLength, vmssGetStaticNumericValue(clip.offset?.x, 0), targetTime);
-  const offsetYSegs = vmssBuildKeyframedPropertyValue(clip.offset?.y, draftValues.offsetY, clipLength, vmssGetStaticNumericValue(clip.offset?.y, 0), targetTime);
-  const rotateSegs = vmssBuildKeyframedPropertyValue(clip.transform?.rotate?.angle, draftValues.rotate, clipLength, vmssGetStaticNumericValue(clip.transform?.rotate?.angle, 0), targetTime);
+  const scaleSegs = vmssBuildKeyframedPropertyValue(scaleSource, values.scale, clipLength, vmssGetStaticNumericValue(scaleSource, 1), targetTime);
+  const opacitySegs = vmssBuildKeyframedPropertyValue(opacitySource, values.opacity, clipLength, vmssGetStaticNumericValue(opacitySource, 1), targetTime);
+  const offsetXSegs = vmssBuildKeyframedPropertyValue(offsetXSource, values.offsetX, clipLength, vmssGetStaticNumericValue(offsetXSource, 0), targetTime);
+  const offsetYSegs = vmssBuildKeyframedPropertyValue(offsetYSource, values.offsetY, clipLength, vmssGetStaticNumericValue(offsetYSource, 0), targetTime);
+  const rotateSegs = vmssBuildKeyframedPropertyValue(rotateSource, values.rotate, clipLength, vmssGetStaticNumericValue(rotateSource, 0), targetTime);
 
   const update = {};
   if (scaleSegs) update.scale = scaleSegs;
@@ -3917,12 +4072,32 @@ function vmssUpdateSelectedKeyframeFromDraft() {
     };
   }
 
-  if (!Object.keys(update).length) {
+  return Object.keys(update).length ? update : null;
+}
+
+function vmssUpdateSelectedKeyframeFromDraft() {
+  const selection = vmssGetSelectedInspectorContext();
+  const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  if (!selection || !activeKeyframe) {
+    vmssSetStatus('Move the scrubber onto a keyframe to update it');
+    return;
+  }
+
+  const draftValues = vmssGetAnimationDraftValues(selection, activeKeyframe);
+  if (!vmssIsAnimationDraftDirty(selection, activeKeyframe, draftValues)) {
+    vmssSetStatus('No keyframe changes to update');
+    return;
+  }
+
+  const targetTime = activeKeyframe.time;
+  const update = vmssBuildKeyframeUpdatePayload(selection.clip, targetTime, draftValues);
+
+  if (!update) {
     vmssSetStatus('Unable to update keyframe');
     return;
   }
 
-  vmssResetAnimationDraft();
+  vmss.animationDraft = null;
   vmssApplySelectedClipUpdate(update, `Keyframe updated at T=${targetTime.toFixed(2)}s`);
 }
 
@@ -3953,16 +4128,28 @@ function vmssBuildAnimationPropertiesMarkup(selection) {
     ? vmssFormatTime(vmssGetStaticNumericValue(clip.start, 0) + activeKeyframe.time)
     : 'No Keyframe';
   const disabled = !activeKeyframe;
+  const editModeContext = activeKeyframe ? vmssGetKeyframeEditModeContext(selection, activeKeyframe) : null;
+  const isInEditMode = !!editModeContext;
   const draftValues = activeKeyframe ? vmssGetAnimationDraftValues(selection, activeKeyframe) : null;
   const isDirty = activeKeyframe ? vmssIsAnimationDraftDirty(selection, activeKeyframe, draftValues) : false;
-  const changedFieldCount = activeKeyframe
-    ? ['offsetX', 'offsetY', 'scale', 'opacity', 'rotate'].filter((field) => vmssIsAnimationDraftFieldChanged(field, activeKeyframe, draftValues)).length
+  const displayValues = vmssGetAnimationInspectorDisplayValues(selection, activeKeyframe, {
+    editModeContext,
+    draftValues,
+  });
+  const changedFieldCount = activeKeyframe && editModeContext
+    ? vmssCountChangedAnimationFields(editModeContext.baseline, displayValues)
     : 0;
+  const fieldDisabled = disabled;
+  const fieldReadOnly = !disabled && !isInEditMode;
   const helperText = activeKeyframe
-    ? isDirty
-      ? 'Changes are staged for this diamond. Press Update Keyframe to replace this keyframe with the edited values.'
-      : 'Edit the values below, then press Update Keyframe to replace this diamond. To move it, delete it here and record a new one from the clip properties panel.'
+    ? isInEditMode
+      ? 'Edit mode is active. Move the clip or change these values, then press Record to overwrite this keyframe, or Cancel to discard the edit.'
+      : 'Keyframe values are shown here when the playhead is on a diamond. Click Edit to modify this keyframe.'
     : `Move the scrubber within ${VMSS_ACTIVE_KEYFRAME_THRESHOLD.toFixed(2)}s of a diamond to load that keyframe.`;
+  const primaryActionMarkup = !isInEditMode
+    ? `<button onclick="vmssEnterKeyframeEditMode()" ${disabled ? 'disabled' : ''} class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold ${disabled ? 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-gray-800 dark:text-gray-500' : 'bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-900/20 dark:text-sky-300 dark:hover:bg-sky-900/40'}"><i class="ri-pencil-line"></i>Edit</button>`
+    : `<button onclick="vmssRecordKeyframeEditMode()" class="inline-flex items-center gap-1 rounded-xl bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100 dark:bg-sky-900/20 dark:text-sky-300 dark:hover:bg-sky-900/40"><i class="ri-radio-button-line"></i>Record</button>
+      <button onclick="vmssCancelKeyframeEditMode()" class="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"><i class="ri-close-line"></i>Cancel</button>`;
 
   return vmssNormalizePropertyMarkup(`
     <section class="mb-4 rounded-[22px] border border-cyan-100 bg-cyan-50/70 p-4 shadow-sm dark:border-cyan-500/20 dark:bg-cyan-500/10">
@@ -3981,20 +4168,18 @@ function vmssBuildAnimationPropertiesMarkup(selection) {
               <p class="text-xs text-slate-500 dark:text-gray-400">${absoluteTime}${changedFieldCount ? ` <span class="ml-2 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:bg-sky-500/20 dark:text-sky-200">${changedFieldCount} changed</span>` : ''}</p>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick="vmssUpdateSelectedKeyframeFromDraft()" ${disabled || !isDirty ? 'disabled' : ''} class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold ${disabled || !isDirty ? 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-gray-800 dark:text-gray-500' : 'bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-900/20 dark:text-sky-300 dark:hover:bg-sky-900/40'}">
-                <i class="ri-save-3-line"></i>Update
-              </button>
+              ${primaryActionMarkup}
               <button onclick="vmssDeleteSelectedKeyframe()" ${disabled ? 'disabled' : ''} class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold ${disabled ? 'cursor-not-allowed bg-slate-100 text-slate-400 dark:bg-gray-800 dark:text-gray-500' : 'bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/40'}">
                 <i class="ri-delete-bin-line"></i>Delete
               </button>
             </div>
           </div>
           <div class="grid gap-3">
-            ${vmssBuildAnimationField('X Position', '<span>X</span>', draftValues?.offsetX ?? '', `vmssSetAnimationDraftValue('offsetX', this.value)`, 'step="0.05" min="-1" max="1"', disabled, vmssIsAnimationDraftFieldChanged('offsetX', activeKeyframe, draftValues))}
-            ${vmssBuildAnimationField('Y Position', '<span>Y</span>', draftValues?.offsetY ?? '', `vmssSetAnimationDraftValue('offsetY', this.value)`, 'step="0.05" min="-1" max="1"', disabled, vmssIsAnimationDraftFieldChanged('offsetY', activeKeyframe, draftValues))}
-            ${vmssBuildAnimationField('Scale', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', draftValues?.scale ?? '', `vmssSetAnimationDraftValue('scale', this.value)`, 'step="0.05" min="0.05"', disabled, vmssIsAnimationDraftFieldChanged('scale', activeKeyframe, draftValues))}
-            ${vmssBuildAnimationField('Opacity', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5c2.4 2.8 4 4.7 4 6.6A4 4 0 1 1 4 9.1c0-1.9 1.6-3.8 4-6.6Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 3v10a4 4 0 0 0 0-8.1C6.7 6.3 6 7.5 6 9.1A2 2 0 0 0 8 11" fill="currentColor" opacity="0.18"/></svg>', draftValues?.opacity ?? '', `vmssSetAnimationDraftValue('opacity', this.value)`, 'step="0.05" min="0" max="1"', disabled, vmssIsAnimationDraftFieldChanged('opacity', activeKeyframe, draftValues))}
-            ${vmssBuildAnimationField('Rotation', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M11.8 5.2V2.8m0 0H9.4m2.4 0A5.8 5.8 0 1 0 13.6 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', draftValues?.rotate ?? '', `vmssSetAnimationDraftValue('rotate', this.value)`, 'step="1" min="-360" max="360"', disabled, vmssIsAnimationDraftFieldChanged('rotate', activeKeyframe, draftValues))}
+            ${vmssBuildAnimationField('X Position', '<span>X</span>', displayValues?.offsetX ?? '', `vmssSetAnimationDraftValue('offsetX', this.value)`, 'step="0.05" min="-1" max="1"', fieldDisabled, vmssIsAnimationDraftFieldChanged('offsetX', activeKeyframe, displayValues), fieldReadOnly)}
+            ${vmssBuildAnimationField('Y Position', '<span>Y</span>', displayValues?.offsetY ?? '', `vmssSetAnimationDraftValue('offsetY', this.value)`, 'step="0.05" min="-1" max="1"', fieldDisabled, vmssIsAnimationDraftFieldChanged('offsetY', activeKeyframe, displayValues), fieldReadOnly)}
+            ${vmssBuildAnimationField('Scale', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', displayValues?.scale ?? '', `vmssSetAnimationDraftValue('scale', this.value)`, 'step="0.05" min="0.05"', fieldDisabled, vmssIsAnimationDraftFieldChanged('scale', activeKeyframe, displayValues), fieldReadOnly)}
+            ${vmssBuildAnimationField('Opacity', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5c2.4 2.8 4 4.7 4 6.6A4 4 0 1 1 4 9.1c0-1.9 1.6-3.8 4-6.6Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 3v10a4 4 0 0 0 0-8.1C6.7 6.3 6 7.5 6 9.1A2 2 0 0 0 8 11" fill="currentColor" opacity="0.18"/></svg>', displayValues?.opacity ?? '', `vmssSetAnimationDraftValue('opacity', this.value)`, 'step="0.05" min="0" max="1"', fieldDisabled, vmssIsAnimationDraftFieldChanged('opacity', activeKeyframe, displayValues), fieldReadOnly)}
+            ${vmssBuildAnimationField('Rotation', '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M11.8 5.2V2.8m0 0H9.4m2.4 0A5.8 5.8 0 1 0 13.6 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>', displayValues?.rotate ?? '', `vmssSetAnimationDraftValue('rotate', this.value)`, 'step="1" min="-360" max="360"', fieldDisabled, vmssIsAnimationDraftFieldChanged('rotate', activeKeyframe, displayValues), fieldReadOnly)}
           </div>
           <p class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-400">${helperText}</p>
         </section>
@@ -4060,11 +4245,28 @@ function vmssSyncSelectionPanelsFromPlayback(force = false) {
   const clipId = vmss.edit?.getClipId?.(selection.trackIndex, selection.clipIndex) || 'none';
   const relTime = vmssGetSelectedClipRelativePlaybackTime(selection).toFixed(2);
   const activeKeyframe = vmssGetSelectedClipActiveKeyframe(selection);
+  const editModeContext = activeKeyframe ? vmssGetKeyframeEditModeContext(selection, activeKeyframe) : null;
+  if (vmss.keyframeEditMode && !editModeContext) {
+    vmssExitKeyframeEditMode();
+  }
+  const displayValues = activeKeyframe
+    ? vmssGetAnimationInspectorDisplayValues(selection, activeKeyframe, {
+      editModeContext,
+      draftValues: vmssGetAnimationDraftValues(selection, activeKeyframe),
+    })
+    : null;
   const signature = [
     clipId,
     vmss.addElementsOpen ? vmss.addElementsCategory || 'closed' : 'closed',
     relTime,
     activeKeyframe ? activeKeyframe.time.toFixed(2) : 'none',
+    editModeContext && displayValues ? [
+      displayValues.offsetX,
+      displayValues.offsetY,
+      displayValues.scale,
+      displayValues.opacity,
+      displayValues.rotate,
+    ].join(',') : 'static',
   ].join('|');
 
   if (!force && vmss.drawerSyncSignature === signature) return;
@@ -4379,6 +4581,85 @@ function vmssSyncAnimatedClipUpdateFromEvent(change) {
   const clipLength = vmssGetStaticNumericValue(currentClip.length ?? previousClip.length, 5);
   const clipStart = vmssGetStaticNumericValue(currentClip.start ?? previousClip.start, 0);
   const relTime = Number(Math.max(0, Math.min(clipLength, (vmss.edit?.playbackTime || 0) - clipStart)).toFixed(3));
+
+  const editModeContext = vmss.keyframeEditMode && vmss.keyframeEditMode.clipId === clipId
+    ? vmss.keyframeEditMode
+    : null;
+
+  if (editModeContext) {
+    const selectedContext = vmssGetSelectedInspectorContext();
+    const liveValues = selectedContext && vmss.edit?.getClipId?.(selectedContext.trackIndex, selectedContext.clipIndex) === clipId
+      ? vmssGetSelectedClipLiveRuntimeValues(selectedContext)
+      : {
+        offsetX: vmssGetStaticNumericValue(currentClip.offset?.x, vmssGetStaticNumericValue(previousClip.offset?.x, 0)),
+        offsetY: vmssGetStaticNumericValue(currentClip.offset?.y, vmssGetStaticNumericValue(previousClip.offset?.y, 0)),
+        rotate: vmssGetStaticNumericValue(currentClip.transform?.rotate?.angle, vmssGetStaticNumericValue(previousClip.transform?.rotate?.angle, 0)),
+        opacity: vmssGetStaticNumericValue(currentClip.opacity, vmssGetStaticNumericValue(previousClip.opacity, 1)),
+        scale: vmssGetStaticNumericValue(currentClip.scale, vmssGetStaticNumericValue(previousClip.scale, 1)),
+      };
+
+    const targetTime = Number(editModeContext.time.toFixed(3));
+    const update = {};
+
+    const scaleSource = Array.isArray(previousClip.scale) ? previousClip.scale : rememberedState?.scale;
+    const opacitySource = Array.isArray(previousClip.opacity) ? previousClip.opacity : rememberedState?.opacity;
+    const offsetXSource = Array.isArray(previousClip.offset?.x) ? previousClip.offset.x : rememberedState?.offsetX;
+    const offsetYSource = Array.isArray(previousClip.offset?.y) ? previousClip.offset.y : rememberedState?.offsetY;
+    const rotateSource = Array.isArray(previousClip.transform?.rotate?.angle) ? previousClip.transform.rotate.angle : rememberedState?.rotate;
+
+    const buildEditModeKeyframeUpdate = (field, sourceValue, liveValue, fallback) => {
+      const currentValue = Array.isArray(sourceValue)
+        ? vmssGetKeyframedScalarValueAtTime(sourceValue, targetTime, fallback, field === 'rotate' ? 2 : field === 'scale' ? 3 : 4)
+        : vmssGetStaticNumericValue(sourceValue, fallback);
+      const normalizedCurrent = vmssNormalizeAnimationDraftValue(field, currentValue);
+      const normalizedLive = vmssNormalizeAnimationDraftValue(field, liveValue);
+      if (!Array.isArray(sourceValue) && normalizedCurrent === normalizedLive) {
+        return null;
+      }
+      return vmssBuildKeyframedPropertyValue(sourceValue, liveValue, clipLength, vmssGetStaticNumericValue(sourceValue, fallback), targetTime);
+    };
+
+    const scaleSegs = buildEditModeKeyframeUpdate('scale', scaleSource || previousClip.scale, liveValues.scale, 1);
+    const opacitySegs = buildEditModeKeyframeUpdate('opacity', opacitySource || previousClip.opacity, liveValues.opacity, 1);
+    const offsetXSegs = buildEditModeKeyframeUpdate('offsetX', offsetXSource || previousClip.offset?.x, liveValues.offsetX, 0);
+    const offsetYSegs = buildEditModeKeyframeUpdate('offsetY', offsetYSource || previousClip.offset?.y, liveValues.offsetY, 0);
+    const rotateSegs = buildEditModeKeyframeUpdate('rotate', rotateSource || previousClip.transform?.rotate?.angle, liveValues.rotate, 0);
+
+    if (scaleSegs) update.scale = scaleSegs;
+    if (opacitySegs) update.opacity = opacitySegs;
+    if (offsetXSegs || offsetYSegs) {
+      update.offset = {
+        ...(previousClip.offset || currentClip.offset || {}),
+        ...(offsetXSegs ? { x: offsetXSegs } : {}),
+        ...(offsetYSegs ? { y: offsetYSegs } : {}),
+      };
+    }
+    if (rotateSegs) {
+      update.transform = {
+        ...(previousClip.transform || currentClip.transform || {}),
+        rotate: {
+          ...((previousClip.transform || currentClip.transform || {}).rotate || {}),
+          angle: rotateSegs,
+        },
+      };
+    }
+
+    if (!Object.keys(update).length) return false;
+
+    vmss.syncingAnimatedClipUpdate = true;
+    try {
+      vmss.edit?.updateClipInDocument?.(clipId, update);
+      vmss.edit?.resolveClip?.(clipId);
+      vmss.canvas?.refresh?.();
+      vmss.timeline?.refresh?.();
+      vmssRememberAnimatedClipStateByLocation(trackIndex, clipIndex);
+      window.requestAnimationFrame(() => vmssRefreshTimelineKeyframeDiamonds());
+    } finally {
+      vmss.syncingAnimatedClipUpdate = false;
+    }
+
+    return true;
+  }
 
   const update = {};
 
@@ -6851,6 +7132,10 @@ window.vmssSetSelectedClipTransition = vmssSetSelectedClipTransition;
 window.vmssSetSelectedClipEffect = vmssSetSelectedClipEffect;
 window.vmssSetSelectedClipKeyframes = vmssSetSelectedClipKeyframes;
 window.vmssAddKeyframeAtCurrentTime = vmssAddKeyframeAtCurrentTime;
+window.vmssEnterKeyframeEditMode = vmssEnterKeyframeEditMode;
+window.vmssSaveKeyframeEditMode = vmssSaveKeyframeEditMode;
+window.vmssRecordKeyframeEditMode = vmssRecordKeyframeEditMode;
+window.vmssCancelKeyframeEditMode = vmssCancelKeyframeEditMode;
 window.vmssDeleteKeyframePoint = vmssDeleteKeyframePoint;
 window.vmssClearAllKeyframes = vmssClearAllKeyframes;
 window.vmssSetSelectedTextContent = vmssSetSelectedTextContent;
