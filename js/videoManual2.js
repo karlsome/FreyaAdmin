@@ -4347,7 +4347,8 @@ function vm2TogglePlay() {
   } else {
     video.pause();
     vm2.playing = false;
-    vm2Get('vm2-play-btn').innerHTML = '<i class="ri-play-fill text-lg"></i>';
+    const playBtn = vm2Get('vm2-play-btn');
+    if (playBtn) playBtn.innerHTML = '<i class="ri-play-fill text-lg"></i>';
   }
 }
 
@@ -4402,11 +4403,13 @@ function vm2SeekTo(timelineTime, { autoplay = false, stepIdx = null } = {}) {
     if (autoplay) {
       const playPromise = video.play();
       vm2.playing = true;
-      vm2Get('vm2-play-btn').innerHTML = '<i class="ri-pause-fill text-lg"></i>';
+      const playBtn = vm2Get('vm2-play-btn');
+      if (playBtn) playBtn.innerHTML = '<i class="ri-pause-fill text-lg"></i>';
       if (playPromise?.catch) {
         playPromise.catch(() => {
           vm2.playing = false;
-          vm2Get('vm2-play-btn').innerHTML = '<i class="ri-play-fill text-lg"></i>';
+          const fallbackPlayBtn = vm2Get('vm2-play-btn');
+          if (fallbackPlayBtn) fallbackPlayBtn.innerHTML = '<i class="ri-play-fill text-lg"></i>';
         });
       }
     }

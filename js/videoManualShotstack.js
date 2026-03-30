@@ -1620,19 +1620,38 @@ function vmssNormalizePlayableMediaSource(sourceUrl) {
   if (sourceUrl.startsWith('blob:') || sourceUrl.startsWith('data:')) {
     return { previewUrl: sourceUrl, publicUrl: sourceUrl };
   }
-  if (sourceUrl.includes('/api/video-manuals/stream/') || sourceUrl.includes('/api/video-manual-media?url=')) {
-    return { previewUrl: sourceUrl, publicUrl: sourceUrl };
-  }
 
   try {
     const parsed = new URL(sourceUrl, window.location.href);
-    const needsProxy = parsed.hostname === 'firebasestorage.googleapis.com' || parsed.hostname === 'storage.googleapis.com';
+    if (parsed.pathname.includes('/api/video-manuals/stream/')) {
+      return { previewUrl: parsed.toString(), publicUrl: parsed.toString() };
+    }
+
+    if (parsed.pathname.includes('/api/video-manual-media/')) {
+      return { previewUrl: parsed.toString(), publicUrl: parsed.toString() };
+    }
+
+    if (parsed.pathname.endsWith('/api/video-manual-media')) {
+      const upstreamUrl = parsed.searchParams.get('url');
+      if (upstreamUrl) {
+        return vmssNormalizePlayableMediaSource(upstreamUrl);
+      }
+      return { previewUrl: parsed.toString(), publicUrl: parsed.toString() };
+    }
+
+    const needsProxy = parsed.hostname === 'firebasestorage.googleapis.com'
+      || parsed.hostname === 'storage.googleapis.com'
+      || parsed.hostname.endsWith('.amazonaws.com');
     if (!needsProxy) {
       return { previewUrl: parsed.toString(), publicUrl: parsed.toString() };
     }
 
+    const pathSegments = parsed.pathname.split('/').filter(Boolean);
+    const rawFileName = pathSegments[pathSegments.length - 1] || 'asset';
+    const safeFileName = encodeURIComponent(rawFileName.includes('.') ? rawFileName : `${rawFileName}.bin`);
+
     return {
-      previewUrl: `${VMSS_API_BASE_URL()}/api/video-manual-media?url=${encodeURIComponent(parsed.toString())}`,
+      previewUrl: `${VMSS_API_BASE_URL()}/api/video-manual-media/${safeFileName}?url=${encodeURIComponent(parsed.toString())}`,
       publicUrl: parsed.toString(),
     };
   } catch (_) {
@@ -2474,7 +2493,7 @@ async function vmssAddShapeClip(shapeType, startTime = 0, options = {}) {
 async function vmssAddImageClip(imageUrl, startTime = 0, options = {}) {
   if (!vmss.edit) return;
 
-  const { width = 400, height = 300 } = options;
+  const { width = 400, height = 300, offset = null, position = 'center' } = options;
   const normalizedSource = vmssNormalizePlayableMediaSource(imageUrl);
   const clipImageUrl = normalizedSource?.previewUrl || imageUrl;
 
@@ -2489,9 +2508,11 @@ async function vmssAddImageClip(imageUrl, startTime = 0, options = {}) {
         src: clipImageUrl,
       },
       start: startTime,
-      length: 5,
+      length: 'auto',
       width,
       height,
+      position,
+      ...(offset ? { offset } : {}),
     }],
   });
 
@@ -2538,7 +2559,7 @@ async function vmssAddVideoClip(videoUrl, startTime = 0, options = {}) {
 async function vmssAddAudioClip(audioUrl, startTime = 0, options = {}) {
   if (!vmss.edit) return;
 
-  const { trim = 0, volume = 1, length = 10 } = options;
+  const { trim = 0, volume = 1, length = 'auto' } = options;
   const targetTrackIndex = vmss.steps.length;
   const normalizedSource = vmssNormalizePlayableMediaSource(audioUrl);
   const clipAudioUrl = normalizedSource?.previewUrl || audioUrl;
@@ -3571,27 +3592,31 @@ function vmssBuildSelectedPropertiesMarkup(selection) {
     const cropBottom = vmssGetStaticNumericValue(crop.bottom, 0);
     const cropLeft = vmssGetStaticNumericValue(crop.left, 0);
     const muted = volume <= 0;
+    const mediaType = resolvedAsset.type || asset.type || 'video';
+    const showVideoTrimControls = mediaType === 'video';
+    const showVolumeControls = mediaType === 'video' || mediaType === 'audio';
+    const mediaHeading = mediaType === 'audio' ? 'Audio' : mediaType === 'image' ? 'Image' : 'Video';
 
     assetFields = `
       <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
         <div>
-          <p class="text-sm font-semibold text-slate-900 dark:text-white">Video</p>
+          <p class="text-sm font-semibold text-slate-900 dark:text-white">${mediaHeading}</p>
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          ${showVideoTrimControls ? `<label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
             <span>Trim</span>
             <input type="number" step="0.1" min="0" value="${trim}" onchange="vmssSetSelectedMediaTrim(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
-          </label>
-          <label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
+          </label>` : ''}
+          ${showVolumeControls ? `<label class="space-y-1 text-xs font-medium text-slate-500 dark:text-gray-400">
             <span>Volume</span>
             <input type="number" step="0.05" min="0" max="1" value="${Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1}" onchange="vmssSetSelectedMediaVolume(this.value)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-cyan-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
-          </label>
+          </label>` : ''}
         </div>
-        <button onclick="vmssToggleSelectedMediaMute()" class="inline-flex items-center justify-center gap-2 rounded-xl ${muted ? 'bg-cyan-500 text-white hover:bg-cyan-600' : 'bg-gray-100 text-slate-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'} px-3 py-2 text-xs font-semibold">
+        <button onclick="vmssToggleSelectedMediaMute()" class="${showVolumeControls ? 'inline-flex' : 'hidden'} items-center justify-center gap-2 rounded-xl ${muted ? 'bg-cyan-500 text-white hover:bg-cyan-600' : 'bg-gray-100 text-slate-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'} px-3 py-2 text-xs font-semibold">
           <i class="${muted ? 'ri-volume-mute-line' : 'ri-volume-up-line'}"></i>${muted ? 'Unmute' : 'Mute'}
         </button>
       </section>
-      <section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
+      <section class="${showVideoTrimControls ? 'space-y-3' : 'hidden'} rounded-2xl border border-slate-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/60">
         <div>
           <p class="text-sm font-semibold text-slate-900 dark:text-white">Crop</p>
         </div>
@@ -5331,6 +5356,8 @@ function vmssSetSelectedMediaTrim(value) {
   const selection = vmssGetSelectedInspectorContext();
   const numericValue = Number(value);
   if (!selection || selection.category !== 'media' || !Number.isFinite(numericValue)) return;
+  const assetType = selection.resolvedClip?.asset?.type || selection.clip?.asset?.type;
+  if (assetType !== 'video') return;
 
   vmssApplySelectedClipUpdate({
     asset: {
