@@ -91,6 +91,41 @@ const vmss = {
   keyframeEditModeHasChanges: false,
 };
 
+function vmssEnsureTimelinePlayheadHitAreaStyles() {
+  if (document.getElementById('vmss-playhead-hit-area-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'vmss-playhead-hit-area-styles';
+  style.textContent = `
+    .ss-playhead-handle {
+      top: -4px !important;
+      width: 28px !important;
+      height: 20px !important;
+      background: transparent !important;
+      touch-action: none;
+    }
+
+    .ss-playhead-handle::before {
+      content: '';
+      position: absolute;
+      top: 4px;
+      left: 50%;
+      width: 12px;
+      height: 12px;
+      background: #3b82f6;
+      border-radius: 2px 2px 50% 50%;
+      transform: translateX(-50%);
+      transition: transform 0.12s ease;
+    }
+
+    .ss-playhead-handle:hover::before {
+      transform: translateX(-50%) scale(1.15);
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
 function vmssGet(id) {
   return document.getElementById(id);
 }
@@ -1471,6 +1506,8 @@ function vmssCreateDefaultTemplate() {
 }
 
 async function vmssInit(containerSelector = '#vmss-editor') {
+  vmssEnsureTimelinePlayheadHitAreaStyles();
+
   const container = document.querySelector(containerSelector);
   if (!container) {
     console.error('Container not found:', containerSelector);
