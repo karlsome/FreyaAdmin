@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kinetic Observatory | Factory Admin</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&amp;family=Inter+Tight:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "tertiary-fixed-dim": "#4cd6ff",
+              "on-surface": "#e1e2eb",
+              "surface-dim": "#10131a",
+              "on-secondary": "#390093",
+              "surface-bright": "#363940",
+              "background": "#10131a",
+              "primary": "#c0c1ff",
+              "surface-container-highest": "#32353c",
+              "on-error": "#690005",
+              "tertiary-fixed": "#b7eaff",
+              "on-secondary-container": "#c8b4ff",
+              "on-secondary-fixed": "#21005d",
+              "primary-fixed-dim": "#c0c1ff",
+              "secondary": "#cebdff",
+              "on-error-container": "#ffdad6",
+              "on-tertiary-fixed-variant": "#004e60",
+              "error": "#ffb4ab",
+              "surface-container-low": "#191c22",
+              "on-background": "#e1e2eb",
+              "on-primary-container": "#0d0096",
+              "on-primary-fixed-variant": "#2f2ebe",
+              "on-primary-fixed": "#07006c",
+              "outline": "#908fa0",
+              "surface-tint": "#c0c1ff",
+              "surface-variant": "#32353c",
+              "error-container": "#93000a",
+              "inverse-surface": "#e1e2eb",
+              "primary-fixed": "#e1e0ff",
+              "outline-variant": "#464554",
+              "surface-container-high": "#272a31",
+              "secondary-fixed-dim": "#cebdff",
+              "surface-container-lowest": "#0b0e14",
+              "secondary-fixed": "#e8ddff",
+              "on-primary": "#1000a9",
+              "on-tertiary": "#003543",
+              "tertiary": "#4cd6ff",
+              "on-tertiary-container": "#002e3a",
+              "on-tertiary-fixed": "#001f28",
+              "surface-container": "#1d2026",
+              "on-secondary-fixed-variant": "#5300cd",
+              "secondary-container": "#5a01df",
+              "tertiary-container": "#009dc1",
+              "on-surface-variant": "#c7c4d7",
+              "primary-container": "#8083ff",
+              "inverse-on-surface": "#2e3037",
+              "surface": "#10131a",
+              "inverse-primary": "#494bd6"
+            },
+            fontFamily: {
+              "headline": ["Inter Tight", "Inter", "sans-serif"],
+              "body": ["Inter", "sans-serif"],
+              "label": ["Inter", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+      body {
+        background-color: #10131a;
+        color: #e1e2eb;
+        font-family: 'Inter', sans-serif;
+      }
+      .glass-card {
+        background: rgba(29, 32, 38, 0.6);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+      }
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+    </style>
+</head>
+<body class="overflow-hidden">
+<!-- SideNavBar Shell -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-[#0b0e14] flex flex-col py-6 px-4 z-50 font-['Inter_Tight'] text-sm font-medium">
+<div class="flex items-center gap-3 px-2 mb-10">
+<div class="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center overflow-hidden">
+<img alt="Factory Admin Logo" data-alt="Abstract geometric logo with indigo and violet shapes symbolizing precision manufacturing and high-tech industrial control" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4eZ9PCpXTK92A8ZoxNe3FGYOkTnMzWP7aj17W1n0T9h6wJeGg1JGtuhwR67V82lJLBuMjAFaK0qYn842OMXDoTGe1dIfklTbwmMMRQnlsD4IBCv97p96yZoWi0OedFIYM2s-VhwPmsq8UN3CKp-H1ypHNFsZFfL2_rL9yPM47CBwubHEUdzQygz2b2T9W2juPJz-pVw1TqQ5OiU7lWQd7jdVT9H27rbE2vn61bVttLp8UlUL7Ca0KN8JU3draXjdvyiqBupD5SdU"/>
+</div>
+<div>
+<h1 class="text-lg font-black text-white leading-none">Factory Admin</h1>
+<p class="text-[10px] uppercase tracking-widest text-indigo-400 font-bold">Precision Control</p>
+</div>
+</div>
+<nav class="flex-1 space-y-1 overflow-y-auto pr-2 scrollbar-hide">
+<!-- Active Tab: Dashboard -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.3)] bg-transparent" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="factory">factory</span>
+<span>Factories</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="precision_manufacturing">precision_manufacturing</span>
+<span>Factory Status</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="event_note">event_note</span>
+<span>Production Planning</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="inventory_2">inventory_2</span>
+<span>Inventory</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span>Notifications</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span>Analytics</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="payments">payments</span>
+<span>Financials</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span>User Management</span>
+</a>
+<!-- Approvals with Badge -->
+<a class="flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined" data-icon="Fact_check">fact_check</span>
+<span>Approvals</span>
+</div>
+<span class="bg-error-container text-on-error-container text-[10px] px-1.5 py-0.5 rounded-md font-bold">12</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+<span>Master DB</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="hub">hub</span>
+<span>Customer Management</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="construction">construction</span>
+<span>Equipment</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="lan">lan</span>
+<span>SCNA</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="settings_input_component">settings_input_component</span>
+<span>Noda</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="play_circle">play_circle</span>
+<span>Video Manual</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 border-t border-white/5 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span>Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ease-in-out text-slate-500 hover:text-white hover:bg-white/5" href="#">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+<span>Logout</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 min-h-screen bg-[#10131a] relative">
+<!-- TopNavBar Shell -->
+<header class="fixed top-0 right-0 left-64 h-16 bg-[#1d2026] flex justify-between items-center px-8 z-40 font-['Inter_Tight'] antialiased">
+<div class="flex items-center gap-6 flex-1">
+<div class="relative w-full max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+<input class="w-full bg-[#10131a] border-none rounded-lg pl-10 pr-4 py-2 text-sm text-on-surface-variant focus:ring-1 focus:ring-indigo-500 transition-all" placeholder="Global system search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4">
+<button class="relative p-2 text-slate-400 hover:bg-white/5 rounded-full transition-colors active:opacity-80">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-indigo-500 rounded-full border-2 border-[#1d2026]"></span>
+</button>
+<button class="p-2 text-slate-400 hover:bg-white/5 rounded-full transition-colors active:opacity-80">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</div>
+<div class="h-8 w-px bg-white/10"></div>
+<div class="flex items-center gap-3">
+<div class="text-right">
+<p class="text-xs font-bold text-white leading-none">Admin User</p>
+<p class="text-[10px] text-slate-400">System Overseer</p>
+</div>
+<img alt="User profile administrator" class="w-8 h-8 rounded-full ring-2 ring-indigo-500/20" data-alt="Close up profile picture of a professional factory administrator in a dark studio setting with subtle blue backlighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCYYUkC5iaPzfNU1XcxmEmO4vtWl-O1FqBTTZhqs3JQNINJaJiqsXQMbI1FtQ9Ojr8dg9JQiZhuhiShYY8Vq0_W26ogb4NDmhMXHTjPDLRh8PUO9dljpSHmq5ygwNP4XHCWxEweLgZPjXmrl55R8a_teFYB8wPOZOArBomD95rKkX9Z20VxoFZ9r9PHWcEmbvNx9PTUkEZPJbbVckJ3HJmewgELDP6scs3wbRbPgWZwxNoRdNVIoKNOggCawSbbpTAFglgvme016Yc"/>
+</div>
+</div>
+</header>
+<!-- Dashboard Canvas -->
+<section class="pt-24 pb-12 px-8 overflow-y-auto h-screen scrollbar-hide">
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="text-3xl font-bold font-headline tracking-tight text-white">Kinetic Observatory</h2>
+<p class="text-on-surface-variant mt-1">Real-time telemetrics for Global Unit Cluster 04</p>
+</div>
+<div class="flex gap-3">
+<button class="px-4 py-2 rounded-lg text-xs font-bold bg-white/5 text-slate-300 hover:bg-white/10 transition-colors">Export Report</button>
+<button class="px-4 py-2 rounded-lg text-xs font-bold bg-primary-container text-on-primary-container hover:opacity-90 transition-opacity">Deploy Command</button>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-12 gap-6 pb-24">
+<!-- Payouts & Volume Tracker (Main Graphic) -->
+<div class="col-span-8 glass-card rounded-2xl p-6 relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-64 h-64 bg-indigo-600/10 blur-[100px] -mr-32 -mt-32"></div>
+<div class="flex justify-between items-start mb-10 relative z-10">
+<div>
+<h3 class="text-lg font-bold text-white mb-1">Payouts &amp; Volume Tracker</h3>
+<p class="text-xs text-on-surface-variant">Live transaction throughput vs operational costs</p>
+</div>
+<div class="flex items-center gap-2 bg-black/20 p-1 rounded-lg">
+<button class="px-3 py-1 text-[10px] font-bold rounded-md bg-indigo-500/20 text-indigo-300">Daily</button>
+<button class="px-3 py-1 text-[10px] font-bold rounded-md text-slate-500 hover:text-slate-300">Weekly</button>
+</div>
+</div>
+<div class="h-64 flex items-end gap-1 mb-6 relative">
+<!-- Simulated Line Chart with SVG -->
+<svg class="absolute inset-0 w-full h-full" preserveaspectratio="none">
+<defs>
+<lineargradient id="grad1" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:rgba(99,102,241,0.4);stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:rgba(99,102,241,0);stop-opacity:1"></stop>
+</lineargradient>
+</defs>
+<path d="M0,180 Q100,120 200,150 T400,80 T600,110 T800,40 L800,240 L0,240 Z" fill="url(#grad1)"></path>
+<path d="M0,180 Q100,120 200,150 T400,80 T600,110 T800,40" fill="none" stroke="#c0c1ff" stroke-width="3"></path>
+</svg>
+<!-- Overlay Labels -->
+<div class="absolute top-4 left-4 flex gap-8">
+<div>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold">Total Payout</p>
+<p class="text-2xl font-black text-white">$142,804.22</p>
+</div>
+<div>
+<p class="text-[10px] text-tertiary uppercase tracking-widest font-bold">Unit Volume</p>
+<p class="text-2xl font-black text-white">2.4M<span class="text-xs text-on-surface-variant font-medium ml-1">kwh</span></p>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-4 gap-4 relative z-10 border-t border-white/5 pt-6">
+<div class="space-y-1">
+<p class="text-[10px] text-on-surface-variant">Efficiency</p>
+<p class="text-sm font-bold text-white">98.4% <span class="text-emerald-400 text-[10px]">↑ 2%</span></p>
+</div>
+<div class="space-y-1">
+<p class="text-[10px] text-on-surface-variant">Avg Latency</p>
+<p class="text-sm font-bold text-white">12ms <span class="text-slate-500 text-[10px]">stable</span></p>
+</div>
+<div class="space-y-1">
+<p class="text-[10px] text-on-surface-variant">Active Nodes</p>
+<p class="text-sm font-bold text-white">1,402 <span class="text-indigo-400 text-[10px]">active</span></p>
+</div>
+<div class="space-y-1">
+<p class="text-[10px] text-on-surface-variant">Peak Demand</p>
+<p class="text-sm font-bold text-white">04:12 <span class="text-slate-500 text-[10px]">UTC</span></p>
+</div>
+</div>
+</div>
+<!-- Factory Status Overview (Tall) -->
+<div class="col-span-4 glass-card rounded-2xl p-6 flex flex-col">
+<h3 class="text-lg font-bold text-white mb-6">Factory Status Overview</h3>
+<div class="space-y-4 flex-1">
+<div class="p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+<div class="flex justify-between items-center mb-3">
+<span class="text-xs font-bold text-slate-300">Active Facilities</span>
+<span class="flex items-center gap-1 text-[10px] font-black text-emerald-400">
+<span class="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
+                                    ONLINE
+                                </span>
+</div>
+<div class="text-3xl font-black text-white mb-1">24</div>
+<div class="w-full bg-black/40 h-1.5 rounded-full overflow-hidden">
+<div class="bg-indigo-500 h-full w-[85%] rounded-full"></div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+<div class="flex justify-between items-center mb-3">
+<span class="text-xs font-bold text-slate-300">Idle / Maintenance</span>
+<span class="text-[10px] font-black text-slate-500">STANDBY</span>
+</div>
+<div class="text-3xl font-black text-white mb-1">04</div>
+<div class="w-full bg-black/40 h-1.5 rounded-full overflow-hidden">
+<div class="bg-slate-600 h-full w-[15%] rounded-full"></div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
+<p class="text-[10px] text-indigo-400 font-bold uppercase tracking-wider mb-2">Next Scheduled Sync</p>
+<div class="flex items-end justify-between">
+<span class="text-xl font-black text-white">02:44:11</span>
+<button class="text-xs font-bold text-indigo-400 underline">Details</button>
+</div>
+</div>
+</div>
+<div class="mt-6 pt-6 border-t border-white/5">
+<img alt="Factory network location map" class="w-full rounded-lg opacity-40 grayscale" data-alt="Stylized dark world map with neon glowing dots indicating factory locations in North America, Europe, and Asia with subtle data transmission lines connecting them" data-location="Global" src="https://lh3.googleusercontent.com/aida-public/AB6AXuADdW1WlsziaExEn_nNJnoiH9cF1QsKDRtLNZK9al-LJnPpbKLxQ8MvqDhPpTqDgruAdcF-DgXMsS0skia5k-cNHqhiUmoS3wkktBzl1VNPdOdLNBdgtgXxrRi0velJydy-Qc0DDV-UIWkgKWExxLIRKf5arQysnVg1z3fN9nOwXXG-3qrA-Nu2fZwashCyEh2T-qH5RKKfOMWejM8tklqZRX8mDXETUuAqEfxc_RUBs7spC8IxNUO8DejOeOMeK5PpIsYt4ZZ6mNQ"/>
+</div>
+</div>
+<!-- Income & Growth Analytics -->
+<div class="col-span-5 glass-card rounded-2xl p-6">
+<div class="flex justify-between items-center mb-8">
+<h3 class="text-lg font-bold text-white">Income &amp; Growth</h3>
+<span class="material-symbols-outlined text-slate-500 cursor-pointer">more_horiz</span>
+</div>
+<div class="flex items-end gap-4 mb-8">
+<div class="w-full h-32 flex items-end gap-2">
+<div class="w-full bg-indigo-500/20 rounded-t-sm h-[40%] hover:bg-indigo-500/40 transition-colors"></div>
+<div class="w-full bg-indigo-500/40 rounded-t-sm h-[60%] hover:bg-indigo-500/60 transition-colors"></div>
+<div class="w-full bg-indigo-500/60 rounded-t-sm h-[90%] hover:bg-indigo-500/80 transition-colors"></div>
+<div class="w-full bg-indigo-500/30 rounded-t-sm h-[50%] hover:bg-indigo-500/50 transition-colors"></div>
+<div class="w-full bg-indigo-500/80 rounded-t-sm h-[100%] hover:bg-indigo-500 transition-colors shadow-[0_0_15px_rgba(99,102,241,0.5)]"></div>
+<div class="w-full bg-indigo-500/50 rounded-t-sm h-[70%] hover:bg-indigo-500/70 transition-colors"></div>
+</div>
+</div>
+<div class="space-y-4">
+<div class="flex justify-between items-center py-2 border-b border-white/5">
+<div class="flex items-center gap-3">
+<span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+<span class="text-sm font-medium text-on-surface-variant">Projected Revenue</span>
+</div>
+<span class="text-sm font-bold text-white">+$4.2M</span>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-white/5">
+<div class="flex items-center gap-3">
+<span class="w-2 h-2 rounded-full bg-tertiary"></span>
+<span class="text-sm font-medium text-on-surface-variant">Maintenance Cost</span>
+</div>
+<span class="text-sm font-bold text-white">-$1.1M</span>
+</div>
+<div class="flex justify-between items-center py-2">
+<div class="flex items-center gap-3">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<span class="text-sm font-medium text-on-surface-variant">Expansion Budget</span>
+</div>
+<span class="text-sm font-bold text-white">$850k</span>
+</div>
+</div>
+</div>
+<!-- Recent Activity (Feed Style) -->
+<div class="col-span-4 glass-card rounded-2xl p-6">
+<h3 class="text-lg font-bold text-white mb-6">Recent Activity</h3>
+<div class="space-y-6">
+<div class="flex gap-4">
+<div class="w-8 h-8 rounded-full bg-error-container/20 flex items-center justify-center text-error">
+<span class="material-symbols-outlined text-sm">warning</span>
+</div>
+<div>
+<p class="text-sm text-white font-bold">Pressure spike in Sector 7</p>
+<p class="text-xs text-on-surface-variant">2 mins ago • Automatic containment engaged</p>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+<span class="material-symbols-outlined text-sm">check_circle</span>
+</div>
+<div>
+<p class="text-sm text-white font-bold">Shift Rotation Complete</p>
+<p class="text-xs text-on-surface-variant">45 mins ago • All 140 workers checked out</p>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="w-8 h-8 rounded-full bg-tertiary/20 flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined text-sm">sync</span>
+</div>
+<div>
+<p class="text-sm text-white font-bold">Firmware Update: SCNA-v2</p>
+<p class="text-xs text-on-surface-variant">2 hours ago • Successfully deployed to 12 factories</p>
+</div>
+</div>
+<div class="flex gap-4 opacity-50">
+<div class="w-8 h-8 rounded-full bg-slate-500/20 flex items-center justify-center text-slate-400">
+<span class="material-symbols-outlined text-sm">inventory_2</span>
+</div>
+<div>
+<p class="text-sm text-white font-bold">Low Stock: Liquid Coolant</p>
+<p class="text-xs text-on-surface-variant">5 hours ago • Auto-order triggered</p>
+</div>
+</div>
+</div>
+<button class="w-full mt-8 py-2 text-xs font-bold text-slate-500 hover:text-white transition-colors">VIEW ALL LOGS</button>
+</div>
+<!-- Inventory Levels (Compact) -->
+<div class="col-span-3 glass-card rounded-2xl p-6 flex flex-col justify-between">
+<div>
+<h3 class="text-lg font-bold text-white mb-4">Inventory Levels</h3>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
+<span>Raw Carbon Fiber</span>
+<span>82%</span>
+</div>
+<div class="h-1 bg-black/40 rounded-full">
+<div class="h-full bg-indigo-500 rounded-full w-[82%]"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
+<span>Graphene Sheets</span>
+<span>45%</span>
+</div>
+<div class="h-1 bg-black/40 rounded-full">
+<div class="h-full bg-indigo-500 rounded-full w-[45%]"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-bold uppercase text-slate-400 mb-1">
+<span>Titanium Alloy</span>
+<span>12%</span>
+</div>
+<div class="h-1 bg-black/40 rounded-full">
+<div class="h-full bg-error rounded-full w-[12%]"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="mt-8 p-3 rounded-xl bg-surface-container-highest border border-white/5">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary">shopping_cart</span>
+<div>
+<p class="text-[10px] font-bold text-white">Pending Orders</p>
+<p class="text-[10px] text-on-surface-variant">04 Shipments inbound</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Contextual FAB (Only for Main Screen) -->
+<button class="fixed bottom-8 right-8 w-14 h-14 bg-indigo-600 rounded-2xl shadow-[0_0_25px_rgba(79,70,229,0.5)] flex items-center justify-center text-white hover:scale-110 active:scale-95 transition-all z-50">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">add</span>
+</button>
+</main>
+</body></html>
