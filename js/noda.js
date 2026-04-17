@@ -2684,8 +2684,8 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                         ${renderNodaDetailSortableHeader('requestedQuantity', '依頼数')}
                                         ${renderNodaDetailSortableHeader('shortfallQuantity', '足りない数', 'px-3 py-2')}
                                         ${renderNodaDetailSortableHeader('shortfallBoxes', '箱数足りない', 'px-3 py-2')}
-                                        ${renderNodaDetailSortableHeader('inventoryStatus', 'Inventory', 'px-3 py-2')}
-                                        ${renderNodaDetailSortableHeader('status', 'Status')}
+                                        ${renderNodaDetailSortableHeader('inventoryStatus', '在庫', 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('status', '倉庫状態')}
                                         ${isEditMode ? '<th class="sticky top-0 z-10 bg-gray-50 px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
                                     </tr>
                                 </thead>
