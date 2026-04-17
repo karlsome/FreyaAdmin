@@ -609,6 +609,11 @@ function renderInventoryTransactions(transactions, backNumber) {
     transactions.sort((a, b) => new Date(b.timeStamp) - new Date(a.timeStamp));
     
     const currentItem = transactions[0]; // Latest transaction has current state
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    const isAdmin = currentUser.role === 'admin';
+    const currentPhysicalQuantity = currentItem.physicalQuantity ?? currentItem.runningQuantity ?? 0;
+    const currentReservedQuantity = currentItem.reservedQuantity ?? 0;
+    const currentAvailableQuantity = currentItem.availableQuantity ?? currentItem.runningQuantity ?? 0;
     
     const contentHTML = `
         <div class="space-y-6">
@@ -630,26 +635,62 @@ function renderInventoryTransactions(transactions, backNumber) {
                     </div>
                     <div class="text-center">
                         <p class="text-sm text-green-600">${t('physicalStock')}</p>
-                        <p class="text-lg font-bold text-green-700">${currentItem.physicalQuantity || 0}</p>
+                        <p class="text-lg font-bold text-green-700">${currentPhysicalQuantity}</p>
                     </div>
                     <div class="text-center">
                         <p class="text-sm text-yellow-600">${t('reservedStock')}</p>
-                        <p class="text-lg font-bold text-yellow-700">${currentItem.reservedQuantity || 0}</p>
+                        <p class="text-lg font-bold text-yellow-700">${currentReservedQuantity}</p>
                     </div>
                     <div class="text-center">
                         <p class="text-sm text-purple-600">${t('availableStock')}</p>
-                        <p class="text-lg font-bold text-purple-700">${currentItem.availableQuantity || currentItem.runningQuantity || 0}</p>
+                        <p class="text-lg font-bold text-purple-700">${currentAvailableQuantity}</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Admin Reset Toggle Button -->
-            <div class="flex justify-end">
+            ${isAdmin ? `
+            <!-- Admin Controls -->
+            <div class="flex flex-wrap justify-end gap-2">
+                <button 
+                    onclick="toggleAdminInventoryAdjustment()"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition-colors flex items-center">
+                    <i class="ri-edit-2-line mr-2"></i>
+                    現在在庫を調整
+                </button>
                 <button 
                     onclick="toggleAdminReset()"
                     class="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition-colors flex items-center">
                     <i class="ri-refresh-line mr-2"></i>
                     在庫リセット
+                </button>
+            </div>
+
+            <div id="adminInventoryAdjustSection" class="bg-indigo-50 p-4 rounded-lg border border-indigo-200 hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h4 class="text-lg font-semibold text-indigo-900">管理者 在庫調整</h4>
+                        <p class="text-sm text-indigo-700">棚卸しと同じ方式で現在の物理在庫を更新し、新しい履歴を追加します。引当在庫は維持され、利用可能在庫は自動で再計算されます。</p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">現在の物理在庫</label>
+                        <div class="px-3 py-2 rounded-lg bg-white border border-indigo-100 text-gray-900 font-semibold">${currentPhysicalQuantity}</div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">現在の引当在庫</label>
+                        <div class="px-3 py-2 rounded-lg bg-white border border-indigo-100 text-gray-900 font-semibold">${currentReservedQuantity}</div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">新しい物理在庫</label>
+                        <input type="number" id="adminInventoryAdjustPhysical" min="0" step="1" value="${currentPhysicalQuantity}" class="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                </div>
+                <button 
+                    onclick="submitInventoryAdjustment(decodeURIComponent('${encodeURIComponent(backNumber)}'), decodeURIComponent('${encodeURIComponent(currentItem.品番 || '')}'), decodeURIComponent('${encodeURIComponent(currentItem.工場 || '')}'), ${currentPhysicalQuantity})"
+                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center">
+                    <i class="ri-save-line mr-2"></i>
+                    在庫を更新
                 </button>
             </div>
 
@@ -672,12 +713,13 @@ function renderInventoryTransactions(transactions, backNumber) {
                     </label>
                 </div>
                 <button 
-                    onclick="confirmInventoryReset('${backNumber}', '${currentItem.品番}', ${currentItem.physicalQuantity || 0}, ${currentItem.reservedQuantity || 0}, ${currentItem.availableQuantity || currentItem.runningQuantity || 0}, '${currentItem.工場 || ''}')"
+                    onclick="confirmInventoryReset(decodeURIComponent('${encodeURIComponent(backNumber)}'), decodeURIComponent('${encodeURIComponent(currentItem.品番 || '')}'), ${currentPhysicalQuantity}, ${currentReservedQuantity}, ${currentAvailableQuantity}, decodeURIComponent('${encodeURIComponent(currentItem.工場 || '')}'))"
                     class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center">
                     <i class="ri-refresh-line mr-2"></i>
                     在庫をリセット
                 </button>
             </div>
+            ` : ''}
 
             <!-- Transaction History -->
             <div>
@@ -699,6 +741,9 @@ function renderInventoryTransactions(transactions, backNumber) {
                             ${transactions.map((transaction, index) => {
                                 const timestamp = new Date(transaction.timeStamp).toLocaleString();
                                 const actionInfo = getTransactionActionInfo(transaction.action);
+                                const physicalValue = transaction.physicalQuantity ?? transaction.runningQuantity ?? 0;
+                                const reservedValue = transaction.reservedQuantity ?? 0;
+                                const availableValue = transaction.availableQuantity ?? transaction.runningQuantity ?? 0;
                                 
                                 return `
                                     <tr class="border-b hover:bg-gray-50 ${index === 0 ? 'bg-blue-50' : ''}">
@@ -709,9 +754,9 @@ function renderInventoryTransactions(transactions, backNumber) {
                                                 ${transaction.action}
                                             </span>
                                         </td>
-                                        <td class="px-4 py-3 text-green-600 font-medium">${transaction.physicalQuantity || transaction.runningQuantity || 0}</td>
-                                        <td class="px-4 py-3 text-yellow-600 font-medium">${transaction.reservedQuantity || 0}</td>
-                                        <td class="px-4 py-3 text-purple-600 font-medium">${transaction.availableQuantity || transaction.runningQuantity || 0}</td>
+                                        <td class="px-4 py-3 text-green-600 font-medium">${physicalValue}</td>
+                                        <td class="px-4 py-3 text-yellow-600 font-medium">${reservedValue}</td>
+                                        <td class="px-4 py-3 text-purple-600 font-medium">${availableValue}</td>
                                         <td class="px-4 py-3 text-gray-600 text-xs">${transaction.source || t('system')}</td>
                                         <td class="px-4 py-3 text-gray-600 text-xs">${transaction.note || transaction.migrationNote || '-'}</td>
                                     </tr>
@@ -733,6 +778,8 @@ function renderInventoryTransactions(transactions, backNumber) {
 function getTransactionActionInfo(action) {
     if (action.includes('Reservation')) {
         return { icon: 'ri-bookmark-line', badgeClass: 'bg-yellow-100 text-yellow-800' };
+    } else if (action.includes('棚卸し')) {
+        return { icon: 'ri-scales-3-line', badgeClass: 'bg-indigo-100 text-indigo-800' };
     } else if (action.includes('Completed') || action.includes('Picked')) {
         return { icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800' };
     } else if (action.includes('Failed') || action.includes('Cancelled')) {
@@ -757,6 +804,10 @@ window.closeInventoryTransactionsModal = function() {
     if (adminSection) {
         adminSection.classList.add('hidden');
     }
+    const adjustSection = document.getElementById('adminInventoryAdjustSection');
+    if (adjustSection) {
+        adjustSection.classList.add('hidden');
+    }
 };
 
 /**
@@ -764,8 +815,93 @@ window.closeInventoryTransactionsModal = function() {
  */
 window.toggleAdminReset = function() {
     const adminSection = document.getElementById('adminResetSection');
+    const adjustSection = document.getElementById('adminInventoryAdjustSection');
+    if (adjustSection) {
+        adjustSection.classList.add('hidden');
+    }
     if (adminSection) {
         adminSection.classList.toggle('hidden');
+    }
+};
+
+/**
+ * Toggle admin inventory adjustment section visibility
+ */
+window.toggleAdminInventoryAdjustment = function() {
+    const adjustSection = document.getElementById('adminInventoryAdjustSection');
+    const adminSection = document.getElementById('adminResetSection');
+    if (adminSection) {
+        adminSection.classList.add('hidden');
+    }
+    if (adjustSection) {
+        adjustSection.classList.toggle('hidden');
+        if (!adjustSection.classList.contains('hidden')) {
+            const input = document.getElementById('adminInventoryAdjustPhysical');
+            if (input) {
+                input.focus();
+                input.select();
+            }
+        }
+    }
+};
+
+/**
+ * Submit admin inventory adjustment using tanaoroshi-style transaction logic
+ */
+window.submitInventoryAdjustment = async function(backNumber, partNumber, factory, currentPhysical) {
+    const quantityInput = document.getElementById('adminInventoryAdjustPhysical');
+    const newPhysicalQuantity = Number(quantityInput ? quantityInput.value : NaN);
+
+    if (!Number.isFinite(newPhysicalQuantity) || newPhysicalQuantity < 0) {
+        alert('新しい物理在庫を正しく入力してください');
+        return;
+    }
+
+    const normalizedNewPhysicalQuantity = Math.floor(newPhysicalQuantity);
+    const difference = normalizedNewPhysicalQuantity - Number(currentPhysical || 0);
+    const confirmMessage = `現在在庫を更新しますか？\n\n背番号: ${backNumber}\n品番: ${partNumber}\n物理在庫: ${currentPhysical} → ${normalizedNewPhysicalQuantity}\n差分: ${difference >= 0 ? '+' : ''}${difference}\n\n新しい履歴が追加されます。`;
+
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        const fullNameElement = document.getElementById('userFullName');
+        const fullName = fullNameElement ? fullNameElement.textContent.trim() : (currentUser.username || 'admin');
+
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'adjustInventory',
+                backNumber: backNumber,
+                partNumber: partNumber,
+                factory: factory,
+                newPhysicalQuantity: normalizedNewPhysicalQuantity,
+                submittedBy: currentUser.username || 'admin',
+                fullName: fullName,
+                role: currentUser.role || ''
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to adjust inventory');
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Inventory adjustment failed');
+        }
+
+        alert('✅ 現在在庫が更新されました');
+        await openInventoryTransactions(backNumber);
+        loadInventoryData();
+    } catch (error) {
+        console.error('Error adjusting inventory:', error);
+        alert('❌ 在庫更新に失敗しました: ' + error.message);
     }
 };
 
