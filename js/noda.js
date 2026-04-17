@@ -6,6 +6,23 @@ let nodaData = [];
 let nodaStatistics = {};
 let nodaSortState = { column: null, direction: 1 };
 let activeNodaStatusFilter = 'all'; // Track which status card is active
+let nodaDetailModalState = {
+    request: null,
+    isEditMode: false,
+    sort: { column: 'lineNumber', direction: 1 }
+};
+let nodaDetailModalResizeObserver = null;
+
+function resetNodaDetailModalSort() {
+    nodaDetailModalState.sort = { column: 'lineNumber', direction: 1 };
+}
+
+function disconnectNodaDetailModalResizeObserver() {
+    if (nodaDetailModalResizeObserver) {
+        nodaDetailModalResizeObserver.disconnect();
+        nodaDetailModalResizeObserver = null;
+    }
+}
 
 /**
  * Initialize NODA system
@@ -461,6 +478,8 @@ function getNodaStatusInfo(status) {
     switch (status) {
         case 'pending':
             return { text: t('statusPending'), icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
+        case 'paused':
+            return { text: 'Paused', icon: 'ri-pause-circle-line', badgeClass: 'bg-orange-100 text-orange-800', rowClass: '' };
         case 'waiting-for-inventory':
             return { text: 'Waiting for Inventory', icon: 'ri-alert-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
         case 'partial-inventory':
@@ -481,6 +500,275 @@ function getNodaStatusInfo(status) {
             return { text: t('statusUnknown'), icon: 'ri-question-line', badgeClass: 'bg-gray-100 text-gray-800', rowClass: '' };
     }
 }
+
+function getNodaDetailSortArrow(column) {
+    if (nodaDetailModalState.sort.column !== column) return '';
+    return nodaDetailModalState.sort.direction === 1 ? ' ↑' : ' ↓';
+}
+
+function renderNodaDetailSortableHeader(column, label, paddingClass = 'px-4 py-2') {
+    return `<th class="sticky top-0 z-10 bg-gray-50 ${paddingClass} text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100" onclick="sortNodaDetailLineItems('${column}')">${label}${getNodaDetailSortArrow(column)}</th>`;
+}
+
+function getNodaDetailSortValue(lineItem, column) {
+    switch (column) {
+        case 'lineNumber':
+            return Number(lineItem.lineNumber) || 0;
+        case 'partNumber':
+            return String(lineItem.品番 || '');
+        case 'backNumber':
+            return String(lineItem.背番号 || '');
+        case 'boxes':
+            return Number(lineItem.箱数) || 0;
+        case 'requestedQuantity':
+            return Number(lineItem.quantity) || 0;
+        case 'shortfallQuantity':
+            return Number(lineItem.shortfallQuantity) || 0;
+        case 'shortfallBoxes':
+            return Number(lineItem['箱数足りない']) || 0;
+        case 'inventoryStatus': {
+            const inventoryRank = {
+                none: 0,
+                insufficient: 1,
+                sufficient: 2
+            };
+            return inventoryRank[lineItem.inventoryStatus] ?? 99;
+        }
+        case 'status': {
+            const statusRank = {
+                pending: 0,
+                paused: 1,
+                'in-progress': 2,
+                completed: 3,
+                cancelled: 4
+            };
+            return statusRank[lineItem.status] ?? 99;
+        }
+        default:
+            return String(lineItem[column] || '');
+    }
+}
+
+function getSortedNodaDetailLineItems(lineItems = []) {
+    const sortColumn = nodaDetailModalState.sort.column;
+    const sortDirection = nodaDetailModalState.sort.direction;
+
+    if (!sortColumn) {
+        return [...lineItems];
+    }
+
+    return [...lineItems].sort((left, right) => {
+        const leftValue = getNodaDetailSortValue(left, sortColumn);
+        const rightValue = getNodaDetailSortValue(right, sortColumn);
+
+        if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+            if (leftValue !== rightValue) {
+                return (leftValue - rightValue) * sortDirection;
+            }
+        } else {
+            const comparison = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+            if (comparison !== 0) {
+                return comparison * sortDirection;
+            }
+        }
+
+        return ((Number(left.lineNumber) || 0) - (Number(right.lineNumber) || 0)) * sortDirection;
+    });
+}
+
+function setupNodaDetailTableLayout() {
+    disconnectNodaDetailModalResizeObserver();
+
+    const modalPanel = document.getElementById('nodaDetailModalPanel');
+    const content = document.getElementById('nodaDetailContent');
+    const lineItemsWrapper = document.getElementById('nodaDetailLineItemsWrapper');
+    const footer = document.getElementById('nodaDetailFooter');
+
+    if (!modalPanel || !content || !lineItemsWrapper) {
+        return;
+    }
+
+    const updateLayout = () => {
+        const contentRect = content.getBoundingClientRect();
+        const wrapperRect = lineItemsWrapper.getBoundingClientRect();
+        const footerHeight = footer ? footer.getBoundingClientRect().height : 0;
+        const availableHeight = Math.floor(content.clientHeight - (wrapperRect.top - contentRect.top) - footerHeight - 24);
+        lineItemsWrapper.style.maxHeight = `${Math.max(240, availableHeight)}px`;
+    };
+
+    requestAnimationFrame(updateLayout);
+
+    if (typeof ResizeObserver === 'function') {
+        nodaDetailModalResizeObserver = new ResizeObserver(() => {
+            requestAnimationFrame(updateLayout);
+        });
+        nodaDetailModalResizeObserver.observe(modalPanel);
+    }
+}
+
+function formatNodaInventoryTimestamp(value) {
+    if (!value) {
+        return 'Unknown';
+    }
+
+    const parsedDate = new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) {
+        return String(value);
+    }
+
+    return parsedDate.toLocaleString();
+}
+
+function ensureNodaInventoryModal() {
+    let modal = document.getElementById('nodaInventoryModal');
+    if (modal) {
+        return modal;
+    }
+
+    const modalHtml = `
+        <div id="nodaInventoryModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[80]">
+            <div class="flex items-center justify-center min-h-screen p-4">
+                <div class="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-900">Current Inventory</h3>
+                        <button onclick="closeNodaInventoryModal()" class="text-gray-400 hover:text-gray-600">
+                            <i class="ri-close-line text-xl"></i>
+                        </button>
+                    </div>
+                    <div id="nodaInventoryModalContent" class="p-6">
+                        <div class="text-sm text-gray-500">Loading inventory...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    modal = document.getElementById('nodaInventoryModal');
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closeNodaInventoryModal();
+        }
+    });
+
+    return modal;
+}
+
+function setupNodaDetailLineRowHandlers() {
+    document.querySelectorAll('[data-noda-line-number]').forEach((row) => {
+        row.addEventListener('click', (event) => {
+            if (event.target.closest('button, input, select, textarea, a, label')) {
+                return;
+            }
+
+            const lineNumber = Number(row.dataset.nodaLineNumber);
+            const lineItem = (nodaDetailModalState.request?.lineItems || []).find(
+                (item) => Number(item.lineNumber) === lineNumber
+            );
+
+            if (!lineItem || !lineItem.背番号) {
+                return;
+            }
+
+            openNodaInventoryModal(lineItem.背番号, lineItem.品番);
+        });
+    });
+}
+
+window.closeNodaInventoryModal = function() {
+    const modal = document.getElementById('nodaInventoryModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+};
+
+async function openNodaInventoryModal(backNumber, partNumber = '') {
+    const modal = ensureNodaInventoryModal();
+    const content = document.getElementById('nodaInventoryModalContent');
+
+    modal.classList.remove('hidden');
+    content.innerHTML = `
+        <div class="space-y-2">
+            <p class="text-sm text-gray-500">Loading inventory for <span class="font-semibold text-gray-700">${backNumber}</span>...</p>
+        </div>
+    `;
+
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'checkInventory',
+                背番号: backNumber
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success || !result.inventory) {
+            throw new Error(result.error || result.message || 'Inventory not found');
+        }
+
+        const inventory = result.inventory;
+        content.innerHTML = `
+            <div class="space-y-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">背番号</label>
+                        <p class="mt-1 text-base font-semibold text-gray-900">${inventory.背番号 || backNumber}</p>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">品番</label>
+                        <p class="mt-1 text-base font-semibold text-gray-900">${inventory.品番 || partNumber || '-'}</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Physical</p>
+                        <p class="mt-2 text-2xl font-semibold text-gray-900">${inventory.physicalQuantity ?? 0}</p>
+                    </div>
+                    <div class="rounded-lg border border-orange-200 bg-orange-50 p-4">
+                        <p class="text-xs font-medium text-orange-600 uppercase tracking-wide">Reserved</p>
+                        <p class="mt-2 text-2xl font-semibold text-orange-700">${inventory.reservedQuantity ?? 0}</p>
+                    </div>
+                    <div class="rounded-lg border border-green-200 bg-green-50 p-4">
+                        <p class="text-xs font-medium text-green-600 uppercase tracking-wide">Available</p>
+                        <p class="mt-2 text-2xl font-semibold text-green-700">${inventory.availableQuantity ?? inventory.runningQuantity ?? 0}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">Last Updated</label>
+                    <p class="mt-1 text-sm text-gray-700">${formatNodaInventoryTimestamp(inventory.lastUpdated)}</p>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `
+            <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+                <p class="font-medium">Failed to load inventory</p>
+                <p class="mt-1 text-sm">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+window.sortNodaDetailLineItems = function(column) {
+    if (!nodaDetailModalState.request) {
+        return;
+    }
+
+    if (nodaDetailModalState.sort.column === column) {
+        nodaDetailModalState.sort.direction *= -1;
+    } else {
+        nodaDetailModalState.sort = { column, direction: 1 };
+    }
+
+    showNodaDetailModal(nodaDetailModalState.request, nodaDetailModalState.isEditMode, true);
+};
 
 /**
  * Sort NODA table by column
@@ -2201,6 +2489,7 @@ window.openNodaDetail = async function(requestId) {
         if (response.ok) {
             const result = await response.json();
             if (result.success) {
+                resetNodaDetailModalSort();
                 showNodaDetailModal(result.data, false); // false = view mode
             } else {
                 alert(t('alertErrorLoadingRequestDetails') + result.error);
@@ -2232,6 +2521,7 @@ window.editNodaRequest = async function(requestId) {
         if (response.ok) {
             const result = await response.json();
             if (result.success) {
+                resetNodaDetailModalSort();
                 showNodaDetailModal(result.data, true); // true = edit mode
             } else {
                 alert(t('alertErrorLoadingRequestDetails') + result.error);
@@ -2247,12 +2537,29 @@ window.editNodaRequest = async function(requestId) {
 /**
  * Show NODA detail/edit modal
  */
-function showNodaDetailModal(request, isEditMode = false) {
+function showNodaDetailModal(request, isEditMode = false, preserveSort = false) {
     const modal = document.getElementById('nodaDetailModal');
     const content = document.getElementById('nodaDetailContent');
+
+    nodaDetailModalState.request = request;
+    nodaDetailModalState.isEditMode = isEditMode;
+
+    if (!preserveSort) {
+        resetNodaDetailModalSort();
+    }
     
     const statusInfo = getNodaStatusInfo(request.status);
     const createdDate = new Date(request.createdAt).toLocaleString();
+    const sortedLineItems = getSortedNodaDetailLineItems(request.lineItems || []);
+    const missingInventoryCount = new Set(
+        sortedLineItems
+            .filter(lineItem => {
+                const shortfall = Number(lineItem.shortfallQuantity) || 0;
+                return shortfall > 0 || lineItem.inventoryStatus === 'none' || lineItem.inventoryStatus === 'insufficient';
+            })
+            .map(lineItem => String(lineItem.背番号 || lineItem.lineNumber || ''))
+            .filter(Boolean)
+    ).size;
     
     // Handle both single and bulk requests
     const isBulkRequest = request.requestType === 'bulk';
@@ -2292,6 +2599,7 @@ function showNodaDetailModal(request, isEditMode = false) {
                                     ${statusInfo.text}
                                 </span>
                             </div>
+                            <p class="mt-2 text-sm font-semibold ${missingInventoryCount > 0 ? 'text-red-600' : 'text-gray-600'}">足りない品 : ${missingInventoryCount}</p>
                         </div>
                     </div>
                     
@@ -2365,23 +2673,24 @@ function showNodaDetailModal(request, isEditMode = false) {
                     <div class="border-t pt-6">
                 `}
                         <h4 class="text-lg font-medium text-gray-900 mb-4">Line Items</h4>
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full border border-gray-200">
+                        <div id="nodaDetailLineItemsWrapper" class="overflow-auto rounded-lg border border-gray-200 bg-white">
+                            <table class="min-w-full">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Line #</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">品番</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">背番号</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reserved</th>
-                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Shortfall</th>
-                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Inventory</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                        ${isEditMode ? '<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
+                                        ${renderNodaDetailSortableHeader('lineNumber', 'Line #')}
+                                        ${renderNodaDetailSortableHeader('partNumber', '品番')}
+                                        ${renderNodaDetailSortableHeader('backNumber', '背番号')}
+                                        ${renderNodaDetailSortableHeader('boxes', '箱数')}
+                                        ${renderNodaDetailSortableHeader('requestedQuantity', '依頼数')}
+                                        ${renderNodaDetailSortableHeader('shortfallQuantity', '足りない数', 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('shortfallBoxes', '箱数足りない', 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('inventoryStatus', 'Inventory', 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('status', 'Status')}
+                                        ${isEditMode ? '<th class="sticky top-0 z-10 bg-gray-50 px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
-                                    ${request.lineItems ? request.lineItems.map(lineItem => {
+                                    ${sortedLineItems.length ? sortedLineItems.map(lineItem => {
                                         const lineStatusInfo = getNodaStatusInfo(lineItem.status);
                                         
                                         // ✅ NEW: Determine inventory status color for row
@@ -2397,10 +2706,11 @@ function showNodaDetailModal(request, isEditMode = false) {
                                         }
                                         
                                         return `
-                                            <tr id="lineItem_${lineItem.lineNumber}">
+                                            <tr id="lineItem_${lineItem.lineNumber}" data-noda-line-number="${lineItem.lineNumber}" class="cursor-pointer hover:bg-blue-50 transition-colors" title="Click to view current inventory">
                                                 <td class="px-4 py-2 text-sm font-medium text-gray-900">${lineItem.lineNumber}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.品番}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.背番号}</td>
+                                                <td class="px-4 py-2 text-sm text-gray-900">${lineItem.箱数 ?? '-'}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">
                                                     ${isEditMode ? `
                                                         <input type="number" 
@@ -2414,11 +2724,11 @@ function showNodaDetailModal(request, isEditMode = false) {
                                                         <div id="qtyError_${lineItem.lineNumber}" class="text-xs text-red-600 mt-1 hidden"></div>
                                                     ` : lineItem.quantity}
                                                 </td>
-                                                <td class="px-3 py-2 text-sm text-blue-600 font-medium">
-                                                    ${lineItem.reservedQuantity !== undefined ? lineItem.reservedQuantity : lineItem.quantity}
-                                                </td>
                                                 <td class="px-3 py-2 text-sm ${lineItem.shortfallQuantity > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}">
                                                     ${lineItem.shortfallQuantity !== undefined ? lineItem.shortfallQuantity : 0}
+                                                </td>
+                                                <td class="px-3 py-2 text-sm ${lineItem['箱数足りない'] > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}">
+                                                    ${lineItem['箱数足りない'] ?? '-'}
                                                 </td>
                                                 <td class="px-3 py-2 text-sm">
                                                     ${inventoryBadge}
@@ -2427,6 +2737,7 @@ function showNodaDetailModal(request, isEditMode = false) {
                                                     ${isEditMode ? `
                                                         <select id="lineStatus_${lineItem.lineNumber}" class="text-xs px-2 py-1 border border-gray-300 rounded" onchange="updateLineItemStatus('${request._id}', ${lineItem.lineNumber}, this.value)">
                                                             <option value="pending" ${lineItem.status === 'pending' ? 'selected' : ''}>Pending</option>
+                                                            <option value="paused" ${lineItem.status === 'paused' ? 'selected' : ''}>Paused</option>
                                                             <option value="in-progress" ${lineItem.status === 'in-progress' ? 'selected' : ''}>In Progress</option>
                                                             <option value="completed" ${lineItem.status === 'completed' ? 'selected' : ''} ${lineItem.status === 'in-progress' ? 'disabled' : ''}>Completed ${lineItem.status === 'in-progress' ? '(ESP32 Only)' : ''}</option>
                                                         </select>
@@ -2457,7 +2768,7 @@ function showNodaDetailModal(request, isEditMode = false) {
                                                 ` : ''}
                                             </tr>
                                         `;
-                                    }).join('') : '<tr><td colspan="9" class="text-center py-4 text-gray-500">No line items found</td></tr>'}
+                                    }).join('') : `<tr><td colspan="${isEditMode ? 10 : 9}" class="text-center py-4 text-gray-500">No line items found</td></tr>`}
                                 </tbody>
                             </table>
                         </div>
@@ -2552,7 +2863,7 @@ function showNodaDetailModal(request, isEditMode = false) {
                 ` : ''}
                     </div>
                 
-                <div class="flex justify-end pt-6 border-t">
+                <div id="nodaDetailFooter" class="flex justify-end pt-6 border-t">
                     <button onclick="closeNodaModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
                         Close
                     </button>
@@ -2669,6 +2980,8 @@ function showNodaDetailModal(request, isEditMode = false) {
     
     content.innerHTML = contentHTML;
     modal.classList.remove('hidden');
+    setupNodaDetailTableLayout();
+    setupNodaDetailLineRowHandlers();
     
     // Setup event listener for pickup date changes (for bulk requests in edit mode)
     if (isEditMode && isBulkRequest) {
@@ -2715,6 +3028,9 @@ function showNodaDetailModal(request, isEditMode = false) {
  * Close NODA modal
  */
 window.closeNodaModal = function() {
+    disconnectNodaDetailModalResizeObserver();
+    nodaDetailModalState.request = null;
+    closeNodaInventoryModal();
     const modal = document.getElementById('nodaDetailModal');
     modal.classList.add('hidden');
 };
