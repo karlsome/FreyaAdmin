@@ -6750,7 +6750,7 @@ function loadPage(page) {
                 <!-- NODA Detail/Edit Modal -->
                 <div id="nodaDetailModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
                     <div class="flex items-center justify-center min-h-screen p-4">
-                        <div class="bg-white rounded-lg max-w-4xl w-full max-h-screen overflow-y-auto">
+                    <div id="nodaDetailModalPanel" class="bg-white rounded-lg max-w-4xl w-full overflow-hidden flex flex-col" style="height: calc(100dvh - 2rem); min-height: min(42rem, calc(100dvh - 2rem)); max-height: calc(100dvh - 2rem); resize: vertical;">
                             <div class="p-6 border-b border-gray-200">
                                 <div class="flex items-center justify-between">
                                     <h3 class="text-lg font-semibold" data-i18n="pickingRequestDetails">Picking Request Details</h3>
@@ -6759,7 +6759,7 @@ function loadPage(page) {
                                     </button>
                                 </div>
                             </div>
-                            <div id="nodaDetailContent" class="p-6">
+                      <div id="nodaDetailContent" class="p-6 flex-1 min-h-0 overflow-auto">
                                 <!-- Content will be populated by JavaScript -->
                             </div>
                         </div>
