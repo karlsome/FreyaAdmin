@@ -2680,10 +2680,10 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                         ${renderNodaDetailSortableHeader('lineNumber', 'Line #')}
                                         ${renderNodaDetailSortableHeader('partNumber', '品番')}
                                         ${renderNodaDetailSortableHeader('backNumber', '背番号')}
-                                        ${renderNodaDetailSortableHeader('boxes', '箱数')}
-                                        ${renderNodaDetailSortableHeader('requestedQuantity', '依頼数')}
-                                        ${renderNodaDetailSortableHeader('shortfallQuantity', '足りない数', 'px-3 py-2')}
-                                        ${renderNodaDetailSortableHeader('shortfallBoxes', '箱数足りない', 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('boxes', '出荷箱数')}
+                                        ${renderNodaDetailSortableHeader('shortfallBoxes', '不足箱数', 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('requestedQuantity', '出荷枚数')}
+                                        ${renderNodaDetailSortableHeader('shortfallQuantity', '不足枚数', 'px-3 py-2')}
                                         ${renderNodaDetailSortableHeader('inventoryStatus', '在庫', 'px-3 py-2')}
                                         ${renderNodaDetailSortableHeader('status', '倉庫状態')}
                                         ${isEditMode ? '<th class="sticky top-0 z-10 bg-gray-50 px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
@@ -2692,6 +2692,10 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     ${sortedLineItems.length ? sortedLineItems.map(lineItem => {
                                         const lineStatusInfo = getNodaStatusInfo(lineItem.status);
+                                        const hasShortfall = (Number(lineItem.shortfallQuantity) || 0) > 0;
+                                        const rowHighlightClass = hasShortfall
+                                            ? 'bg-red-50 hover:bg-red-100'
+                                            : 'hover:bg-blue-50';
                                         
                                         // ✅ NEW: Determine inventory status color for row
                                         let inventoryBadge = '';
@@ -2706,11 +2710,14 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                         }
                                         
                                         return `
-                                            <tr id="lineItem_${lineItem.lineNumber}" data-noda-line-number="${lineItem.lineNumber}" class="cursor-pointer hover:bg-blue-50 transition-colors" title="Click to view current inventory">
+                                            <tr id="lineItem_${lineItem.lineNumber}" data-noda-line-number="${lineItem.lineNumber}" class="cursor-pointer transition-colors ${rowHighlightClass}" title="Click to view current inventory">
                                                 <td class="px-4 py-2 text-sm font-medium text-gray-900">${lineItem.lineNumber}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.品番}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.背番号}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.箱数 ?? '-'}</td>
+                                                <td class="px-3 py-2 text-sm ${lineItem['箱数足りない'] > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}">
+                                                    ${lineItem['箱数足りない'] ?? '-'}
+                                                </td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">
                                                     ${isEditMode ? `
                                                         <input type="number" 
@@ -2726,9 +2733,6 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                                 </td>
                                                 <td class="px-3 py-2 text-sm ${lineItem.shortfallQuantity > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}">
                                                     ${lineItem.shortfallQuantity !== undefined ? lineItem.shortfallQuantity : 0}
-                                                </td>
-                                                <td class="px-3 py-2 text-sm ${lineItem['箱数足りない'] > 0 ? 'text-red-600 font-medium' : 'text-gray-400'}">
-                                                    ${lineItem['箱数足りない'] ?? '-'}
                                                 </td>
                                                 <td class="px-3 py-2 text-sm">
                                                     ${inventoryBadge}
