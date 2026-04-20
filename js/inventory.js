@@ -307,7 +307,7 @@ function renderInventoryThresholdSummary() {
                     <i class="ri-bar-chart-box-line text-amber-500"></i>
                     Inventory Alerts
                 </div>
-                <p class="mt-1 text-xs text-gray-500">Thresholds are based on available boxes. Model rules override the global default.</p>
+                <p class="mt-1 text-xs text-gray-500">Thresholds are based on Boxes In Stock (physical boxes). Model rules override the global default.</p>
             </div>
             <div class="flex flex-wrap gap-2">
                 ${filters.map((filter) => {
@@ -468,7 +468,7 @@ function getAvailabilityStatus(item) {
 }
 
 function buildInventoryThresholdTooltip(item, availabilityStatus) {
-    if (!Number.isFinite(Number(item?.availableBoxCount))) {
+    if (!Number.isFinite(Number(item?.stockBoxCount))) {
         return 'Box-based threshold unavailable. Capacity per box is missing for this item.';
     }
 
@@ -476,7 +476,7 @@ function buildInventoryThresholdTooltip(item, availabilityStatus) {
         ? `Model rule${item?.model ? ` (${item.model})` : ''}`
         : 'Global rule';
 
-    return `${availabilityStatus.label} alert. ${source}. Available boxes: ${formatInventoryBoxCount(item?.availableBoxCount)}. Warning <= ${formatInventoryBoxCount(item?.thresholdWarning)} boxes, Critical <= ${formatInventoryBoxCount(item?.thresholdCritical)} boxes.`;
+    return `${availabilityStatus.label} alert. ${source}. Boxes in stock: ${formatInventoryBoxCount(item?.stockBoxCount)}. Warning <= ${formatInventoryBoxCount(item?.thresholdWarning)} boxes, Critical <= ${formatInventoryBoxCount(item?.thresholdCritical)} boxes.`;
 }
 
 function escapeInventoryAttribute(value) {
@@ -904,7 +904,7 @@ function renderInventoryThresholdDrawerContent() {
                     <i class="ri-information-line text-lg text-amber-600 mt-0.5"></i>
                     <div>
                         <p class="text-sm font-semibold text-amber-900">Alert evaluation</p>
-                        <p class="mt-1 text-sm text-amber-800">Items at or below the critical box count turn red. Items above critical but at or below warning turn amber.</p>
+                        <p class="mt-1 text-sm text-amber-800">Items at or below the critical physical box count turn red. Items above critical but at or below warning turn amber.</p>
                         <p class="mt-2 text-xs text-amber-700">${buildInventoryThresholdUpdatedText(config)}</p>
                     </div>
                 </div>
@@ -913,7 +913,7 @@ function renderInventoryThresholdDrawerContent() {
             <div class="rounded-2xl border border-gray-200 p-5">
                 <div class="mb-4">
                     <h4 class="text-lg font-semibold text-gray-900">Global Default</h4>
-                    <p class="mt-1 text-sm text-gray-500">This applies to every inventory item unless a model override exists. Values are in available boxes.</p>
+                    <p class="mt-1 text-sm text-gray-500">This applies to every inventory item unless a model override exists. Values are in Boxes In Stock (physical boxes).</p>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -1992,7 +1992,7 @@ function downloadInventoryCSV(data) {
         return;
     }
     
-    const headers = ['品番', '背番号', 'Model', 'Physical Stock', 'Reserved Stock', 'Available Stock', 'Available Boxes', 'Threshold Status', 'Warning Threshold (Boxes)', 'Critical Threshold (Boxes)', 'Threshold Rule', 'Last Updated'];
+    const headers = ['品番', '背番号', 'Model', 'Physical Stock', 'Boxes In Stock', 'Reserved Stock', 'Available Stock', 'Threshold Status', 'Warning Threshold (Boxes)', 'Critical Threshold (Boxes)', 'Threshold Rule', 'Last Updated'];
     const csvContent = [
         headers.join(','),
         ...data.map(item => [
@@ -2000,9 +2000,9 @@ function downloadInventoryCSV(data) {
             `"${item.背番号 || ''}"`,
             `"${item.model || ''}"`,
             item.physicalQuantity || 0,
+            formatInventoryBoxCount(item.stockBoxCount),
             item.reservedQuantity || 0,
             item.availableQuantity || 0,
-            formatInventoryBoxCount(item.availableBoxCount),
             `"${item.thresholdStatus || ''}"`,
             item.thresholdWarning ?? '',
             item.thresholdCritical ?? '',
