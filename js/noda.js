@@ -284,10 +284,10 @@ function renderNodaTable() {
                         ${t('requestNumber')} ${getNodaSortArrow('requestNumber')}
                     </th>
                     <th class="px-3 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('便')">
-                        便 ${getNodaSortArrow('便')}
+                        ${t('deliveryOrder')} ${getNodaSortArrow('便')}
                     </th>
                     <th class="px-3 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('納品書番号')">
-                        納品書番号 ${getNodaSortArrow('納品書番号')}
+                        ${t('deliveryNote')} ${getNodaSortArrow('納品書番号')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('requestType')">
                         ${t('type')} ${getNodaSortArrow('requestType')}
@@ -302,7 +302,7 @@ function renderNodaTable() {
                         ${t('pickupDate').replace(':', '')} ${getNodaSortArrow('pickupDate')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTable('納入指示日')">
-                        納入指示日 (Deadline) ${getNodaSortArrow('納入指示日')}
+                        ${t('deliveryDeadline')} ${getNodaSortArrow('納入指示日')}
                     </th>
                     <th class="px-4 py-3 text-left font-medium text-gray-700">${t('actions')}</th>
                 </tr>
@@ -402,12 +402,12 @@ function renderNodaTable() {
                                 </div>
                                 ${isPastDeadline ? `
                                     <div class="mt-1 text-xs">
-                                        <span class="text-gray-600">⏰ Deadline passed</span>
+                                        <span class="text-gray-600">⏰ ${t('deadlinePassed')}</span>
                                     </div>
                                 ` : (fifoWaiting > 0 || fifoPartial > 0 ? `
                                     <div class="mt-1 text-xs">
-                                        ${fifoWaiting > 0 ? `<span class="text-red-600">⚠️ ${fifoWaiting} waiting</span>` : ''}
-                                        ${fifoPartial > 0 ? `<span class="text-yellow-600">⚠️ ${fifoPartial} partial</span>` : ''}
+                                        ${fifoWaiting > 0 ? `<span class="text-red-600">⚠️ ${fifoWaiting} ${t('waiting')}</span>` : ''}
+                                        ${fifoPartial > 0 ? `<span class="text-yellow-600">⚠️ ${fifoPartial} ${t('partial')}</span>` : ''}
                                     </div>
                                 ` : '')}
                             </div>
@@ -440,7 +440,7 @@ function renderNodaTable() {
                                     isBulkRequest ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'
                                 }">
                                     <i class="${isBulkRequest ? 'ri-stack-line' : 'ri-file-line'} mr-1"></i>
-                                    ${isBulkRequest ? 'Bulk' : 'Single'}
+                                    ${isBulkRequest ? t('bulkType') : t('singleType')}
                                 </span>
                             </td>
                             <td class="px-4 py-3">
@@ -486,13 +486,13 @@ function getNodaStatusInfo(status) {
         case 'pending':
             return { text: t('statusPending'), icon: 'ri-time-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
         case 'paused':
-            return { text: 'Paused', icon: 'ri-pause-circle-line', badgeClass: 'bg-orange-100 text-orange-800', rowClass: '' };
+            return { text: t('statusPaused'), icon: 'ri-pause-circle-line', badgeClass: 'bg-orange-100 text-orange-800', rowClass: '' };
         case 'waiting-for-inventory':
-            return { text: 'Waiting for Inventory', icon: 'ri-alert-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
+            return { text: t('statusWaitingForInventory'), icon: 'ri-alert-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
         case 'partial-inventory':
-            return { text: 'Partial Inventory', icon: 'ri-alert-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
+            return { text: t('statusPartialInventory'), icon: 'ri-alert-line', badgeClass: 'bg-yellow-100 text-yellow-800', rowClass: '' };
         case 'past-deadline':
-            return { text: 'Deadline Passed', icon: 'ri-calendar-close-line', badgeClass: 'bg-gray-200 text-gray-600', rowClass: '' };
+            return { text: t('statusDeadlinePassed'), icon: 'ri-calendar-close-line', badgeClass: 'bg-gray-200 text-gray-600', rowClass: '' };
         case 'in-progress':
             return { text: t('statusInProgress'), icon: 'ri-play-line', badgeClass: 'bg-blue-100 text-blue-800', rowClass: '' };
         case 'active':
@@ -2586,33 +2586,33 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Request Number</label>
+                            <label class="block text-sm font-medium text-gray-700">${t('requestNumber')}</label>
                             <p class="mt-1 text-lg font-semibold text-blue-600">${request.requestNumber}</p>
                         </div>
-                        
+
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Type</label>
+                            <label class="block text-sm font-medium text-gray-700">${t('type')}</label>
                             <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
                                 <i class="ri-stack-line mr-1"></i>
-                                Bulk Request
+                                ${t('bulkRequest')}
                             </span>
                         </div>
                         
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Overall Status</label>
+                            <label class="block text-sm font-medium text-gray-700">${t('overallStatus')}</label>
                             <div class="mt-1">
                                 <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusInfo.badgeClass}">
                                     <i class="${statusInfo.icon} mr-1"></i>
                                     ${statusInfo.text}
                                 </span>
                             </div>
-                            <p class="mt-2 text-sm font-semibold ${missingInventoryCount > 0 ? 'text-red-600' : 'text-gray-600'}">足りない品 : ${missingInventoryCount}</p>
+                            <p class="mt-2 text-sm font-semibold ${missingInventoryCount > 0 ? 'text-red-600' : 'text-gray-600'}">${t('insufficientItems')} : ${missingInventoryCount}</p>
                         </div>
                     </div>
-                    
+
                     <div class="space-y-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Pickup Date</label>
+                            <label class="block text-sm font-medium text-gray-700">${t('pickupDate')}</label>
                             ${isEditMode ? `
                                 <input type="date" id="editPickupDate" value="${request.pickupDate || request.date}" class="mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
                             ` : `
@@ -2621,42 +2621,42 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                         </div>
                         
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Total Items</label>
+                            <label class="block text-sm font-medium text-gray-700">${t('totalItems')}</label>
                             <p class="mt-1 text-gray-900">${request.totalItems || (request.lineItems ? request.lineItems.length : 0)}</p>
                         </div>
-                        
+
                         ${request.便 || request.納品書番号 || request.納入指示日 ? `
                         <div class="p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-2">
                             ${request.便 ? `
                             <div>
-                                <label class="block text-xs font-medium text-gray-600">便 (Delivery Order)</label>
+                                <label class="block text-xs font-medium text-gray-600">${t('deliveryOrder')}</label>
                                 <p class="text-sm font-semibold text-blue-600">${request.便}</p>
                             </div>
                             ` : ''}
                             ${request.納品書番号 ? `
                             <div>
-                                <label class="block text-xs font-medium text-gray-600">納品書番号 (Delivery Note)</label>
+                                <label class="block text-xs font-medium text-gray-600">${t('deliveryNote')}</label>
                                 <p class="text-sm font-semibold text-blue-600">${request.納品書番号}</p>
                             </div>
                             ` : ''}
                             ${request.納入指示日 ? `
                             <div>
-                                <label class="block text-xs font-medium text-gray-600">納入指示日 (Deadline)</label>
+                                <label class="block text-xs font-medium text-gray-600">${t('deliveryDeadline')}</label>
                                 <p class="text-sm font-semibold text-red-600">${request.納入指示日}</p>
                             </div>
                             ` : ''}
                         </div>
                         ` : ''}
                         </div>
-                        
+
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Created At</label>
+                            <label class="block text-sm font-medium text-gray-700">${t('createdAt')}</label>
                             <p class="mt-1 text-gray-600">${createdDate}</p>
                         </div>
-                        
+
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Created By</label>
-                            <p class="mt-1 text-gray-600">${request.createdBy || 'Unknown'}</p>
+                            <label class="block text-sm font-medium text-gray-700">${t('createdBy')}</label>
+                            <p class="mt-1 text-gray-600">${request.createdBy || t('unknown')}</p>
                         </div>
                     </div>
                 </div>
@@ -2666,10 +2666,10 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                     <div class="border-t pt-6">
                         <nav class="flex space-x-1 mb-4">
                             <button id="existingItemsTab" onclick="switchEditTab('existing')" class="edit-tab-button active px-4 py-2 border-b-2 border-blue-500 text-blue-600 font-medium">
-                                <i class="ri-list-check mr-2"></i>Existing Items
+                                <i class="ri-list-check mr-2"></i>${t('existingItems')}
                             </button>
                             <button id="addItemsTab" onclick="switchEditTab('add')" class="edit-tab-button px-4 py-2 border-b-2 border-transparent text-gray-500 hover:text-gray-700">
-                                <i class="ri-add-line mr-2"></i>Add More Items
+                                <i class="ri-add-line mr-2"></i>${t('addMoreItems')}
                             </button>
                         </nav>
                         
@@ -2679,21 +2679,21 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                     <!-- Line Items Table -->
                     <div class="border-t pt-6">
                 `}
-                        <h4 class="text-lg font-medium text-gray-900 mb-4">Line Items</h4>
+                        <h4 class="text-lg font-medium text-gray-900 mb-4">${t('lineItems')}</h4>
                         <div id="nodaDetailLineItemsWrapper" class="overflow-auto rounded-lg border border-gray-200 bg-white">
                             <table class="min-w-full">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        ${renderNodaDetailSortableHeader('lineNumber', 'Line #')}
-                                        ${renderNodaDetailSortableHeader('partNumber', '品番')}
-                                        ${renderNodaDetailSortableHeader('backNumber', '背番号')}
-                                        ${renderNodaDetailSortableHeader('boxes', '出荷箱数')}
-                                        ${renderNodaDetailSortableHeader('shortfallBoxes', '不足箱数', 'px-3 py-2')}
-                                        ${renderNodaDetailSortableHeader('requestedQuantity', '出荷枚数')}
-                                        ${renderNodaDetailSortableHeader('shortfallQuantity', '不足枚数', 'px-3 py-2')}
-                                        ${renderNodaDetailSortableHeader('inventoryStatus', '在庫', 'px-3 py-2')}
-                                        ${renderNodaDetailSortableHeader('status', '倉庫状態')}
-                                        ${isEditMode ? '<th class="sticky top-0 z-10 bg-gray-50 px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>' : ''}
+                                        ${renderNodaDetailSortableHeader('lineNumber', t('lineNumber'))}
+                                        ${renderNodaDetailSortableHeader('partNumber', t('partNumber'))}
+                                        ${renderNodaDetailSortableHeader('backNumber', t('backNumber'))}
+                                        ${renderNodaDetailSortableHeader('boxes', t('shippingBoxes'))}
+                                        ${renderNodaDetailSortableHeader('shortfallBoxes', t('shortfallBoxes'), 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('requestedQuantity', t('shippingQuantity'))}
+                                        ${renderNodaDetailSortableHeader('shortfallQuantity', t('shortfallQuantity'), 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('inventoryStatus', t('inventoryStatusCol'), 'px-3 py-2')}
+                                        ${renderNodaDetailSortableHeader('status', t('warehouseStatus'))}
+                                        ${isEditMode ? `<th class="sticky top-0 z-10 bg-gray-50 px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">${t('actions')}</th>` : ''}
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
