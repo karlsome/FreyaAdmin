@@ -9,6 +9,7 @@ let activeNodaStatusFilter = 'all'; // Track which status card is active
 let nodaDetailModalState = {
     request: null,
     isEditMode: false,
+    isSummaryCollapsed: false,
     sort: { column: 'lineNumber', direction: 1 }
 };
 let nodaDetailModalResizeObserver = null;
@@ -22,6 +23,10 @@ function disconnectNodaDetailModalResizeObserver() {
         nodaDetailModalResizeObserver.disconnect();
         nodaDetailModalResizeObserver = null;
     }
+}
+
+function shouldCollapseNodaDetailSummaryByDefault() {
+    return true;
 }
 
 /**
@@ -583,35 +588,66 @@ function getSortedNodaDetailLineItems(lineItems = []) {
     });
 }
 
-function setupNodaDetailTableLayout() {
-    disconnectNodaDetailModalResizeObserver();
-
-    const modalPanel = document.getElementById('nodaDetailModalPanel');
+function updateNodaDetailTableLayout() {
     const content = document.getElementById('nodaDetailContent');
     const lineItemsWrapper = document.getElementById('nodaDetailLineItemsWrapper');
     const footer = document.getElementById('nodaDetailFooter');
 
-    if (!modalPanel || !content || !lineItemsWrapper) {
+    if (!content || !lineItemsWrapper || lineItemsWrapper.offsetParent === null) {
         return;
     }
 
-    const updateLayout = () => {
-        const contentRect = content.getBoundingClientRect();
-        const wrapperRect = lineItemsWrapper.getBoundingClientRect();
-        const footerHeight = footer ? footer.getBoundingClientRect().height : 0;
-        const availableHeight = Math.floor(content.clientHeight - (wrapperRect.top - contentRect.top) - footerHeight - 24);
-        lineItemsWrapper.style.maxHeight = `${Math.max(240, availableHeight)}px`;
-    };
+    const contentRect = content.getBoundingClientRect();
+    const wrapperRect = lineItemsWrapper.getBoundingClientRect();
+    const footerHeight = footer ? footer.getBoundingClientRect().height : 0;
+    const availableHeight = Math.floor(content.clientHeight - (wrapperRect.top - contentRect.top) - footerHeight - 24);
+    const minimumHeight = shouldCollapseNodaDetailSummaryByDefault() ? 180 : 240;
+    lineItemsWrapper.style.maxHeight = `${Math.max(minimumHeight, availableHeight)}px`;
+}
 
-    requestAnimationFrame(updateLayout);
+function setupNodaDetailTableLayout() {
+    disconnectNodaDetailModalResizeObserver();
+
+    const modalPanel = document.getElementById('nodaDetailModalPanel');
+    const lineItemsWrapper = document.getElementById('nodaDetailLineItemsWrapper');
+
+    if (!modalPanel || !lineItemsWrapper) {
+        return;
+    }
+
+    requestAnimationFrame(updateNodaDetailTableLayout);
 
     if (typeof ResizeObserver === 'function') {
         nodaDetailModalResizeObserver = new ResizeObserver(() => {
-            requestAnimationFrame(updateLayout);
+            requestAnimationFrame(updateNodaDetailTableLayout);
         });
         nodaDetailModalResizeObserver.observe(modalPanel);
     }
 }
+
+function updateNodaDetailSummaryVisibility() {
+    const details = document.getElementById('nodaDetailExtraInfo');
+    const toggleButton = document.getElementById('nodaDetailSummaryToggle');
+    const toggleIcon = document.getElementById('nodaDetailSummaryToggleIcon');
+    const toggleLabel = document.getElementById('nodaDetailSummaryToggleLabel');
+
+    if (!details || !toggleButton || !toggleIcon || !toggleLabel) {
+        return;
+    }
+
+    const isCollapsed = nodaDetailModalState.isSummaryCollapsed;
+    details.classList.toggle('hidden', isCollapsed);
+    toggleButton.setAttribute('aria-expanded', String(!isCollapsed));
+    toggleIcon.className = isCollapsed ? 'ri-arrow-down-s-line text-base' : 'ri-arrow-up-s-line text-base';
+    toggleLabel.textContent = isCollapsed ? t('showDetails') : t('hideDetails');
+
+    requestAnimationFrame(updateNodaDetailTableLayout);
+}
+
+window.toggleNodaDetailSummary = function() {
+    nodaDetailModalState.isSummaryCollapsed = !nodaDetailModalState.isSummaryCollapsed;
+    updateNodaDetailSummaryVisibility();
+};
 
 function formatNodaInventoryTimestamp(value) {
     if (!value) {
@@ -2572,12 +2608,14 @@ window.editNodaRequest = async function(requestId) {
 function showNodaDetailModal(request, isEditMode = false, preserveSort = false) {
     const modal = document.getElementById('nodaDetailModal');
     const content = document.getElementById('nodaDetailContent');
+    const isBulkRequest = request.requestType === 'bulk';
 
     nodaDetailModalState.request = request;
     nodaDetailModalState.isEditMode = isEditMode;
 
     if (!preserveSort) {
         resetNodaDetailModalSort();
+        nodaDetailModalState.isSummaryCollapsed = isBulkRequest && shouldCollapseNodaDetailSummaryByDefault();
     }
     
     const statusInfo = getNodaStatusInfo(request.status);
@@ -2593,8 +2631,6 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
             .filter(Boolean)
     ).size;
     
-    // Handle both single and bulk requests
-    const isBulkRequest = request.requestType === 'bulk';
     const pickupDate = isBulkRequest ? 
         new Date(request.pickupDate).toLocaleDateString() : 
         new Date(request.date).toLocaleDateString();
@@ -2608,80 +2644,98 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
         // Bulk request display
         contentHTML = `
             <div class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">${t('requestNumber')}</label>
-                            <p class="mt-1 text-lg font-semibold text-blue-600">${request.requestNumber}</p>
-                        </div>
+                <div class="rounded-xl border border-gray-200 bg-gradient-to-b from-white to-gray-50 px-4 py-4 shadow-sm space-y-4">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div class="min-w-0 flex-1 space-y-3">
+                            <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                                <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">${t('requestNumber')}</span>
+                                <p class="text-base font-semibold text-blue-600 break-all">${request.requestNumber}</p>
+                            </div>
 
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">${t('type')}</label>
-                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
-                                <i class="ri-stack-line mr-1"></i>
-                                ${t('bulkRequest')}
-                            </span>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">${t('overallStatus')}</label>
-                            <div class="mt-1">
-                                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusInfo.badgeClass}">
+                            <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                                <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">${t('overallStatus')}</span>
+                                <span class="inline-flex w-fit items-center px-3 py-1 rounded-full text-sm font-medium ${statusInfo.badgeClass}">
                                     <i class="${statusInfo.icon} mr-1"></i>
                                     ${statusInfo.text}
                                 </span>
                             </div>
-                            <p class="mt-2 text-sm font-semibold ${missingInventoryCount > 0 ? 'text-red-600' : 'text-gray-600'}">${t('insufficientItems')} : ${missingInventoryCount}</p>
+
+                            <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                                <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">${t('insufficientItems')}</span>
+                                <p class="text-sm font-semibold ${missingInventoryCount > 0 ? 'text-red-600' : 'text-gray-600'}">${missingInventoryCount}</p>
+                            </div>
                         </div>
+
+                        <button
+                            id="nodaDetailSummaryToggle"
+                            type="button"
+                            aria-expanded="${(!nodaDetailModalState.isSummaryCollapsed).toString()}"
+                            onclick="toggleNodaDetailSummary()"
+                            class="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:bg-gray-50 sm:w-auto"
+                        >
+                            <i id="nodaDetailSummaryToggleIcon" class="${nodaDetailModalState.isSummaryCollapsed ? 'ri-arrow-down-s-line' : 'ri-arrow-up-s-line'} text-base"></i>
+                            <span id="nodaDetailSummaryToggleLabel">${nodaDetailModalState.isSummaryCollapsed ? t('showDetails') : t('hideDetails')}</span>
+                        </button>
                     </div>
 
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">${t('pickupDate')}</label>
-                            ${isEditMode ? `
-                                <input type="date" id="editPickupDate" value="${request.pickupDate || request.date}" class="mt-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-                            ` : `
-                                <p class="mt-1 text-gray-900">${pickupDate}</p>
-                            `}
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">${t('totalItems')}</label>
-                            <p class="mt-1 text-gray-900">${request.totalItems || (request.lineItems ? request.lineItems.length : 0)}</p>
-                        </div>
+                    <div id="nodaDetailExtraInfo" class="${nodaDetailModalState.isSummaryCollapsed ? 'hidden ' : ''}border-t border-gray-200 pt-4">
+                        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('type')}</label>
+                                <div class="mt-2">
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
+                                        <i class="ri-stack-line mr-1"></i>
+                                        ${t('bulkRequest')}
+                                    </span>
+                                </div>
+                            </div>
 
-                        ${request.便 || request.納品書番号 || request.納入指示日 ? `
-                        <div class="p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-2">
-                            ${request.便 ? `
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600">${t('deliveryOrder')}</label>
-                                <p class="text-sm font-semibold text-blue-600">${request.便}</p>
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('pickupDate')}</label>
+                                ${isEditMode ? `
+                                    <input type="date" id="editPickupDate" value="${request.pickupDate || request.date}" class="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                                ` : `
+                                    <p class="mt-2 text-sm font-medium text-gray-900">${pickupDate}</p>
+                                `}
+                            </div>
+
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('totalItems')}</label>
+                                <p class="mt-2 text-sm font-medium text-gray-900">${request.totalItems || (request.lineItems ? request.lineItems.length : 0)}</p>
+                            </div>
+
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('createdAt')}</label>
+                                <p class="mt-2 text-sm text-gray-600">${createdDate}</p>
+                            </div>
+
+                            <div class="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('createdBy')}</label>
+                                <p class="mt-2 text-sm text-gray-600">${request.createdBy || t('unknown')}</p>
+                            </div>
+
+                            ${request.便 || request.納品書番号 || request.納入指示日 ? `
+                            <div class="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-3 md:col-span-2 xl:col-span-1">
+                                ${request.便 ? `
+                                <div>
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('deliveryOrder')}</label>
+                                    <p class="mt-1 text-sm font-semibold text-blue-600">${request.便}</p>
+                                </div>
+                                ` : ''}
+                                ${request.納品書番号 ? `
+                                <div>
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('deliveryNote')}</label>
+                                    <p class="mt-1 text-sm font-semibold text-blue-600">${request.納品書番号}</p>
+                                </div>
+                                ` : ''}
+                                ${request.納入指示日 ? `
+                                <div>
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500">${t('deliveryDeadline')}</label>
+                                    <p class="mt-1 text-sm font-semibold text-red-600">${request.納入指示日}</p>
+                                </div>
+                                ` : ''}
                             </div>
                             ` : ''}
-                            ${request.納品書番号 ? `
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600">${t('deliveryNote')}</label>
-                                <p class="text-sm font-semibold text-blue-600">${request.納品書番号}</p>
-                            </div>
-                            ` : ''}
-                            ${request.納入指示日 ? `
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600">${t('deliveryDeadline')}</label>
-                                <p class="text-sm font-semibold text-red-600">${request.納入指示日}</p>
-                            </div>
-                            ` : ''}
-                        </div>
-                        ` : ''}
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">${t('createdAt')}</label>
-                            <p class="mt-1 text-gray-600">${createdDate}</p>
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">${t('createdBy')}</label>
-                            <p class="mt-1 text-gray-600">${request.createdBy || t('unknown')}</p>
                         </div>
                     </div>
                 </div>
@@ -3017,6 +3071,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
     content.innerHTML = contentHTML;
     modal.classList.remove('hidden');
     setupNodaDetailTableLayout();
+    updateNodaDetailSummaryVisibility();
     setupNodaDetailLineRowHandlers();
     
     // Setup event listener for pickup date changes (for bulk requests in edit mode)
@@ -3066,6 +3121,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
 window.closeNodaModal = function() {
     disconnectNodaDetailModalResizeObserver();
     nodaDetailModalState.request = null;
+    nodaDetailModalState.isSummaryCollapsed = false;
     closeNodaInventoryModal();
     const modal = document.getElementById('nodaDetailModal');
     modal.classList.add('hidden');
@@ -4310,6 +4366,7 @@ window.switchEditTab = function(tabName) {
         document.getElementById('existingItemsTab').classList.add('active', 'border-blue-500', 'text-blue-600');
         document.getElementById('existingItemsTab').classList.remove('border-transparent', 'text-gray-500');
         document.getElementById('existingItemsContent').classList.remove('hidden');
+        requestAnimationFrame(updateNodaDetailTableLayout);
     } else if (tabName === 'add') {
         document.getElementById('addItemsTab').classList.add('active', 'border-blue-500', 'text-blue-600');
         document.getElementById('addItemsTab').classList.remove('border-transparent', 'text-gray-500');
