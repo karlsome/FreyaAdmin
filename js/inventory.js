@@ -7,6 +7,90 @@ let inventorySummary = {};
 let inventorySortState = { column: null, direction: 1 };
 let inventoryAllProducts = [];      // all products from masterDB (for model→sebanggo mapping)
 let inventorySelectedSebanggoArray = []; // currently active sebanggo tags
+let inventoryThresholdSummary = createDefaultInventoryThresholdSummary();
+let inventoryThresholdStatusFilter = 'all';
+let inventoryThresholdConfig = getDefaultInventoryThresholdConfig();
+
+function getDefaultInventoryThresholdConfig() {
+    return {
+        global: {
+            warning: 10,
+            critical: 3
+        },
+        models: [],
+        updatedAt: null,
+        updatedBy: ''
+    };
+}
+
+function normalizeInventoryThresholdBoxValue(value, defaultValue) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+        return defaultValue;
+    }
+
+    return Math.round(numericValue * 100) / 100;
+}
+
+function createDefaultInventoryThresholdSummary() {
+    return {
+        totalItems: 0,
+        healthyCount: 0,
+        warningCount: 0,
+        criticalCount: 0
+    };
+}
+
+function normalizeInventoryThresholdConfig(config = {}) {
+    const fallback = getDefaultInventoryThresholdConfig();
+    const globalWarning = normalizeInventoryThresholdBoxValue(config?.global?.warning, fallback.global.warning);
+    const globalCritical = normalizeInventoryThresholdBoxValue(
+        config?.global?.critical,
+        Math.min(fallback.global.critical, globalWarning)
+    );
+
+    const normalizedModels = Array.isArray(config?.models)
+        ? config.models
+            .map((rule) => {
+                const model = String(rule?.model || '').trim();
+                if (!model) {
+                    return null;
+                }
+
+                const warning = normalizeInventoryThresholdBoxValue(rule?.warning, globalWarning);
+                const critical = normalizeInventoryThresholdBoxValue(rule?.critical, Math.min(globalCritical, warning));
+
+                return {
+                    model,
+                    warning,
+                    critical: Math.min(critical, warning)
+                };
+            })
+            .filter(Boolean)
+            .sort((left, right) => left.model.localeCompare(right.model))
+        : [];
+
+    return {
+        global: {
+            warning: globalWarning,
+            critical: Math.min(globalCritical, globalWarning)
+        },
+        models: normalizedModels,
+        updatedAt: config?.updatedAt || null,
+        updatedBy: config?.updatedBy || ''
+    };
+}
+
+function normalizeInventoryThresholdSummary(summary = {}) {
+    const defaults = createDefaultInventoryThresholdSummary();
+
+    return {
+        totalItems: Number(summary?.totalItems) || defaults.totalItems,
+        healthyCount: Number(summary?.healthyCount) || defaults.healthyCount,
+        warningCount: Number(summary?.warningCount) || defaults.warningCount,
+        criticalCount: Number(summary?.criticalCount) || defaults.criticalCount
+    };
+}
 
 /**
  * Initialize Inventory system
@@ -29,6 +113,12 @@ function initializeInventorySystem() {
     const resetAllSection = document.getElementById('inventoryResetAllSection');
     if (currentUser.role === 'admin' && resetAllSection) {
         resetAllSection.style.display = 'flex';
+    }
+
+    const thresholdSection = document.getElementById('inventoryThresholdSection');
+    if (currentUser.role === 'admin' && thresholdSection) {
+        thresholdSection.style.display = 'flex';
+        loadInventoryThresholdConfig({ silent: true });
     }
     
     // Event listeners
@@ -100,6 +190,7 @@ async function loadInventoryData() {
                 console.log('📊 Raw inventory data received:', result.data);
                 inventoryData = result.data;
                 inventorySummary = result.summary;
+                inventoryThresholdSummary = normalizeInventoryThresholdSummary(result.thresholdSummary);
                 updateInventorySummary();
                 renderInventoryTable();
                 updateInventoryPagination(result.pagination);
@@ -145,6 +236,10 @@ function buildInventoryQueryFilters() {
     if (searchTerm) {
         filters.search = searchTerm;
     }
+
+    if (inventoryThresholdStatusFilter && inventoryThresholdStatusFilter !== 'all') {
+        filters.thresholdStatus = inventoryThresholdStatusFilter;
+    }
     
     return filters;
 }
@@ -165,6 +260,72 @@ function updateInventorySummary() {
     document.getElementById('inventoryPhysicalStock').textContent = inventorySummary.totalPhysicalStock || 0;
     document.getElementById('inventoryReservedStock').textContent = inventorySummary.totalReservedStock || 0;
     document.getElementById('inventoryAvailableStock').textContent = inventorySummary.totalAvailableStock || 0;
+    renderInventoryThresholdSummary();
+}
+
+function renderInventoryThresholdSummary() {
+    const container = document.getElementById('inventoryThresholdSummary');
+    if (!container) return;
+
+    const summary = normalizeInventoryThresholdSummary(inventoryThresholdSummary);
+    const totalCount = summary.totalItems;
+    const filters = [
+        {
+            key: 'all',
+            label: 'All',
+            count: totalCount,
+            icon: 'ri-stack-line',
+            classes: 'border-slate-200 text-slate-700 bg-slate-50 hover:bg-slate-100'
+        },
+        {
+            key: 'critical',
+            label: 'Critical',
+            count: summary.criticalCount,
+            icon: 'ri-alarm-warning-line',
+            classes: 'border-red-200 text-red-700 bg-red-50 hover:bg-red-100'
+        },
+        {
+            key: 'warning',
+            label: 'Low',
+            count: summary.warningCount,
+            icon: 'ri-error-warning-line',
+            classes: 'border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100'
+        },
+        {
+            key: 'healthy',
+            label: 'Healthy',
+            count: summary.healthyCount,
+            icon: 'ri-checkbox-circle-line',
+            classes: 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+        }
+    ];
+
+    container.innerHTML = `
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+                <div class="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <i class="ri-bar-chart-box-line text-amber-500"></i>
+                    Inventory Alerts
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Thresholds are based on available boxes. Model rules override the global default.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                ${filters.map((filter) => {
+                    const isActive = inventoryThresholdStatusFilter === filter.key;
+                    return `
+                        <button
+                            type="button"
+                            onclick="setInventoryThresholdStatusFilter('${filter.key}')"
+                            class="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition-colors ${filter.classes} ${isActive ? 'ring-2 ring-offset-2 ring-slate-300' : ''}">
+                            <i class="${filter.icon}"></i>
+                            <span>${filter.label}</span>
+                            <span class="rounded-full bg-white/70 px-2 py-0.5 text-xs font-semibold">${filter.count}</span>
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
 }
 
 /**
@@ -218,10 +379,11 @@ function renderInventoryTable() {
             <tbody>
                 ${inventoryData.map((item, index) => {
                     const lastUpdated = new Date(item.lastUpdated).toLocaleDateString();
-                    const availabilityStatus = getAvailabilityStatus(item.availableQuantity);
+                    const availabilityStatus = getAvailabilityStatus(item);
+                    const thresholdTooltip = escapeInventoryAttribute(buildInventoryThresholdTooltip(item, availabilityStatus));
                     
                     return `
-                        <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openInventoryTransactions('${item.背番号}')">
+                        <tr class="border-b cursor-pointer ${availabilityStatus.rowClass}" onclick="openInventoryTransactions('${item.背番号}')">
                             <td class="px-2 sm:px-4 py-2 sm:py-3 font-medium text-blue-600">
                                 <span class="hover:underline">
                                     ${item.品番}
@@ -246,7 +408,7 @@ function renderInventoryTable() {
                                 <span class="text-yellow-600 font-medium">${item.reservedQuantity}</span>
                             </td>
                             <td class="px-2 sm:px-4 py-2 sm:py-3">
-                                <span class="inline-flex items-center px-1.5 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${availabilityStatus.badgeClass}">
+                                <span title="${thresholdTooltip}" class="inline-flex items-center px-1.5 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${availabilityStatus.badgeClass}">
                                     <i class="${availabilityStatus.icon} mr-1 text-xs"></i>
                                     ${item.availableQuantity}
                                 </span>
@@ -273,15 +435,63 @@ function renderInventoryTable() {
 /**
  * Get availability status information for display
  */
-function getAvailabilityStatus(availableQuantity) {
-    if (availableQuantity <= 0) {
-        return { icon: 'ri-close-circle-line', badgeClass: 'bg-red-100 text-red-800' };
-    } else if (availableQuantity <= 10) {
-        return { icon: 'ri-error-warning-line', badgeClass: 'bg-yellow-100 text-yellow-800' };
-    } else {
-        return { icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800' };
+function getAvailabilityStatus(item) {
+    const status = String(item?.thresholdStatus || '').trim().toLowerCase();
+
+    if (status === 'critical') {
+        return {
+            status,
+            label: 'Critical',
+            icon: 'ri-alarm-warning-line',
+            badgeClass: 'bg-red-100 text-red-800',
+            rowClass: 'bg-red-50 hover:bg-red-100'
+        };
     }
+
+    if (status === 'warning') {
+        return {
+            status,
+            label: 'Low',
+            icon: 'ri-error-warning-line',
+            badgeClass: 'bg-amber-100 text-amber-800',
+            rowClass: 'hover:bg-amber-50'
+        };
+    }
+
+    return {
+        status: 'healthy',
+        label: 'Healthy',
+        icon: 'ri-checkbox-circle-line',
+        badgeClass: 'bg-green-100 text-green-800',
+        rowClass: 'hover:bg-gray-50'
+    };
 }
+
+function buildInventoryThresholdTooltip(item, availabilityStatus) {
+    if (!Number.isFinite(Number(item?.availableBoxCount))) {
+        return 'Box-based threshold unavailable. Capacity per box is missing for this item.';
+    }
+
+    const source = item?.thresholdSource === 'model'
+        ? `Model rule${item?.model ? ` (${item.model})` : ''}`
+        : 'Global rule';
+
+    return `${availabilityStatus.label} alert. ${source}. Available boxes: ${formatInventoryBoxCount(item?.availableBoxCount)}. Warning <= ${formatInventoryBoxCount(item?.thresholdWarning)} boxes, Critical <= ${formatInventoryBoxCount(item?.thresholdCritical)} boxes.`;
+}
+
+function escapeInventoryAttribute(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+window.setInventoryThresholdStatusFilter = function(status) {
+    inventoryThresholdStatusFilter = status || 'all';
+    currentInventoryPage = 1;
+    loadInventoryData();
+};
 
 function formatInventoryBoxCount(boxCount) {
     const numericValue = Number(boxCount);
@@ -498,6 +708,414 @@ function removeInventorySebanggoFromSelection(sebanggo) {
     currentInventoryPage = 1;
     loadInventoryData();
 }
+
+async function loadInventoryThresholdConfig({ silent = false } = {}) {
+    try {
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'getThresholdConfig'
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to load threshold rules');
+        }
+
+        inventoryThresholdConfig = normalizeInventoryThresholdConfig(result.data);
+        return inventoryThresholdConfig;
+    } catch (error) {
+        console.error('Failed to load inventory threshold config:', error);
+        if (!silent) {
+            const drawerContent = document.getElementById('inventoryThresholdDrawerContent');
+            if (drawerContent) {
+                drawerContent.innerHTML = `
+                    <div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                        <div class="flex items-start gap-3">
+                            <i class="ri-error-warning-line text-lg"></i>
+                            <div>
+                                <p class="font-semibold">Unable to load threshold rules</p>
+                                <p class="mt-1">${error.message}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        throw error;
+    }
+}
+
+function setInventoryThresholdDrawerLoadingState(message = 'Loading threshold rules...') {
+    const drawerContent = document.getElementById('inventoryThresholdDrawerContent');
+    if (!drawerContent) return;
+
+    drawerContent.innerHTML = `
+        <div class="flex items-center justify-center py-10 text-sm text-gray-500">
+            <i class="ri-loader-4-line animate-spin mr-2"></i>
+            ${message}
+        </div>
+    `;
+}
+
+async function ensureInventoryThresholdModelsLoaded() {
+    if (!inventoryAllProducts.length) {
+        await loadInventoryAllProducts();
+    }
+
+    const modelSelect = document.getElementById('inventoryModelFilter');
+    if (!modelSelect || modelSelect.options.length <= 1) {
+        await loadInventoryModelOptions();
+    }
+}
+
+function getInventoryAvailableModels() {
+    const models = new Set();
+
+    inventoryAllProducts.forEach((product) => {
+        const model = String(product?.モデル || '').trim();
+        if (model) {
+            models.add(model);
+        }
+    });
+
+    if (models.size === 0) {
+        const modelSelect = document.getElementById('inventoryModelFilter');
+        if (modelSelect) {
+            Array.from(modelSelect.options).forEach((option) => {
+                const model = String(option.value || '').trim();
+                if (model) {
+                    models.add(model);
+                }
+            });
+        }
+    }
+
+    return Array.from(models).sort((left, right) => left.localeCompare(right));
+}
+
+function buildInventoryThresholdUpdatedText(config) {
+    if (!config?.updatedAt) {
+        return 'Defaults apply until an admin saves a new rule set.';
+    }
+
+    const updatedDate = new Date(config.updatedAt);
+    if (Number.isNaN(updatedDate.getTime())) {
+        return config.updatedBy
+            ? `Last updated by ${config.updatedBy}`
+            : 'Threshold rules were updated previously.';
+    }
+
+    const formattedDate = updatedDate.toLocaleString();
+    return config.updatedBy
+        ? `Last updated ${formattedDate} by ${config.updatedBy}`
+        : `Last updated ${formattedDate}`;
+}
+
+function buildInventoryThresholdModelOptions(selectedModel = '') {
+    const availableModels = getInventoryAvailableModels();
+    const modelSet = new Set(availableModels);
+    const normalizedSelectedModel = String(selectedModel || '').trim();
+
+    if (normalizedSelectedModel && !modelSet.has(normalizedSelectedModel)) {
+        availableModels.unshift(normalizedSelectedModel);
+    }
+
+    const options = ['<option value="">Select model</option>'];
+    availableModels.forEach((model) => {
+        const isSelected = model === normalizedSelectedModel ? 'selected' : '';
+        options.push(`<option value="${escapeInventoryAttribute(model)}" ${isSelected}>${model}</option>`);
+    });
+
+    return options.join('');
+}
+
+function renderInventoryThresholdModelRow(rule = {}) {
+    const warningValue = Number(rule?.warning);
+    const criticalValue = Number(rule?.critical);
+
+    return `
+        <div class="rounded-xl border border-gray-200 bg-gray-50 p-4" data-threshold-model-row>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Model</label>
+                    <select data-field="model" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                        ${buildInventoryThresholdModelOptions(rule?.model || '')}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Warning <= boxes</label>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        data-field="warning"
+                        value="${Number.isFinite(warningValue) ? warningValue : ''}"
+                        class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                </div>
+                <div class="flex items-end gap-3">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Critical <= boxes</label>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            data-field="critical"
+                            value="${Number.isFinite(criticalValue) ? criticalValue : ''}"
+                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                    </div>
+                    <button type="button" onclick="removeInventoryThresholdModelRow(this)" class="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors" title="Remove model rule">
+                        <i class="ri-delete-bin-line"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function refreshInventoryThresholdModelState() {
+    const rows = document.querySelectorAll('#inventoryThresholdModelRows [data-threshold-model-row]');
+    const emptyState = document.getElementById('inventoryThresholdModelEmptyState');
+    const count = document.getElementById('inventoryThresholdModelRuleCount');
+
+    if (emptyState) {
+        emptyState.classList.toggle('hidden', rows.length > 0);
+    }
+
+    if (count) {
+        count.textContent = `${rows.length} rule${rows.length === 1 ? '' : 's'}`;
+    }
+}
+
+function renderInventoryThresholdDrawerContent() {
+    const drawerContent = document.getElementById('inventoryThresholdDrawerContent');
+    if (!drawerContent) return;
+
+    const config = normalizeInventoryThresholdConfig(inventoryThresholdConfig);
+
+    drawerContent.innerHTML = `
+        <div class="space-y-6">
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+                <div class="flex items-start gap-3">
+                    <i class="ri-information-line text-lg text-amber-600 mt-0.5"></i>
+                    <div>
+                        <p class="text-sm font-semibold text-amber-900">Alert evaluation</p>
+                        <p class="mt-1 text-sm text-amber-800">Items at or below the critical box count turn red. Items above critical but at or below warning turn amber.</p>
+                        <p class="mt-2 text-xs text-amber-700">${buildInventoryThresholdUpdatedText(config)}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-gray-200 p-5">
+                <div class="mb-4">
+                    <h4 class="text-lg font-semibold text-gray-900">Global Default</h4>
+                    <p class="mt-1 text-sm text-gray-500">This applies to every inventory item unless a model override exists. Values are in available boxes.</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Warning threshold (boxes)</label>
+                        <input
+                            type="number"
+                            id="inventoryThresholdGlobalWarning"
+                            min="0"
+                            step="0.01"
+                            value="${config.global.warning}"
+                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Critical threshold (boxes)</label>
+                        <input
+                            type="number"
+                            id="inventoryThresholdGlobalCritical"
+                            min="0"
+                            step="0.01"
+                            value="${config.global.critical}"
+                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-gray-200 p-5">
+                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                    <div>
+                        <h4 class="text-lg font-semibold text-gray-900">Model Overrides</h4>
+                        <p class="mt-1 text-sm text-gray-500">Use overrides when a specific model needs tighter or looser limits than the global default.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span id="inventoryThresholdModelRuleCount" class="text-xs font-semibold uppercase tracking-wide text-gray-500"></span>
+                        <button type="button" onclick="addInventoryThresholdModelRow()" class="inline-flex items-center rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 transition-colors">
+                            <i class="ri-add-line mr-2"></i>
+                            Add model rule
+                        </button>
+                    </div>
+                </div>
+
+                <div id="inventoryThresholdModelEmptyState" class="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500">
+                    No model overrides yet. The global threshold will be used for every item.
+                </div>
+
+                <div id="inventoryThresholdModelRows" class="space-y-3">
+                    ${config.models.map((rule) => renderInventoryThresholdModelRow(rule)).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+
+    refreshInventoryThresholdModelState();
+}
+
+window.openInventoryThresholdDrawer = async function() {
+    const drawer = document.getElementById('inventoryThresholdDrawer');
+    if (!drawer) return;
+
+    drawer.classList.remove('hidden');
+    setInventoryThresholdDrawerLoadingState();
+
+    try {
+        await ensureInventoryThresholdModelsLoaded();
+        await loadInventoryThresholdConfig({ silent: false });
+        renderInventoryThresholdDrawerContent();
+    } catch (error) {
+        console.error('Unable to open inventory threshold drawer:', error);
+    }
+};
+
+window.closeInventoryThresholdDrawer = function() {
+    const drawer = document.getElementById('inventoryThresholdDrawer');
+    if (drawer) {
+        drawer.classList.add('hidden');
+    }
+};
+
+window.addInventoryThresholdModelRow = async function() {
+    await ensureInventoryThresholdModelsLoaded();
+
+    const rowsContainer = document.getElementById('inventoryThresholdModelRows');
+    if (!rowsContainer) return;
+
+    rowsContainer.insertAdjacentHTML('beforeend', renderInventoryThresholdModelRow());
+    refreshInventoryThresholdModelState();
+};
+
+window.removeInventoryThresholdModelRow = function(button) {
+    const row = button?.closest('[data-threshold-model-row]');
+    if (row) {
+        row.remove();
+        refreshInventoryThresholdModelState();
+    }
+};
+
+function parseInventoryThresholdInputValue(value, label) {
+    const numericValue = Number(String(value ?? '').trim());
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+        throw new Error(`${label} must be 0 or higher.`);
+    }
+
+    return Math.round(numericValue * 100) / 100;
+}
+
+function collectInventoryThresholdConfigFromForm() {
+    const globalWarning = parseInventoryThresholdInputValue(
+        document.getElementById('inventoryThresholdGlobalWarning')?.value,
+        'Global warning threshold (boxes)'
+    );
+    const globalCritical = parseInventoryThresholdInputValue(
+        document.getElementById('inventoryThresholdGlobalCritical')?.value,
+        'Global critical threshold (boxes)'
+    );
+
+    if (globalCritical > globalWarning) {
+        throw new Error('Global critical threshold cannot exceed the warning threshold.');
+    }
+
+    const seenModels = new Set();
+    const modelRules = Array.from(document.querySelectorAll('#inventoryThresholdModelRows [data-threshold-model-row]'))
+        .map((row) => {
+            const model = String(row.querySelector('[data-field="model"]')?.value || '').trim();
+            const warningRaw = row.querySelector('[data-field="warning"]')?.value;
+            const criticalRaw = row.querySelector('[data-field="critical"]')?.value;
+
+            if (!model && !String(warningRaw || '').trim() && !String(criticalRaw || '').trim()) {
+                return null;
+            }
+
+            if (!model) {
+                throw new Error('Select a model for every override rule.');
+            }
+
+            if (seenModels.has(model)) {
+                throw new Error(`Model override already exists for ${model}.`);
+            }
+
+            const warning = parseInventoryThresholdInputValue(warningRaw, `${model} warning threshold (boxes)`);
+            const critical = parseInventoryThresholdInputValue(criticalRaw, `${model} critical threshold (boxes)`);
+
+            if (critical > warning) {
+                throw new Error(`Critical threshold cannot exceed warning threshold for ${model}.`);
+            }
+
+            seenModels.add(model);
+            return {
+                model,
+                warning,
+                critical
+            };
+        })
+        .filter(Boolean);
+
+    return {
+        global: {
+            warning: globalWarning,
+            critical: globalCritical
+        },
+        models: modelRules
+    };
+}
+
+window.saveInventoryThresholdConfig = async function() {
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    if (currentUser.role !== 'admin') {
+        alert('Only admin can update threshold rules.');
+        return;
+    }
+
+    try {
+        const config = collectInventoryThresholdConfigFromForm();
+        const fullNameElement = document.getElementById('userFullName');
+        const fullName = fullNameElement ? fullNameElement.textContent.trim() : (currentUser.username || 'admin');
+
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'saveThresholdConfig',
+                role: currentUser.role,
+                submittedBy: currentUser.username || 'admin',
+                fullName,
+                config
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to save threshold rules');
+        }
+
+        inventoryThresholdConfig = normalizeInventoryThresholdConfig(result.data);
+        closeInventoryThresholdDrawer();
+        await loadInventoryData();
+        alert('Inventory threshold rules saved.');
+    } catch (error) {
+        console.error('Failed to save inventory threshold config:', error);
+        alert(error.message || 'Failed to save threshold rules.');
+    }
+};
 
 // ==================== END MODEL FILTER & TAGGING ====================
 
@@ -1340,19 +1958,22 @@ window.exportInventoryData = async function() {
         showInventoryLoadingState();
         
         const filters = buildInventoryQueryFilters();
-        const queryParams = new URLSearchParams();
-        
-        // Add filters to query
-        Object.keys(filters).forEach(key => {
-            queryParams.append(key, JSON.stringify(filters[key]));
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'exportInventoryData',
+                filters
+            })
         });
-        
-        queryParams.append('export', 'true');
-        
-        const response = await fetch(`${BASE_URL}/api/inventory/data?${queryParams}`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        
+
         const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || `HTTP error! status: ${response.status}`);
+        }
+
         downloadInventoryCSV(data.data);
         
         loadInventoryData(); // Restore normal view
@@ -1371,15 +1992,21 @@ function downloadInventoryCSV(data) {
         return;
     }
     
-    const headers = ['品番', '背番号', 'Physical Stock', 'Reserved Stock', 'Available Stock', 'Last Updated'];
+    const headers = ['品番', '背番号', 'Model', 'Physical Stock', 'Reserved Stock', 'Available Stock', 'Available Boxes', 'Threshold Status', 'Warning Threshold (Boxes)', 'Critical Threshold (Boxes)', 'Threshold Rule', 'Last Updated'];
     const csvContent = [
         headers.join(','),
         ...data.map(item => [
             `"${item.品番 || ''}"`,
             `"${item.背番号 || ''}"`,
+            `"${item.model || ''}"`,
             item.physicalQuantity || 0,
             item.reservedQuantity || 0,
             item.availableQuantity || 0,
+            formatInventoryBoxCount(item.availableBoxCount),
+            `"${item.thresholdStatus || ''}"`,
+            item.thresholdWarning ?? '',
+            item.thresholdCritical ?? '',
+            `"${item.thresholdSource || ''}"`,
             `"${new Date(item.lastUpdated).toLocaleString('ja-JP')}"`
         ].join(','))
     ].join('\n');

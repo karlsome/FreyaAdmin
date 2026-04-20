@@ -178,7 +178,7 @@ function loadPage(page) {
                                 <span data-i18n="loading">Loading...</span>
                             </div>
                         </div>
-                        <div class="flex items-center space-x-4">
+                        <div class="flex flex-wrap items-center gap-3">
                             <button onclick="exportAnalyticsData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                                 <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
                             </button>
@@ -6995,6 +6995,11 @@ function loadPage(page) {
                                     <i class="ri-refresh-line mr-2"></i><span data-i18n="resetAll">Reset All</span>
                                 </button>
                             </div>
+                          <div id="inventoryThresholdSection" style="display: none;">
+                            <button onclick="openInventoryThresholdDrawer()" class="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors">
+                              <i class="ri-alarm-warning-line mr-2"></i><span>Threshold Rules</span>
+                            </button>
+                          </div>
                             <button onclick="exportInventoryData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                                 <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
                             </button>
@@ -7096,6 +7101,13 @@ function loadPage(page) {
                         </div>
                     </div>
 
+                        <div id="inventoryThresholdSummary" class="bg-white p-4 rounded-lg border border-gray-200">
+                          <div class="flex items-center justify-center py-4 text-sm text-gray-500">
+                            <i class="ri-loader-4-line animate-spin mr-2"></i>
+                            Loading inventory alerts...
+                          </div>
+                        </div>
+
                     <!-- Data Table -->
                     <div class="bg-white rounded-lg border border-gray-200">
                         <div class="p-4 border-b border-gray-200">
@@ -7136,6 +7148,38 @@ function loadPage(page) {
                         </div>
                     </div>
                 </div>
+
+                    <div id="inventoryThresholdDrawer" class="fixed inset-0 hidden z-[60]">
+                      <div class="absolute inset-0 bg-slate-900/40" onclick="closeInventoryThresholdDrawer()"></div>
+                      <div class="absolute inset-y-0 right-0 w-full max-w-2xl bg-white shadow-2xl flex flex-col">
+                        <div class="px-6 py-5 border-b border-gray-200 flex items-start justify-between gap-4">
+                          <div>
+                            <h3 class="text-xl font-semibold text-gray-900">Inventory Threshold Rules</h3>
+                            <p class="mt-1 text-sm text-gray-500">Global defaults are admin-owned. Model rules override the global values for matching inventory items.</p>
+                          </div>
+                          <button onclick="closeInventoryThresholdDrawer()" class="text-gray-400 hover:text-gray-600">
+                            <i class="ri-close-line text-2xl"></i>
+                          </button>
+                        </div>
+                        <div id="inventoryThresholdDrawerContent" class="flex-1 overflow-y-auto px-6 py-6">
+                          <div class="flex items-center justify-center py-10 text-sm text-gray-500">
+                            <i class="ri-loader-4-line animate-spin mr-2"></i>
+                            Loading threshold rules...
+                          </div>
+                        </div>
+                        <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
+                            <p class="text-xs text-gray-500">Thresholds are evaluated against available boxes.</p>
+                          <div class="flex items-center gap-3">
+                            <button type="button" onclick="closeInventoryThresholdDrawer()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">
+                              Cancel
+                            </button>
+                            <button type="button" onclick="saveInventoryThresholdConfig()" class="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors">
+                              <i class="ri-save-line mr-2"></i>Save Rules
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
                 <!-- Inventory Transactions Modal -->
                 <div id="inventoryTransactionsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
