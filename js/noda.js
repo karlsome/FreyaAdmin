@@ -10,6 +10,7 @@ let nodaDetailModalState = {
     request: null,
     isEditMode: false,
     isSummaryCollapsed: false,
+    lineItemFilter: 'all',
     sort: { column: 'lineNumber', direction: 1 }
 };
 let nodaDetailModalResizeObserver = null;
@@ -561,6 +562,26 @@ function getNodaDetailSortValue(lineItem, column) {
     }
 }
 
+function isNodaLineItemInsufficient(lineItem) {
+    const shortfallQuantity = Number(lineItem.shortfallQuantity) || 0;
+    const shortfallBoxes = Number(lineItem['箱数足りない']) || 0;
+
+    return shortfallQuantity > 0
+        || shortfallBoxes > 0
+        || lineItem.inventoryStatus === 'none'
+        || lineItem.inventoryStatus === 'insufficient';
+}
+
+function getVisibleNodaDetailLineItems(lineItems = []) {
+    const sortedLineItems = getSortedNodaDetailLineItems(lineItems);
+
+    if (nodaDetailModalState.lineItemFilter !== 'insufficient') {
+        return sortedLineItems;
+    }
+
+    return sortedLineItems.filter(isNodaLineItemInsufficient);
+}
+
 function getSortedNodaDetailLineItems(lineItems = []) {
     const sortColumn = nodaDetailModalState.sort.column;
     const sortDirection = nodaDetailModalState.sort.direction;
@@ -647,6 +668,26 @@ function updateNodaDetailSummaryVisibility() {
 window.toggleNodaDetailSummary = function() {
     nodaDetailModalState.isSummaryCollapsed = !nodaDetailModalState.isSummaryCollapsed;
     updateNodaDetailSummaryVisibility();
+};
+
+window.showNodaDetailInsufficientItems = function() {
+    if (!nodaDetailModalState.request) {
+        return;
+    }
+
+    nodaDetailModalState.lineItemFilter = nodaDetailModalState.lineItemFilter === 'insufficient'
+        ? 'all'
+        : 'insufficient';
+    showNodaDetailModal(nodaDetailModalState.request, nodaDetailModalState.isEditMode, true);
+};
+
+window.showAllNodaDetailLineItems = function() {
+    if (!nodaDetailModalState.request) {
+        return;
+    }
+
+    nodaDetailModalState.lineItemFilter = 'all';
+    showNodaDetailModal(nodaDetailModalState.request, nodaDetailModalState.isEditMode, true);
 };
 
 function formatNodaInventoryTimestamp(value) {
@@ -2616,17 +2657,17 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
     if (!preserveSort) {
         resetNodaDetailModalSort();
         nodaDetailModalState.isSummaryCollapsed = isBulkRequest && shouldCollapseNodaDetailSummaryByDefault();
+        nodaDetailModalState.lineItemFilter = 'all';
     }
     
     const statusInfo = getNodaStatusInfo(request.status);
     const createdDate = new Date(request.createdAt).toLocaleString();
     const sortedLineItems = getSortedNodaDetailLineItems(request.lineItems || []);
+    const visibleLineItems = getVisibleNodaDetailLineItems(request.lineItems || []);
+    const isShowingOnlyInsufficient = nodaDetailModalState.lineItemFilter === 'insufficient';
     const missingInventoryCount = new Set(
         sortedLineItems
-            .filter(lineItem => {
-                const shortfall = Number(lineItem.shortfallQuantity) || 0;
-                return shortfall > 0 || lineItem.inventoryStatus === 'none' || lineItem.inventoryStatus === 'insufficient';
-            })
+            .filter(isNodaLineItemInsufficient)
             .map(lineItem => String(lineItem.背番号 || lineItem.lineNumber || ''))
             .filter(Boolean)
     ).size;
@@ -2660,9 +2701,17 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                 </span>
                             </div>
 
-                            <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                                <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">${t('insufficientItems')}</span>
-                                <p class="text-sm font-semibold ${missingInventoryCount > 0 ? 'text-red-600' : 'text-gray-600'}">${missingInventoryCount}</p>
+                            <div>
+                                <button
+                                    type="button"
+                                    onclick="showNodaDetailInsufficientItems()"
+                                    aria-pressed="${isShowingOnlyInsufficient.toString()}"
+                                    class="inline-flex items-center gap-3 rounded-lg px-2 py-1 -mx-2 transition ${missingInventoryCount > 0 ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-200' : 'cursor-default'} ${isShowingOnlyInsufficient ? 'bg-red-50 ring-1 ring-red-200' : 'hover:bg-red-50'}"
+                                    ${missingInventoryCount > 0 ? '' : 'disabled aria-disabled="true"'}
+                                >
+                                    <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">${t('insufficientItems')}</span>
+                                    <span class="text-sm font-semibold ${missingInventoryCount > 0 ? 'text-red-600' : 'text-gray-600'}">${missingInventoryCount}</span>
+                                </button>
                             </div>
                         </div>
 
@@ -2758,7 +2807,15 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                     <!-- Line Items Table -->
                     <div class="border-t pt-6">
                 `}
-                        <h4 class="text-lg font-medium text-gray-900 mb-4">${t('lineItems')}</h4>
+                        <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <h4 class="text-lg font-medium text-gray-900">${t('lineItems')}</h4>
+                            ${isShowingOnlyInsufficient ? `
+                                <button type="button" onclick="showAllNodaDetailLineItems()" class="inline-flex items-center gap-2 self-start rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100">
+                                    <i class="ri-eye-line"></i>
+                                    ${t('showAll')}
+                                </button>
+                            ` : ''}
+                        </div>
                         <div id="nodaDetailLineItemsWrapper" class="overflow-auto rounded-lg border border-gray-200 bg-white">
                             <table class="min-w-full">
                                 <thead class="bg-gray-50">
@@ -2776,10 +2833,10 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
-                                    ${sortedLineItems.length ? sortedLineItems.map(lineItem => {
+                                    ${visibleLineItems.length ? visibleLineItems.map(lineItem => {
                                         const lineStatusInfo = getNodaStatusInfo(lineItem.status);
-                                        const hasShortfall = (Number(lineItem.shortfallQuantity) || 0) > 0;
-                                        const rowHighlightClass = hasShortfall
+                                        const isInsufficientRow = isNodaLineItemInsufficient(lineItem);
+                                        const rowHighlightClass = isInsufficientRow
                                             ? 'bg-red-50 hover:bg-red-100'
                                             : 'hover:bg-blue-50';
                                         
@@ -2858,7 +2915,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                                 ` : ''}
                                             </tr>
                                         `;
-                                    }).join('') : `<tr><td colspan="${isEditMode ? 10 : 9}" class="text-center py-4 text-gray-500">No line items found</td></tr>`}
+                                    }).join('') : `<tr><td colspan="${isEditMode ? 10 : 9}" class="text-center py-4 text-gray-500">${t('noLineItemsFound')}</td></tr>`}
                                 </tbody>
                             </table>
                         </div>
@@ -3122,6 +3179,7 @@ window.closeNodaModal = function() {
     disconnectNodaDetailModalResizeObserver();
     nodaDetailModalState.request = null;
     nodaDetailModalState.isSummaryCollapsed = false;
+    nodaDetailModalState.lineItemFilter = 'all';
     closeNodaInventoryModal();
     const modal = document.getElementById('nodaDetailModal');
     modal.classList.add('hidden');
