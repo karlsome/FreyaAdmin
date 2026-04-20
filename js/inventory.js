@@ -200,6 +200,9 @@ function renderInventoryTable() {
                     <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('physicalQuantity')">
                         ${t('physicalStock')} ${getInventorySortArrow('physicalQuantity')}
                     </th>
+                    <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('stockBoxCount')">
+                        ${t('stockBoxCount')} ${getInventorySortArrow('stockBoxCount')}
+                    </th>
                     <th class="px-2 sm:px-4 py-2 sm:py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortInventoryTable('reservedQuantity')">
                         ${t('reservedStock')} ${getInventorySortArrow('reservedQuantity')}
                     </th>
@@ -235,6 +238,9 @@ function renderInventoryTable() {
                             </td>
                             <td class="px-2 sm:px-4 py-2 sm:py-3">
                                 <span class="text-green-600 font-medium">${item.physicalQuantity}</span>
+                            </td>
+                            <td class="px-2 sm:px-4 py-2 sm:py-3">
+                                <span class="text-sky-600 font-medium">${formatInventoryBoxCount(item.stockBoxCount)}</span>
                             </td>
                             <td class="px-2 sm:px-4 py-2 sm:py-3">
                                 <span class="text-yellow-600 font-medium">${item.reservedQuantity}</span>
@@ -275,6 +281,19 @@ function getAvailabilityStatus(availableQuantity) {
     } else {
         return { icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800' };
     }
+}
+
+function formatInventoryBoxCount(boxCount) {
+    const numericValue = Number(boxCount);
+    if (!Number.isFinite(numericValue)) {
+        return '-';
+    }
+
+    const isWholeNumber = Math.abs(numericValue - Math.round(numericValue)) < 0.000001;
+    return numericValue.toLocaleString(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: isWholeNumber ? 0 : 2
+    });
 }
 
 /**
@@ -612,6 +631,7 @@ function renderInventoryTransactions(transactions, backNumber) {
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
     const isAdmin = currentUser.role === 'admin';
     const currentPhysicalQuantity = currentItem.physicalQuantity ?? currentItem.runningQuantity ?? 0;
+    const currentStockBoxCount = currentItem.stockBoxCount;
     const currentReservedQuantity = currentItem.reservedQuantity ?? 0;
     const currentAvailableQuantity = currentItem.availableQuantity ?? currentItem.runningQuantity ?? 0;
     
@@ -628,7 +648,7 @@ function renderInventoryTransactions(transactions, backNumber) {
                         </span>
                     ` : ''}
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div class="text-center">
                         <p class="text-sm text-blue-600">${t('partNumber')}</p>
                         <p class="text-lg font-bold text-blue-900">${currentItem.品番}</p>
@@ -640,6 +660,10 @@ function renderInventoryTransactions(transactions, backNumber) {
                     <div class="text-center">
                         <p class="text-sm text-yellow-600">${t('reservedStock')}</p>
                         <p class="text-lg font-bold text-yellow-700">${currentReservedQuantity}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-sm text-sky-600">${t('stockBoxCount')}</p>
+                        <p class="text-lg font-bold text-sky-700">${formatInventoryBoxCount(currentStockBoxCount)}</p>
                     </div>
                     <div class="text-center">
                         <p class="text-sm text-purple-600">${t('availableStock')}</p>
