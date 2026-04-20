@@ -626,6 +626,19 @@ function formatNodaInventoryTimestamp(value) {
     return parsedDate.toLocaleString();
 }
 
+function formatNodaInventoryBoxCount(value) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+        return '-';
+    }
+
+    const isWholeNumber = Math.abs(numericValue - Math.round(numericValue)) < 0.000001;
+    return numericValue.toLocaleString(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: isWholeNumber ? 0 : 2
+    });
+}
+
 function ensureNodaInventoryModal() {
     let modal = document.getElementById('nodaInventoryModal');
     if (modal) {
@@ -637,13 +650,13 @@ function ensureNodaInventoryModal() {
             <div class="flex items-center justify-center min-h-screen p-4">
                 <div class="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden">
                     <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                        <h3 class="text-lg font-semibold text-gray-900">Current Inventory</h3>
+                        <h3 id="nodaInventoryModalTitle" class="text-lg font-semibold text-gray-900">${t('currentInventory')}</h3>
                         <button onclick="closeNodaInventoryModal()" class="text-gray-400 hover:text-gray-600">
                             <i class="ri-close-line text-xl"></i>
                         </button>
                     </div>
                     <div id="nodaInventoryModalContent" class="p-6">
-                        <div class="text-sm text-gray-500">Loading inventory...</div>
+                        <div class="text-sm text-gray-500">${t('loadingInventory')}</div>
                     </div>
                 </div>
             </div>
@@ -692,11 +705,16 @@ window.closeNodaInventoryModal = function() {
 async function openNodaInventoryModal(backNumber, partNumber = '') {
     const modal = ensureNodaInventoryModal();
     const content = document.getElementById('nodaInventoryModalContent');
+    const title = document.getElementById('nodaInventoryModalTitle');
+
+    if (title) {
+        title.textContent = t('currentInventory');
+    }
 
     modal.classList.remove('hidden');
     content.innerHTML = `
         <div class="space-y-2">
-            <p class="text-sm text-gray-500">Loading inventory for <span class="font-semibold text-gray-700">${backNumber}</span>...</p>
+            <p class="text-sm text-gray-500">${t('loadingInventoryFor').replace('{backNumber}', `<span class="font-semibold text-gray-700">${backNumber}</span>`)}</p>
         </div>
     `;
 
@@ -715,7 +733,10 @@ async function openNodaInventoryModal(backNumber, partNumber = '') {
         const result = await response.json();
 
         if (!response.ok || !result.success || !result.inventory) {
-            throw new Error(result.error || result.message || 'Inventory not found');
+            const localizedMessage = result.message === 'Item not found in inventory'
+                ? t('itemNotFoundInInventory')
+                : (result.error || result.message || t('errorCheckingInventory'));
+            throw new Error(localizedMessage);
         }
 
         const inventory = result.inventory;
@@ -723,32 +744,36 @@ async function openNodaInventoryModal(backNumber, partNumber = '') {
             <div class="space-y-5">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">背番号</label>
+                        <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">${t('serialNumber')}</label>
                         <p class="mt-1 text-base font-semibold text-gray-900">${inventory.背番号 || backNumber}</p>
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">品番</label>
+                        <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">${t('partNumber')}</label>
                         <p class="mt-1 text-base font-semibold text-gray-900">${inventory.品番 || partNumber || '-'}</p>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Physical</p>
+                        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">${t('physical')}</p>
                         <p class="mt-2 text-2xl font-semibold text-gray-900">${inventory.physicalQuantity ?? 0}</p>
                     </div>
+                    <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+                        <p class="text-xs font-medium text-sky-600 uppercase tracking-wide">${t('boxes')}</p>
+                        <p class="mt-2 text-2xl font-semibold text-sky-700">${formatNodaInventoryBoxCount(inventory.stockBoxCount)}</p>
+                    </div>
                     <div class="rounded-lg border border-orange-200 bg-orange-50 p-4">
-                        <p class="text-xs font-medium text-orange-600 uppercase tracking-wide">Reserved</p>
+                        <p class="text-xs font-medium text-orange-600 uppercase tracking-wide">${t('reserved')}</p>
                         <p class="mt-2 text-2xl font-semibold text-orange-700">${inventory.reservedQuantity ?? 0}</p>
                     </div>
                     <div class="rounded-lg border border-green-200 bg-green-50 p-4">
-                        <p class="text-xs font-medium text-green-600 uppercase tracking-wide">Available</p>
+                        <p class="text-xs font-medium text-green-600 uppercase tracking-wide">${t('available')}</p>
                         <p class="mt-2 text-2xl font-semibold text-green-700">${inventory.availableQuantity ?? inventory.runningQuantity ?? 0}</p>
                     </div>
                 </div>
 
                 <div>
-                    <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">Last Updated</label>
+                    <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide">${t('lastUpdated')}</label>
                     <p class="mt-1 text-sm text-gray-700">${formatNodaInventoryTimestamp(inventory.lastUpdated)}</p>
                 </div>
             </div>
@@ -756,7 +781,7 @@ async function openNodaInventoryModal(backNumber, partNumber = '') {
     } catch (error) {
         content.innerHTML = `
             <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
-                <p class="font-medium">Failed to load inventory</p>
+                <p class="font-medium">${t('failedToLoadInventory')}</p>
                 <p class="mt-1 text-sm">${error.message}</p>
             </div>
         `;
