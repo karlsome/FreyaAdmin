@@ -317,13 +317,20 @@ function renderNodaTable() {
                     
                     // Determine which status to show in the badge
                     let displayStatus = item.status;
-                    if (!isCompleted && !isPastDeadline) {
-                        // For active requests, show dynamic inventory status if it differs from stored
-                        if (dynamicStatus === 'sufficient') {
-                            displayStatus = 'pending'; // Show as pending if inventory is now OK
-                        } else if (dynamicStatus === 'waiting-for-inventory' || dynamicStatus === 'partial-inventory') {
-                            displayStatus = dynamicStatus; // Show inventory status
-                        }
+                        if (!isCompleted && !isPastDeadline) {
+                            const usesInventoryDrivenStatus = ['pending', 'partial-inventory', 'waiting-for-inventory'].includes(item.status);
+
+                            // Only inventory-driven statuses should be normalized by the live FIFO result.
+                            // Workflow statuses like in-progress or paused must stay visible as-is.
+                            if (usesInventoryDrivenStatus) {
+                                if (dynamicStatus === 'sufficient') {
+                                    displayStatus = 'pending';
+                                } else if (dynamicStatus === 'waiting-for-inventory' || dynamicStatus === 'partial-inventory') {
+                                    displayStatus = dynamicStatus;
+                                }
+                            } else {
+                                displayStatus = item.status;
+                            }
                     } else if (isPastDeadline) {
                         displayStatus = 'past-deadline';
                     }
