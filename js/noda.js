@@ -751,6 +751,216 @@ function ensureNodaInventoryModal() {
     return modal;
 }
 
+function renderNodaDetailExportModalContent(modal) {
+    modal.innerHTML = `
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">${t('exportCsv')}</h3>
+                        <p class="mt-1 text-sm text-gray-500">${t('chooseItemsToExport')}</p>
+                    </div>
+                    <button type="button" onclick="closeNodaDetailExportModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+                <div class="px-6 py-5 space-y-3">
+                    <button type="button" onclick="exportNodaDetailCsv('all')" class="w-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-left transition hover:border-blue-300 hover:bg-blue-100">
+                        <span class="flex items-start gap-3">
+                            <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-blue-600 shadow-sm">
+                                <i class="ri-list-check-2 text-lg"></i>
+                            </span>
+                            <span>
+                                <span class="block text-sm font-semibold text-gray-900">${t('exportAllItems')}</span>
+                                <span class="mt-1 block text-xs text-gray-500">${t('lineItems')}</span>
+                            </span>
+                        </span>
+                    </button>
+                    <button type="button" onclick="exportNodaDetailCsv('shortage')" class="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-left transition hover:border-red-300 hover:bg-red-100">
+                        <span class="flex items-start gap-3">
+                            <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-red-600 shadow-sm">
+                                <i class="ri-error-warning-line text-lg"></i>
+                            </span>
+                            <span>
+                                <span class="block text-sm font-semibold text-gray-900">${t('exportShortageItems')}</span>
+                                <span class="mt-1 block text-xs text-gray-500">${t('insufficientItems')}</span>
+                            </span>
+                        </span>
+                    </button>
+                </div>
+                <div class="px-6 py-4 border-t border-gray-200 flex justify-end">
+                    <button type="button" onclick="closeNodaDetailExportModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                        ${t('close')}
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function ensureNodaDetailExportModal() {
+    let modal = document.getElementById('nodaDetailExportModal');
+    if (!modal) {
+        document.body.insertAdjacentHTML('beforeend', '<div id="nodaDetailExportModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[90]"></div>');
+        modal = document.getElementById('nodaDetailExportModal');
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeNodaDetailExportModal();
+            }
+        });
+    }
+
+    renderNodaDetailExportModalContent(modal);
+    return modal;
+}
+
+function escapeNodaCsvValue(value) {
+    const stringValue = value === null || value === undefined ? '' : String(value);
+    return `"${stringValue.replace(/"/g, '""')}"`;
+}
+
+function downloadNodaCsvFile(headers, rows, fileName) {
+    if (!rows.length) {
+        alert(t('alertNoDataToExport'));
+        return;
+    }
+
+    const csvLines = [
+        headers.map(escapeNodaCsvValue).join(','),
+        ...rows.map((row) => row.map(escapeNodaCsvValue).join(','))
+    ];
+
+    const blob = new Blob([`\uFEFF${csvLines.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function sanitizeNodaCsvFileNameSegment(value) {
+    const sanitizedValue = String(value || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 80);
+
+    return sanitizedValue || 'request';
+}
+
+function formatNodaCsvDateValue(value, includeTime = false) {
+    if (!value) {
+        return '';
+    }
+
+    const parsedDate = new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) {
+        return String(value);
+    }
+
+    return includeTime ? parsedDate.toLocaleString() : parsedDate.toLocaleDateString();
+}
+
+function getNodaInventoryStatusExportLabel(inventoryStatus) {
+    switch (inventoryStatus) {
+        case 'none':
+            return t('waiting');
+        case 'insufficient':
+            return t('partial');
+        case 'sufficient':
+            return t('available');
+        default:
+            return '-';
+    }
+}
+
+window.openNodaDetailExportModal = function() {
+    if (!nodaDetailModalState.request) {
+        return;
+    }
+
+    ensureNodaDetailExportModal().classList.remove('hidden');
+};
+
+window.closeNodaDetailExportModal = function() {
+    const modal = document.getElementById('nodaDetailExportModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+};
+
+window.exportNodaDetailCsv = function(scope = 'all') {
+    const request = nodaDetailModalState.request;
+    if (!request) {
+        return;
+    }
+
+    const sortedLineItems = getSortedNodaDetailLineItems(request.lineItems || []);
+    const exportScope = scope === 'shortage' ? 'shortage' : 'all';
+    const itemsToExport = exportScope === 'shortage'
+        ? sortedLineItems.filter(isNodaLineItemInsufficient)
+        : sortedLineItems;
+
+    if (!itemsToExport.length) {
+        alert(t('alertNoDataToExport'));
+        return;
+    }
+
+    const overallStatusText = getNodaStatusInfo(request.status).text;
+    const pickupDate = formatNodaCsvDateValue(request.pickupDate || request.date);
+    const headers = [
+        t('requestNumber'),
+        t('overallStatus'),
+        t('pickupDate'),
+        t('deliveryOrder'),
+        t('deliveryNote'),
+        t('deliveryDeadline'),
+        t('lineNumber'),
+        t('partNumber'),
+        t('backNumber'),
+        t('shippingBoxes'),
+        t('shortfallBoxes'),
+        t('shippingQuantity'),
+        t('shortfallQuantity'),
+        t('inventoryStatusCol'),
+        t('warehouseStatus'),
+        t('createdAt'),
+        t('createdBy')
+    ];
+
+    const rows = itemsToExport.map((lineItem) => {
+        const lineStatusText = getNodaStatusInfo(lineItem.status).text;
+
+        return [
+            request.requestNumber || '',
+            overallStatusText,
+            pickupDate,
+            request.便 || '',
+            request.納品書番号 || '',
+            request.納入指示日 || '',
+            lineItem.lineNumber ?? '',
+            lineItem.品番 || '',
+            lineItem.背番号 || '',
+            lineItem.箱数 ?? '',
+            lineItem['箱数足りない'] ?? 0,
+            lineItem.quantity ?? '',
+            lineItem.shortfallQuantity ?? 0,
+            getNodaInventoryStatusExportLabel(lineItem.inventoryStatus),
+            lineStatusText,
+            formatNodaCsvDateValue(request.createdAt, true),
+            request.createdBy || ''
+        ];
+    });
+
+    const fileName = `noda_request_${sanitizeNodaCsvFileNameSegment(request.requestNumber)}_${exportScope}_${new Date().toISOString().split('T')[0]}.csv`;
+    downloadNodaCsvFile(headers, rows, fileName);
+    closeNodaDetailExportModal();
+};
+
 function setupNodaDetailLineRowHandlers() {
     document.querySelectorAll('[data-noda-line-number]').forEach((row) => {
         row.addEventListener('click', (event) => {
@@ -2551,30 +2761,23 @@ function downloadNodaCsv(data) {
         alert(t('alertNoDataToExport'));
         return;
     }
-    
+
     const headers = ['Request Number', 'Status', '品番', '背番号', 'Pickup Date', 'Quantity', 'Created At'];
-    const csvContent = [
-        headers.join(','),
-        ...data.map(item => [
+    const rows = data.map(item => [
             item.requestNumber,
             item.status,
             item.品番,
             item.背番号,
-            new Date(item.date).toLocaleDateString(),
+            formatNodaCsvDateValue(item.date || item.pickupDate),
             item.quantity,
-            new Date(item.createdAt).toLocaleString()
-        ].join(','))
-    ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `noda_requests_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+            formatNodaCsvDateValue(item.createdAt, true)
+    ]);
+
+    downloadNodaCsvFile(
+        headers,
+        rows,
+        `noda_requests_${new Date().toISOString().split('T')[0]}.csv`
+    );
 }
 
 // ==================== MODAL FUNCTIONALITY ====================
@@ -2809,12 +3012,20 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                 `}
                         <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <h4 class="text-lg font-medium text-gray-900">${t('lineItems')}</h4>
-                            ${isShowingOnlyInsufficient ? `
-                                <button type="button" onclick="showAllNodaDetailLineItems()" class="inline-flex items-center gap-2 self-start rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100">
-                                    <i class="ri-eye-line"></i>
-                                    ${t('showAll')}
-                                </button>
-                            ` : ''}
+                            <div class="flex flex-col gap-2 self-start sm:flex-row sm:items-center">
+                                ${sortedLineItems.length ? `
+                                    <button type="button" onclick="openNodaDetailExportModal()" class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100">
+                                        <i class="ri-download-2-line"></i>
+                                        ${t('exportCsv')}
+                                    </button>
+                                ` : ''}
+                                ${isShowingOnlyInsufficient ? `
+                                    <button type="button" onclick="showAllNodaDetailLineItems()" class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100">
+                                        <i class="ri-eye-line"></i>
+                                        ${t('showAll')}
+                                    </button>
+                                ` : ''}
+                            </div>
                         </div>
                         <div id="nodaDetailLineItemsWrapper" class="overflow-auto rounded-lg border border-gray-200 bg-white">
                             <table class="min-w-full">
@@ -3180,6 +3391,7 @@ window.closeNodaModal = function() {
     nodaDetailModalState.request = null;
     nodaDetailModalState.isSummaryCollapsed = false;
     nodaDetailModalState.lineItemFilter = 'all';
+    closeNodaDetailExportModal();
     closeNodaInventoryModal();
     const modal = document.getElementById('nodaDetailModal');
     modal.classList.add('hidden');
