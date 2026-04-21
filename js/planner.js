@@ -37,10 +37,21 @@ let plannerState = {
         { name: 'Lunch Break', start: '12:00', end: '12:45', isDefault: true, id: 'default-lunch' },
         { name: 'Break', start: '15:00', end: '15:15', isDefault: true, id: 'default-break' }
     ],
+    activeMainTab: 'goals',
     activeTab: 'timeline',
     productColors: {},
     colorIndex: 0,
-    hideUnavailableEquipment: false // Toggle for hiding greyed out equipment
+    hideUnavailableEquipment: false, // Toggle for hiding greyed out equipment
+    preview: {
+        data: null,
+        error: '',
+        isLoading: false,
+        isDirty: true,
+        lastLoadedAt: 0,
+        horizonDays: 3,
+        autoRefreshTimer: null,
+        pendingPromise: null
+    }
 };
 
 // Color palette for products
@@ -50,6 +61,9 @@ const PRODUCT_COLORS = [
     '#14B8A6', '#F43F5E', '#A855F7', '#22C55E', '#FBBF24',
     '#E879F9', '#2DD4BF', '#FB7185', '#A3E635', '#818CF8'
 ];
+
+const PLANNER_PREVIEW_CACHE_MS = 60 * 1000;
+const PLANNER_PREVIEW_AUTO_REFRESH_DELAY_MS = 400;
 
 // Get random color from palette or assign next color
 function getRandomColor() {
@@ -336,6 +350,679 @@ function resolvePlannerBoxQuantity(product = {}, equipmentName = '') {
     return 1;
 }
 
+function buildPlannerPreviewKey(sebanggo = '', hinban = '') {
+    return `${String(sebanggo || '').trim()}::${String(hinban || '').trim()}`;
+}
+
+function escapePlannerPreviewHtml(value = '') {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatPlannerPreviewNumber(value, fallback = '0') {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+        return fallback;
+    }
+
+    return numericValue.toLocaleString();
+}
+
+function formatPlannerPreviewDate(value = '') {
+    const text = String(value || '').trim();
+    if (!text) {
+        return '-';
+    }
+
+    const parsed = new Date(`${text}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+        return text;
+    }
+
+    return parsed.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        weekday: 'short'
+    });
+}
+
+function formatPlannerPreviewTimestamp(value = '') {
+    if (!value) {
+        return 'Not refreshed yet';
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return String(value);
+    }
+
+    return parsed.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function getPlannerPreviewCoveragePercent(item = {}) {
+    const demandQuantity = Number(item.totalDemandQuantity || 0);
+    if (demandQuantity <= 0) {
+        return 100;
+    }
+
+    const coveredQuantity = Number(item.inventoryCoveredQuantity || 0) + Number(item.plannedCoveredQuantity || 0);
+    return Math.max(0, Math.min(100, Math.round((coveredQuantity / demandQuantity) * 100)));
+}
+
+function recalculatePlannerPreviewItem(item = {}) {
+    const demandQuantity = Number(item.totalDemandQuantity || 0);
+    const physicalInventory = Number(item.physicalInventory || 0);
+    const currentPlannedQuantity = Number(item.currentPlannedQuantity || 0);
+    const inventoryCoveredQuantity = Math.min(physicalInventory, demandQuantity);
+    const requiredProductionQuantity = Math.max(demandQuantity - physicalInventory, 0);
+    const plannedCoveredQuantity = Math.min(requiredProductionQuantity, currentPlannedQuantity);
+    const uncoveredQuantity = Math.max(requiredProductionQuantity - currentPlannedQuantity, 0);
+    const overplannedQuantity = Math.max(currentPlannedQuantity - requiredProductionQuantity, 0);
+
+    let changeType = 'inventory-only';
+    if (uncoveredQuantity > 0) {
+        changeType = currentPlannedQuantity > 0 ? 'increase' : 'add';
+    } else if (overplannedQuantity > 0) {
+        changeType = 'overplanned';
+    } else if (currentPlannedQuantity > 0) {
+        changeType = 'covered';
+    }
+
+    return {
+        ...item,
+        inventoryCoveredQuantity,
+        requiredProductionQuantity,
+        plannedCoveredQuantity,
+        uncoveredQuantity,
+        overplannedQuantity,
+        changeType,
+    };
+}
+
+function getPlannerPreviewEquipmentSummary() {
+    const equipmentMap = new Map();
+
+    plannerState.selectedProducts.forEach((product = {}) => {
+        const equipment = String(product.equipment || '').trim() || 'Unassigned';
+        const quantity = Number(product.quantity || 0);
+        const summary = equipmentMap.get(equipment) || {
+            equipment,
+            quantity: 0,
+            itemCount: 0,
+            startTimes: []
+        };
+
+        summary.quantity += Number.isFinite(quantity) ? quantity : 0;
+        summary.itemCount += 1;
+        if (product.startTime) {
+            summary.startTimes.push(String(product.startTime));
+        }
+
+        equipmentMap.set(equipment, summary);
+    });
+
+    return Array.from(equipmentMap.values())
+        .map((entry) => ({
+            ...entry,
+            firstStartTime: entry.startTimes.sort()[0] || null,
+        }))
+        .sort((left, right) => {
+            if (right.quantity !== left.quantity) {
+                return right.quantity - left.quantity;
+            }
+            return left.equipment.localeCompare(right.equipment);
+        });
+}
+
+function applyLocalPlanToPlannerPreview(preview = {}) {
+    const localPlanMap = new Map();
+
+    plannerState.selectedProducts.forEach((product = {}) => {
+        const key = buildPlannerPreviewKey(product.背番号, product.品番);
+        if (!key || key === '::') {
+            return;
+        }
+
+        const quantity = Number(product.quantity || 0);
+        const current = localPlanMap.get(key) || {
+            quantity: 0,
+            equipment: new Set(),
+            entryCount: 0
+        };
+
+        current.quantity += Number.isFinite(quantity) ? quantity : 0;
+        current.entryCount += 1;
+        if (product.equipment) {
+            current.equipment.add(String(product.equipment).trim());
+        }
+
+        localPlanMap.set(key, current);
+    });
+
+    const items = Array.isArray(preview.items)
+        ? preview.items.map((rawItem) => {
+            const item = { ...rawItem };
+            const localPlan = localPlanMap.get(buildPlannerPreviewKey(item.背番号, item.品番));
+
+            if (localPlan) {
+                item.currentPlannedQuantity = localPlan.quantity;
+                item.plannedEquipment = Array.from(localPlan.equipment);
+                item.plannedEntryCount = localPlan.entryCount;
+            } else if (plannerState.selectedProducts.length > 0) {
+                item.currentPlannedQuantity = 0;
+                item.plannedEquipment = [];
+                item.plannedEntryCount = 0;
+            }
+
+            return recalculatePlannerPreviewItem(item);
+        })
+        : [];
+
+    const summary = {
+        itemCount: items.length,
+        atRiskCount: items.filter((item) => Number(item.uncoveredQuantity || 0) > 0).length,
+        missingCapabilityCount: items.filter((item) => Number(item.requiredProductionQuantity || 0) > 0 && item.capabilityStatus !== 'mapped').length,
+        totalDemandQuantity: items.reduce((sum, item) => sum + Number(item.totalDemandQuantity || 0), 0),
+        totalInventoryCoveredQuantity: items.reduce((sum, item) => sum + Number(item.inventoryCoveredQuantity || 0), 0),
+        totalRequiredProductionQuantity: items.reduce((sum, item) => sum + Number(item.requiredProductionQuantity || 0), 0),
+        totalCurrentPlannedQuantity: items.reduce((sum, item) => sum + Number(item.currentPlannedQuantity || 0), 0),
+        totalPlannedCoveredQuantity: items.reduce((sum, item) => sum + Number(item.plannedCoveredQuantity || 0), 0),
+        totalUncoveredQuantity: items.reduce((sum, item) => sum + Number(item.uncoveredQuantity || 0), 0),
+        totalOverplannedQuantity: items.reduce((sum, item) => sum + Number(item.overplannedQuantity || 0), 0),
+    };
+
+    return {
+        ...preview,
+        items,
+        currentPlan: {
+            ...(preview.currentPlan || {}),
+            exists: plannerState.selectedProducts.length > 0 || preview.currentPlan?.exists === true,
+            productCount: plannerState.selectedProducts.length || Number(preview.currentPlan?.productCount || 0),
+        },
+        summary,
+    };
+}
+
+function schedulePlannerPreviewRefresh() {
+    if (plannerState.preview.autoRefreshTimer) {
+        clearTimeout(plannerState.preview.autoRefreshTimer);
+    }
+
+    plannerState.preview.autoRefreshTimer = setTimeout(() => {
+        ensurePlannerPreviewLoaded({ forceRefresh: true }).catch((error) => {
+            console.error('Failed to auto-refresh planner preview:', error);
+        });
+    }, PLANNER_PREVIEW_AUTO_REFRESH_DELAY_MS);
+}
+
+function markPlannerPreviewDirty(options = {}) {
+    const clearData = options.clearData === true;
+    const scheduleIfActive = options.scheduleIfActive !== false;
+
+    plannerState.preview.isDirty = true;
+
+    if (clearData) {
+        plannerState.preview.data = null;
+        plannerState.preview.error = '';
+        plannerState.preview.lastLoadedAt = 0;
+    } else if (plannerState.preview.data) {
+        plannerState.preview.data = applyLocalPlanToPlannerPreview(plannerState.preview.data);
+    }
+
+    if (plannerState.activeMainTab === 'preview') {
+        renderPlannerPreview();
+
+        if (scheduleIfActive && plannerState.currentFactory && plannerState.currentDate) {
+            schedulePlannerPreviewRefresh();
+        }
+    }
+}
+
+async function ensurePlannerPreviewLoaded(options = {}) {
+    const forceRefresh = options.forceRefresh === true;
+    const showNotifications = options.showNotifications === true;
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        renderPlannerPreview();
+        return null;
+    }
+
+    if (
+        !forceRefresh
+        && plannerState.preview.data
+        && !plannerState.preview.isDirty
+        && (Date.now() - plannerState.preview.lastLoadedAt) < PLANNER_PREVIEW_CACHE_MS
+    ) {
+        renderPlannerPreview();
+        return plannerState.preview.data;
+    }
+
+    if (plannerState.preview.pendingPromise) {
+        return plannerState.preview.pendingPromise;
+    }
+
+    plannerState.preview.isLoading = true;
+    plannerState.preview.error = '';
+    renderPlannerPreview();
+
+    const requestUrl = `${BASE_URL}api/production-planner/preview?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}&horizonDays=${encodeURIComponent(plannerState.preview.horizonDays)}`;
+
+    plannerState.preview.pendingPromise = (async () => {
+        try {
+            const response = await fetch(requestUrl);
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || result.message || 'Failed to load planner preview');
+            }
+
+            plannerState.preview.data = applyLocalPlanToPlannerPreview(result.preview || {});
+            plannerState.preview.isDirty = false;
+            plannerState.preview.lastLoadedAt = Date.now();
+            plannerState.preview.error = '';
+
+            if (showNotifications) {
+                showPlannerNotification('Preview refreshed', 'success');
+            }
+
+            return plannerState.preview.data;
+        } catch (error) {
+            plannerState.preview.error = error.message || 'Failed to load planner preview';
+            if (showNotifications) {
+                showPlannerNotification('Failed to refresh preview: ' + plannerState.preview.error, 'error');
+            }
+            throw error;
+        } finally {
+            plannerState.preview.isLoading = false;
+            plannerState.preview.pendingPromise = null;
+            renderPlannerPreview();
+        }
+    })();
+
+    return plannerState.preview.pendingPromise;
+}
+
+function renderPlannerPreview() {
+    const container = document.getElementById('plannerPreviewContainer');
+    if (!container) {
+        return;
+    }
+
+    if (!plannerState.currentFactory) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-radar-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Select a factory to generate a live preview</p>
+                <p class="mt-2 text-sm">The preview compares latest physical inventory, the next 3 days of requests, and your current planner draft.</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (plannerState.preview.isLoading && !plannerState.preview.data) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8">
+                <div class="flex items-center gap-4 text-gray-700 dark:text-gray-200">
+                    <div class="h-10 w-10 rounded-full border-4 border-cyan-200 border-t-cyan-600 animate-spin"></div>
+                    <div>
+                        <p class="text-lg font-semibold">Building live preview</p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">Analyzing inventory, 3-day request demand, and current planner rows.</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    if (!plannerState.preview.data && plannerState.preview.error) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
+                <i class="ri-error-warning-line text-5xl text-rose-500 mb-3 block"></i>
+                <p class="text-lg font-semibold text-rose-800">Preview failed to load</p>
+                <p class="mt-2 text-sm text-rose-700">${escapePlannerPreviewHtml(plannerState.preview.error)}</p>
+                <button onclick="refreshPlannerPreview(true)" class="mt-5 inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 transition-colors">
+                    <i class="ri-refresh-line"></i>
+                    <span>Retry</span>
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+    if (preview) {
+        plannerState.preview.data = preview;
+    }
+    if (!preview) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-radar-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Preview is ready when you are</p>
+                <p class="mt-2 text-sm">Refresh to compare the current planner draft against live demand and inventory.</p>
+            </div>
+        `;
+        return;
+    }
+
+    const summary = preview.summary || {};
+    const equipmentSummary = getPlannerPreviewEquipmentSummary();
+    const atRiskItems = (preview.items || []).filter((item) => Number(item.uncoveredQuantity || 0) > 0).slice(0, 6);
+    const capabilityExceptions = (preview.items || []).filter((item) => Number(item.requiredProductionQuantity || 0) > 0 && item.capabilityStatus !== 'mapped').slice(0, 6);
+    const highlightedItems = (preview.items || []).filter((item) => item.changeType !== 'inventory-only').slice(0, 10);
+    const totalCoveredQuantity = Number(summary.totalInventoryCoveredQuantity || 0) + Number(summary.totalPlannedCoveredQuantity || 0);
+    const totalCoveragePercent = Number(summary.totalDemandQuantity || 0) > 0
+        ? Math.max(0, Math.min(100, Math.round((totalCoveredQuantity / Number(summary.totalDemandQuantity || 0)) * 100)))
+        : 100;
+    const statusText = plannerState.preview.isLoading
+        ? 'Refreshing live data...'
+        : plannerState.preview.isDirty
+            ? 'Planner draft changed. Refresh pending.'
+            : `Last refresh ${formatPlannerPreviewTimestamp(preview.generatedAt)}`;
+
+    container.innerHTML = `
+        <div class="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-950 text-white shadow-2xl">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.35),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(34,197,94,0.2),_transparent_36%)]"></div>
+            <div class="relative p-6 lg:p-8">
+                <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                    <div class="max-w-3xl">
+                        <div class="flex flex-wrap gap-2 mb-4 text-xs font-medium uppercase tracking-[0.18em] text-slate-300">
+                            <span class="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-3 py-1 text-cyan-200">Live Preview</span>
+                            <span class="rounded-full border border-white/15 px-3 py-1">${escapePlannerPreviewHtml(preview.factory || plannerState.currentFactory)}</span>
+                            <span class="rounded-full border border-white/15 px-3 py-1">Target ${escapePlannerPreviewHtml(preview.targetDate || plannerState.currentDate)}</span>
+                            <span class="rounded-full border border-white/15 px-3 py-1">${formatPlannerPreviewNumber(preview.horizon?.days || plannerState.preview.horizonDays)} day horizon</span>
+                        </div>
+                        <h3 class="text-2xl lg:text-3xl font-semibold tracking-tight">Current inventory vs next 3 days of request demand</h3>
+                        <p class="mt-3 text-sm leading-6 text-slate-300">This draft-only view combines the latest physical inventory, active NODA requests inside the horizon, and the planner rows currently visible on screen. Nothing here writes to the planner by itself.</p>
+                    </div>
+                    <div class="flex flex-col items-stretch gap-3 lg:items-end lg:text-right">
+                        <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+                            <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
+                            <div class="mt-1 text-xs text-slate-400">Coverage ${formatPlannerPreviewNumber(totalCoveragePercent)}% of ${formatPlannerPreviewNumber(summary.totalDemandQuantity || 0)} pcs</div>
+                        </div>
+                        <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-300 transition-colors">
+                            <i class="ri-refresh-line"></i>
+                            <span>${plannerState.preview.isLoading ? 'Refreshing...' : 'Refresh Preview'}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+            <div class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
+                <p class="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">3-Day Demand</p>
+                <p class="mt-3 text-2xl font-semibold text-slate-900 dark:text-white">${formatPlannerPreviewNumber(summary.totalDemandQuantity || 0)}</p>
+                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">${formatPlannerPreviewNumber(summary.itemCount || 0)} active products</p>
+            </div>
+            <div class="rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 p-4 shadow-sm">
+                <p class="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">Covered By Inventory</p>
+                <p class="mt-3 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">${formatPlannerPreviewNumber(summary.totalInventoryCoveredQuantity || 0)}</p>
+                <p class="mt-2 text-xs text-emerald-700/80 dark:text-emerald-300/80">No production required</p>
+            </div>
+            <div class="rounded-2xl border border-cyan-200 dark:border-cyan-900 bg-cyan-50 dark:bg-cyan-950/30 p-4 shadow-sm">
+                <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">Production Needed</p>
+                <p class="mt-3 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(summary.totalRequiredProductionQuantity || 0)}</p>
+                <p class="mt-2 text-xs text-cyan-700/80 dark:text-cyan-300/80">After inventory coverage</p>
+            </div>
+            <div class="rounded-2xl border border-violet-200 dark:border-violet-900 bg-violet-50 dark:bg-violet-950/30 p-4 shadow-sm">
+                <p class="text-xs uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">In Current Draft</p>
+                <p class="mt-3 text-2xl font-semibold text-violet-900 dark:text-violet-100">${formatPlannerPreviewNumber(summary.totalCurrentPlannedQuantity || 0)}</p>
+                <p class="mt-2 text-xs text-violet-700/80 dark:text-violet-300/80">${formatPlannerPreviewNumber(summary.totalPlannedCoveredQuantity || 0)} pcs protecting demand</p>
+            </div>
+            <div class="rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 p-4 shadow-sm">
+                <p class="text-xs uppercase tracking-[0.16em] text-rose-700 dark:text-rose-300">Still At Risk</p>
+                <p class="mt-3 text-2xl font-semibold text-rose-900 dark:text-rose-100">${formatPlannerPreviewNumber(summary.totalUncoveredQuantity || 0)}</p>
+                <p class="mt-2 text-xs text-rose-700/80 dark:text-rose-300/80">${formatPlannerPreviewNumber(summary.atRiskCount || 0)} products uncovered</p>
+            </div>
+            <div class="rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4 shadow-sm">
+                <p class="text-xs uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">Capability Gaps</p>
+                <p class="mt-3 text-2xl font-semibold text-amber-900 dark:text-amber-100">${formatPlannerPreviewNumber(summary.missingCapabilityCount || 0)}</p>
+                <p class="mt-2 text-xs text-amber-700/80 dark:text-amber-300/80">Items needing review before execution</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
+            <div class="xl:col-span-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                <div class="flex items-center justify-between gap-3 mb-5">
+                    <div>
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Demand Horizon</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">How the next ${formatPlannerPreviewNumber(preview.horizon?.days || plannerState.preview.horizonDays)} days are stacking up right now.</p>
+                    </div>
+                    <div class="text-sm font-medium text-gray-600 dark:text-gray-300">${formatPlannerPreviewNumber(totalCoveragePercent)}% covered</div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    ${(preview.dailyDemand || []).map((day) => {
+                        const dayQuantity = Number(day.quantity || 0);
+                        const dayPercent = Number(summary.totalDemandQuantity || 0) > 0
+                            ? Math.max(8, Math.round((dayQuantity / Number(summary.totalDemandQuantity || 0)) * 100))
+                            : 8;
+                        return `
+                            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-slate-50 dark:bg-slate-900/40 p-4">
+                                <div class="flex items-center justify-between gap-3">
+                                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">${escapePlannerPreviewHtml(formatPlannerPreviewDate(day.date))}</p>
+                                    <p class="text-sm text-slate-500 dark:text-slate-400">${formatPlannerPreviewNumber(dayQuantity)} pcs</p>
+                                </div>
+                                <div class="mt-4 h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                                    <div class="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" style="width:${dayPercent}%"></div>
+                                </div>
+                                <p class="mt-3 text-xs text-slate-500 dark:text-slate-400">Inventory and planner draft are both measured against this horizon.</p>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                ${highlightedItems.length > 0 ? `
+                    <div class="mt-5 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                        <div class="px-4 py-3 bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white">Planner Impact Snapshot</p>
+                        </div>
+                        <div class="divide-y divide-gray-200 dark:divide-gray-700">
+                            ${highlightedItems.map((item) => `
+                                <div class="px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p class="font-medium text-gray-900 dark:text-white">${escapePlannerPreviewHtml(item.背番号 || '-')}${item.品番 ? ` <span class="text-gray-400">/ ${escapePlannerPreviewHtml(item.品番)}</span>` : ''}</p>
+                                        <p class="text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(item.品名 || item.モデル || 'No product name')}</p>
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                                        <span class="rounded-full px-2.5 py-1 ${item.changeType === 'overplanned' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200' : item.uncoveredQuantity > 0 ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'}">${item.changeType === 'overplanned' ? `Overplanned by ${formatPlannerPreviewNumber(item.overplannedQuantity || 0)}` : item.uncoveredQuantity > 0 ? `Needs ${formatPlannerPreviewNumber(item.uncoveredQuantity || 0)} more` : 'Covered'}</span>
+                                        <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">Draft ${formatPlannerPreviewNumber(item.currentPlannedQuantity || 0)} pcs</span>
+                                        ${item.preferredMachine ? `<span class="rounded-full bg-cyan-100 px-2.5 py-1 text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-200">Prefers ${escapePlannerPreviewHtml(item.preferredMachine)}</span>` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+
+            <div class="xl:col-span-2 space-y-6">
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                    <div class="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Current Planner Draft</h4>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">What is already on the planner screen right now.</p>
+                        </div>
+                        <div class="rounded-full bg-slate-100 dark:bg-slate-700 px-3 py-1 text-xs font-medium text-slate-700 dark:text-slate-200">${formatPlannerPreviewNumber(equipmentSummary.length)} machines</div>
+                    </div>
+                    ${equipmentSummary.length > 0 ? `
+                        <div class="space-y-3">
+                            ${equipmentSummary.slice(0, 8).map((equipment) => `
+                                <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-slate-50 dark:bg-slate-900/40 px-4 py-3">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <p class="font-medium text-gray-900 dark:text-white">${escapePlannerPreviewHtml(equipment.equipment)}</p>
+                                        <p class="text-sm text-gray-500 dark:text-gray-400">${formatPlannerPreviewNumber(equipment.quantity)} pcs</p>
+                                    </div>
+                                    <div class="mt-1 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+                                        <span>${formatPlannerPreviewNumber(equipment.itemCount)} rows</span>
+                                        <span>${equipment.firstStartTime ? `starts ${escapePlannerPreviewHtml(equipment.firstStartTime)}` : 'no start time set'}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-5 text-sm text-gray-500 dark:text-gray-400">
+                            No planner rows are selected yet for this date.
+                        </div>
+                    `}
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                    <div class="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Exceptions</h4>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">Items that block safe execution right now.</p>
+                        </div>
+                    </div>
+                    ${(atRiskItems.length > 0 || capabilityExceptions.length > 0) ? `
+                        <div class="space-y-3">
+                            ${atRiskItems.map((item) => `
+                                <div class="rounded-xl border border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/30 px-4 py-3">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div>
+                                            <p class="font-medium text-rose-900 dark:text-rose-100">${escapePlannerPreviewHtml(item.背番号 || item.品番 || '-')}</p>
+                                            <p class="text-xs text-rose-700 dark:text-rose-300">Still short ${formatPlannerPreviewNumber(item.uncoveredQuantity || 0)} pcs across ${formatPlannerPreviewNumber(item.requestCount || 0)} request(s)</p>
+                                        </div>
+                                        <span class="rounded-full bg-white/70 dark:bg-black/20 px-2.5 py-1 text-xs font-medium text-rose-700 dark:text-rose-200">At Risk</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                            ${capabilityExceptions.map((item) => `
+                                <div class="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 px-4 py-3">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div>
+                                            <p class="font-medium text-amber-900 dark:text-amber-100">${escapePlannerPreviewHtml(item.背番号 || item.品番 || '-')}</p>
+                                            <p class="text-xs text-amber-700 dark:text-amber-300">Capability status: ${escapePlannerPreviewHtml(item.capabilityStatus || 'unmapped')}</p>
+                                        </div>
+                                        <span class="rounded-full bg-white/70 dark:bg-black/20 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-200">Capability</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div class="rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 p-5 text-sm text-emerald-800 dark:text-emerald-200">
+                            No blocking exceptions in the current snapshot.
+                        </div>
+                    `}
+                </div>
+            </div>
+        </div>
+
+        <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                    <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Per-Product Coverage</h4>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">What the planner draft would need to change if you acted on this snapshot right now.</p>
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Showing ${formatPlannerPreviewNumber((preview.items || []).length)} products in the selected factory horizon</div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 dark:bg-gray-900/40 text-gray-600 dark:text-gray-300">
+                        <tr>
+                            <th class="px-4 py-3 text-left font-medium">Product</th>
+                            <th class="px-4 py-3 text-left font-medium">Demand</th>
+                            <th class="px-4 py-3 text-right font-medium">Inventory</th>
+                            <th class="px-4 py-3 text-right font-medium">Need Production</th>
+                            <th class="px-4 py-3 text-right font-medium">In Draft</th>
+                            <th class="px-4 py-3 text-left font-medium">Preview Delta</th>
+                            <th class="px-4 py-3 text-left font-medium">Machine Readiness</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                        ${(preview.items || []).length > 0 ? (preview.items || []).map((item) => {
+                            const coveragePercent = getPlannerPreviewCoveragePercent(item);
+                            const rowClass = Number(item.uncoveredQuantity || 0) > 0
+                                ? 'bg-rose-50/70 dark:bg-rose-950/10'
+                                : Number(item.overplannedQuantity || 0) > 0
+                                    ? 'bg-amber-50/70 dark:bg-amber-950/10'
+                                    : '';
+                            return `
+                                <tr class="${rowClass}">
+                                    <td class="px-4 py-4 align-top">
+                                        <div class="min-w-[220px]">
+                                            <p class="font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(item.背番号 || '-')}</p>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${escapePlannerPreviewHtml(item.品番 || '')}</p>
+                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">${escapePlannerPreviewHtml(item.品名 || item.モデル || 'No name')}</p>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-4 align-top">
+                                        <div class="min-w-[220px]">
+                                            <div class="flex items-center justify-between gap-3">
+                                                <span class="font-medium text-gray-900 dark:text-white">${formatPlannerPreviewNumber(item.totalDemandQuantity || 0)} pcs</span>
+                                                <span class="text-xs text-gray-500 dark:text-gray-400">${formatPlannerPreviewNumber(coveragePercent)}% covered</span>
+                                            </div>
+                                            <div class="mt-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                                                <div class="h-full rounded-full ${Number(item.uncoveredQuantity || 0) > 0 ? 'bg-gradient-to-r from-rose-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-cyan-500'}" style="width:${coveragePercent}%"></div>
+                                            </div>
+                                            <div class="mt-3 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                                ${(item.demandByDate || []).map((entry) => `
+                                                    <span class="rounded-full bg-gray-100 dark:bg-gray-700 px-2.5 py-1">${escapePlannerPreviewHtml(formatPlannerPreviewDate(entry.date))}: ${formatPlannerPreviewNumber(entry.quantity || 0)}</span>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-4 align-top text-right">
+                                        <div class="font-medium text-gray-900 dark:text-white">${formatPlannerPreviewNumber(item.physicalInventory || 0)}</div>
+                                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${item.inventoryLastUpdated ? escapePlannerPreviewHtml(formatPlannerPreviewTimestamp(item.inventoryLastUpdated)) : 'No snapshot'}</div>
+                                    </td>
+                                    <td class="px-4 py-4 align-top text-right">
+                                        <div class="font-medium text-cyan-700 dark:text-cyan-300">${formatPlannerPreviewNumber(item.requiredProductionQuantity || 0)}</div>
+                                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${item.boxQuantity ? `${formatPlannerPreviewNumber(Math.ceil(Number(item.requiredProductionQuantity || 0) / Number(item.boxQuantity || 1)))} boxes` : 'Box qty unavailable'}</div>
+                                    </td>
+                                    <td class="px-4 py-4 align-top text-right">
+                                        <div class="font-medium text-violet-700 dark:text-violet-300">${formatPlannerPreviewNumber(item.currentPlannedQuantity || 0)}</div>
+                                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${(item.plannedEquipment || []).length > 0 ? escapePlannerPreviewHtml(item.plannedEquipment.join(', ')) : 'Not in draft'}</div>
+                                    </td>
+                                    <td class="px-4 py-4 align-top">
+                                        <div class="min-w-[180px] flex flex-wrap gap-2">
+                                            ${Number(item.uncoveredQuantity || 0) > 0 ? `<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-800 dark:bg-rose-950/40 dark:text-rose-200">Add ${formatPlannerPreviewNumber(item.uncoveredQuantity || 0)} pcs</span>` : ''}
+                                            ${Number(item.overplannedQuantity || 0) > 0 ? `<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Overplanned ${formatPlannerPreviewNumber(item.overplannedQuantity || 0)} pcs</span>` : ''}
+                                            ${Number(item.uncoveredQuantity || 0) === 0 && Number(item.overplannedQuantity || 0) === 0 ? `<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Demand protected</span>` : ''}
+                                            ${(item.requestNumbers || []).slice(0, 3).map((requestNumber) => `
+                                                <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(requestNumber)}</span>
+                                            `).join('')}
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-4 align-top">
+                                        <div class="min-w-[220px] flex flex-wrap gap-2">
+                                            ${(item.eligibleMachines || []).slice(0, 4).map((machine) => `
+                                                <span class="rounded-full ${machine.preferred ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'} px-2.5 py-1 text-xs font-medium">${escapePlannerPreviewHtml(machine.equipment)}${machine.preferred ? ' · preferred' : ''}</span>
+                                            `).join('')}
+                                            ${(!item.eligibleMachines || item.eligibleMachines.length === 0) ? `<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">${escapePlannerPreviewHtml(item.capabilityStatus || 'unmapped')}</span>` : ''}
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('') : `
+                            <tr>
+                                <td colspan="7" class="px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                                    No active demand or planner rows were found for the selected horizon.
+                                </td>
+                            </tr>
+                        `}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        ${plannerState.preview.error ? `
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                Last refresh warning: ${escapePlannerPreviewHtml(plannerState.preview.error)}
+            </div>
+        ` : ''}
+    `;
+}
+
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -424,6 +1111,7 @@ function setupPlannerEventListeners() {
 // Switch between main tabs (Production Goals vs Planning)
 function switchPlannerMainTab(tab) {
     console.log('📋 Switching to main tab:', tab, 'Current factory:', plannerState.currentFactory);
+    plannerState.activeMainTab = tab;
     
     // Update tab buttons
     document.querySelectorAll('.planner-main-tab-btn').forEach(btn => {
@@ -480,6 +1168,15 @@ function switchPlannerMainTab(tab) {
             } else {
                 renderGoalList();
             }
+        }
+    } else if (tab === 'preview') {
+        document.getElementById('planner-preview-tab')?.classList.remove('hidden');
+        renderPlannerPreview();
+
+        if (plannerState.currentFactory) {
+            ensurePlannerPreviewLoaded({ forceRefresh: plannerState.preview.isDirty }).catch((error) => {
+                console.error('Failed to load planner preview:', error);
+            });
         }
     } else if (tab === 'planning') {
         document.getElementById('planner-planning-tab')?.classList.remove('hidden');
@@ -717,6 +1414,7 @@ async function loadExistingPlans(factory, date) {
             
             console.log(`✅ Restored ${plannerState.selectedProducts.length} products from plan`);
         } else {
+            plannerState.currentPlan = null;
             plannerState.selectedProducts = [];
             console.log('ℹ️ No existing plan found for this date');
         }
@@ -981,6 +1679,7 @@ function processActualProductionData(records) {
 async function handleFactoryChange(e) {
     const factory = e.target.value;
     plannerState.currentFactory = factory;
+    markPlannerPreviewDirty({ clearData: true, scheduleIfActive: false });
     
     // Save selected factory to localStorage
     if (factory) {
@@ -1024,6 +1723,7 @@ async function handleFactoryChange(e) {
 
 async function handleDateChange(e) {
     plannerState.currentDate = e.target.value;
+    markPlannerPreviewDirty({ clearData: true, scheduleIfActive: false });
     
     if (plannerState.currentFactory) {
         // Ensure products are loaded for capacity lookups
@@ -3126,6 +3826,17 @@ window.filterSelectedProducts = function(searchTerm) {
     updateSelectedProductsSummary(searchTerm);
 };
 
+window.refreshPlannerPreview = async function(forceRefresh = true) {
+    try {
+        await ensurePlannerPreviewLoaded({
+            forceRefresh: forceRefresh === true,
+            showNotifications: true
+        });
+    } catch (error) {
+        console.error('Failed to refresh planner preview:', error);
+    }
+};
+
 // ============================================
 // VIEW RENDERING
 // ============================================
@@ -3133,6 +3844,7 @@ function renderAllViews() {
     renderTimelineView();
     renderKanbanView();
     renderTableView();
+    markPlannerPreviewDirty();
 }
 
 function renderActiveView() {
@@ -3153,12 +3865,23 @@ function clearPlannerViews() {
     plannerState.equipment = [];
     plannerState.products = [];
     plannerState.selectedProducts = [];
+    plannerState.currentPlan = null;
+    if (plannerState.preview.autoRefreshTimer) {
+        clearTimeout(plannerState.preview.autoRefreshTimer);
+    }
+    plannerState.preview.data = null;
+    plannerState.preview.error = '';
+    plannerState.preview.isDirty = true;
+    plannerState.preview.lastLoadedAt = 0;
+    plannerState.preview.pendingPromise = null;
+    plannerState.preview.autoRefreshTimer = null;
     
     document.getElementById('productListContainer').innerHTML = '';
     document.getElementById('selectedProductsSummary').innerHTML = '';
     document.getElementById('timelineContainer').innerHTML = '';
     document.getElementById('kanbanContainer').innerHTML = '';
     document.getElementById('tableContainer').innerHTML = '';
+    renderPlannerPreview();
 }
 
 // ============================================
