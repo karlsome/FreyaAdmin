@@ -50,7 +50,8 @@ let plannerState = {
         lastLoadedAt: 0,
         horizonDays: 3,
         autoRefreshTimer: null,
-        pendingPromise: null
+        pendingPromise: null,
+        scheduleUntilTime: PLANNER_CONFIG.workEndTime
     }
 };
 
@@ -408,147 +409,421 @@ function formatPlannerPreviewTimestamp(value = '') {
     });
 }
 
-function getPlannerPreviewCoveragePercent(item = {}) {
-    const demandQuantity = Number(item.totalDemandQuantity || 0);
-    if (demandQuantity <= 0) {
-        return 100;
-    }
-
-    const coveredQuantity = Number(item.inventoryCoveredQuantity || 0) + Number(item.plannedCoveredQuantity || 0);
-    return Math.max(0, Math.min(100, Math.round((coveredQuantity / demandQuantity) * 100)));
+function getPlannerPreviewMinimumScheduleUntilTime() {
+    return minutesToTime(timeToMinutes(PLANNER_CONFIG.workStartTime) + PLANNER_CONFIG.intervalMinutes);
 }
 
-function recalculatePlannerPreviewItem(item = {}) {
-    const demandQuantity = Number(item.totalDemandQuantity || 0);
-    const physicalInventory = Number(item.physicalInventory || 0);
-    const currentPlannedQuantity = Number(item.currentPlannedQuantity || 0);
-    const inventoryCoveredQuantity = Math.min(physicalInventory, demandQuantity);
-    const requiredProductionQuantity = Math.max(demandQuantity - physicalInventory, 0);
-    const plannedCoveredQuantity = Math.min(requiredProductionQuantity, currentPlannedQuantity);
-    const uncoveredQuantity = Math.max(requiredProductionQuantity - currentPlannedQuantity, 0);
-    const overplannedQuantity = Math.max(currentPlannedQuantity - requiredProductionQuantity, 0);
+function normalizePlannerPreviewScheduleUntilTime(value = '') {
+    const fallbackMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
+    const minimumMinutes = timeToMinutes(getPlannerPreviewMinimumScheduleUntilTime());
+    const maximumMinutes = (24 * 60) - PLANNER_CONFIG.intervalMinutes;
+    const normalizedValue = String(value || '').trim();
+    let minutes = /^\d{2}:\d{2}$/.test(normalizedValue)
+        ? timeToMinutes(normalizedValue)
+        : fallbackMinutes;
 
-    let changeType = 'inventory-only';
-    if (uncoveredQuantity > 0) {
-        changeType = currentPlannedQuantity > 0 ? 'increase' : 'add';
-    } else if (overplannedQuantity > 0) {
-        changeType = 'overplanned';
-    } else if (currentPlannedQuantity > 0) {
-        changeType = 'covered';
+    if (!Number.isFinite(minutes)) {
+        minutes = fallbackMinutes;
     }
 
-    return {
-        ...item,
-        inventoryCoveredQuantity,
-        requiredProductionQuantity,
-        plannedCoveredQuantity,
-        uncoveredQuantity,
-        overplannedQuantity,
-        changeType,
+    minutes = Math.max(minimumMinutes, Math.min(maximumMinutes, minutes));
+    minutes = Math.floor(minutes / PLANNER_CONFIG.intervalMinutes) * PLANNER_CONFIG.intervalMinutes;
+
+    return minutesToTime(minutes);
+}
+
+function getPlannerPreviewScheduleUntilTime() {
+    return normalizePlannerPreviewScheduleUntilTime(plannerState.preview.scheduleUntilTime || PLANNER_CONFIG.workEndTime);
+}
+
+function getPlannerPreviewScheduleUntilMinutes() {
+    return timeToMinutes(getPlannerPreviewScheduleUntilTime());
+}
+
+function getPlannerPreviewPossibleEquipmentText(row = {}) {
+    const machines = Array.isArray(row.eligibleMachines) ? row.eligibleMachines : [];
+    if (machines.length === 0) {
+        return String(row.capabilityStatus || '-');
+    }
+
+    return machines
+        .map((machine) => {
+            const equipment = String(machine?.equipment || machine?.設備 || '').trim();
+            if (!equipment) {
+                return '';
+            }
+
+            return machine?.preferred === true ? `${equipment}*` : equipment;
+        })
+        .filter(Boolean)
+        .join(' / ');
+}
+
+function getPlannerPreviewStatusClasses(status = '') {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'paused') {
+        return 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-200';
+    }
+    if (normalized.includes('partial')) {
+        return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200';
+    }
+    if (normalized === 'completed' || status === '完了') {
+        return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200';
+    }
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+}
+
+function getPlannerPreviewCapabilityClasses(status = '') {
+    switch (String(status || '').trim()) {
+        case 'mapped':
+            return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200';
+        case 'disabled':
+            return 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+        case 'empty':
+            return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200';
+        default:
+            return 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200';
+    }
+}
+
+function getPlannerPreviewInventoryClasses(status = '') {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'none') {
+        return 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200';
+    }
+    if (normalized === 'insufficient') {
+        return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200';
+    }
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200';
+}
+
+function getPlannerPreviewEquipmentParts(equipment = '') {
+    return String(equipment || '')
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+}
+
+function doesPlannerPreviewEquipmentShareParts(leftEquipment = '', rightEquipment = '') {
+    const leftParts = getPlannerPreviewEquipmentParts(leftEquipment);
+    const rightParts = getPlannerPreviewEquipmentParts(rightEquipment);
+
+    if (leftParts.length === 0 || rightParts.length === 0) {
+        return false;
+    }
+
+    return leftParts.some((part) => rightParts.includes(part));
+}
+
+function getPlannerPreviewAssignmentEndMinutes(assignment = {}) {
+    if (!assignment.startTime || !assignment.estimatedTime) {
+        return timeToMinutes(PLANNER_CONFIG.workStartTime);
+    }
+
+    const startMinutes = timeToMinutes(assignment.startTime);
+    const durationMinutes = Number(assignment.estimatedTime.totalSeconds || 0) / 60;
+    return findNextAvailableTime(startMinutes, durationMinutes, assignment.equipment).endTime;
+}
+
+function getPlannerPreviewNextStartMinutes(assignments = [], equipment = '') {
+    return assignments.reduce((latestMinutes, assignment) => {
+        if (!doesPlannerPreviewEquipmentShareParts(equipment, assignment.equipment)) {
+            return latestMinutes;
+        }
+
+        return Math.max(latestMinutes, getPlannerPreviewAssignmentEndMinutes(assignment));
+    }, timeToMinutes(PLANNER_CONFIG.workStartTime));
+}
+
+function getPlannerPreviewProductRecord(productLike = {}) {
+    const sebanggo = String(productLike.背番号 || '').trim();
+    const hinban = String(productLike.品番 || '').trim();
+
+    return plannerState.products.find((candidate) => (
+        (sebanggo && candidate.背番号 === sebanggo)
+        || (hinban && candidate.品番 === hinban)
+    )) || {
+        ...productLike,
+        背番号: sebanggo,
+        品番: hinban,
+        品名: productLike.品名 || '',
+        モデル: productLike.モデル || '',
+        収容数: productLike.boxQuantity || 1,
     };
 }
 
-function getPlannerPreviewEquipmentSummary() {
-    const equipmentMap = new Map();
-
-    plannerState.selectedProducts.forEach((product = {}) => {
-        const equipment = String(product.equipment || '').trim() || 'Unassigned';
-        const quantity = Number(product.quantity || 0);
-        const summary = equipmentMap.get(equipment) || {
-            equipment,
-            quantity: 0,
-            itemCount: 0,
-            startTimes: []
-        };
-
-        summary.quantity += Number.isFinite(quantity) ? quantity : 0;
-        summary.itemCount += 1;
-        if (product.startTime) {
-            summary.startTimes.push(String(product.startTime));
-        }
-
-        equipmentMap.set(equipment, summary);
-    });
-
-    return Array.from(equipmentMap.values())
-        .map((entry) => ({
-            ...entry,
-            firstStartTime: entry.startTimes.sort()[0] || null,
-        }))
+function buildPlannerPreviewBaseAssignments() {
+    return plannerState.selectedProducts
+        .map((item, index) => ({ ...item, __previewOrder: index }))
         .sort((left, right) => {
-            if (right.quantity !== left.quantity) {
-                return right.quantity - left.quantity;
+            const leftHasStartTime = !!left.startTime;
+            const rightHasStartTime = !!right.startTime;
+            if (leftHasStartTime !== rightHasStartTime) {
+                return leftHasStartTime ? -1 : 1;
             }
-            return left.equipment.localeCompare(right.equipment);
-        });
+            if (leftHasStartTime && rightHasStartTime) {
+                const leftStart = timeToMinutes(left.startTime);
+                const rightStart = timeToMinutes(right.startTime);
+                if (leftStart !== rightStart) {
+                    return leftStart - rightStart;
+                }
+            }
+            return left.__previewOrder - right.__previewOrder;
+        })
+        .reduce((assignments, item) => {
+            const equipment = String(item.equipment || '').trim();
+            const quantity = Number(item.quantity || 0);
+
+            if (!equipment || quantity <= 0) {
+                return assignments;
+            }
+
+            const productRecord = getPlannerPreviewProductRecord(item);
+            const productForEquipment = { ...productRecord, ...item, equipment };
+            const estimatedTime = item.estimatedTime?.totalSeconds
+                ? item.estimatedTime
+                : calculateProductionTime(productForEquipment, quantity, equipment);
+            const boxes = Number.isFinite(Number(item.boxes))
+                ? Number(item.boxes)
+                : calculateBoxesNeeded(productForEquipment, quantity, equipment);
+            const startTime = item.startTime
+                ? String(item.startTime)
+                : minutesToTime(getPlannerPreviewNextStartMinutes(assignments, equipment));
+
+            assignments.push({
+                ...productRecord,
+                ...item,
+                quantity,
+                equipment,
+                startTime,
+                boxes,
+                estimatedTime,
+                color: item.color || plannerState.productColors[productRecord.背番号] || '#64748B',
+                previewSource: 'current-plan',
+            });
+
+            return assignments;
+        }, []);
 }
 
-function applyLocalPlanToPlannerPreview(preview = {}) {
-    const localPlanMap = new Map();
+function buildPlannerPreviewSimulation(preview = {}) {
+    const assignments = buildPlannerPreviewBaseAssignments();
+    const scheduleUntilTime = getPlannerPreviewScheduleUntilTime();
+    const scheduleUntilMinutes = getPlannerPreviewScheduleUntilMinutes();
+    const exceptions = [];
+    const priorityRows = Array.isArray(preview.priorityRows)
+        ? [...preview.priorityRows].sort((left, right) => {
+            if (Number(left.queueOrder || 0) !== Number(right.queueOrder || 0)) {
+                return Number(left.queueOrder || 0) - Number(right.queueOrder || 0);
+            }
+            return Number(left.lineNumber || 0) - Number(right.lineNumber || 0);
+        })
+        : [];
+    const currentPlanOverflow = assignments
+        .map((assignment) => {
+            const endMinutes = getPlannerPreviewAssignmentEndMinutes(assignment);
+            if (endMinutes <= scheduleUntilMinutes) {
+                return null;
+            }
 
-    plannerState.selectedProducts.forEach((product = {}) => {
-        const key = buildPlannerPreviewKey(product.背番号, product.品番);
-        if (!key || key === '::') {
+            return {
+                ...assignment,
+                endMinutes,
+                endTime: minutesToTime(endMinutes),
+            };
+        })
+        .filter(Boolean);
+
+    let scheduledShortfallQuantity = 0;
+    let unscheduledShortfallQuantity = 0;
+    let timeLimitMissedQuantity = 0;
+    let timeLimitExceptionCount = 0;
+
+    priorityRows.forEach((priorityRow) => {
+        const shortageQuantity = Number(priorityRow.shortfallQuantity || 0);
+        if (shortageQuantity <= 0) {
             return;
         }
 
-        const quantity = Number(product.quantity || 0);
-        const current = localPlanMap.get(key) || {
-            quantity: 0,
-            equipment: new Set(),
-            entryCount: 0
-        };
+        const candidateMachines = Array.isArray(priorityRow.eligibleMachines)
+            ? priorityRow.eligibleMachines
+                .map((machine, index) => ({
+                    equipment: String(machine?.equipment || machine?.設備 || '').trim(),
+                    priority: Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : index + 1,
+                    preferred: machine?.preferred === true,
+                }))
+                .filter((machine) => machine.equipment)
+            : [];
 
-        current.quantity += Number.isFinite(quantity) ? quantity : 0;
-        current.entryCount += 1;
-        if (product.equipment) {
-            current.equipment.add(String(product.equipment).trim());
+        if (candidateMachines.length === 0) {
+            unscheduledShortfallQuantity += shortageQuantity;
+            exceptions.push({
+                id: priorityRow.id,
+                reason: priorityRow.capabilityStatus || 'unmapped',
+                requestNumber: priorityRow.requestNumber,
+                lineNumber: priorityRow.lineNumber,
+                背番号: priorityRow.背番号,
+                品番: priorityRow.品番,
+                shortfallQuantity: shortageQuantity,
+            });
+            return;
         }
 
-        localPlanMap.set(key, current);
+        const productRecord = getPlannerPreviewProductRecord(priorityRow);
+        const equipmentChoices = candidateMachines
+            .map((machine, index) => {
+                const startMinutes = getPlannerPreviewNextStartMinutes(assignments, machine.equipment);
+                const productForEquipment = { ...productRecord, equipment: machine.equipment };
+                const estimatedTime = calculateProductionTime(productForEquipment, shortageQuantity, machine.equipment);
+                const timing = findNextAvailableTime(startMinutes, estimatedTime.totalSeconds / 60, machine.equipment);
+                const boxes = calculateBoxesNeeded(productForEquipment, shortageQuantity, machine.equipment);
+
+                return {
+                    ...machine,
+                    order: index,
+                    startMinutes: timing.startTime,
+                    endMinutes: timing.endTime,
+                    estimatedTime,
+                    boxes,
+                };
+            })
+            .sort((left, right) => {
+                if (left.startMinutes !== right.startMinutes) {
+                    return left.startMinutes - right.startMinutes;
+                }
+                if (left.priority !== right.priority) {
+                    return left.priority - right.priority;
+                }
+                return left.order - right.order;
+            });
+
+        const fitChoices = equipmentChoices
+            .filter((machine) => machine.endMinutes <= scheduleUntilMinutes)
+            .sort((left, right) => {
+                if (left.endMinutes !== right.endMinutes) {
+                    return left.endMinutes - right.endMinutes;
+                }
+                if (left.startMinutes !== right.startMinutes) {
+                    return left.startMinutes - right.startMinutes;
+                }
+                if (left.preferred !== right.preferred) {
+                    return left.preferred ? -1 : 1;
+                }
+                if (left.priority !== right.priority) {
+                    return left.priority - right.priority;
+                }
+                return left.order - right.order;
+            });
+
+        const selectedMachine = fitChoices[0];
+        if (!selectedMachine) {
+            unscheduledShortfallQuantity += shortageQuantity;
+            timeLimitMissedQuantity += shortageQuantity;
+            timeLimitExceptionCount += 1;
+            exceptions.push({
+                id: priorityRow.id,
+                reason: 'time-limit',
+                requestNumber: priorityRow.requestNumber,
+                lineNumber: priorityRow.lineNumber,
+                背番号: priorityRow.背番号,
+                品番: priorityRow.品番,
+                shortfallQuantity: shortageQuantity,
+                scheduleUntilTime,
+                candidateEquipment: candidateMachines.map((machine) => (
+                    machine.preferred ? `${machine.equipment}*` : machine.equipment
+                )),
+            });
+            return;
+        }
+
+        assignments.push({
+            ...productRecord,
+            背番号: priorityRow.背番号,
+            品番: priorityRow.品番,
+            品名: priorityRow.品名,
+            モデル: priorityRow.モデル,
+            quantity: shortageQuantity,
+            equipment: selectedMachine.equipment,
+            startTime: minutesToTime(selectedMachine.startMinutes),
+            boxes: selectedMachine.boxes,
+            estimatedTime: selectedMachine.estimatedTime,
+            color: plannerState.productColors[priorityRow.背番号] || '#0F766E',
+            previewSource: 'priority',
+            requestNumber: priorityRow.requestNumber,
+            lineNumber: priorityRow.lineNumber,
+            requestStatus: priorityRow.requestStatus,
+            sourceRowId: priorityRow.id,
+            previewEndTime: minutesToTime(selectedMachine.endMinutes),
+            usedPreferredMachine: selectedMachine.preferred === true,
+        });
+
+        scheduledShortfallQuantity += shortageQuantity;
     });
 
-    const items = Array.isArray(preview.items)
-        ? preview.items.map((rawItem) => {
-            const item = { ...rawItem };
-            const localPlan = localPlanMap.get(buildPlannerPreviewKey(item.背番号, item.品番));
+    const visibleAssignments = assignments.filter((assignment) => {
+        const startMinutes = assignment.startTime
+            ? timeToMinutes(assignment.startTime)
+            : timeToMinutes(PLANNER_CONFIG.workStartTime);
+        return Number.isFinite(startMinutes) && startMinutes < scheduleUntilMinutes;
+    });
 
-            if (localPlan) {
-                item.currentPlannedQuantity = localPlan.quantity;
-                item.plannedEquipment = Array.from(localPlan.equipment);
-                item.plannedEntryCount = localPlan.entryCount;
-            } else if (plannerState.selectedProducts.length > 0) {
-                item.currentPlannedQuantity = 0;
-                item.plannedEquipment = [];
-                item.plannedEntryCount = 0;
-            }
+    const equipmentList = Array.from(new Set(
+        visibleAssignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
 
-            return recalculatePlannerPreviewItem(item);
-        })
-        : [];
+    const currentPlanOverflowQuantity = currentPlanOverflow.reduce(
+        (sum, assignment) => sum + Number(assignment.quantity || 0),
+        0
+    );
+    const otherExceptionCount = exceptions.filter((exception) => exception.reason !== 'time-limit').length;
 
-    const summary = {
-        itemCount: items.length,
-        atRiskCount: items.filter((item) => Number(item.uncoveredQuantity || 0) > 0).length,
-        missingCapabilityCount: items.filter((item) => Number(item.requiredProductionQuantity || 0) > 0 && item.capabilityStatus !== 'mapped').length,
-        totalDemandQuantity: items.reduce((sum, item) => sum + Number(item.totalDemandQuantity || 0), 0),
-        totalInventoryCoveredQuantity: items.reduce((sum, item) => sum + Number(item.inventoryCoveredQuantity || 0), 0),
-        totalRequiredProductionQuantity: items.reduce((sum, item) => sum + Number(item.requiredProductionQuantity || 0), 0),
-        totalCurrentPlannedQuantity: items.reduce((sum, item) => sum + Number(item.currentPlannedQuantity || 0), 0),
-        totalPlannedCoveredQuantity: items.reduce((sum, item) => sum + Number(item.plannedCoveredQuantity || 0), 0),
-        totalUncoveredQuantity: items.reduce((sum, item) => sum + Number(item.uncoveredQuantity || 0), 0),
-        totalOverplannedQuantity: items.reduce((sum, item) => sum + Number(item.overplannedQuantity || 0), 0),
+    return {
+        assignments,
+        equipmentList,
+        exceptions,
+        currentPlanOverflow,
+        currentPlanOverflowQuantity,
+        scheduleUntilTime,
+        scheduleUntilMinutes,
+        scheduledShortfallQuantity,
+        unscheduledShortfallQuantity,
+        timeLimitMissedQuantity,
+        timeLimitExceptionCount,
+        otherExceptionCount,
+        currentPlanQuantity: assignments
+            .filter((assignment) => assignment.previewSource === 'current-plan')
+            .reduce((sum, assignment) => sum + Number(assignment.quantity || 0), 0),
+        previewInsertCount: assignments.filter((assignment) => assignment.previewSource === 'priority').length,
     };
+}
+
+function applyLocalPlanToPlannerPreview(preview = {}) {
+    const simulation = buildPlannerPreviewSimulation(preview);
 
     return {
         ...preview,
-        items,
         currentPlan: {
             ...(preview.currentPlan || {}),
             exists: plannerState.selectedProducts.length > 0 || preview.currentPlan?.exists === true,
             productCount: plannerState.selectedProducts.length || Number(preview.currentPlan?.productCount || 0),
         },
-        summary,
+        simulation,
+        summary: {
+            ...(preview.summary || {}),
+            previewInsertCount: simulation.previewInsertCount,
+            scheduledShortfallQuantity: simulation.scheduledShortfallQuantity,
+            unscheduledShortfallQuantity: simulation.unscheduledShortfallQuantity,
+            currentPlanQuantity: simulation.currentPlanQuantity,
+            previewExceptionCount: simulation.exceptions.length + simulation.currentPlanOverflow.length,
+            timeLimitExceptionCount: simulation.timeLimitExceptionCount,
+            timeLimitMissedQuantity: simulation.timeLimitMissedQuantity,
+            currentPlanOverflowCount: simulation.currentPlanOverflow.length,
+            currentPlanOverflowQuantity: simulation.currentPlanOverflowQuantity,
+            otherExceptionCount: simulation.otherExceptionCount,
+            scheduleUntilTime: simulation.scheduleUntilTime,
+        },
     };
 }
 
@@ -614,7 +889,7 @@ async function ensurePlannerPreviewLoaded(options = {}) {
     plannerState.preview.error = '';
     renderPlannerPreview();
 
-    const requestUrl = `${BASE_URL}api/production-planner/preview?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}&horizonDays=${encodeURIComponent(plannerState.preview.horizonDays)}`;
+    const requestUrl = `${BASE_URL}api/production-planner/preview?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}`;
 
     plannerState.preview.pendingPromise = (async () => {
         try {
@@ -625,7 +900,24 @@ async function ensurePlannerPreviewLoaded(options = {}) {
                 throw new Error(result.error || result.message || 'Failed to load planner preview');
             }
 
-            plannerState.preview.data = applyLocalPlanToPlannerPreview(result.preview || {});
+            const preview = result.preview || {};
+            const capabilityCacheEntries = {};
+            (preview.priorityRows || []).forEach((row) => {
+                const key = buildPlannerCapabilityKey(plannerState.currentFactory, row.背番号, row.品番);
+                capabilityCacheEntries[key] = {
+                    factory: plannerState.currentFactory,
+                    背番号: row.背番号,
+                    品番: row.品番,
+                    hasMapping: row.hasCapabilityMapping === true,
+                    capabilityEnabled: row.capabilityStatus !== 'disabled',
+                    eligibleMachines: Array.isArray(row.eligibleMachines) ? row.eligibleMachines : [],
+                    preferredMachine: row.preferredMachine || null,
+                    reason: row.capabilityStatus === 'mapped' ? null : row.capabilityStatus,
+                };
+            });
+            Object.assign(plannerState.productionCapabilities, capabilityCacheEntries);
+
+            plannerState.preview.data = applyLocalPlanToPlannerPreview(preview);
             plannerState.preview.isDirty = false;
             plannerState.preview.lastLoadedAt = Date.now();
             plannerState.preview.error = '';
@@ -651,6 +943,146 @@ async function ensurePlannerPreviewLoaded(options = {}) {
     return plannerState.preview.pendingPromise;
 }
 
+function getPlannerPreviewTimeSlots(assignments = []) {
+    const slots = [];
+    const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
+    const endMinutes = getPlannerPreviewScheduleUntilMinutes();
+
+    for (let minutes = startMinutes; minutes < endMinutes; minutes += PLANNER_CONFIG.intervalMinutes) {
+        slots.push(minutesToTime(minutes));
+    }
+
+    return slots;
+}
+
+function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) {
+    let html = '';
+
+    timeSlots.forEach((slot, index) => {
+        const slotMinutes = timeToMinutes(slot);
+        const breakAtSlot = plannerState.breaks.find((breakItem) => {
+            const breakStart = timeToMinutes(breakItem.start);
+            const breakEnd = timeToMinutes(breakItem.end);
+            const appliesToEquipment = !breakItem.equipment || breakItem.equipment === equipment;
+            return slotMinutes >= breakStart && slotMinutes < breakEnd && appliesToEquipment;
+        });
+
+        if (breakAtSlot) {
+            const previousSlot = index > 0 ? timeToMinutes(timeSlots[index - 1]) : null;
+            const isBreakStart = previousSlot === null || !plannerState.breaks.some((breakItem) => {
+                const breakStart = timeToMinutes(breakItem.start);
+                const breakEnd = timeToMinutes(breakItem.end);
+                const appliesToEquipment = !breakItem.equipment || breakItem.equipment === equipment;
+                return previousSlot >= breakStart && previousSlot < breakEnd && appliesToEquipment;
+            });
+
+            html += `
+                <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-slate-200 dark:bg-slate-700 relative" style="width:${slotWidth}px">
+                    ${isBreakStart ? `<div class="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-slate-600 dark:text-slate-200">${escapePlannerPreviewHtml(breakAtSlot.name || 'Break')}</div>` : ''}
+                </div>
+            `;
+            return;
+        }
+
+        let assignmentForSlot = null;
+        for (let indexAssigned = 0; indexAssigned < assignedProducts.length; indexAssigned += 1) {
+            const assignment = assignedProducts[indexAssigned];
+            const assignmentStart = assignment.startTime ? timeToMinutes(assignment.startTime) : 0;
+            const assignmentEnd = getPlannerPreviewAssignmentEndMinutes(assignment);
+            if (slotMinutes >= assignmentStart && slotMinutes < assignmentEnd) {
+                assignmentForSlot = assignment;
+                break;
+            }
+        }
+
+        if (!assignmentForSlot) {
+            html += `<div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800" style="width:${slotWidth}px"></div>`;
+            return;
+        }
+
+        const assignmentStart = assignmentForSlot.startTime ? timeToMinutes(assignmentForSlot.startTime) : 0;
+        const isFirstVisibleSlot = slotMinutes === assignmentStart;
+        const fillColor = assignmentForSlot.previewSource === 'priority'
+            ? `${assignmentForSlot.color}2B`
+            : `${assignmentForSlot.color}16`;
+        const endTimeLabel = minutesToTime(getPlannerPreviewAssignmentEndMinutes(assignmentForSlot));
+        const titleText = [
+            assignmentForSlot.requestNumber ? `Request ${assignmentForSlot.requestNumber}` : 'Current plan row',
+            assignmentForSlot.背番号 || assignmentForSlot.品番 || '-',
+            `${formatPlannerPreviewNumber(assignmentForSlot.quantity || 0)} pcs`,
+            `${escapePlannerPreviewHtml(assignmentForSlot.startTime || slot)} - ${escapePlannerPreviewHtml(endTimeLabel)}`
+        ].join(' | ');
+
+        html += `
+            <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 relative" style="width:${slotWidth}px; background-color:${fillColor}" title="${escapePlannerPreviewHtml(titleText)}">
+                ${isFirstVisibleSlot ? `
+                    <div class="absolute inset-0 flex flex-col justify-center px-1.5 overflow-hidden">
+                        <span class="text-[10px] font-semibold truncate" style="color:${assignmentForSlot.color}">${escapePlannerPreviewHtml(assignmentForSlot.背番号 || assignmentForSlot.品番 || '-')}</span>
+                        <span class="text-[9px] text-slate-500 dark:text-slate-300 truncate">${assignmentForSlot.previewSource === 'priority' ? escapePlannerPreviewHtml(assignmentForSlot.requestNumber || 'Preview insert') : 'Current plan'}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+
+    return html;
+}
+
+function renderPlannerPreviewTimeline(preview = {}) {
+    const simulation = preview.simulation || buildPlannerPreviewSimulation(preview);
+    const equipmentList = Array.isArray(simulation.equipmentList) ? simulation.equipmentList : [];
+
+    if (equipmentList.length === 0) {
+        const emptyMessage = simulation.timeLimitExceptionCount > 0
+            ? `No preview rows fit before ${simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime()}.`
+            : 'No machine assignments are available for preview yet.';
+        return `
+            <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                ${escapePlannerPreviewHtml(emptyMessage)}
+            </div>
+        `;
+    }
+
+    const timeSlots = getPlannerPreviewTimeSlots(simulation.assignments || []);
+    const slotWidth = 60;
+    let headerHtml = '<div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">Machine</div>';
+
+    timeSlots.forEach((slot) => {
+        headerHtml += `
+            <div class="flex-shrink-0 border-r dark:border-gray-600 text-center text-xs text-gray-500 dark:text-gray-400" style="width:${slotWidth}px">${slot}</div>
+        `;
+    });
+
+    const rowsHtml = equipmentList.map((equipment) => {
+        const assignedProducts = (simulation.assignments || []).filter((assignment) => assignment.equipment === equipment);
+        return `
+            <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-preview-equipment="${escapePlannerPreviewHtml(equipment)}">
+                <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/40 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">
+                    ${escapePlannerPreviewHtml(equipment)}
+                </div>
+                <div class="flex-1 flex relative">
+                    ${renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth)}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="border rounded-xl dark:border-gray-700 overflow-hidden">
+            <div class="overflow-auto max-h-[560px]">
+                <div class="min-w-max">
+                    <div class="flex border-b dark:border-gray-600 bg-gray-50 dark:bg-gray-700 sticky top-0 z-20">
+                        ${headerHtml}
+                    </div>
+                    <div class="bg-white dark:bg-gray-800">
+                        ${rowsHtml}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderPlannerPreview() {
     const container = document.getElementById('plannerPreviewContainer');
     if (!container) {
@@ -660,9 +1092,9 @@ function renderPlannerPreview() {
     if (!plannerState.currentFactory) {
         container.innerHTML = `
             <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
-                <i class="ri-radar-line text-5xl mb-3 block"></i>
-                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Select a factory to generate a live preview</p>
-                <p class="mt-2 text-sm">The preview compares latest physical inventory, the next 3 days of requests, and your current planner draft.</p>
+                <i class="ri-layout-grid-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Select a factory to build the preview queue</p>
+                <p class="mt-2 text-sm">The left table shows unfinished shortage line-items, the right table shows current inventory, and the bottom calendar shows the planned-only preview.</p>
             </div>
         `;
         return;
@@ -672,10 +1104,10 @@ function renderPlannerPreview() {
         container.innerHTML = `
             <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8">
                 <div class="flex items-center gap-4 text-gray-700 dark:text-gray-200">
-                    <div class="h-10 w-10 rounded-full border-4 border-cyan-200 border-t-cyan-600 animate-spin"></div>
+                    <div class="h-10 w-10 rounded-full border-4 border-sky-200 border-t-sky-600 animate-spin"></div>
                     <div>
-                        <p class="text-lg font-semibold">Building live preview</p>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Analyzing inventory, 3-day request demand, and current planner rows.</p>
+                        <p class="text-lg font-semibold">Building priority preview</p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">Collecting unfinished shortage lines, current inventory, and machine assignments.</p>
                     </div>
                 </div>
             </div>
@@ -701,29 +1133,26 @@ function renderPlannerPreview() {
     const preview = plannerState.preview.data
         ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
         : null;
-    if (preview) {
-        plannerState.preview.data = preview;
-    }
     if (!preview) {
         container.innerHTML = `
             <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
-                <i class="ri-radar-line text-5xl mb-3 block"></i>
+                <i class="ri-layout-grid-line text-5xl mb-3 block"></i>
                 <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Preview is ready when you are</p>
-                <p class="mt-2 text-sm">Refresh to compare the current planner draft against live demand and inventory.</p>
+                <p class="mt-2 text-sm">Refresh to rebuild the priority table, inventory table, and preview calendar.</p>
             </div>
         `;
         return;
     }
 
+    plannerState.preview.data = preview;
+
     const summary = preview.summary || {};
-    const equipmentSummary = getPlannerPreviewEquipmentSummary();
-    const atRiskItems = (preview.items || []).filter((item) => Number(item.uncoveredQuantity || 0) > 0).slice(0, 6);
-    const capabilityExceptions = (preview.items || []).filter((item) => Number(item.requiredProductionQuantity || 0) > 0 && item.capabilityStatus !== 'mapped').slice(0, 6);
-    const highlightedItems = (preview.items || []).filter((item) => item.changeType !== 'inventory-only').slice(0, 10);
-    const totalCoveredQuantity = Number(summary.totalInventoryCoveredQuantity || 0) + Number(summary.totalPlannedCoveredQuantity || 0);
-    const totalCoveragePercent = Number(summary.totalDemandQuantity || 0) > 0
-        ? Math.max(0, Math.min(100, Math.round((totalCoveredQuantity / Number(summary.totalDemandQuantity || 0)) * 100)))
-        : 100;
+    const priorityRows = Array.isArray(preview.priorityRows) ? preview.priorityRows : [];
+    const inventoryRows = Array.isArray(preview.inventoryRows) ? preview.inventoryRows : [];
+    const simulation = preview.simulation || buildPlannerPreviewSimulation(preview);
+    const scheduleUntilTime = getPlannerPreviewScheduleUntilTime();
+    const timeLimitExceptions = (simulation.exceptions || []).filter((exception) => exception.reason === 'time-limit');
+    const otherExceptions = (simulation.exceptions || []).filter((exception) => exception.reason !== 'time-limit');
     const statusText = plannerState.preview.isLoading
         ? 'Refreshing live data...'
         : plannerState.preview.isDirty
@@ -731,295 +1160,240 @@ function renderPlannerPreview() {
             : `Last refresh ${formatPlannerPreviewTimestamp(preview.generatedAt)}`;
 
     container.innerHTML = `
-        <div class="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-950 text-white shadow-2xl">
-            <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.35),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(34,197,94,0.2),_transparent_36%)]"></div>
-            <div class="relative p-6 lg:p-8">
-                <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-                    <div class="max-w-3xl">
-                        <div class="flex flex-wrap gap-2 mb-4 text-xs font-medium uppercase tracking-[0.18em] text-slate-300">
-                            <span class="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-3 py-1 text-cyan-200">Live Preview</span>
-                            <span class="rounded-full border border-white/15 px-3 py-1">${escapePlannerPreviewHtml(preview.factory || plannerState.currentFactory)}</span>
-                            <span class="rounded-full border border-white/15 px-3 py-1">Target ${escapePlannerPreviewHtml(preview.targetDate || plannerState.currentDate)}</span>
-                            <span class="rounded-full border border-white/15 px-3 py-1">${formatPlannerPreviewNumber(preview.horizon?.days || plannerState.preview.horizonDays)} day horizon</span>
+        <div class="space-y-6">
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <div class="flex flex-wrap gap-2 mb-3 text-xs font-medium uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                            <span class="rounded-full bg-sky-100 px-3 py-1 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">Preview Queue</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(preview.factory || plannerState.currentFactory)}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">Plan date ${escapePlannerPreviewHtml(preview.targetDate || plannerState.currentDate)}</span>
                         </div>
-                        <h3 class="text-2xl lg:text-3xl font-semibold tracking-tight">Current inventory vs next 3 days of request demand</h3>
-                        <p class="mt-3 text-sm leading-6 text-slate-300">This draft-only view combines the latest physical inventory, active NODA requests inside the horizon, and the planner rows currently visible on screen. Nothing here writes to the planner by itself.</p>
+                        <h3 class="text-2xl font-semibold text-gray-900 dark:text-white">Priority shortages, current inventory, and planned-only machine preview</h3>
+                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Left is the unfinished shortage queue. Right is the current inventory snapshot. Bottom is the read-only machine calendar built from that queue.</p>
                     </div>
-                    <div class="flex flex-col items-stretch gap-3 lg:items-end lg:text-right">
-                        <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+                    <div class="flex flex-col items-stretch gap-3 lg:items-end">
+                        <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
                             <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
-                            <div class="mt-1 text-xs text-slate-400">Coverage ${formatPlannerPreviewNumber(totalCoveragePercent)}% of ${formatPlannerPreviewNumber(summary.totalDemandQuantity || 0)} pcs</div>
+                            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${formatPlannerPreviewNumber(summary.priorityRowCount || 0)} shortage line-items | ${formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)} pcs waiting</div>
                         </div>
-                        <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-300 transition-colors">
+                        <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
                             <i class="ri-refresh-line"></i>
                             <span>${plannerState.preview.isLoading ? 'Refreshing...' : 'Refresh Preview'}</span>
                         </button>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
-            <div class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
-                <p class="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">3-Day Demand</p>
-                <p class="mt-3 text-2xl font-semibold text-slate-900 dark:text-white">${formatPlannerPreviewNumber(summary.totalDemandQuantity || 0)}</p>
-                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">${formatPlannerPreviewNumber(summary.itemCount || 0)} active products</p>
-            </div>
-            <div class="rounded-2xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 p-4 shadow-sm">
-                <p class="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">Covered By Inventory</p>
-                <p class="mt-3 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">${formatPlannerPreviewNumber(summary.totalInventoryCoveredQuantity || 0)}</p>
-                <p class="mt-2 text-xs text-emerald-700/80 dark:text-emerald-300/80">No production required</p>
-            </div>
-            <div class="rounded-2xl border border-cyan-200 dark:border-cyan-900 bg-cyan-50 dark:bg-cyan-950/30 p-4 shadow-sm">
-                <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">Production Needed</p>
-                <p class="mt-3 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(summary.totalRequiredProductionQuantity || 0)}</p>
-                <p class="mt-2 text-xs text-cyan-700/80 dark:text-cyan-300/80">After inventory coverage</p>
-            </div>
-            <div class="rounded-2xl border border-violet-200 dark:border-violet-900 bg-violet-50 dark:bg-violet-950/30 p-4 shadow-sm">
-                <p class="text-xs uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">In Current Draft</p>
-                <p class="mt-3 text-2xl font-semibold text-violet-900 dark:text-violet-100">${formatPlannerPreviewNumber(summary.totalCurrentPlannedQuantity || 0)}</p>
-                <p class="mt-2 text-xs text-violet-700/80 dark:text-violet-300/80">${formatPlannerPreviewNumber(summary.totalPlannedCoveredQuantity || 0)} pcs protecting demand</p>
-            </div>
-            <div class="rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 p-4 shadow-sm">
-                <p class="text-xs uppercase tracking-[0.16em] text-rose-700 dark:text-rose-300">Still At Risk</p>
-                <p class="mt-3 text-2xl font-semibold text-rose-900 dark:text-rose-100">${formatPlannerPreviewNumber(summary.totalUncoveredQuantity || 0)}</p>
-                <p class="mt-2 text-xs text-rose-700/80 dark:text-rose-300/80">${formatPlannerPreviewNumber(summary.atRiskCount || 0)} products uncovered</p>
-            </div>
-            <div class="rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 p-4 shadow-sm">
-                <p class="text-xs uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">Capability Gaps</p>
-                <p class="mt-3 text-2xl font-semibold text-amber-900 dark:text-amber-100">${formatPlannerPreviewNumber(summary.missingCapabilityCount || 0)}</p>
-                <p class="mt-2 text-xs text-amber-700/80 dark:text-amber-300/80">Items needing review before execution</p>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
-            <div class="xl:col-span-3 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-                <div class="flex items-center justify-between gap-3 mb-5">
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Demand Horizon</h4>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">How the next ${formatPlannerPreviewNumber(preview.horizon?.days || plannerState.preview.horizonDays)} days are stacking up right now.</p>
+                <div class="mt-5 grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">Priority Lines</p>
+                        <p class="mt-2 text-2xl font-semibold text-amber-900 dark:text-amber-100">${formatPlannerPreviewNumber(summary.priorityRowCount || 0)}</p>
                     </div>
-                    <div class="text-sm font-medium text-gray-600 dark:text-gray-300">${formatPlannerPreviewNumber(totalCoveragePercent)}% covered</div>
+                    <div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 dark:border-rose-900 dark:bg-rose-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-rose-700 dark:text-rose-300">Waiting Qty</p>
+                        <p class="mt-2 text-2xl font-semibold text-rose-900 dark:text-rose-100">${formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)}</p>
+                    </div>
+                    <div class="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:border-cyan-900 dark:bg-cyan-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">Preview Inserts</p>
+                        <p class="mt-2 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(summary.previewInsertCount || 0)}</p>
+                    </div>
+                    <div class="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">Current Plan</p>
+                        <p class="mt-2 text-2xl font-semibold text-violet-900 dark:text-violet-100">${formatPlannerPreviewNumber(summary.currentPlanQuantity || 0)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-700 dark:text-slate-300">Exceptions</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">${formatPlannerPreviewNumber(summary.previewExceptionCount || 0)}</p>
+                    </div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    ${(preview.dailyDemand || []).map((day) => {
-                        const dayQuantity = Number(day.quantity || 0);
-                        const dayPercent = Number(summary.totalDemandQuantity || 0) > 0
-                            ? Math.max(8, Math.round((dayQuantity / Number(summary.totalDemandQuantity || 0)) * 100))
-                            : 8;
-                        return `
-                            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-slate-50 dark:bg-slate-900/40 p-4">
-                                <div class="flex items-center justify-between gap-3">
-                                    <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">${escapePlannerPreviewHtml(formatPlannerPreviewDate(day.date))}</p>
-                                    <p class="text-sm text-slate-500 dark:text-slate-400">${formatPlannerPreviewNumber(dayQuantity)} pcs</p>
-                                </div>
-                                <div class="mt-4 h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                                    <div class="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500" style="width:${dayPercent}%"></div>
-                                </div>
-                                <p class="mt-3 text-xs text-slate-500 dark:text-slate-400">Inventory and planner draft are both measured against this horizon.</p>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Priority Table</h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">Basic shortage queue for the current preview.</p>
                             </div>
-                        `;
-                    }).join('')}
-                </div>
-                ${highlightedItems.length > 0 ? `
-                    <div class="mt-5 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <div class="px-4 py-3 bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white">Planner Impact Snapshot</p>
-                        </div>
-                        <div class="divide-y divide-gray-200 dark:divide-gray-700">
-                            ${highlightedItems.map((item) => `
-                                <div class="px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                    <div>
-                                        <p class="font-medium text-gray-900 dark:text-white">${escapePlannerPreviewHtml(item.背番号 || '-')}${item.品番 ? ` <span class="text-gray-400">/ ${escapePlannerPreviewHtml(item.品番)}</span>` : ''}</p>
-                                        <p class="text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(item.品名 || item.モデル || 'No product name')}</p>
-                                    </div>
-                                    <div class="flex flex-wrap items-center gap-2 text-xs">
-                                        <span class="rounded-full px-2.5 py-1 ${item.changeType === 'overplanned' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200' : item.uncoveredQuantity > 0 ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'}">${item.changeType === 'overplanned' ? `Overplanned by ${formatPlannerPreviewNumber(item.overplannedQuantity || 0)}` : item.uncoveredQuantity > 0 ? `Needs ${formatPlannerPreviewNumber(item.uncoveredQuantity || 0)} more` : 'Covered'}</span>
-                                        <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">Draft ${formatPlannerPreviewNumber(item.currentPlannedQuantity || 0)} pcs</span>
-                                        ${item.preferredMachine ? `<span class="rounded-full bg-cyan-100 px-2.5 py-1 text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-200">Prefers ${escapePlannerPreviewHtml(item.preferredMachine)}</span>` : ''}
-                                    </div>
-                                </div>
-                            `).join('')}
+                            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">${formatPlannerPreviewNumber(priorityRows.length)} lines</span>
                         </div>
                     </div>
-                ` : ''}
-            </div>
-
-            <div class="xl:col-span-2 space-y-6">
-                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-                    <div class="flex items-center justify-between gap-3 mb-4">
-                        <div>
-                            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Current Planner Draft</h4>
-                            <p class="text-sm text-gray-500 dark:text-gray-400">What is already on the planner screen right now.</p>
-                        </div>
-                        <div class="rounded-full bg-slate-100 dark:bg-slate-700 px-3 py-1 text-xs font-medium text-slate-700 dark:text-slate-200">${formatPlannerPreviewNumber(equipmentSummary.length)} machines</div>
-                    </div>
-                    ${equipmentSummary.length > 0 ? `
-                        <div class="space-y-3">
-                            ${equipmentSummary.slice(0, 8).map((equipment) => `
-                                <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-slate-50 dark:bg-slate-900/40 px-4 py-3">
-                                    <div class="flex items-center justify-between gap-3">
-                                        <p class="font-medium text-gray-900 dark:text-white">${escapePlannerPreviewHtml(equipment.equipment)}</p>
-                                        <p class="text-sm text-gray-500 dark:text-gray-400">${formatPlannerPreviewNumber(equipment.quantity)} pcs</p>
-                                    </div>
-                                    <div class="mt-1 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
-                                        <span>${formatPlannerPreviewNumber(equipment.itemCount)} rows</span>
-                                        <span>${equipment.firstStartTime ? `starts ${escapePlannerPreviewHtml(equipment.firstStartTime)}` : 'no start time set'}</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    ` : `
-                        <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-5 text-sm text-gray-500 dark:text-gray-400">
-                            No planner rows are selected yet for this date.
-                        </div>
-                    `}
-                </div>
-
-                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
-                    <div class="flex items-center justify-between gap-3 mb-4">
-                        <div>
-                            <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Exceptions</h4>
-                            <p class="text-sm text-gray-500 dark:text-gray-400">Items that block safe execution right now.</p>
-                        </div>
-                    </div>
-                    ${(atRiskItems.length > 0 || capabilityExceptions.length > 0) ? `
-                        <div class="space-y-3">
-                            ${atRiskItems.map((item) => `
-                                <div class="rounded-xl border border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/30 px-4 py-3">
-                                    <div class="flex items-start justify-between gap-3">
-                                        <div>
-                                            <p class="font-medium text-rose-900 dark:text-rose-100">${escapePlannerPreviewHtml(item.背番号 || item.品番 || '-')}</p>
-                                            <p class="text-xs text-rose-700 dark:text-rose-300">Still short ${formatPlannerPreviewNumber(item.uncoveredQuantity || 0)} pcs across ${formatPlannerPreviewNumber(item.requestCount || 0)} request(s)</p>
-                                        </div>
-                                        <span class="rounded-full bg-white/70 dark:bg-black/20 px-2.5 py-1 text-xs font-medium text-rose-700 dark:text-rose-200">At Risk</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                            ${capabilityExceptions.map((item) => `
-                                <div class="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 px-4 py-3">
-                                    <div class="flex items-start justify-between gap-3">
-                                        <div>
-                                            <p class="font-medium text-amber-900 dark:text-amber-100">${escapePlannerPreviewHtml(item.背番号 || item.品番 || '-')}</p>
-                                            <p class="text-xs text-amber-700 dark:text-amber-300">Capability status: ${escapePlannerPreviewHtml(item.capabilityStatus || 'unmapped')}</p>
-                                        </div>
-                                        <span class="rounded-full bg-white/70 dark:bg-black/20 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-200">Capability</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    ` : `
-                        <div class="rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 p-5 text-sm text-emerald-800 dark:text-emerald-200">
-                            No blocking exceptions in the current snapshot.
-                        </div>
-                    `}
-                </div>
-            </div>
-        </div>
-
-        <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
-            <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div>
-                    <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Per-Product Coverage</h4>
-                    <p class="text-sm text-gray-500 dark:text-gray-400">What the planner draft would need to change if you acted on this snapshot right now.</p>
-                </div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Showing ${formatPlannerPreviewNumber((preview.items || []).length)} products in the selected factory horizon</div>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="min-w-full text-sm">
-                    <thead class="bg-gray-50 dark:bg-gray-900/40 text-gray-600 dark:text-gray-300">
-                        <tr>
-                            <th class="px-4 py-3 text-left font-medium">Product</th>
-                            <th class="px-4 py-3 text-left font-medium">Demand</th>
-                            <th class="px-4 py-3 text-right font-medium">Inventory</th>
-                            <th class="px-4 py-3 text-right font-medium">Need Production</th>
-                            <th class="px-4 py-3 text-right font-medium">In Draft</th>
-                            <th class="px-4 py-3 text-left font-medium">Preview Delta</th>
-                            <th class="px-4 py-3 text-left font-medium">Machine Readiness</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                        ${(preview.items || []).length > 0 ? (preview.items || []).map((item) => {
-                            const coveragePercent = getPlannerPreviewCoveragePercent(item);
-                            const rowClass = Number(item.uncoveredQuantity || 0) > 0
-                                ? 'bg-rose-50/70 dark:bg-rose-950/10'
-                                : Number(item.overplannedQuantity || 0) > 0
-                                    ? 'bg-amber-50/70 dark:bg-amber-950/10'
-                                    : '';
-                            return `
-                                <tr class="${rowClass}">
-                                    <td class="px-4 py-4 align-top">
-                                        <div class="min-w-[220px]">
-                                            <p class="font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(item.背番号 || '-')}</p>
-                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${escapePlannerPreviewHtml(item.品番 || '')}</p>
-                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">${escapePlannerPreviewHtml(item.品名 || item.モデル || 'No name')}</p>
-                                        </div>
-                                    </td>
-                                    <td class="px-4 py-4 align-top">
-                                        <div class="min-w-[220px]">
-                                            <div class="flex items-center justify-between gap-3">
-                                                <span class="font-medium text-gray-900 dark:text-white">${formatPlannerPreviewNumber(item.totalDemandQuantity || 0)} pcs</span>
-                                                <span class="text-xs text-gray-500 dark:text-gray-400">${formatPlannerPreviewNumber(coveragePercent)}% covered</span>
-                                            </div>
-                                            <div class="mt-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                                                <div class="h-full rounded-full ${Number(item.uncoveredQuantity || 0) > 0 ? 'bg-gradient-to-r from-rose-500 to-orange-500' : 'bg-gradient-to-r from-emerald-500 to-cyan-500'}" style="width:${coveragePercent}%"></div>
-                                            </div>
-                                            <div class="mt-3 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
-                                                ${(item.demandByDate || []).map((entry) => `
-                                                    <span class="rounded-full bg-gray-100 dark:bg-gray-700 px-2.5 py-1">${escapePlannerPreviewHtml(formatPlannerPreviewDate(entry.date))}: ${formatPlannerPreviewNumber(entry.quantity || 0)}</span>
-                                                `).join('')}
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="px-4 py-4 align-top text-right">
-                                        <div class="font-medium text-gray-900 dark:text-white">${formatPlannerPreviewNumber(item.physicalInventory || 0)}</div>
-                                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${item.inventoryLastUpdated ? escapePlannerPreviewHtml(formatPlannerPreviewTimestamp(item.inventoryLastUpdated)) : 'No snapshot'}</div>
-                                    </td>
-                                    <td class="px-4 py-4 align-top text-right">
-                                        <div class="font-medium text-cyan-700 dark:text-cyan-300">${formatPlannerPreviewNumber(item.requiredProductionQuantity || 0)}</div>
-                                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${item.boxQuantity ? `${formatPlannerPreviewNumber(Math.ceil(Number(item.requiredProductionQuantity || 0) / Number(item.boxQuantity || 1)))} boxes` : 'Box qty unavailable'}</div>
-                                    </td>
-                                    <td class="px-4 py-4 align-top text-right">
-                                        <div class="font-medium text-violet-700 dark:text-violet-300">${formatPlannerPreviewNumber(item.currentPlannedQuantity || 0)}</div>
-                                        <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${(item.plannedEquipment || []).length > 0 ? escapePlannerPreviewHtml(item.plannedEquipment.join(', ')) : 'Not in draft'}</div>
-                                    </td>
-                                    <td class="px-4 py-4 align-top">
-                                        <div class="min-w-[180px] flex flex-wrap gap-2">
-                                            ${Number(item.uncoveredQuantity || 0) > 0 ? `<span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-800 dark:bg-rose-950/40 dark:text-rose-200">Add ${formatPlannerPreviewNumber(item.uncoveredQuantity || 0)} pcs</span>` : ''}
-                                            ${Number(item.overplannedQuantity || 0) > 0 ? `<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Overplanned ${formatPlannerPreviewNumber(item.overplannedQuantity || 0)} pcs</span>` : ''}
-                                            ${Number(item.uncoveredQuantity || 0) === 0 && Number(item.overplannedQuantity || 0) === 0 ? `<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">Demand protected</span>` : ''}
-                                            ${(item.requestNumbers || []).slice(0, 3).map((requestNumber) => `
-                                                <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(requestNumber)}</span>
-                                            `).join('')}
-                                        </div>
-                                    </td>
-                                    <td class="px-4 py-4 align-top">
-                                        <div class="min-w-[220px] flex flex-wrap gap-2">
-                                            ${(item.eligibleMachines || []).slice(0, 4).map((machine) => `
-                                                <span class="rounded-full ${machine.preferred ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200'} px-2.5 py-1 text-xs font-medium">${escapePlannerPreviewHtml(machine.equipment)}${machine.preferred ? ' · preferred' : ''}</span>
-                                            `).join('')}
-                                            ${(!item.eligibleMachines || item.eligibleMachines.length === 0) ? `<span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">${escapePlannerPreviewHtml(item.capabilityStatus || 'unmapped')}</span>` : ''}
-                                        </div>
-                                    </td>
+                    <div class="overflow-auto max-h-[520px]">
+                        <table class="min-w-full text-sm text-left">
+                            <thead class="sticky top-0 z-10 bg-gray-50 text-gray-600 dark:bg-gray-900/40 dark:text-gray-300">
+                                <tr>
+                                    <th class="px-4 py-2 font-medium">Priority</th>
+                                    <th class="px-4 py-2 font-medium">Request #</th>
+                                    <th class="px-4 py-2 font-medium">背番号</th>
+                                    <th class="px-4 py-2 text-right font-medium">不足枚数</th>
+                                    <th class="px-4 py-2 text-right font-medium">不足箱数</th>
+                                    <th class="px-4 py-2 font-medium">possible 設備</th>
                                 </tr>
-                            `;
-                        }).join('') : `
-                            <tr>
-                                <td colspan="7" class="px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
-                                    No active demand or planner rows were found for the selected horizon.
-                                </td>
-                            </tr>
-                        `}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                                ${priorityRows.length > 0 ? priorityRows.map((row) => `
+                                    <tr class="${row.capabilityStatus !== 'mapped' ? 'bg-rose-50/40 dark:bg-rose-950/10' : 'bg-white dark:bg-gray-800'}">
+                                        <td class="px-4 py-3 text-gray-700 dark:text-gray-200">
+                                            ${formatPlannerPreviewNumber(row.priorityRank || row.queueOrder || 0)}
+                                        </td>
+                                        <td class="px-4 py-3 font-medium text-sky-700 dark:text-sky-300" title="Line ${formatPlannerPreviewNumber(row.lineNumber || 0)}">
+                                            ${escapePlannerPreviewHtml(row.requestNumber || '-')}
+                                        </td>
+                                        <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                                            ${escapePlannerPreviewHtml(row.背番号 || row.品番 || '-')}
+                                        </td>
+                                        <td class="px-4 py-3 text-right font-semibold text-rose-700 dark:text-rose-300">
+                                            ${formatPlannerPreviewNumber(row.shortfallQuantity || 0)}
+                                        </td>
+                                        <td class="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                                            ${row.shortageBoxes !== null ? formatPlannerPreviewNumber(row.shortageBoxes) : '-'}
+                                        </td>
+                                        <td class="px-4 py-3 text-gray-600 dark:text-gray-300 ${row.capabilityStatus !== 'mapped' ? 'font-medium text-rose-700 dark:text-rose-300' : ''}">
+                                            ${escapePlannerPreviewHtml(getPlannerPreviewPossibleEquipmentText(row))}
+                                        </td>
+                                    </tr>
+                                `).join('') : `
+                                    <tr>
+                                        <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                                            No unfinished shortage line-items are waiting right now.
+                                        </td>
+                                    </tr>
+                                `}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="px-4 py-2 border-t border-gray-200 bg-gray-50 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-900/30 dark:text-gray-400">
+                        * means preferred 設備.
+                    </div>
+                </div>
 
-        ${plannerState.preview.error ? `
-            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                Last refresh warning: ${escapePlannerPreviewHtml(plannerState.preview.error)}
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Current Inventory Table</h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">Latest inventory snapshot for the active products relevant to this preview.</p>
+                            </div>
+                            <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${formatPlannerPreviewNumber(inventoryRows.length)} products</span>
+                        </div>
+                    </div>
+                    <div class="overflow-auto max-h-[520px]">
+                        <table class="min-w-full text-sm text-left">
+                            <thead class="sticky top-0 z-10 bg-gray-50 text-gray-600 dark:bg-gray-900/40 dark:text-gray-300">
+                                <tr>
+                                    <th class="px-4 py-2 font-medium">背番号</th>
+                                    <th class="px-4 py-2 font-medium">品番</th>
+                                    <th class="px-4 py-2 text-right font-medium">Physical</th>
+                                    <th class="px-4 py-2 text-right font-medium">Reserved</th>
+                                    <th class="px-4 py-2 text-right font-medium">Available</th>
+                                    <th class="px-4 py-2 text-right font-medium">Waiting</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                                ${inventoryRows.length > 0 ? inventoryRows.map((row) => `
+                                    <tr class="${Number(row.pendingShortfallQuantity || 0) > 0 ? 'bg-amber-50/40 dark:bg-amber-950/10' : 'bg-white dark:bg-gray-800'}">
+                                        <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">${escapePlannerPreviewHtml(row.背番号 || '-')}</td>
+                                        <td class="px-4 py-3 text-gray-700 dark:text-gray-300">${escapePlannerPreviewHtml(row.品番 || '-')}</td>
+                                        <td class="px-4 py-3 text-right font-semibold text-emerald-700 dark:text-emerald-300">${formatPlannerPreviewNumber(row.physicalQuantity || 0)}</td>
+                                        <td class="px-4 py-3 text-right text-gray-700 dark:text-gray-300">${formatPlannerPreviewNumber(row.reservedQuantity || 0)}</td>
+                                        <td class="px-4 py-3 text-right text-gray-700 dark:text-gray-300">${formatPlannerPreviewNumber(row.availableQuantity || 0)}</td>
+                                        <td class="px-4 py-3 text-right font-semibold ${Number(row.pendingShortfallQuantity || 0) > 0 ? 'text-rose-700 dark:text-rose-300' : 'text-gray-500 dark:text-gray-400'}">${formatPlannerPreviewNumber(row.pendingShortfallQuantity || 0)}</td>
+                                    </tr>
+                                `).join('') : `
+                                    <tr>
+                                        <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                                            No inventory rows are available for the current preview scope.
+                                        </td>
+                                    </tr>
+                                `}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-        ` : ''}
+
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Planned Preview Calendar</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">Read-only 15-minute machine view. The preview only places shortage rows that can finish by the selected cutoff.</p>
+                    </div>
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <label class="flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-300">
+                            <span class="font-medium">Schedule Until</span>
+                            <input
+                                type="time"
+                                step="${PLANNER_CONFIG.intervalMinutes * 60}"
+                                min="${getPlannerPreviewMinimumScheduleUntilTime()}"
+                                max="23:45"
+                                value="${escapePlannerPreviewHtml(scheduleUntilTime)}"
+                                onchange="setPlannerPreviewScheduleUntilTime(this.value)"
+                                class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-sky-900/40"
+                            >
+                        </label>
+                        <div class="flex flex-wrap gap-2 text-xs">
+                            <span class="rounded-full bg-violet-100 px-3 py-1 font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-200">Current plan ${formatPlannerPreviewNumber(summary.currentPlanQuantity || 0)} pcs</span>
+                            <span class="rounded-full bg-cyan-100 px-3 py-1 font-medium text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-200">Scheduled before ${escapePlannerPreviewHtml(scheduleUntilTime)}: ${formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)} pcs</span>
+                            <span class="rounded-full bg-amber-100 px-3 py-1 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">Outside limit ${formatPlannerPreviewNumber(summary.timeLimitMissedQuantity || 0)} pcs</span>
+                            ${Number(summary.currentPlanOverflowCount || 0) > 0 ? `<span class="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">Current plan past limit ${formatPlannerPreviewNumber(summary.currentPlanOverflowCount || 0)} row(s)</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-violet-200 dark:bg-violet-800"></span>Current plan rows</span>
+                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-cyan-200 dark:bg-cyan-800"></span>Priority preview inserts</span>
+                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-300 dark:bg-slate-600"></span>Break time</span>
+                </div>
+                <div class="p-5">
+                    ${renderPlannerPreviewTimeline(preview)}
+                    ${timeLimitExceptions.length > 0 ? `
+                        <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 dark:border-amber-900 dark:bg-amber-950/20">
+                            <p class="text-sm font-semibold text-amber-800 dark:text-amber-200">Some shortage lines are not included because they do not fit before ${escapePlannerPreviewHtml(scheduleUntilTime)}.</p>
+                            <div class="mt-3 space-y-2">
+                                ${timeLimitExceptions.slice(0, 8).map((exception) => `
+                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
+                                        <div class="text-amber-900 dark:text-amber-100">${escapePlannerPreviewHtml(exception.requestNumber || '-')} - ${escapePlannerPreviewHtml(exception.背番号 || exception.品番 || '-')}</div>
+                                        <div class="text-amber-700 dark:text-amber-300">${formatPlannerPreviewNumber(exception.shortfallQuantity || 0)} pcs · ${escapePlannerPreviewHtml((exception.candidateEquipment || []).join(' / ') || '-')}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${simulation.currentPlanOverflow.length > 0 ? `
+                        <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-700 dark:bg-slate-900/30">
+                            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100">Some existing planner rows already run past ${escapePlannerPreviewHtml(scheduleUntilTime)} and are clipped in this calendar.</p>
+                            <div class="mt-3 space-y-2">
+                                ${simulation.currentPlanOverflow.slice(0, 8).map((assignment) => `
+                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
+                                        <div class="text-slate-800 dark:text-slate-100">${escapePlannerPreviewHtml(assignment.equipment || '-')} - ${escapePlannerPreviewHtml(assignment.背番号 || assignment.品番 || '-')}</div>
+                                        <div class="text-slate-600 dark:text-slate-300">${escapePlannerPreviewHtml(assignment.startTime || '-')} - ${escapePlannerPreviewHtml(assignment.endTime || '-')}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${otherExceptions.length > 0 ? `
+                        <div class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-4 dark:border-rose-900 dark:bg-rose-950/20">
+                            <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">Capability or mapping issues still need review.</p>
+                            <div class="mt-3 space-y-2">
+                                ${otherExceptions.slice(0, 8).map((exception) => `
+                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
+                                        <div class="text-rose-800 dark:text-rose-200">${escapePlannerPreviewHtml(exception.requestNumber || '-')}, line ${formatPlannerPreviewNumber(exception.lineNumber || 0)} - ${escapePlannerPreviewHtml(exception.背番号 || exception.品番 || '-')}</div>
+                                        <div class="text-rose-700 dark:text-rose-300">${formatPlannerPreviewNumber(exception.shortfallQuantity || 0)} pcs · ${escapePlannerPreviewHtml(exception.reason || 'unmapped')}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+
+            ${plannerState.preview.error ? `
+                <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    Last refresh warning: ${escapePlannerPreviewHtml(plannerState.preview.error)}
+                </div>
+            ` : ''}
+        </div>
     `;
 }
 
@@ -3835,6 +4209,11 @@ window.refreshPlannerPreview = async function(forceRefresh = true) {
     } catch (error) {
         console.error('Failed to refresh planner preview:', error);
     }
+};
+
+window.setPlannerPreviewScheduleUntilTime = function(value) {
+    plannerState.preview.scheduleUntilTime = normalizePlannerPreviewScheduleUntilTime(value);
+    renderPlannerPreview();
 };
 
 // ============================================
