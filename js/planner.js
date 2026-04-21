@@ -25,6 +25,7 @@ let plannerState = {
     currentDate: new Date().toISOString().split('T')[0],
     endDate: null, // For date range plans
     equipment: [],
+    productionCapabilities: {},
     products: [], // All available products from masterDB
     goals: [], // Production quantity goals
     plans: [],
@@ -91,6 +92,248 @@ function getColorForProduct(product) {
     
     // Default: assign from color palette
     return getRandomColor();
+}
+
+function buildPlannerCapabilityKey(factory = '', sebanggo = '', hinban = '') {
+    return `${factory}::${sebanggo}::${hinban}`;
+}
+
+function normalizePlannerCapabilityItem(product = {}, fallbackFactory = '') {
+    return {
+        factory: String(fallbackFactory || product.factory || product['工場'] || plannerState.currentFactory || '').trim(),
+        背番号: String(product.背番号 || '').trim(),
+        品番: String(product.品番 || '').trim()
+    };
+}
+
+function mergePlannerEquipmentOptions(equipmentList = []) {
+    if (!Array.isArray(equipmentList) || equipmentList.length === 0) {
+        return;
+    }
+
+    const merged = new Set(plannerState.equipment);
+    equipmentList.forEach((equipment) => {
+        const value = String(equipment || '').trim();
+        if (value) {
+            merged.add(value);
+        }
+    });
+
+    plannerState.equipment = Array.from(merged).sort((left, right) => left.localeCompare(right));
+}
+
+async function loadProductionCapabilitiesForItems(items = [], options = {}) {
+    const fallbackFactory = String(options.factory || plannerState.currentFactory || '').trim();
+    const forceRefresh = options.forceRefresh === true;
+    const normalizedItems = [];
+    const seenKeys = new Set();
+
+    items.forEach((item) => {
+        const normalized = normalizePlannerCapabilityItem(item, fallbackFactory);
+        if (!normalized.factory || (!normalized.背番号 && !normalized.品番)) {
+            return;
+        }
+
+        const key = buildPlannerCapabilityKey(normalized.factory, normalized.背番号, normalized.品番);
+        if (seenKeys.has(key)) {
+            return;
+        }
+
+        seenKeys.add(key);
+        normalizedItems.push(normalized);
+    });
+
+    if (normalizedItems.length === 0) {
+        return plannerState.productionCapabilities;
+    }
+
+    const itemsToFetch = forceRefresh
+        ? normalizedItems
+        : normalizedItems.filter((item) => {
+            const key = buildPlannerCapabilityKey(item.factory, item.背番号, item.品番);
+            return !plannerState.productionCapabilities[key];
+        });
+
+    if (itemsToFetch.length === 0) {
+        return plannerState.productionCapabilities;
+    }
+
+    const response = await fetch(`${BASE_URL}api/production-capability/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            factory: fallbackFactory,
+            items: itemsToFetch
+        })
+    });
+
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to load production capability mappings');
+    }
+
+    Object.assign(plannerState.productionCapabilities, result.capabilities || {});
+
+    const mappedEquipment = Object.values(result.capabilities || {}).flatMap((entry) =>
+        Array.isArray(entry.eligibleMachines)
+            ? entry.eligibleMachines.map((machine) => machine.equipment)
+            : []
+    );
+    mergePlannerEquipmentOptions(mappedEquipment);
+
+    return plannerState.productionCapabilities;
+}
+
+function getCachedProductionCapability(product = {}, fallbackFactory = '') {
+    const normalized = normalizePlannerCapabilityItem(product, fallbackFactory);
+    const key = buildPlannerCapabilityKey(normalized.factory, normalized.背番号, normalized.品番);
+    return plannerState.productionCapabilities[key] || null;
+}
+
+function getEligibleEquipmentForProduct(product = {}, fallbackFactory = '') {
+    const capability = getCachedProductionCapability(product, fallbackFactory);
+    if (!capability || !Array.isArray(capability.eligibleMachines)) {
+        return [];
+    }
+
+    return capability.eligibleMachines
+        .map((machine) => String(machine?.equipment || machine?.設備 || '').trim())
+        .filter(Boolean);
+}
+
+function getPlannerEquipmentOptionsForProduct(product = {}, fallbackFactory = '') {
+    const eligibleEquipment = getEligibleEquipmentForProduct(product, fallbackFactory);
+    return eligibleEquipment.length > 0 ? eligibleEquipment : plannerState.equipment;
+}
+
+function getPlannerNumberValue(value) {
+    if (value === '' || value === null || value === undefined) {
+        return null;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getPlannerEquipmentNames(equipmentName = '') {
+    return String(equipmentName || '')
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean);
+}
+
+function getPlannerMasterProduct(product = {}) {
+    if (!product) {
+        return null;
+    }
+
+    if (
+        product.machineConfig
+        || product['秒数(1pcs何秒)'] !== undefined
+        || product.pcPerCycle !== undefined
+        || product['収容数'] !== undefined
+    ) {
+        return product;
+    }
+
+    return plannerState.products.find((candidate) => (
+        (product.品番 && candidate.品番 === product.品番)
+        || (product.背番号 && candidate.背番号 === product.背番号)
+    )) || null;
+}
+
+function getPlannerCapabilityMachine(product = {}, equipmentName = '') {
+    const selectedEquipment = String(equipmentName || product.equipment || '').trim();
+    if (!selectedEquipment) {
+        return null;
+    }
+
+    const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+    if (!capability || !Array.isArray(capability.eligibleMachines)) {
+        return null;
+    }
+
+    return capability.eligibleMachines.find((machine) => (
+        String(machine?.equipment || machine?.設備 || '').trim() === selectedEquipment
+    )) || null;
+}
+
+function resolvePlannerMasterPcPerCycle(product = {}, equipmentName = '') {
+    const masterProduct = getPlannerMasterProduct(product) || product;
+    const rootPcPerCycle = getPlannerNumberValue(masterProduct?.pcPerCycle);
+    const machineConfig = masterProduct?.machineConfig && typeof masterProduct.machineConfig === 'object'
+        ? masterProduct.machineConfig
+        : null;
+    const equipmentNames = getPlannerEquipmentNames(equipmentName);
+
+    if (!machineConfig || equipmentNames.length === 0) {
+        return rootPcPerCycle;
+    }
+
+    if (equipmentNames.length === 1) {
+        return getPlannerNumberValue(machineConfig[equipmentNames[0]]?.pcPerCycle) ?? rootPcPerCycle;
+    }
+
+    const machineValues = equipmentNames
+        .map((name) => getPlannerNumberValue(machineConfig[name]?.pcPerCycle))
+        .filter((value) => value !== null);
+
+    if (
+        machineValues.length === equipmentNames.length
+        && machineValues.length > 0
+        && machineValues.every((value) => value === machineValues[0])
+    ) {
+        return machineValues[0];
+    }
+
+    return rootPcPerCycle;
+}
+
+function resolvePlannerCycleTimeSeconds(product = {}, equipmentName = '') {
+    const capabilityMachine = getPlannerCapabilityMachine(product, equipmentName);
+    const capabilityOverride = getPlannerNumberValue(capabilityMachine?.cycleTimeSeconds);
+    if (capabilityOverride !== null && capabilityOverride > 0) {
+        return capabilityOverride;
+    }
+
+    const masterProduct = getPlannerMasterProduct(product) || product;
+    const masterCycleTime = getPlannerNumberValue(masterProduct?.['秒数(1pcs何秒)']);
+    if (masterCycleTime !== null && masterCycleTime > 0) {
+        return masterCycleTime;
+    }
+
+    return PLANNER_CONFIG.defaultCycleTime;
+}
+
+function resolvePlannerPcPerCycle(product = {}, equipmentName = '') {
+    const capabilityMachine = getPlannerCapabilityMachine(product, equipmentName);
+    const capabilityOverride = getPlannerNumberValue(capabilityMachine?.pcPerCycle);
+    if (capabilityOverride !== null && capabilityOverride > 0) {
+        return capabilityOverride;
+    }
+
+    const masterPcPerCycle = resolvePlannerMasterPcPerCycle(product, equipmentName);
+    if (masterPcPerCycle !== null && masterPcPerCycle > 0) {
+        return masterPcPerCycle;
+    }
+
+    return PLANNER_CONFIG.defaultPcPerCycle;
+}
+
+function resolvePlannerBoxQuantity(product = {}, equipmentName = '') {
+    const capabilityMachine = getPlannerCapabilityMachine(product, equipmentName);
+    const capabilityOverride = getPlannerNumberValue(capabilityMachine?.boxQuantityOverride);
+    if (capabilityOverride !== null && capabilityOverride > 0) {
+        return capabilityOverride;
+    }
+
+    const masterProduct = getPlannerMasterProduct(product) || product;
+    const masterBoxQuantity = getPlannerNumberValue(masterProduct?.['収容数']);
+    if (masterBoxQuantity !== null && masterBoxQuantity > 0) {
+        return masterBoxQuantity;
+    }
+
+    return 1;
 }
 
 // ============================================
@@ -868,12 +1111,10 @@ function switchPlannerTab(tab) {
 // ============================================
 // TIME CALCULATIONS
 // ============================================
-function calculateProductionTime(product, quantity) {
-    // Get cycle time in seconds (default 120 seconds = 2 minutes)
-    const cycleTimeSeconds = parseFloat(product['秒数(1pcs何秒)']) || PLANNER_CONFIG.defaultCycleTime;
-    
-    // Get pieces per cycle (default 1)
-    const pcPerCycle = parseInt(product.pcPerCycle) || PLANNER_CONFIG.defaultPcPerCycle;
+function calculateProductionTime(product, quantity, equipmentName = '') {
+    const selectedEquipment = String(equipmentName || product.equipment || '').trim();
+    const cycleTimeSeconds = resolvePlannerCycleTimeSeconds(product, selectedEquipment);
+    const pcPerCycle = resolvePlannerPcPerCycle(product, selectedEquipment);
     
     // Calculate number of cycles needed
     const cyclesNeeded = Math.ceil(quantity / pcPerCycle);
@@ -894,25 +1135,10 @@ function calculateProductionTime(product, quantity) {
     };
 }
 
-function calculateBoxesNeeded(product, quantity) {
-    let capacity = parseInt(product['収容数']) || 0;
-    
-    // If capacity not in product, look it up from plannerState.products (masterDB)
-    if (!capacity && (product.品番 || product.背番号)) {
-        const fullProduct = plannerState.products.find(p => 
-            (product.品番 && p.品番 === product.品番) || 
-            (product.背番号 && p.背番号 === product.背番号)
-        );
-        if (fullProduct && fullProduct['収容数']) {
-            capacity = parseInt(fullProduct['収容数']);
-        }
-    }
-    
-    // Default to 1 if still no capacity found
-    if (!capacity || capacity <= 0) {
-        capacity = 1;
-    }
-    
+function calculateBoxesNeeded(product, quantity, equipmentName = '') {
+    const selectedEquipment = String(equipmentName || product.equipment || '').trim();
+    const capacity = resolvePlannerBoxQuantity(product, selectedEquipment);
+
     return Math.ceil(quantity / capacity);
 }
 
@@ -2360,9 +2586,67 @@ function toggleProductSelection(productId) {
     }
 }
 
-function showAddProductModal(product) {
+async function showAddProductModal(product) {
     const color = plannerState.productColors[product.背番号] || '#6B7280';
     const capacity = parseInt(product['収容数']) || 1;
+    const plannerFactory = plannerState.currentFactory;
+    let equipmentOptions = plannerState.equipment;
+    let capabilityNotice = '';
+    let disableEquipmentSelection = false;
+
+    try {
+        await loadProductionCapabilitiesForItems([product], { factory: plannerFactory });
+
+        const capability = getCachedProductionCapability(product, plannerFactory);
+        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerFactory);
+
+        if (capability?.hasMapping) {
+            if (eligibleEquipment.length > 0) {
+                equipmentOptions = eligibleEquipment;
+                capabilityNotice = `
+                    <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        Capability mapping active for ${plannerFactory || 'this factory'}: ${eligibleEquipment.join(', ')}
+                    </div>
+                `;
+            } else {
+                equipmentOptions = [];
+                disableEquipmentSelection = true;
+                capabilityNotice = `
+                    <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        This product has a capability record, but no enabled equipment is available for ${plannerFactory || 'this factory'}.
+                    </div>
+                `;
+            }
+        } else {
+            capabilityNotice = `
+                <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    No capability mapping found for ${plannerFactory || 'this factory'} yet. Using legacy equipment list.
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('❌ Failed to load capability mapping for add-product modal:', error);
+        capabilityNotice = `
+            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                Capability lookup failed. Using current equipment list.
+            </div>
+        `;
+    }
+
+    if (equipmentOptions.length === 0) {
+        disableEquipmentSelection = true;
+        if (!capabilityNotice) {
+            capabilityNotice = `
+                <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    No equipment is available for manual assignment.
+                </div>
+            `;
+        }
+    }
+
+    const confirmButtonClasses = disableEquipmentSelection
+        ? 'px-4 py-2 bg-blue-300 text-white rounded-lg cursor-not-allowed'
+        : 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors';
     
     const modalHTML = `
         <div id="addProductModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -2377,6 +2661,8 @@ function showAddProductModal(product) {
                     </div>
                     
                     <div class="space-y-4">
+                        ${capabilityNotice}
+
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="targetQuantity">Target Quantity</label>
                             <input type="number" id="productQuantity" min="1" value="${capacity}" 
@@ -2399,16 +2685,16 @@ function showAddProductModal(product) {
                         
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="assignToEquipment">Assign to Equipment</label>
-                            <select id="equipmentSelect" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white">
+                            <select id="equipmentSelect" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" onchange="updateQuantityPreview('${product._id}')" ${disableEquipmentSelection ? 'disabled' : ''}>
                                 <option value="" data-i18n="selectEquipment">-- Select Equipment --</option>
-                                ${plannerState.equipment.map(eq => `<option value="${eq}">${eq}</option>`).join('')}
+                                ${equipmentOptions.map(eq => `<option value="${eq}">${eq}</option>`).join('')}
                             </select>
                         </div>
                     </div>
                     
                     <div class="flex justify-end gap-3 mt-6">
                         <button onclick="closeAddProductModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
-                        <button onclick="confirmAddProduct('${product._id}')" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors" data-i18n="addToPlan">Add to Plan</button>
+                        <button onclick="confirmAddProduct('${product._id}')" class="${confirmButtonClasses}" data-i18n="addToPlan" ${disableEquipmentSelection ? 'disabled' : ''}>Add to Plan</button>
                     </div>
                 </div>
             </div>
@@ -2432,8 +2718,10 @@ function updateQuantityPreview(productId) {
     if (!product) return;
     
     const quantity = parseInt(document.getElementById('productQuantity')?.value) || 1;
-    const boxes = calculateBoxesNeeded(product, quantity);
-    const time = calculateProductionTime(product, quantity);
+    const selectedEquipment = document.getElementById('equipmentSelect')?.value || '';
+    const previewProduct = selectedEquipment ? { ...product, equipment: selectedEquipment } : product;
+    const boxes = calculateBoxesNeeded(previewProduct, quantity, selectedEquipment);
+    const time = calculateProductionTime(previewProduct, quantity, selectedEquipment);
     
     document.getElementById('boxesPreview').textContent = boxes;
     document.getElementById('timePreview').textContent = time.formattedTime;
@@ -2445,7 +2733,7 @@ function closeAddProductModal() {
     window.currentAddProduct = null;
 }
 
-function confirmAddProduct(productId) {
+async function confirmAddProduct(productId) {
     const product = window.currentAddProduct;
     if (!product) return;
     
@@ -2456,9 +2744,29 @@ function confirmAddProduct(productId) {
         showPlannerNotification('Please select equipment', 'warning');
         return;
     }
+
+    try {
+        await loadProductionCapabilitiesForItems([product], { factory: plannerState.currentFactory });
+    } catch (error) {
+        console.error('❌ Failed to refresh capability mapping before manual add:', error);
+    }
+
+    const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+    const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
+
+    if (capability?.hasMapping && eligibleEquipment.length === 0) {
+        showPlannerNotification('This product has no enabled capability equipment in the current factory', 'error');
+        return;
+    }
+
+    if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(equipment)) {
+        showPlannerNotification(`${product.背番号} is not mapped to ${equipment}`, 'warning');
+        return;
+    }
     
-    const timeInfo = calculateProductionTime(product, quantity);
-    const boxes = calculateBoxesNeeded(product, quantity);
+    const productForEquipment = { ...product, equipment };
+    const timeInfo = calculateProductionTime(productForEquipment, quantity, equipment);
+    const boxes = calculateBoxesNeeded(productForEquipment, quantity, equipment);
     
     plannerState.selectedProducts.push({
         ...product,
@@ -3608,6 +3916,27 @@ async function handleKanbanDrop(event, newEquipment) {
     
     const product = plannerState.selectedProducts.find(p => p._id === productId);
     if (product && product.equipment !== newEquipment) {
+        try {
+            await loadProductionCapabilitiesForItems([product], { factory: plannerState.currentFactory });
+        } catch (error) {
+            console.error('❌ Failed to validate capability mapping during drag/drop:', error);
+            showPlannerNotification('Failed to validate capability mapping for this move', 'error');
+            return;
+        }
+
+        const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
+
+        if (capability?.hasMapping && eligibleEquipment.length === 0) {
+            showPlannerNotification(`${product.背番号} has no enabled capability equipment in this factory`, 'warning');
+            return;
+        }
+
+        if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(newEquipment)) {
+            showPlannerNotification(`${product.背番号} is not mapped to ${newEquipment}`, 'warning');
+            return;
+        }
+
         product.equipment = newEquipment;
         renderAllViews();
         updateSelectedProductsSummary();
@@ -3997,24 +4326,18 @@ function renderMultiPickerSelected() {
     
     container.innerHTML = multiPickerState.selectedProducts.map((product, index) => {
         const color = plannerState.productColors[product.背番号] || '#6B7280';
-        const timeInfo = calculateProductionTime(product, product.quantity);
-        const boxes = calculateBoxesNeeded(product, product.quantity);
+        const selectedEquipment = multiPickerState.equipment || '';
+        const productForEquipment = selectedEquipment ? { ...product, equipment: selectedEquipment } : product;
+        const timeInfo = calculateProductionTime(productForEquipment, product.quantity, selectedEquipment);
+        const boxes = calculateBoxesNeeded(productForEquipment, product.quantity, selectedEquipment);
         
         // Get goal info
         const goalQty = product.remainingQuantity || 0;
         const inputQty = product.quantity || 0;
         const remaining = Math.max(0, goalQty - inputQty);
         
-        // Get capacity for box calculation
-        let capacity = parseInt(product['収容数']) || 1;
-        if (!product['収容数'] && product.品番) {
-            const fullProduct = plannerState.products.find(p => p.品番 === product.品番 || p.背番号 === product.背番号);
-            if (fullProduct && fullProduct['収容数']) {
-                capacity = parseInt(fullProduct['収容数']);
-            }
-        }
-        const goalBoxes = Math.ceil(goalQty / capacity);
-        const remainingBoxes = Math.ceil(remaining / capacity);
+        const goalBoxes = calculateBoxesNeeded(productForEquipment, goalQty, selectedEquipment);
+        const remainingBoxes = calculateBoxesNeeded(productForEquipment, remaining, selectedEquipment);
         
         return `
             <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
@@ -4103,8 +4426,10 @@ function renderMultiPickerOrdered() {
     
     container.innerHTML = multiPickerState.orderedProducts.map((product, index) => {
         const color = plannerState.productColors[product.背番号] || '#6B7280';
-        const timeInfo = calculateProductionTime(product, product.quantity);
-        const boxes = calculateBoxesNeeded(product, product.quantity);
+        const selectedEquipment = multiPickerState.equipment || '';
+        const productForEquipment = selectedEquipment ? { ...product, equipment: selectedEquipment } : product;
+        const timeInfo = calculateProductionTime(productForEquipment, product.quantity, selectedEquipment);
+        const boxes = calculateBoxesNeeded(productForEquipment, product.quantity, selectedEquipment);
         
         return `
             <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 relative">
@@ -4174,6 +4499,16 @@ async function confirmMultiPickerSelection() {
         showPlannerNotification('Please move products to the order column', 'warning');
         return;
     }
+
+    try {
+        await loadProductionCapabilitiesForItems(multiPickerState.orderedProducts, {
+            factory: plannerState.currentFactory
+        });
+    } catch (error) {
+        console.error('❌ Failed to load capability mappings for multi-picker:', error);
+        showPlannerNotification('Failed to validate capability mappings for the selected equipment', 'error');
+        return;
+    }
     
     // Calculate actual start times, skipping breaks
     // Use the clicked time slot, not the work start time
@@ -4187,6 +4522,7 @@ async function confirmMultiPickerSelection() {
     // STEP 1: Validate all products first
     // ========================================
     const productsToAdd = [];
+    const capabilitySkippedProducts = [];
     for (const product of multiPickerState.orderedProducts) {
         // Find the current goal to check remaining quantity
         const currentGoal = plannerState.goals.find(g => g._id === product._id);
@@ -4197,9 +4533,25 @@ async function confirmMultiPickerSelection() {
             showPlannerNotification(`Cannot schedule ${product.quantity} pcs for ${product.背番号} - only ${currentGoal.remainingQuantity} pcs remaining`, 'error');
             continue; // Skip this product
         }
+
+        const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
+
+        if (capability?.hasMapping && eligibleEquipment.length === 0) {
+            capabilitySkippedProducts.push(product.背番号 || product.品番 || 'Unknown');
+            console.warn(`⚠️ ${product.背番号} has no enabled capability equipment`);
+            continue;
+        }
+
+        if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(equipment)) {
+            capabilitySkippedProducts.push(product.背番号 || product.品番 || 'Unknown');
+            console.warn(`⚠️ ${product.背番号} is not mapped to ${equipment}`);
+            continue;
+        }
         
-        const timeInfo = calculateProductionTime(product, product.quantity);
-        const boxes = calculateBoxesNeeded(product, product.quantity);
+        const productForEquipment = { ...product, equipment };
+        const timeInfo = calculateProductionTime(productForEquipment, product.quantity, equipment);
+        const boxes = calculateBoxesNeeded(productForEquipment, product.quantity, equipment);
         const productDurationMinutes = timeInfo.totalSeconds / 60;
         
         // Find actual start time and end time, accounting for breaks
@@ -4220,6 +4572,10 @@ async function confirmMultiPickerSelection() {
     }
     
     if (productsToAdd.length === 0) {
+        if (capabilitySkippedProducts.length > 0) {
+            showPlannerNotification(`No valid products to add. ${capabilitySkippedProducts.join(', ')} are not mapped to ${equipment}.`, 'error');
+            return;
+        }
         showPlannerNotification('No valid products to add to timeline', 'error');
         return;
     }
@@ -4319,7 +4675,10 @@ async function confirmMultiPickerSelection() {
         updateSelectedProductsSummary();
         renderAllViews();
         
-        showPlannerNotification(`✅ Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline`, 'success');
+        const notificationText = capabilitySkippedProducts.length > 0
+            ? `Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline. ${capabilitySkippedProducts.length} skipped by capability mapping.`
+            : `✅ Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline`;
+        showPlannerNotification(notificationText, capabilitySkippedProducts.length > 0 ? 'warning' : 'success');
         
     } catch (error) {
         // ========================================
@@ -4621,9 +4980,9 @@ window.showSmartSchedulingModal = async function() {
     }
     
     // Show loading modal
-    showLoadingModal('Analyzing production trends...');
+    showLoadingModal('Analyzing production trends and capability mappings...');
     
-    showPlannerNotification('Analyzing production trends...', 'info');
+    showPlannerNotification('Analyzing production trends and capability mappings...', 'info');
     
     try {
         // Get goals for current date with remaining quantity
@@ -4635,6 +4994,7 @@ window.showSmartSchedulingModal = async function() {
         console.log('Goals count:', goalsToSchedule.length);
         
         if (goalsToSchedule.length === 0) {
+            hideLoadingModal();
             showPlannerNotification('No goals with remaining quantity for today', 'warning');
             return;
         }
@@ -4667,6 +5027,11 @@ window.showSmartSchedulingModal = async function() {
         const trends = result.trends;
         console.log('Trends received:', trends);
         console.log('Number of trends:', Object.keys(trends).length);
+
+        await loadProductionCapabilitiesForItems(goalsToSchedule, {
+            factory: plannerState.currentFactory,
+            forceRefresh: true
+        });
         
         // Helper function to get material suffix from 背番号
         function getMaterialSuffix(背番号) {
@@ -4734,14 +5099,46 @@ window.showSmartSchedulingModal = async function() {
             console.log('  Full goal object:', goal);
             
             const trend = trends[identifier];
+            const capability = getCachedProductionCapability(goal, plannerState.currentFactory);
+            const capabilityMachines = Array.isArray(capability?.eligibleMachines) ? capability.eligibleMachines : [];
             console.log(`  Trend for ${identifier}:`, trend);
+            console.log(`  Capability for ${identifier}:`, capability);
             
             // Apply 992W(310D) smart rules
             const is992W = is992WProduct(goal);
             let bestEquipment = null;
             let bestScore = -1;
             
-            if (is992W && goal.背番号) {
+            if (capability?.hasMapping && capabilityMachines.length > 0) {
+                const trendDistribution = trend?.equipmentDistribution || {};
+                const rankedCapabilityOptions = capabilityMachines
+                    .map((machine, index) => ({
+                        equipment: machine.equipment || machine.設備,
+                        priority: Number.isFinite(Number(machine.priority)) ? Number(machine.priority) : index + 1,
+                        preferred: machine.preferred === true,
+                        trendFrequency: trendDistribution[machine.equipment || machine.設備] || 0
+                    }))
+                    .sort((left, right) => {
+                        if (left.priority !== right.priority) {
+                            return left.priority - right.priority;
+                        }
+                        if (left.preferred !== right.preferred) {
+                            return left.preferred ? -1 : 1;
+                        }
+                        if (left.trendFrequency !== right.trendFrequency) {
+                            return right.trendFrequency - left.trendFrequency;
+                        }
+                        return String(left.equipment).localeCompare(String(right.equipment));
+                    });
+
+                if (rankedCapabilityOptions.length > 0) {
+                    bestEquipment = rankedCapabilityOptions[0].equipment;
+                    bestScore = rankedCapabilityOptions[0].priority;
+                    console.log(`  ✓ Capability Assignment to ${bestEquipment} (priority=${bestScore}, history=${rankedCapabilityOptions[0].trendFrequency})`);
+                }
+            } else if (capability?.hasMapping && capabilityMachines.length === 0) {
+                console.log('  ✗ Capability mapping exists but no enabled equipment is available');
+            } else if (is992W && goal.背番号) {
                 const firstDigit = parseInt(goal.背番号.charAt(0));
                 const material = getMaterialSuffix(goal.背番号);
                 
@@ -4810,11 +5207,14 @@ window.showSmartSchedulingModal = async function() {
                 assignments[bestEquipment].push({
                     ...goal,
                     quantity: goal.remainingQuantity,
-                    confidence: trend ? (trend.frequency / trend.totalRecords) : 0
+                    confidence: trend && trend.totalRecords ? (trend.frequency / trend.totalRecords) : 0,
+                    assignmentSource: capability?.hasMapping && capabilityMachines.length > 0 ? 'capability' : 'history',
+                    assignmentRank: capability?.hasMapping && capabilityMachines.length > 0 ? bestScore : null,
+                    historyConfidence: trend && trend.totalRecords ? (trend.frequency / trend.totalRecords) : 0
                 });
                 totalAssigned++;
             } else {
-                console.log(`  ✗ NOT ASSIGNED - No trend data found`);
+                console.log(`  ✗ NOT ASSIGNED - No valid capability mapping or history data found`);
                 totalUnassigned++;
             }
         });
@@ -4847,7 +5247,10 @@ function showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassi
                 <div class="p-6 border-b border-gray-200 dark:border-gray-700">
                     <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="smartScheduling">Smart Scheduling</h3>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                        ${totalAssigned} products assigned, ${totalUnassigned} without history
+                        ${totalAssigned} products assigned, ${totalUnassigned} unassigned
+                    </p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                        Capability priority is used first when a mapping exists. Press history is only a tie-breaker or legacy fallback.
                     </p>
                     <div class="mt-4">
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -4874,7 +5277,9 @@ function showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassi
                                         </div>
                                         <div class="text-right">
                                             <p class="text-sm text-gray-600 dark:text-gray-400">
-                                                ${Math.round(p.confidence * 100)}% confidence
+                                                ${p.assignmentSource === 'capability'
+                                                    ? `Capability priority ${p.assignmentRank || 1}${p.historyConfidence ? ` · history ${Math.round(p.historyConfidence * 100)}%` : ''}`
+                                                    : `${Math.round((p.historyConfidence || p.confidence || 0) * 100)}% history confidence`}
                                             </p>
                                         </div>
                                     </div>
@@ -4963,24 +5368,60 @@ window.confirmSmartScheduling = async function() {
             for (const product of products) {
                 console.log(`\n--- Processing: ${product.背番号} (${product.remainingQuantity} pcs remaining) ---`);
                 
-                // Build ranked equipment list from trend data
                 const trend = window._smartSchedulingTrends[product.背番号 || product.品番];
-                if (!trend || !trend.equipmentDistribution) {
-                    console.log('❌ No equipment distribution data - SKIPPING');
+                const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+                const capabilityMachines = Array.isArray(capability?.eligibleMachines) ? capability.eligibleMachines : [];
+
+                let rankedEquipment = [];
+
+                if (capability?.hasMapping && capabilityMachines.length > 0) {
+                    const trendDistribution = trend?.equipmentDistribution || {};
+                    rankedEquipment = capabilityMachines
+                        .map((machine, index) => {
+                            const equipment = machine.equipment || machine.設備;
+                            const frequency = trendDistribution[equipment] || 0;
+
+                            return {
+                                equipment,
+                                priority: Number.isFinite(Number(machine.priority)) ? Number(machine.priority) : index + 1,
+                                preferred: machine.preferred === true,
+                                frequency,
+                                confidence: trend?.totalRecords ? (frequency / trend.totalRecords * 100).toFixed(0) + '%' : 'capability'
+                            };
+                        })
+                        .sort((left, right) => {
+                            if (left.priority !== right.priority) {
+                                return left.priority - right.priority;
+                            }
+                            if (left.preferred !== right.preferred) {
+                                return left.preferred ? -1 : 1;
+                            }
+                            if (left.frequency !== right.frequency) {
+                                return right.frequency - left.frequency;
+                            }
+                            return String(left.equipment).localeCompare(String(right.equipment));
+                        });
+
+                    console.log('Ranked equipment from capability:', rankedEquipment.map(e => `${e.equipment} (p${e.priority}, ${e.confidence})`).join(' → '));
+                } else if (capability?.hasMapping && capabilityMachines.length === 0) {
+                    console.log('❌ Capability mapping exists but no enabled equipment - SKIPPING');
+                    skippedCount++;
+                    continue;
+                } else if (trend && trend.equipmentDistribution) {
+                    rankedEquipment = Object.entries(trend.equipmentDistribution)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([eq, freq]) => ({
+                            equipment: eq,
+                            frequency: freq,
+                            confidence: (freq / trend.totalRecords * 100).toFixed(0) + '%'
+                        }));
+
+                    console.log('Ranked equipment from history:', rankedEquipment.map(e => `${e.equipment} (${e.confidence})`).join(' → '));
+                } else {
+                    console.log('❌ No capability mapping or equipment distribution data - SKIPPING');
                     skippedCount++;
                     continue;
                 }
-                
-                // Sort equipment by frequency (confidence)
-                const rankedEquipment = Object.entries(trend.equipmentDistribution)
-                    .sort((a, b) => b[1] - a[1]) // Sort by frequency descending
-                    .map(([eq, freq]) => ({
-                        equipment: eq,
-                        frequency: freq,
-                        confidence: (freq / trend.totalRecords * 100).toFixed(0) + '%'
-                    }));
-                
-                console.log('Ranked equipment:', rankedEquipment.map(e => `${e.equipment} (${e.confidence})`).join(' → '));
                 
                 // Filter out equipment that conflicts with existing groups or is in use as part of a group
                 const availableEquipment = rankedEquipment.filter(({ equipment }) => {
@@ -5013,23 +5454,13 @@ window.confirmSmartScheduling = async function() {
                 
                 console.log('Available equipment after filtering:', availableEquipment.map(e => e.equipment).join(' → '));
                 
-                // Get product capacity per box
-                let capacity = parseInt(product['収容数']) || 0;
-                if (!capacity) {
-                    const fullProduct = plannerState.products.find(p => 
-                        (product.品番 && p.品番 === product.品番) || 
-                        (product.背番号 && p.背番号 === product.背番号)
-                    );
-                    if (fullProduct) capacity = parseInt(fullProduct['収容数']) || 1;
-                }
-                if (!capacity || capacity <= 0) capacity = 1;
-                
-                console.log(`Box capacity: ${capacity} pcs/box`);
-                
                 // Try each equipment in order of confidence (using filtered list)
                 let scheduled = false;
                 for (const { equipment } of availableEquipment) {
                     console.log(`\n  Trying: ${equipment}...`);
+                    const productForEquipment = { ...product, equipment };
+                    const capacity = resolvePlannerBoxQuantity(productForEquipment, equipment);
+                    console.log(`Box capacity: ${capacity} pcs/box`);
                     
                     // Calculate current end time for this equipment
                     const existingProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
@@ -5073,7 +5504,7 @@ window.confirmSmartScheduling = async function() {
                     
                     for (let box = 1; box <= totalBoxesNeeded; box++) {
                         const boxQuantity = Math.min(capacity, remainingQuantity - ((box - 1) * capacity));
-                        const boxTimeInfo = calculateProductionTime(product, boxQuantity);
+                        const boxTimeInfo = calculateProductionTime(productForEquipment, boxQuantity, equipment);
                         const boxDurationMinutes = boxTimeInfo.totalSeconds / 60;
                         
                         // Calculate where this box would end, accounting for breaks
@@ -5101,7 +5532,7 @@ window.confirmSmartScheduling = async function() {
                     const quantityToSchedule = boxesThatFit * capacity;
                     const actualQuantity = Math.min(quantityToSchedule, remainingQuantity);
                     
-                    const timeInfo = calculateProductionTime(product, actualQuantity);
+                    const timeInfo = calculateProductionTime(productForEquipment, actualQuantity, equipment);
                     const timing = findNextAvailableTime(currentTime, timeInfo.totalSeconds / 60, equipment);
                     
                     // Check for conflicts with MongoDB before scheduling
@@ -5178,7 +5609,7 @@ window.confirmSmartScheduling = async function() {
         hideLoadingModal();
         
         if (scheduledCount > 0) {
-            showPlannerNotification(`✅ Scheduled ${scheduledCount} product(s) in complete boxes. ${skippedCount > 0 ? skippedCount + ' skipped (no space or no history).' : ''}`, 'success');
+            showPlannerNotification(`✅ Scheduled ${scheduledCount} product(s) in complete boxes. ${skippedCount > 0 ? skippedCount + ' skipped (no space, no capability, or no history).' : ''}`, 'success');
         } else {
             showPlannerNotification('No products could be scheduled. Try increasing time limit or check equipment availability.', 'warning');
         }
