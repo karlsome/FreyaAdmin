@@ -13,7 +13,9 @@ The goal is to move from a fully manual planning process to a demand-driven syst
 5. Assigns those goals to eligible machines automatically.
 6. Warns all planner users when the nearest deadline cannot be protected.
 
-This is a planning reference only. No implementation is included in this document.
+This is the target planning reference for the full auto-planning system.
+
+It also records the currently implemented planner-preview scheduling heuristic so future work can be compared against a stable baseline.
 
 ---
 
@@ -25,6 +27,28 @@ This is a planning reference only. No implementation is included in this documen
 4. Machine assignment must use a dedicated equipment capability source of truth.
 5. Normal working hours should be used first; overtime is allowed only when required.
 6. Manual planning should not be silently overwritten.
+
+---
+
+## Current Planner Preview Snapshot (Apr 2026)
+
+The current coded scheduling heuristic lives in `js/planner.js` on the Production Planner preview tab.
+
+It is narrower than the full end-to-end automation design described later in this document.
+
+Current implemented behavior:
+
+1. The preview consumes a queue that is already priority-ordered by backend preview data.
+2. Consecutive identical rows are merged only when `背番号 / 品番`, capability status, and eligible-machine signature all match.
+3. `背番号` is interpreted as:
+  - numeric prefix = shape
+  - alphabetic suffix = material
+4. Existing planner rows are treated as occupied windows, and the preview tries to place new work into the earliest available gap before the selected cutoff.
+5. The preview takes the highest-priority unscheduled row as the anchor, chooses one machine, then expands that same-machine block with:
+  - same `背番号` rows first
+  - same material suffix rows second
+  - only inside the same request scope as the anchor row
+6. The current preview heuristic does not yet do partial split, 2-machine split, next-day rollover, or safety-stock fill.
 
 ---
 
@@ -101,6 +125,14 @@ Requests must be prioritized in this order:
 1. Earliest internal production deadline first.
 2. Lower `便` first within the same day.
 3. Fallback recommendation if still tied: earlier `createdAt` first.
+
+### 背番号 Shape / Material Rule
+
+- Numeric prefix in `背番号` = shape.
+- Alphabetic suffix in `背番号` = material.
+- Same `背番号` means same shape and same material.
+- Same-material batching means same suffix only, for example `1TD`, `2TD`, and `3TD` all share material `TD` but are still different products.
+- Quantity merging is allowed only when the full `背番号 / 品番` pair matches.
 
 ### Working Hours
 
@@ -278,17 +310,31 @@ This demand is not yet the final machine schedule.
 
 ### Stage 6: Machine Assignment
 
-For each proposed production demand row:
+For each highest-priority unscheduled production demand row:
 
 1. Load eligible machines from `productionCapabilityDB`.
-2. Rank machines by:
-   - explicit machine priority
-   - least-loaded machine
-   - historical trend only as tie-breaker
-3. Place work into available time from `09:00-17:30` first.
-4. If still required, extend up to `19:00`.
-5. Respect breaks.
-6. Split across up to 2 machines when needed.
+2. Treat that row as the anchor for a machine block.
+3. Rank eligible machines by:
+  - preferred machine flag
+  - continuity with the same `背番号` already scheduled on that machine
+  - continuity with the same material suffix already scheduled on that machine
+  - look-ahead batching potential for remaining same `背番号` rows and remaining same-material rows
+  - earliest available completion time
+  - explicit machine priority
+  - historical trend only as the final tie-breaker
+4. Place the anchor row into the earliest available window.
+5. Expand the same-machine block by pulling:
+  - same `背番号` rows first
+  - same material suffix rows second
+  - only while the machine stays eligible and the row still fits in the allowed window
+  - without crossing into a later request scope that would skip unfinished higher-priority rows
+6. Respect breaks and existing occupied windows.
+7. The full automation service may still split across up to 2 machines when one-machine placement cannot protect the deadline.
+
+Current note:
+
+- The planner preview already implements a same-day version of steps 2-6.
+- Partial split, 2-machine split, next-day rollover, and safety stock remain broader auto-planning responsibilities.
 
 ### Stage 7: Safety Stock Fill
 

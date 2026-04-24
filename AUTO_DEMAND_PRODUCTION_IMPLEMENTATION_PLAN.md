@@ -13,6 +13,34 @@ Related file:
 
 ---
 
+## Current Implemented Planner Preview Snapshot (Apr 2026)
+
+This file still describes the target server-side auto-planner for v1.
+
+The code that is currently implemented in the planner preview is narrower and should be treated as the live baseline heuristic until the backend proposal engine replaces it.
+
+Current implemented preview behavior in `js/planner.js`:
+
+1. The input queue arrives as `preview.priorityRows`, already ordered by backend preview priority.
+2. Consecutive identical rows merge only when `背番号 / 品番`, capability status, and eligible-machine signature match.
+3. Existing planner assignments become occupied machine windows, and preview rows are placed into the earliest gap that still fits before the selected cutoff.
+4. `背番号` is interpreted as numeric shape + alphabetic material suffix.
+5. The scheduler takes the highest-priority unscheduled row as the anchor.
+6. Machine choice prefers:
+  - preferred machine flag
+  - same-item continuity
+  - same-material continuity
+  - look-ahead batch potential
+  - earlier finish time
+  - explicit capability priority
+7. After anchor placement, the scheduler expands the same-machine block with:
+  - same `背番号` rows first
+  - same material suffix rows second
+  - only within the same request scope as the anchor row
+8. The current preview heuristic does not yet do partial row split, 2-machine split, next-day rollover, or safety-stock fill.
+
+---
+
 ## Final V1 Objective
 
 Automatically generate the next production day's plan from NODA demand using the latest physical inventory snapshot after the daily inventory scan.
@@ -90,6 +118,14 @@ Requests and derived shortages must be prioritized in this order:
 1. earliest internal production deadline
 2. lower `便`
 3. earlier `createdAt`
+
+### 背番号 Shape / Material Rule
+
+1. Numeric prefix in `背番号` = shape.
+2. Alphabetic suffix in `背番号` = material.
+3. Same `背番号` means same shape and same material.
+4. Same-material batching means same suffix only, for example `1TD`, `2TD`, and `3TD` all share material `TD` but remain separate products.
+5. Quantity merging is allowed only when the full `背番号 / 品番` pair matches.
 
 ### Factory Rule
 
@@ -389,15 +425,27 @@ Sort by:
 
 ### Step 8: Schedule By Priority
 
-For each candidate row in priority order:
+For each highest-priority candidate row not yet scheduled:
 
-1. rank eligible machines by explicit capability priority
-2. prefer the least-loaded eligible machine when priorities are equal
-3. use historical trend only as tie-breaker
-4. calculate estimated duration from cycle time rules
-5. attempt single-machine placement first
-6. if single-machine placement fails or crosses split threshold, attempt split across up to 2 machines
-7. if no valid placement exists, record exception
+1. choose that row as the anchor
+2. rank eligible machines by:
+  - preferred machine flag
+  - continuity with the same `背番号` already scheduled on that machine
+  - continuity with the same material suffix already scheduled on that machine
+  - look-ahead batching potential for remaining same `背番号` rows and same-material rows
+  - earliest available completion time
+  - explicit capability priority
+  - historical trend only as the final tie-breaker
+3. calculate estimated duration from cycle time rules
+4. place the anchor row into the earliest available eligible window
+5. expand the same-machine block by pulling:
+  - same `背番号` rows first
+  - same material suffix rows second
+  - only while the row remains eligible and still fits before the active cutoff
+  - without crossing into a later request scope that would bypass unfinished higher-priority rows
+6. current planner preview uses whole-row single-machine batching only
+7. the full backend proposal engine must extend this with full-box partial split and up-to-2-machine split when needed to protect the deadline
+8. if no valid placement exists, record exception
 
 ### Step 9: Fill Safety Stock
 
@@ -586,6 +634,7 @@ Build:
 Deliverable:
 
 - system can produce machine-level schedule proposal
+- backend scheduling preserves the same `背番号` first, same material suffix second block-expansion rule already established in the planner preview
 
 ### Phase 5: Approval And Planner Integration
 
