@@ -1656,6 +1656,40 @@ function buildPlannerPreviewScheduleExport(preview = {}, mode = 'auto') {
     };
 }
 
+function buildPlannerPreviewDraftBasisRows(preview = {}) {
+    return (Array.isArray(preview.priorityRows) ? preview.priorityRows : [])
+        .map((row = {}) => {
+            const id = String(row.id || '').trim();
+            const requestId = String(row.requestId || '').trim();
+            const requestNumber = String(row.requestNumber || '').trim();
+            const lineNumber = Number.isFinite(Number(row.lineNumber)) ? Number(row.lineNumber) : null;
+            const sebanggo = String(row.背番号 || '').trim();
+            const hinban = String(row.品番 || '').trim();
+            const shortfallQuantity = Number(row.shortfallQuantity || 0);
+
+            if (!id && !requestNumber && !requestId && !sebanggo && !hinban) {
+                return null;
+            }
+
+            return {
+                id: id || null,
+                requestId: requestId || null,
+                requestNumber,
+                lineNumber,
+                背番号: sebanggo,
+                品番: hinban,
+                shortfallQuantity,
+            };
+        })
+        .filter(Boolean);
+}
+
+function formatPlannerPreviewDraftBasisRowLabel(row = {}) {
+    const requestNumber = String(row.requestNumber || '').trim() || '-';
+    const itemLabel = String(row.背番号 || row.品番 || '').trim() || '-';
+    return `${requestNumber} / ${itemLabel}`;
+}
+
 async function copyPlannerPreviewTextToClipboard(text = '') {
     if (!text) {
         return false;
@@ -2301,6 +2335,25 @@ function renderPlannerPreview() {
     const hasAnyPreviewDraft = hasPreviewDraft || hasSavedPreviewDraft;
     const isViewingDraft = plannerState.preview.viewMode === 'draft' && hasAnyPreviewDraft;
     const isPreviewDraftEditing = isViewingDraft && hasPreviewDraft && plannerState.preview.isDraftMode === true;
+    const savedDraftBasisComparison = savedPreviewDraft?.basisComparison || null;
+    const hasTrackedSavedDraftBasis = savedDraftBasisComparison?.tracked === true;
+    const isSavedDraftStale = hasTrackedSavedDraftBasis && savedDraftBasisComparison?.isStale === true;
+    const isSavedDraftBasisUntracked = hasSavedPreviewDraft && savedDraftBasisComparison?.tracked === false;
+    const savedDraftDifferenceParts = hasTrackedSavedDraftBasis
+        ? [
+            savedDraftBasisComparison.missingCount > 0 ? `${formatPlannerPreviewNumber(savedDraftBasisComparison.missingCount)} missing` : '',
+            savedDraftBasisComparison.newCount > 0 ? `${formatPlannerPreviewNumber(savedDraftBasisComparison.newCount)} new` : '',
+            savedDraftBasisComparison.changedQuantityCount > 0 ? `${formatPlannerPreviewNumber(savedDraftBasisComparison.changedQuantityCount)} quantity changed` : '',
+        ].filter(Boolean)
+        : [];
+    const savedDraftDifferenceSummary = savedDraftDifferenceParts.join(' | ');
+    const savedDraftDifferenceExamples = hasTrackedSavedDraftBasis && isSavedDraftStale
+        ? [
+            ...(savedDraftBasisComparison.sampleMissingRows || []).slice(0, 2).map((row) => `Missing: ${formatPlannerPreviewDraftBasisRowLabel(row)}`),
+            ...(savedDraftBasisComparison.sampleNewRows || []).slice(0, 2).map((row) => `New: ${formatPlannerPreviewDraftBasisRowLabel(row)}`),
+            ...(savedDraftBasisComparison.sampleChangedRows || []).slice(0, 2).map((row) => `Qty: ${formatPlannerPreviewDraftBasisRowLabel(row)} ${formatPlannerPreviewNumber(row.savedShortfallQuantity || 0)} -> ${formatPlannerPreviewNumber(row.currentShortfallQuantity || 0)}`),
+        ].slice(0, 3)
+        : [];
     const requestColorMap = buildPlannerPreviewRequestColorMap(preview);
     const timeLimitExceptions = (simulation.exceptions || []).filter((exception) => exception.reason === 'time-limit');
     const otherExceptions = (simulation.exceptions || []).filter((exception) => exception.reason !== 'time-limit');
@@ -2555,6 +2608,23 @@ function renderPlannerPreview() {
                 ` : hasSavedPreviewDraft ? `
                     <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-sky-50/70 text-xs text-sky-700 dark:bg-sky-950/20 dark:text-sky-200">
                         Saved Preview Draft is stored separately from the auto-generated preview. Use View Auto and View Draft to compare both calendars without overwriting either one.
+                    </div>
+                ` : ''}
+                ${isSavedDraftStale ? `
+                    <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-rose-50/80 text-xs text-rose-700 dark:bg-rose-950/20 dark:text-rose-200">
+                        <div class="font-semibold">Saved Preview Draft is based on older priority-table data.</div>
+                        <div class="mt-1">The latest auto preview no longer matches the draft basis${savedDraftDifferenceSummary ? `: ${escapePlannerPreviewHtml(savedDraftDifferenceSummary)}.` : '.'} Review View Auto before relying on the saved Draft.</div>
+                        ${savedDraftDifferenceExamples.length > 0 ? `
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                ${savedDraftDifferenceExamples.map((example) => `
+                                    <span class="rounded-full bg-white/80 px-2 py-1 text-[11px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">${escapePlannerPreviewHtml(example)}</span>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : isSavedDraftBasisUntracked ? `
+                    <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-amber-50/80 text-xs text-amber-700 dark:bg-amber-950/20 dark:text-amber-200">
+                        Saved Preview Draft was created before stale-data tracking was enabled. Save the draft again once to compare it against future priority-table changes automatically.
                     </div>
                 ` : ''}
                 <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
@@ -8646,6 +8716,7 @@ window.savePlannerPreviewDraft = async function() {
                 date: plannerState.currentDate,
                 scheduleUntilTime: getPlannerPreviewScheduleUntilTime(),
                 assignments,
+                basisRows: buildPlannerPreviewDraftBasisRows(preview),
                 updatedBy,
             })
         });
