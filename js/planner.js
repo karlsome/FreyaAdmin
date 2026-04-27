@@ -2110,6 +2110,16 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
         const draftId = getPlannerPreviewDraftAssignmentId(assignmentForSlot);
         const requestNumberColorClass = getPlannerPreviewRequestColorClass(assignmentForSlot, requestColorMap);
         const tileRequestLabel = getPlannerPreviewTileRequestLabel(assignmentForSlot) || 'Preview insert';
+        const headMarkerHtml = isAssignmentHead
+            ? `
+                <div class="absolute inset-y-0 left-0 w-1.5 bg-slate-900/80 dark:bg-slate-100/90"></div>
+                <div class="absolute left-1 top-1 h-2 w-2 rounded-full bg-white ring-1 ring-slate-900/70 dark:bg-slate-100 dark:ring-slate-200/80"></div>
+            `
+            : '';
+        const headTileClasses = isAssignmentHead
+            ? 'border-l-4 border-slate-900 dark:border-slate-100 ring-1 ring-inset ring-slate-300/80 dark:ring-slate-500/80'
+            : '';
+        const headTextClasses = isAssignmentHead ? 'font-bold' : 'font-semibold opacity-85';
         const dropAttributes = isDraftMode
             ? `
                 data-preview-draft-slot="true"
@@ -2139,10 +2149,11 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
         ].filter(Boolean).join(' | ');
 
         html += `
-            <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 relative ${isDraftMode ? 'transition-colors' : ''} ${isDraftMode && isAssignmentHead ? 'cursor-grab ring-1 ring-inset ring-sky-300 dark:ring-sky-700' : ''}" style="width:${slotWidth}px; background-color:${fillColor}" title="${escapePlannerPreviewHtml(titleText)}" ${dropAttributes} ${dragAttributes}>
+            <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 relative ${isDraftMode ? 'transition-colors' : ''} ${headTileClasses} ${isDraftMode && isAssignmentHead ? 'cursor-grab ring-sky-300 dark:ring-sky-700' : ''}" style="width:${slotWidth}px; background-color:${fillColor}" title="${escapePlannerPreviewHtml(titleText)}" ${dropAttributes} ${dragAttributes}>
+                ${headMarkerHtml}
                 <div class="absolute inset-0 flex flex-col justify-center px-1.5 overflow-hidden">
-                    <span class="text-[10px] font-semibold truncate" style="color:${assignmentForSlot.color}">${escapePlannerPreviewHtml(assignmentForSlot.背番号 || assignmentForSlot.品番 || '-')}</span>
-                    <span class="text-[9px] font-semibold truncate ${requestNumberColorClass}">${escapePlannerPreviewHtml(tileRequestLabel)}</span>
+                    <span class="text-[10px] truncate ${headTextClasses}" style="color:${assignmentForSlot.color}">${escapePlannerPreviewHtml(assignmentForSlot.背番号 || assignmentForSlot.品番 || '-')}</span>
+                    <span class="text-[9px] truncate ${headTextClasses} ${requestNumberColorClass}">${escapePlannerPreviewHtml(tileRequestLabel)}</span>
                 </div>
             </div>
         `;
