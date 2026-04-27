@@ -23,21 +23,23 @@ Current implemented preview behavior in `js/planner.js`:
 
 1. The input queue arrives as `preview.priorityRows`, already ordered by backend preview priority.
 2. Consecutive identical rows merge only when `背番号 / 品番`, capability status, and eligible-machine signature match.
-3. Existing planner assignments become occupied machine windows, and preview rows are placed into the earliest gap that still fits before the selected cutoff.
-4. `背番号` is interpreted as numeric shape + alphabetic material suffix.
-5. The scheduler takes the highest-priority unscheduled row as the anchor.
-6. Machine choice prefers:
+3. The preview calendar is standalone: saved production plans, production goals, and planning-tab selected rows are ignored.
+4. Preview rows are placed into the earliest gap that still fits before the selected cutoff.
+5. `背番号` is interpreted as numeric shape + alphabetic material suffix.
+6. The scheduler takes the highest-priority unscheduled row as the anchor.
+7. Machine choice first uses the earliest feasible calendar window for that anchor, then breaks ties with:
   - preferred machine flag
   - same-item continuity
   - same-material continuity
   - look-ahead batch potential
-  - earlier finish time
   - explicit capability priority
-7. After anchor placement, the scheduler expands the same-machine block with:
+8. After anchor placement, the scheduler expands the same-machine block with:
   - same `背番号` rows first
   - same material suffix rows second
   - only within the same request scope as the anchor row
-8. The current preview heuristic does not yet do partial row split, 2-machine split, next-day rollover, or safety-stock fill.
+9. Lower-priority request rows cannot be backfilled earlier than the current higher-priority block's finish time.
+10. Calendar occupancy is rounded to 15-minute tiles so the preview grid behaves like the Planning tab timeline.
+11. The current preview heuristic does not yet do partial row split, 2-machine split, next-day rollover, or safety-stock fill.
 
 ---
 
@@ -117,7 +119,8 @@ Requests and derived shortages must be prioritized in this order:
 
 1. earliest internal production deadline
 2. lower `便`
-3. earlier `createdAt`
+3. lower `requestNumber` / request sequence
+4. earlier `createdAt`
 
 ### 背番号 Shape / Material Rule
 

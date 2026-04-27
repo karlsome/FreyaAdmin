@@ -43,12 +43,15 @@ Current implemented behavior:
 3. `背番号` is interpreted as:
   - numeric prefix = shape
   - alphabetic suffix = material
-4. Existing planner rows are treated as occupied windows, and the preview tries to place new work into the earliest available gap before the selected cutoff.
-5. The preview takes the highest-priority unscheduled row as the anchor, chooses one machine, then expands that same-machine block with:
+4. The preview calendar is standalone and ignores saved production plans, production goals, and planning-tab selected rows.
+5. The preview tries to place new work into the earliest available gap before the selected cutoff.
+6. The preview takes the highest-priority unscheduled row as the anchor, chooses the earliest feasible machine window for that anchor, then expands that same-machine block with:
   - same `背番号` rows first
   - same material suffix rows second
   - only inside the same request scope as the anchor row
-6. The current preview heuristic does not yet do partial split, 2-machine split, next-day rollover, or safety-stock fill.
+7. Lower-priority request rows cannot be backfilled earlier than the current higher-priority block's finish time.
+8. Calendar occupancy is rounded to 15-minute tiles so the preview grid behaves like the Planning tab timeline.
+9. The current preview heuristic does not yet do partial split, 2-machine split, next-day rollover, or safety-stock fill.
 
 ---
 
@@ -315,11 +318,11 @@ For each highest-priority unscheduled production demand row:
 1. Load eligible machines from `productionCapabilityDB`.
 2. Treat that row as the anchor for a machine block.
 3. Rank eligible machines by:
+  - earliest feasible calendar start and completion time
   - preferred machine flag
   - continuity with the same `背番号` already scheduled on that machine
   - continuity with the same material suffix already scheduled on that machine
   - look-ahead batching potential for remaining same `背番号` rows and remaining same-material rows
-  - earliest available completion time
   - explicit machine priority
   - historical trend only as the final tie-breaker
 4. Place the anchor row into the earliest available window.
