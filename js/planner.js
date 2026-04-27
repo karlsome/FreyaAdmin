@@ -414,6 +414,90 @@ function formatPlannerPreviewTimestamp(value = '') {
     });
 }
 
+const PLANNER_PREVIEW_REQUEST_COLOR_CLASSES = [
+    'text-red-700 dark:text-red-300',
+    'text-orange-700 dark:text-orange-300',
+    'text-yellow-700 dark:text-yellow-300',
+    'text-green-700 dark:text-green-300',
+    'text-blue-700 dark:text-blue-300',
+    'text-violet-700 dark:text-violet-300',
+];
+
+function getPlannerPreviewRequestColorKey(item = {}) {
+    const groupedRequestNumbers = Array.isArray(item.groupedRequestNumbers)
+        ? item.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+
+    if (groupedRequestNumbers.length > 0) {
+        return groupedRequestNumbers[0];
+    }
+
+    const requestNumber = String(item.requestNumber || '').trim();
+    if (requestNumber) {
+        return requestNumber;
+    }
+
+    return String(item.requestNumberLabel || '').trim();
+}
+
+function buildPlannerPreviewRequestColorMap(preview = {}) {
+    const requestColorMap = {};
+    let colorIndex = 0;
+
+    const registerRequestColor = (item = {}) => {
+        const key = getPlannerPreviewRequestColorKey(item);
+        if (!key || requestColorMap[key]) {
+            return;
+        }
+
+        requestColorMap[key] = PLANNER_PREVIEW_REQUEST_COLOR_CLASSES[
+            colorIndex % PLANNER_PREVIEW_REQUEST_COLOR_CLASSES.length
+        ];
+        colorIndex += 1;
+    };
+
+    (preview.priorityRows || []).forEach(registerRequestColor);
+    (preview.simulation?.assignments || []).forEach(registerRequestColor);
+    (preview.savedDraft?.assignments || []).forEach(registerRequestColor);
+    (plannerState.preview.draftAssignments || []).forEach(registerRequestColor);
+
+    return requestColorMap;
+}
+
+function getPlannerPreviewRequestColorClass(item = {}, requestColorMap = {}) {
+    const key = getPlannerPreviewRequestColorKey(item);
+    return requestColorMap[key] || 'text-sky-700 dark:text-sky-300';
+}
+
+function formatPlannerPreviewTileRequestNumber(requestNumber = '') {
+    const normalizedRequestNumber = String(requestNumber || '').trim();
+    if (!normalizedRequestNumber) {
+        return '';
+    }
+
+    const match = normalizedRequestNumber.match(/-(\d{8})-([^\-]+)$/);
+    if (!match) {
+        return normalizedRequestNumber;
+    }
+
+    const [, yyyymmdd, binNumber] = match;
+    return `${yyyymmdd.slice(4)}-${binNumber}`;
+}
+
+function getPlannerPreviewTileRequestLabel(item = {}) {
+    const groupedRequestNumbers = Array.isArray(item.groupedRequestNumbers)
+        ? item.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+
+    if (groupedRequestNumbers.length > 1) {
+        return `${formatPlannerPreviewTileRequestNumber(groupedRequestNumbers[0])} +${groupedRequestNumbers.length - 1}`;
+    }
+
+    return formatPlannerPreviewTileRequestNumber(
+        groupedRequestNumbers[0] || item.requestNumber || item.requestNumberLabel || ''
+    );
+}
+
 function getPlannerPreviewMinimumScheduleUntilTime() {
     return minutesToTime(timeToMinutes(PLANNER_CONFIG.workStartTime) + PLANNER_CONFIG.intervalMinutes);
 }
@@ -1477,6 +1561,136 @@ function getPlannerPreviewRenderSimulation(preview = {}) {
     };
 }
 
+function getPlannerPreviewExportSimulation(preview = {}, mode = 'auto') {
+    const simulation = preview.simulation || buildPlannerPreviewSimulation(preview);
+
+    if (mode !== 'draft') {
+        return {
+            ...simulation,
+            assignments: normalizePlannerPreviewDraftAssignments(simulation.assignments || []),
+            draftSource: 'auto-generated',
+        };
+    }
+
+    const draftAssignments = hasPlannerPreviewDraft()
+        ? normalizePlannerPreviewDraftAssignments(plannerState.preview.draftAssignments || [])
+        : getPlannerPreviewSavedDraftAssignments(preview);
+
+    if (!Array.isArray(draftAssignments) || draftAssignments.length === 0) {
+        return null;
+    }
+
+    const equipmentList = Array.from(new Set(
+        draftAssignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+
+    return {
+        ...simulation,
+        assignments: draftAssignments,
+        equipmentList,
+        draftSource: hasPlannerPreviewDraft() ? 'local-unsaved-draft' : 'saved-draft',
+    };
+}
+
+function buildPlannerPreviewScheduleExport(preview = {}, mode = 'auto') {
+    const normalizedMode = mode === 'draft' ? 'draft' : 'auto';
+    const simulation = getPlannerPreviewExportSimulation(preview, normalizedMode);
+    if (!simulation) {
+        return null;
+    }
+
+    const assignments = normalizePlannerPreviewDraftAssignments(simulation.assignments || []).map((assignment, index) => ({
+        index: index + 1,
+        draftId: getPlannerPreviewDraftAssignmentId(assignment) || null,
+        equipment: String(assignment.equipment || '').trim(),
+        startTime: String(assignment.startTime || '').trim(),
+        endTime: minutesToTime(getPlannerPreviewAssignmentEndMinutes(assignment)),
+        requestNumber: String(assignment.requestNumber || '').trim(),
+        requestNumberLabel: String(assignment.requestNumberLabel || assignment.requestNumber || '').trim(),
+        背番号: String(assignment.背番号 || '').trim(),
+        品番: String(assignment.品番 || '').trim(),
+        品名: String(assignment.品名 || '').trim(),
+        モデル: String(assignment.モデル || '').trim(),
+        quantity: Number(assignment.quantity || 0),
+        boxes: assignment.boxes === null || assignment.boxes === undefined ? null : Number(assignment.boxes),
+        previewSource: String(assignment.previewSource || '').trim(),
+        usedPreferredMachine: assignment.usedPreferredMachine === true,
+        groupedRequestNumbers: Array.isArray(assignment.groupedRequestNumbers) ? assignment.groupedRequestNumbers : [],
+        sourceRowIds: Array.isArray(assignment.sourceRowIds) ? assignment.sourceRowIds : [],
+        eligibleMachines: getPlannerPreviewDraftAssignmentEligibleEquipment(assignment),
+        estimatedTime: assignment.estimatedTime ? {
+            totalSeconds: Number(assignment.estimatedTime.totalSeconds || 0),
+            totalMinutes: Number(assignment.estimatedTime.totalMinutes || 0),
+            formattedTime: String(assignment.estimatedTime.formattedTime || '').trim(),
+            secondsPerPiece: Number.isFinite(Number(assignment.estimatedTime.secondsPerPiece)) ? Number(assignment.estimatedTime.secondsPerPiece) : null,
+            cycleTimeSeconds: Number.isFinite(Number(assignment.estimatedTime.cycleTimeSeconds)) ? Number(assignment.estimatedTime.cycleTimeSeconds) : null,
+            pcPerCycle: Number.isFinite(Number(assignment.estimatedTime.pcPerCycle)) ? Number(assignment.estimatedTime.pcPerCycle) : null,
+            cyclesNeeded: Number.isFinite(Number(assignment.estimatedTime.cyclesNeeded)) ? Number(assignment.estimatedTime.cyclesNeeded) : null,
+        } : null,
+    }));
+
+    const scheduleByMachine = Object.fromEntries(
+        (simulation.equipmentList || []).map((equipment) => [
+            equipment,
+            assignments.filter((assignment) => assignment.equipment === equipment)
+        ])
+    );
+
+    return {
+        exportType: 'production-planner-preview-schedule',
+        mode: normalizedMode,
+        draftSource: simulation.draftSource || null,
+        factory: String(preview.factory || plannerState.currentFactory || '').trim(),
+        targetDate: String(preview.targetDate || plannerState.currentDate || '').trim(),
+        generatedAt: preview.generatedAt || null,
+        scheduleUntilTime: getPlannerPreviewScheduleUntilTime(),
+        priorityRowCount: Number(preview.summary?.priorityRowCount || 0),
+        totalShortfallQuantity: Number(preview.summary?.totalShortfallQuantity || 0),
+        assignmentCount: assignments.length,
+        equipmentList: simulation.equipmentList || [],
+        exceptions: Array.isArray(simulation.exceptions) ? simulation.exceptions : [],
+        assignments,
+        scheduleByMachine,
+    };
+}
+
+async function copyPlannerPreviewTextToClipboard(text = '') {
+    if (!text) {
+        return false;
+    }
+
+    try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch (error) {
+        console.warn('Clipboard API copy failed, falling back to execCommand.', error);
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    let copied = false;
+    try {
+        copied = document.execCommand('copy');
+    } catch (error) {
+        console.warn('execCommand copy failed.', error);
+    }
+
+    document.body.removeChild(textarea);
+    return copied;
+}
+
 function isPlannerPreviewBreakAtMinutes(equipment = '', slotMinutes = 0) {
     return plannerState.breaks.some((breakItem) => {
         const breakStart = timeToMinutes(breakItem.start);
@@ -1807,6 +2021,7 @@ function evaluatePlannerPreviewDraftSwap(assignments = [], movingAssignment = {}
 function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth, options = {}) {
     let html = '';
     const isDraftMode = options.isDraftMode === true;
+    const requestColorMap = options.requestColorMap || {};
 
     timeSlots.forEach((slot, index) => {
         const slotMinutes = timeToMinutes(slot);
@@ -1893,6 +2108,8 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
 
         const timingDetail = timingDetailParts.join(' | ');
         const draftId = getPlannerPreviewDraftAssignmentId(assignmentForSlot);
+        const requestNumberColorClass = getPlannerPreviewRequestColorClass(assignmentForSlot, requestColorMap);
+        const tileRequestLabel = getPlannerPreviewTileRequestLabel(assignmentForSlot) || 'Preview insert';
         const dropAttributes = isDraftMode
             ? `
                 data-preview-draft-slot="true"
@@ -1925,7 +2142,7 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
             <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 relative ${isDraftMode ? 'transition-colors' : ''} ${isDraftMode && isAssignmentHead ? 'cursor-grab ring-1 ring-inset ring-sky-300 dark:ring-sky-700' : ''}" style="width:${slotWidth}px; background-color:${fillColor}" title="${escapePlannerPreviewHtml(titleText)}" ${dropAttributes} ${dragAttributes}>
                 <div class="absolute inset-0 flex flex-col justify-center px-1.5 overflow-hidden">
                     <span class="text-[10px] font-semibold truncate" style="color:${assignmentForSlot.color}">${escapePlannerPreviewHtml(assignmentForSlot.背番号 || assignmentForSlot.品番 || '-')}</span>
-                    <span class="text-[9px] text-slate-500 dark:text-slate-300 truncate">${escapePlannerPreviewHtml(assignmentForSlot.requestNumberLabel || assignmentForSlot.requestNumber || 'Preview insert')}</span>
+                    <span class="text-[9px] font-semibold truncate ${requestNumberColorClass}">${escapePlannerPreviewHtml(tileRequestLabel)}</span>
                 </div>
             </div>
         `;
@@ -1934,10 +2151,17 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
     return html;
 }
 
-function renderPlannerPreviewTimeline(preview = {}) {
+function renderPlannerPreviewTimeline(preview = {}, requestColorMap = {}) {
     const simulation = getPlannerPreviewRenderSimulation(preview);
     const equipmentList = Array.isArray(simulation.equipmentList) ? simulation.equipmentList : [];
     const isDraftTimelineEditing = plannerState.preview.viewMode === 'draft' && plannerState.preview.isDraftMode === true;
+    const machineColumnWidth = Math.max(
+        112,
+        ((Math.max(
+            'Machine'.length,
+            ...equipmentList.map((equipment) => String(equipment || '').trim().length)
+        ) * 8) + 28)
+    );
 
     if (equipmentList.length === 0) {
         const emptyMessage = simulation.timeLimitExceptionCount > 0
@@ -1952,7 +2176,7 @@ function renderPlannerPreviewTimeline(preview = {}) {
 
     const timeSlots = getPlannerPreviewTimeSlots(simulation.assignments || []);
     const slotWidth = 60;
-    let headerHtml = '<div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">Machine</div>';
+    let headerHtml = `<div class="flex-shrink-0 whitespace-nowrap bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">Machine</div>`;
 
     timeSlots.forEach((slot) => {
         headerHtml += `
@@ -1966,11 +2190,11 @@ function renderPlannerPreviewTimeline(preview = {}) {
             .sort((left, right) => timeToMinutes(left.startTime || PLANNER_CONFIG.workStartTime) - timeToMinutes(right.startTime || PLANNER_CONFIG.workStartTime));
         return `
             <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-preview-equipment="${escapePlannerPreviewHtml(equipment)}">
-                <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/40 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">
+                <div class="flex-shrink-0 whitespace-nowrap bg-gray-50 dark:bg-gray-700/40 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">
                     ${escapePlannerPreviewHtml(equipment)}
                 </div>
                 <div class="flex-1 flex relative">
-                    ${renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth, { isDraftMode: isDraftTimelineEditing })}
+                    ${renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth, { isDraftMode: isDraftTimelineEditing, requestColorMap })}
                 </div>
             </div>
         `;
@@ -2066,6 +2290,7 @@ function renderPlannerPreview() {
     const hasAnyPreviewDraft = hasPreviewDraft || hasSavedPreviewDraft;
     const isViewingDraft = plannerState.preview.viewMode === 'draft' && hasAnyPreviewDraft;
     const isPreviewDraftEditing = isViewingDraft && hasPreviewDraft && plannerState.preview.isDraftMode === true;
+    const requestColorMap = buildPlannerPreviewRequestColorMap(preview);
     const timeLimitExceptions = (simulation.exceptions || []).filter((exception) => exception.reason === 'time-limit');
     const otherExceptions = (simulation.exceptions || []).filter((exception) => exception.reason !== 'time-limit');
     const statusText = plannerState.preview.isLoading
@@ -2163,7 +2388,7 @@ function renderPlannerPreview() {
                                         <td class="px-4 py-3 text-gray-700 dark:text-gray-200">
                                             ${formatPlannerPreviewNumber(row.priorityRank || row.queueOrder || 0)}
                                         </td>
-                                        <td class="px-4 py-3 font-medium text-sky-700 dark:text-sky-300" title="Line ${formatPlannerPreviewNumber(row.lineNumber || 0)}">
+                                        <td class="px-4 py-3 font-medium ${getPlannerPreviewRequestColorClass(row, requestColorMap)}" title="Line ${formatPlannerPreviewNumber(row.lineNumber || 0)}">
                                             ${escapePlannerPreviewHtml(row.requestNumber || '-')}
                                         </td>
                                         <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">
@@ -2291,6 +2516,18 @@ function renderPlannerPreview() {
                                 ` : ''}
                             </div>
                             <div class="flex flex-wrap gap-2 text-xs">
+                                <button onclick="exportPlannerPreviewScheduleJson('auto')" class="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 font-medium text-cyan-700 hover:bg-cyan-100 transition-colors dark:border-cyan-900 dark:bg-cyan-950/30 dark:text-cyan-200 dark:hover:bg-cyan-950/40">
+                                    <i class="ri-file-copy-line"></i>
+                                    <span>Copy Auto JSON</span>
+                                </button>
+                                ${hasAnyPreviewDraft ? `
+                                    <button onclick="exportPlannerPreviewScheduleJson('draft')" class="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 font-medium text-sky-700 hover:bg-sky-100 transition-colors dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-950/40">
+                                        <i class="ri-file-copy-2-line"></i>
+                                        <span>Copy Draft JSON</span>
+                                    </button>
+                                ` : ''}
+                            </div>
+                            <div class="flex flex-wrap gap-2 text-xs">
                                 ${hasSavedPreviewDraft ? `
                                     <span class="rounded-full bg-sky-100 px-3 py-1 font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${escapePlannerPreviewHtml(savedDraftStatusText)}</span>
                                 ` : ''}
@@ -2315,7 +2552,7 @@ function renderPlannerPreview() {
                     ${isPreviewDraftEditing ? `<span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded border border-sky-400 bg-white dark:bg-gray-900"></span>Drag the first tile of a block to move the whole block</span>` : ''}
                 </div>
                 <div class="p-5">
-                    ${renderPlannerPreviewTimeline(preview)}
+                    ${renderPlannerPreviewTimeline(preview, requestColorMap)}
                     ${timeLimitExceptions.length > 0 ? `
                         <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 dark:border-amber-900 dark:bg-amber-950/20">
                             <p class="text-sm font-semibold text-amber-800 dark:text-amber-200">Some shortage lines are not included because they do not fit before ${escapePlannerPreviewHtml(scheduleUntilTime)}.</p>
@@ -8288,6 +8525,34 @@ window.setPlannerPreviewViewMode = function(mode) {
     }
 
     renderPlannerPreview();
+};
+
+window.exportPlannerPreviewScheduleJson = async function(mode = 'auto') {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification('Load the preview first before exporting schedule JSON.', 'warning');
+        return;
+    }
+
+    const exportData = buildPlannerPreviewScheduleExport(preview, mode);
+    if (!exportData) {
+        showPlannerNotification('No Draft schedule is available to export yet.', 'warning');
+        return;
+    }
+
+    const exportText = JSON.stringify(exportData, null, 2);
+    const copied = await copyPlannerPreviewTextToClipboard(exportText);
+    const exportLabel = mode === 'draft' ? 'Draft' : 'Auto';
+
+    if (!copied) {
+        showPlannerNotification(`Unable to copy ${exportLabel} JSON to the clipboard.`, 'error');
+        return;
+    }
+
+    showPlannerNotification(`${exportLabel} schedule JSON copied to clipboard. Paste it here when you want me to inspect it.`, 'success');
 };
 
 window.togglePlannerPreviewDraftMode = function() {
