@@ -13039,6 +13039,40 @@ function _ensureEditModalDOM() {
     document.body.appendChild(el);
 }
 
+  function _editDefaultBreakTimeData(existing = {}) {
+    const keys = new Set(['break1', 'break2', 'break3', 'break4']);
+    if (existing && typeof existing === 'object') {
+      Object.keys(existing).forEach(key => keys.add(key));
+    }
+
+    return Array.from(keys)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .reduce((normalized, key) => {
+        const current = existing && typeof existing[key] === 'object' ? existing[key] : {};
+        normalized[key] = {
+          start: typeof current.start === 'string' ? current.start : '',
+          end: typeof current.end === 'string' ? current.end : ''
+        };
+        return normalized;
+      }, {});
+  }
+
+  function _editNormalizeTimeFields(record) {
+    if (!record || typeof record !== 'object') return;
+
+    record.Break_Time_Data = _editDefaultBreakTimeData(record.Break_Time_Data);
+
+    if (record.Total_Break_Minutes === undefined || record.Total_Break_Minutes === null || Number.isNaN(Number(record.Total_Break_Minutes))) {
+      record.Total_Break_Minutes = 0;
+    }
+    if (record.Total_Break_Hours === undefined || record.Total_Break_Hours === null || Number.isNaN(Number(record.Total_Break_Hours))) {
+      record.Total_Break_Hours = Math.round(((Number(record.Total_Break_Minutes) || 0) / 60) * 100) / 100;
+    }
+    if (record.Total_Trouble_Hours === undefined || record.Total_Trouble_Hours === null || Number.isNaN(Number(record.Total_Trouble_Hours))) {
+      record.Total_Trouble_Hours = Math.round(((Number(record.Total_Trouble_Minutes) || 0) / 60) * 100) / 100;
+    }
+  }
+
 /** Open the edit modal for a document */
 window.openDocEditModal = async function(docId, collection) {
     _ensureEditModalDOM();
@@ -13056,10 +13090,21 @@ window.openDocEditModal = async function(docId, collection) {
         pendingImages: []
     };
 
+    _editNormalizeTimeFields(window._editState.doc);
+    _editNormalizeTimeFields(window._editState.working);
+
+    const needsDerivedTimeMetrics = [
+      window._editState.working.Total_Break_Minutes,
+      window._editState.working.Total_Break_Hours,
+      window._editState.working.Total_Work_Hours,
+      window._editState.working.Cycle_Time
+    ].some(value => value === undefined || value === null || value === '');
+
     const subtitle = document.getElementById('docEditModalSubtitle');
     if (subtitle) subtitle.textContent = `${collection} / ${doc.品番 || ''} / ${doc.背番号 || ''} / ${doc.Date || ''}`;
 
     _renderEditModalBody();
+    if (needsDerivedTimeMetrics) _editAutoCalc();
     document.getElementById('docEditModal').classList.remove('hidden');
     document.getElementById('docEditNote').value = '';
 
