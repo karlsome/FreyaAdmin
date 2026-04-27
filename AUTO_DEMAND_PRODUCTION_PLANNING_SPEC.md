@@ -330,7 +330,7 @@ For each highest-priority unscheduled production demand row:
   - same `背番号` rows first
   - same material suffix rows second
   - only while the machine stays eligible and the row still fits in the allowed window
-  - without crossing into a later request scope that would skip unfinished higher-priority rows
+  - allow the next request to start as soon as that machine becomes free so the preview does not leave idle gaps between rows
 6. Respect breaks and existing occupied windows.
 7. The full automation service may still split across up to 2 machines when one-machine placement cannot protect the deadline.
 

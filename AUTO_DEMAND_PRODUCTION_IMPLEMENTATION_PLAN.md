@@ -445,7 +445,7 @@ For each highest-priority candidate row not yet scheduled:
   - same `背番号` rows first
   - same material suffix rows second
   - only while the row remains eligible and still fits before the active cutoff
-  - without crossing into a later request scope that would bypass unfinished higher-priority rows
+  - allow the next request to start as soon as that machine becomes free so the preview does not leave idle gaps between rows
 6. current planner preview uses whole-row single-machine batching only
 7. the full backend proposal engine must extend this with full-box partial split and up-to-2-machine split when needed to protect the deadline
 8. if no valid placement exists, record exception

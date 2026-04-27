@@ -649,21 +649,6 @@ function getPlannerPreviewPriorityBucketKey(priorityRow = {}) {
     return `${internalDeadline}::${deliveryOrder}`;
 }
 
-function getPlannerPreviewSchedulingScopeKey(priorityRow = {}) {
-    const requestNumbers = getPlannerPreviewRequestNumbers(priorityRow);
-    if (requestNumbers.length > 0) {
-        return `request:${requestNumbers.join('|')}`;
-    }
-
-    const bucketKey = getPlannerPreviewPriorityBucketKey(priorityRow);
-    if (bucketKey) {
-        return `bucket:${bucketKey}`;
-    }
-
-    const rowKey = String(priorityRow.id || getPlannerPreviewProductKey(priorityRow) || '').trim();
-    return rowKey ? `row:${rowKey}` : 'row:unknown';
-}
-
 function doPlannerPreviewRowsShareBatchScope(leftRow = {}, rightRow = {}) {
     const leftRequestNumbers = getPlannerPreviewRequestNumbers(leftRow);
     const rightRequestNumbers = getPlannerPreviewRequestNumbers(rightRow);
@@ -1102,12 +1087,8 @@ function buildPlannerPreviewSimulation(preview = {}) {
     const assignments = [];
     const scheduleUntilTime = getPlannerPreviewScheduleUntilTime();
     const scheduleUntilMinutes = getPlannerPreviewScheduleUntilMinutes();
-    const workStartMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
     const exceptions = [];
     const pendingRows = buildPlannerPreviewSchedulingRows(preview.priorityRows || []);
-    let priorityReleaseMinutes = workStartMinutes;
-    let activeScopeKey = '';
-    let activeScopeMaxEndMinutes = workStartMinutes;
 
     let scheduledShortfallQuantity = 0;
     let unscheduledShortfallQuantity = 0;
@@ -1161,23 +1142,11 @@ function buildPlannerPreviewSimulation(preview = {}) {
             continue;
         }
 
-        const schedulingScopeKey = getPlannerPreviewSchedulingScopeKey(priorityRow);
-        const isNewScope = schedulingScopeKey !== activeScopeKey;
-        if (isNewScope) {
-            if (activeScopeKey) {
-                priorityReleaseMinutes = Math.max(priorityReleaseMinutes, activeScopeMaxEndMinutes);
-            }
-
-            activeScopeKey = schedulingScopeKey;
-            activeScopeMaxEndMinutes = priorityReleaseMinutes;
-        }
-
         const fitChoices = getPlannerPreviewMachineChoicesForRow(
             assignments,
             priorityRow,
             pendingRows,
-            scheduleUntilMinutes,
-            { earliestStartMinutes: isNewScope ? priorityReleaseMinutes : workStartMinutes }
+            scheduleUntilMinutes
         );
         const selectedMachine = fitChoices[0];
         if (!selectedMachine) {
@@ -1187,7 +1156,6 @@ function buildPlannerPreviewSimulation(preview = {}) {
 
         assignments.push(buildPlannerPreviewAssignment(priorityRow, selectedMachine));
         scheduledShortfallQuantity += shortageQuantity;
-        activeScopeMaxEndMinutes = Math.max(activeScopeMaxEndMinutes, selectedMachine.endMinutes);
     }
 
     const visibleAssignments = assignments.filter((assignment) => {
