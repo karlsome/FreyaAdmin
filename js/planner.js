@@ -886,6 +886,22 @@ function getPlannerPreviewAffinityRank(assignments = [], equipment = '', priorit
     return 2;
 }
 
+function getPlannerPreviewGroupingTier(affinityRank = 2) {
+    if (affinityRank === 0) {
+        return 0;
+    }
+
+    if (affinityRank === 1) {
+        return 1;
+    }
+
+    return 2;
+}
+
+function getPlannerPreviewGroupingDelayLimitMinutes() {
+    return PLANNER_CONFIG.intervalMinutes * 2;
+}
+
 function getPlannerPreviewNextStartMinutes(assignments = [], equipment = '') {
     return assignments.reduce((latestMinutes, assignment) => {
         if (!doesPlannerPreviewEquipmentShareParts(equipment, assignment.equipment)) {
@@ -1077,7 +1093,7 @@ function getPlannerPreviewMachineChoicesForRow(assignments = [], priorityRow = {
 
     const productRecord = getPlannerPreviewProductRecord(priorityRow);
 
-    return candidateMachines
+    let machineChoices = candidateMachines
         .map((machine) => {
             const productForEquipment = { ...productRecord, equipment: machine.equipment };
             const estimatedTime = calculateProductionTime(productForEquipment, quantity, machine.equipment);
@@ -1107,19 +1123,32 @@ function getPlannerPreviewMachineChoicesForRow(assignments = [], priorityRow = {
                 ...batchPotential,
             };
         })
-        .filter((machine) => machine.endMinutes <= scheduleUntilMinutes)
+        .filter((machine) => machine.endMinutes <= scheduleUntilMinutes);
+
+    const earliestStartMinutes = machineChoices.reduce((earliestMinutes, machine) => (
+        Math.min(earliestMinutes, machine.startMinutes)
+    ), Number.POSITIVE_INFINITY);
+    const groupingDelayLimitMinutes = getPlannerPreviewGroupingDelayLimitMinutes();
+
+    machineChoices = machineChoices.map((machine) => {
+        const startDelayMinutes = Number.isFinite(earliestStartMinutes)
+            ? Math.max(0, machine.startMinutes - earliestStartMinutes)
+            : 0;
+        const canUseGroupingPreference = startDelayMinutes <= groupingDelayLimitMinutes;
+
+        return {
+            ...machine,
+            startDelayMinutes,
+            groupingTier: canUseGroupingPreference
+                ? getPlannerPreviewGroupingTier(machine.affinityRank)
+                : 2,
+        };
+    });
+
+    return machineChoices
         .sort((left, right) => {
-            if (left.startMinutes !== right.startMinutes) {
-                return left.startMinutes - right.startMinutes;
-            }
-            if (left.endMinutes !== right.endMinutes) {
-                return left.endMinutes - right.endMinutes;
-            }
-            if (left.preferred !== right.preferred) {
-                return left.preferred ? -1 : 1;
-            }
-            if (left.affinityRank !== right.affinityRank) {
-                return left.affinityRank - right.affinityRank;
+            if (left.groupingTier !== right.groupingTier) {
+                return left.groupingTier - right.groupingTier;
             }
             if (right.sameProductCount !== left.sameProductCount) {
                 return right.sameProductCount - left.sameProductCount;
@@ -1132,6 +1161,18 @@ function getPlannerPreviewMachineChoicesForRow(assignments = [], priorityRow = {
             }
             if (right.sameMaterialQuantity !== left.sameMaterialQuantity) {
                 return right.sameMaterialQuantity - left.sameMaterialQuantity;
+            }
+            if (left.startMinutes !== right.startMinutes) {
+                return left.startMinutes - right.startMinutes;
+            }
+            if (left.endMinutes !== right.endMinutes) {
+                return left.endMinutes - right.endMinutes;
+            }
+            if (left.preferred !== right.preferred) {
+                return left.preferred ? -1 : 1;
+            }
+            if (left.affinityRank !== right.affinityRank) {
+                return left.affinityRank - right.affinityRank;
             }
             if (left.priority !== right.priority) {
                 return left.priority - right.priority;
@@ -1631,8 +1672,14 @@ function buildPlannerPreviewScheduleExport(preview = {}, mode = 'auto') {
         } : null,
     }));
 
+    const equipmentList = Array.from(new Set(
+        assignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+
     const scheduleByMachine = Object.fromEntries(
-        (simulation.equipmentList || []).map((equipment) => [
+        equipmentList.map((equipment) => [
             equipment,
             assignments.filter((assignment) => assignment.equipment === equipment)
         ])
@@ -1649,7 +1696,7 @@ function buildPlannerPreviewScheduleExport(preview = {}, mode = 'auto') {
         priorityRowCount: Number(preview.summary?.priorityRowCount || 0),
         totalShortfallQuantity: Number(preview.summary?.totalShortfallQuantity || 0),
         assignmentCount: assignments.length,
-        equipmentList: simulation.equipmentList || [],
+        equipmentList,
         exceptions: Array.isArray(simulation.exceptions) ? simulation.exceptions : [],
         assignments,
         scheduleByMachine,
