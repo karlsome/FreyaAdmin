@@ -7274,50 +7274,51 @@ function loadPage(page) {
                       </div>
                     </div>
 
-                    <div id="inventoryExportChoiceModal" class="fixed inset-0 hidden z-[66]">
-                      <div class="absolute inset-0 bg-slate-900/55" onclick="closeInventoryExportChoiceModal()"></div>
-                      <div class="absolute inset-0 flex items-center justify-center p-4">
-                        <div class="relative w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-                          <div class="border-b border-slate-200 bg-slate-900 px-6 py-5 text-white">
-                            <div class="flex items-start justify-between gap-4">
-                              <div>
-                                <div class="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-slate-100" data-i18n="csvExport">CSV Export</div>
-                                <h3 class="mt-3 text-2xl font-semibold" data-i18n="inventoryExportChoiceTitle">CSV Export Source</h3>
-                                <p class="mt-2 text-sm text-slate-200" data-i18n="inventoryExportChoiceSubtitle">A point-in-time snapshot is active. Choose whether to export that snapshot or the latest live inventory.</p>
+                    <div id="inventoryExportChoiceModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[66]">
+                      <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg shadow-xl max-w-xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                          <div class="p-6 border-b border-gray-200">
+                            <div class="flex items-center justify-between">
+                              <div class="flex items-start space-x-3">
+                                <i class="ri-download-line text-3xl text-indigo-600"></i>
+                                <div>
+                                  <h3 class="text-xl font-bold text-gray-900" data-i18n="inventoryExportChoiceTitle">CSV Export Source</h3>
+                                  <p class="text-sm text-gray-600" data-i18n="inventoryExportChoiceSubtitle">A point-in-time snapshot is active. Choose whether to export that snapshot or the latest live inventory.</p>
+                                </div>
                               </div>
-                              <button onclick="closeInventoryExportChoiceModal()" class="text-slate-300 transition-colors hover:text-white">
+                              <button onclick="closeInventoryExportChoiceModal()" class="text-gray-400 hover:text-gray-600">
                                 <i class="ri-close-line text-2xl"></i>
                               </button>
                             </div>
                           </div>
 
-                          <div class="space-y-4 bg-slate-50 px-6 py-6">
-                            <button type="button" onclick="exportInventorySnapshotCsv()" class="group w-full rounded-2xl border border-indigo-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md">
+                          <div class="p-6 space-y-4">
+                            <button type="button" onclick="exportInventorySnapshotCsv()" class="w-full rounded-lg border border-gray-200 bg-white p-4 text-left transition-colors hover:bg-gray-50 hover:border-indigo-300">
                               <div class="flex items-start gap-4">
-                                <div class="rounded-2xl bg-indigo-100 p-3 text-indigo-700 transition-colors group-hover:bg-indigo-600 group-hover:text-white">
+                                <div class="mt-0.5 rounded-lg bg-indigo-100 p-3 text-indigo-600">
                                   <i class="ri-history-line text-xl"></i>
                                 </div>
                                 <div>
-                                  <p class="text-base font-semibold text-slate-900" data-i18n="inventoryExportSnapshot">Export Snapshot</p>
-                                  <p class="mt-1 text-sm leading-6 text-slate-500" data-i18n="inventoryExportSnapshotDescription">Download the inventory captured at the selected snapshot time.</p>
+                                  <p class="text-base font-semibold text-gray-900" data-i18n="inventoryExportSnapshot">Export Snapshot</p>
+                                  <p class="mt-1 text-sm text-gray-600" data-i18n="inventoryExportSnapshotDescription">Download the inventory captured at the selected snapshot time.</p>
                                 </div>
                               </div>
                             </button>
 
-                            <button type="button" onclick="exportCurrentInventoryCsv()" class="group w-full rounded-2xl border border-emerald-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md">
+                            <button type="button" onclick="exportCurrentInventoryCsv()" class="w-full rounded-lg border border-gray-200 bg-white p-4 text-left transition-colors hover:bg-gray-50 hover:border-indigo-300">
                               <div class="flex items-start gap-4">
-                                <div class="rounded-2xl bg-emerald-100 p-3 text-emerald-700 transition-colors group-hover:bg-emerald-600 group-hover:text-white">
+                                <div class="mt-0.5 rounded-lg bg-green-100 p-3 text-green-600">
                                   <i class="ri-pulse-line text-xl"></i>
                                 </div>
                                 <div>
-                                  <p class="text-base font-semibold text-slate-900" data-i18n="inventoryExportCurrent">Export Current Inventory</p>
-                                  <p class="mt-1 text-sm leading-6 text-slate-500" data-i18n="inventoryExportCurrentDescription">Ignore the active snapshot and download the latest live inventory.</p>
+                                  <p class="text-base font-semibold text-gray-900" data-i18n="inventoryExportCurrent">Export Current Inventory</p>
+                                  <p class="mt-1 text-sm text-gray-600" data-i18n="inventoryExportCurrentDescription">Ignore the active snapshot and download the latest live inventory.</p>
                                 </div>
                               </div>
                             </button>
                           </div>
 
-                          <div class="border-t border-slate-200 bg-white px-6 py-4">
+                          <div class="p-6 border-t border-gray-200 bg-gray-50">
                             <div class="flex justify-end">
                               <button type="button" onclick="closeInventoryExportChoiceModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors" data-i18n="cancel">Cancel</button>
                             </div>
