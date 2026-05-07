@@ -10728,27 +10728,33 @@ window.toggleEquipmentCard = toggleEquipmentCard;
 // PRINT FUNCTIONALITY
 // ============================================
 
-// Show print modal with equipment selection
-window.showPrintModal = function() {
-    if (plannerState.selectedProducts.length === 0) {
-        showPlannerNotification('No products selected to print', 'error');
+let plannerPrintModalContext = null;
+
+function showSchedulePrintModal(products = [], options = {}) {
+    if (!Array.isArray(products) || products.length === 0) {
+        showPlannerNotification(options.emptyMessage || 'No products selected to print', 'error');
         return;
     }
-    
-    // Get unique equipment list from selected products, sorted
-    const equipmentSet = new Set(plannerState.selectedProducts.map(p => p.equipment));
+
+    plannerPrintModalContext = {
+        products,
+        options,
+    };
+
+    const equipmentSet = new Set(products.map((product) => String(product.equipment || '').trim()).filter(Boolean));
     const equipmentList = Array.from(equipmentSet).sort();
-    
+    const modalTitle = String(options.modalTitle || 'Select Equipment to Print').trim();
+
     const modalHTML = `
         <div id="printModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
                 <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Select Equipment to Print</h3>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(modalTitle)}</h3>
                     <button onclick="closePrintModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                         <i class="ri-close-line text-xl"></i>
                     </button>
                 </div>
-                
+
                 <div class="p-4">
                     <div class="mb-4">
                         <label class="flex items-center gap-2 mb-3 cursor-pointer">
@@ -10756,24 +10762,22 @@ window.showPrintModal = function() {
                             <span class="font-medium text-gray-900 dark:text-white">Select All</span>
                         </label>
                     </div>
-                    
+
                     <div class="space-y-2 max-h-96 overflow-y-auto">
-                        ${equipmentList.map(equipment => `
+                        ${equipmentList.map((equipment) => `
                             <label class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded">
-                                <input type="checkbox" class="equipment-checkbox rounded" value="${equipment}" checked>
-                                <span class="text-gray-900 dark:text-white">${equipment}</span>
+                                <input type="checkbox" class="equipment-checkbox rounded" value="${escapePlannerPreviewHtml(equipment)}" checked>
+                                <span class="text-gray-900 dark:text-white">${escapePlannerPreviewHtml(equipment)}</span>
                             </label>
                         `).join('')}
                     </div>
                 </div>
-                
+
                 <div class="flex items-center justify-end gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
-                    <button onclick="closePrintModal()" 
-                            class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600">
+                    <button onclick="closePrintModal()" class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600">
                         Cancel
                     </button>
-                    <button onclick="printSelectedEquipment()" 
-                            class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2">
+                    <button onclick="printSelectedEquipment()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2">
                         <i class="ri-printer-line"></i>
                         <span>Print</span>
                     </button>
@@ -10781,13 +10785,24 @@ window.showPrintModal = function() {
             </div>
         </div>
     `;
-    
+
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+// Show print modal with equipment selection
+window.showPrintModal = function() {
+    showSchedulePrintModal(plannerState.selectedProducts, {
+        modalTitle: 'Select Equipment to Print',
+        emptyMessage: 'No products selected to print',
+        scheduleTitle: 'Production Schedule',
+        headerTitle: '生産スケジュール (Production Schedule)',
+    });
 };
 
 window.closePrintModal = function() {
     const modal = document.getElementById('printModal');
     if (modal) modal.remove();
+    plannerPrintModalContext = null;
 };
 
 window.toggleAllEquipment = function(checked) {
@@ -10797,6 +10812,16 @@ window.toggleAllEquipment = function(checked) {
 };
 
 window.printSelectedEquipment = async function() {
+    const printContext = plannerPrintModalContext || {
+        products: plannerState.selectedProducts,
+        options: {
+            loadingMessage: 'Generating print preview...',
+            errorMessage: 'Failed to generate print table',
+            scheduleTitle: 'Production Schedule',
+            headerTitle: '生産スケジュール (Production Schedule)',
+        },
+    };
+
     // Get selected equipment
     const selectedEquipment = Array.from(document.querySelectorAll('.equipment-checkbox:checked'))
         .map(checkbox => checkbox.value);
@@ -10809,19 +10834,19 @@ window.printSelectedEquipment = async function() {
     closePrintModal();
     
     // Show loading
-    showPlannerNotification('Generating print preview...', 'info');
+    showPlannerNotification(printContext.options.loadingMessage || 'Generating print preview...', 'info');
     
     try {
-        await generatePrintTable(selectedEquipment);
+        await generatePrintTable(selectedEquipment, printContext.products, printContext.options);
     } catch (error) {
         console.error('Print error:', error);
-        showPlannerNotification('Failed to generate print table', 'error');
+        showPlannerNotification(printContext.options.errorMessage || 'Failed to generate print table', 'error');
     }
 };
 
-async function generatePrintTable(selectedEquipment) {
+async function generatePrintTable(selectedEquipment, products = plannerState.selectedProducts, options = {}) {
     // Filter products by selected equipment
-    const productsToPrint = plannerState.selectedProducts
+    const productsToPrint = (Array.isArray(products) ? products : [])
         .filter(p => selectedEquipment.includes(p.equipment))
         .sort((a, b) => {
             // Sort by equipment name first
@@ -10932,7 +10957,7 @@ async function generatePrintTable(selectedEquipment) {
     }
     
     // Generate HTML for print
-    const printHTML = generatePrintHTML(printRows);
+    const printHTML = generatePrintHTML(printRows, options);
     
     // Open print window
     const printWindow = window.open('', '_blank');
@@ -11040,8 +11065,10 @@ function calculateActualWorkingTime(product) {
     return simplifyTimeRanges(fullTimeString);
 }
 
-function generatePrintHTML(rows) {
-    const date = plannerState.currentDate;
+function generatePrintHTML(rows, options = {}) {
+    const date = options.date || plannerState.currentDate;
+    const title = String(options.scheduleTitle || 'Production Schedule').trim();
+    const headerTitle = String(options.headerTitle || '生産スケジュール (Production Schedule)').trim();
     
     // Group rows by equipment and assign alternating colors
     let currentEquipment = null;
@@ -11063,7 +11090,7 @@ function generatePrintHTML(rows) {
         <html>
         <head>
             <meta charset="UTF-8">
-            <title>Production Schedule - ${date}</title>
+            <title>${escapePlannerPreviewHtml(title)} - ${escapePlannerPreviewHtml(date)}</title>
             <style>
                 @page {
                     size: A4;
@@ -11154,8 +11181,8 @@ function generatePrintHTML(rows) {
         </head>
         <body>
             <div class="header">
-                <h1>生産スケジュール (Production Schedule)</h1>
-                <div class="date">日付: ${date}</div>
+                <h1>${escapePlannerPreviewHtml(headerTitle)}</h1>
+                <div class="date">日付: ${escapePlannerPreviewHtml(date)}</div>
             </div>
             
             <table>
@@ -11200,6 +11227,45 @@ window.closePrintModal = closePrintModal;
 window.toggleAllEquipment = toggleAllEquipment;
 window.printSelectedEquipment = printSelectedEquipment;
 
+function getScheduleCalendarProducts(products = []) {
+    const byEquipment = {};
+
+    (Array.isArray(products) ? products : []).forEach((item) => {
+        const equipment = String(item.equipment || '').trim();
+        if (!equipment) {
+            return;
+        }
+
+        if (!byEquipment[equipment]) {
+            byEquipment[equipment] = [];
+        }
+
+        byEquipment[equipment].push(item);
+    });
+
+    return {
+        byEquipment,
+        sortedEquipment: Object.keys(byEquipment).sort(),
+    };
+}
+
+async function openScheduleCalendarWindow(products = [], options = {}) {
+    if (!Array.isArray(products) || products.length === 0) {
+        showPlannerNotification(options.emptyMessage || 'No products scheduled for this date', 'warning');
+        return;
+    }
+
+    const { byEquipment, sortedEquipment } = getScheduleCalendarProducts(products);
+    const calendarHTML = await generateCalendarHTML(sortedEquipment, byEquipment, {
+        ...options,
+        products,
+    });
+
+    const calendarWindow = window.open('', '_blank');
+    calendarWindow.document.write(calendarHTML);
+    calendarWindow.document.close();
+}
+
 // ============================================
 // CALENDAR VIEW (GANTT CHART)
 // ============================================
@@ -11223,33 +11289,24 @@ window.openCalendarView = async function() {
         }
     }
     
-    // Group products by equipment and sort
-    const byEquipment = {};
-    plannerState.selectedProducts.forEach(item => {
-        if (!byEquipment[item.equipment]) {
-            byEquipment[item.equipment] = [];
-        }
-        byEquipment[item.equipment].push(item);
+    await openScheduleCalendarWindow(plannerState.selectedProducts, {
+        emptyMessage: 'No products scheduled for this date',
+        title: 'Production Schedule',
+        headerTitle: '生産スケジュール (Production Schedule)',
+        includeProductionStats: true,
     });
-    
-    // Sort equipment names
-    const sortedEquipment = Object.keys(byEquipment).sort();
-    
-    // Generate calendar HTML
-    const calendarHTML = await generateCalendarHTML(sortedEquipment, byEquipment);
-    
-    // Open in new window
-    const calendarWindow = window.open('', '_blank');
-    calendarWindow.document.write(calendarHTML);
-    calendarWindow.document.close();
 };
 
 /**
  * Generate HTML for calendar view
  */
-async function generateCalendarHTML(equipment, productsByEquipment) {
-    const date = plannerState.currentDate;
-    const factory = plannerState.currentFactory;
+async function generateCalendarHTML(equipment, productsByEquipment, options = {}) {
+    const date = options.date || plannerState.currentDate;
+    const factory = options.factory || plannerState.currentFactory;
+    const products = Array.isArray(options.products) ? options.products : [];
+    const pageTitle = String(options.title || 'Production Schedule').trim();
+    const headerTitle = String(options.headerTitle || '生産スケジュール (Production Schedule)').trim();
+    const includeProductionStats = options.includeProductionStats !== false;
     
     // Calculate time range
     const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
@@ -11262,6 +11319,12 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
     let progressPercent = 0;
     
     try {
+        totalScheduledQty = products.reduce((sum, product) => sum + Number(product.quantity || 0), 0);
+
+        if (!includeProductionStats) {
+            throw new Error('skip-production-stats');
+        }
+
         // Fetch goals for target quantity
         const goalsResponse = await fetch(`${BASE_URL}api/production-goals?date=${date}&factory=${encodeURIComponent(factory)}`);
         if (goalsResponse.ok) {
@@ -11300,7 +11363,7 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
         if (productionResponse.ok) {
             const productionData = await productionResponse.json();
             if (productionData && productionData.length > 0) {
-                totalScheduledQty = productionData[0].totalQuantity || 0;
+                totalScheduledQty = productionData[0].totalQuantity || totalScheduledQty;
             }
         }
         
@@ -11308,12 +11371,14 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
             progressPercent = Math.round((totalScheduledQty / totalGoalQty) * 100);
         }
     } catch (error) {
-        console.warn('Could not fetch production data:', error);
+        if (error.message !== 'skip-production-stats') {
+            console.warn('Could not fetch production data:', error);
+        }
     }
     
     // Collect all unique products with their colors for legend
     const productLegend = new Map();
-    plannerState.selectedProducts.forEach(item => {
+    products.forEach(item => {
         if (!productLegend.has(item.背番号)) {
             productLegend.set(item.背番号, {
                 背番号: item.背番号,
@@ -11414,7 +11479,7 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
         <html>
         <head>
             <meta charset="UTF-8">
-            <title>Production Schedule - ${date}</title>
+            <title>${escapePlannerPreviewHtml(pageTitle)} - ${escapePlannerPreviewHtml(date)}</title>
             <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
             <style>
                 * {
@@ -11781,10 +11846,10 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
         </head>
         <body>
             <div class="header">
-                <h1>生産スケジュール (Production Schedule)</h1>
+                <h1>${escapePlannerPreviewHtml(headerTitle)}</h1>
                 <div class="info">
-                    <strong>日付:</strong> ${date} | 
-                    <strong>工場:</strong> ${factory}
+                    <strong>日付:</strong> ${escapePlannerPreviewHtml(date)} | 
+                    <strong>工場:</strong> ${escapePlannerPreviewHtml(factory)}
                 </div>
                 <div class="stats">
                     <div class="stat-item">
@@ -12132,4 +12197,146 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
 }
 
 window.openCalendarView = openCalendarView;
+
+function closePlannerPreviewSourceModal() {
+    const modal = document.getElementById('plannerPreviewSourceModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function showPlannerPreviewSourceModal(action = 'print') {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification('Load the preview first before using this action.', 'warning');
+        return;
+    }
+
+    const modes = getPlannerPreviewActionModes(preview);
+    if (modes.length <= 1) {
+        if (action === 'calendar') {
+            window.openPlannerPreviewCalendarView('auto');
+        } else {
+            window.showPlannerPreviewPrintModal('auto');
+        }
+        return;
+    }
+
+    const actionLabel = action === 'calendar' ? 'Calendar View' : 'Print';
+    const iconClass = action === 'calendar' ? 'ri-calendar-line' : 'ri-printer-line';
+
+    const modalHTML = `
+        <div id="plannerPreviewSourceModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Choose Preview Source</h3>
+                    <button onclick="closePlannerPreviewSourceModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+                <div class="p-4 space-y-3">
+                    <button onclick="runPlannerPreviewSourceAction('${action}', 'auto')" class="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-300 px-4 py-3 text-left hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700">
+                        <span class="flex items-center gap-3 text-gray-900 dark:text-white">
+                            <i class="${iconClass}"></i>
+                            <span>Use Auto Schedule</span>
+                        </span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">Auto</span>
+                    </button>
+                    <button onclick="runPlannerPreviewSourceAction('${action}', 'draft')" class="w-full flex items-center justify-between gap-3 rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-left hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/30 dark:hover:bg-sky-950/40">
+                        <span class="flex items-center gap-3 text-sky-800 dark:text-sky-100">
+                            <i class="${iconClass}"></i>
+                            <span>Use Draft Schedule</span>
+                        </span>
+                        <span class="text-xs text-sky-600 dark:text-sky-300">Draft</span>
+                    </button>
+                </div>
+                <div class="px-4 pb-4 text-xs text-gray-500 dark:text-gray-400">
+                    ${escapePlannerPreviewHtml(actionLabel)} can use either the current Auto preview or the current Draft preview.
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+window.closePlannerPreviewSourceModal = closePlannerPreviewSourceModal;
+
+window.runPlannerPreviewSourceAction = function(action = 'print', mode = 'auto') {
+    closePlannerPreviewSourceModal();
+
+    if (action === 'calendar') {
+        window.openPlannerPreviewCalendarView(mode);
+        return;
+    }
+
+    window.showPlannerPreviewPrintModal(mode);
+};
+
+window.showPlannerPreviewPrintModal = function(mode = null) {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification('Load the preview first before printing it.', 'warning');
+        return;
+    }
+
+    if (!mode) {
+        showPlannerPreviewSourceModal('print');
+        return;
+    }
+
+    const previewAssignments = getPlannerPreviewActionAssignments(preview, mode);
+    if (previewAssignments.length === 0) {
+        showPlannerNotification(mode === 'draft' ? 'No Draft preview blocks are available to print.' : 'No Auto preview blocks are available to print.', 'warning');
+        return;
+    }
+
+    const modeLabel = mode === 'draft' ? 'Draft' : 'Auto';
+    showSchedulePrintModal(previewAssignments, {
+        modalTitle: `Select Preview ${modeLabel} Equipment to Print`,
+        emptyMessage: `No Preview ${modeLabel} blocks are available to print.`,
+        loadingMessage: `Generating Preview ${modeLabel} print preview...`,
+        errorMessage: `Failed to generate Preview ${modeLabel} print table.`,
+        scheduleTitle: `Preview ${modeLabel} Schedule`,
+        headerTitle: `プレビュー生産スケジュール (${modeLabel})`,
+        date: preview.targetDate || plannerState.currentDate,
+    });
+};
+
+window.showPlannerPreviewCalendarView = function() {
+    showPlannerPreviewSourceModal('calendar');
+};
+
+window.openPlannerPreviewCalendarView = async function(mode = 'auto') {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification('Load the preview first before opening calendar view.', 'warning');
+        return;
+    }
+
+    const previewAssignments = getPlannerPreviewActionAssignments(preview, mode);
+    if (previewAssignments.length === 0) {
+        showPlannerNotification(mode === 'draft' ? 'No Draft preview blocks are available for calendar view.' : 'No Auto preview blocks are available for calendar view.', 'warning');
+        return;
+    }
+
+    const modeLabel = mode === 'draft' ? 'Draft' : 'Auto';
+    await openScheduleCalendarWindow(previewAssignments, {
+        emptyMessage: `No Preview ${modeLabel} blocks are available for calendar view.`,
+        title: `Preview ${modeLabel} Schedule`,
+        headerTitle: `プレビュー生産スケジュール (${modeLabel})`,
+        includeProductionStats: false,
+        date: preview.targetDate || plannerState.currentDate,
+        factory: preview.factory || plannerState.currentFactory,
+    });
+};
 
