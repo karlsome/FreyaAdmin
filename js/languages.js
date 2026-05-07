@@ -1104,6 +1104,13 @@ const translations = {
       inventorySnapshotTimeRequired: "Choose a time between 08:00 and 17:00.",
       inventorySnapshotTimeInvalid: "Time must be between 08:00 and 17:00 in 30-minute intervals.",
       loadingInventorySnapshot: "Loading inventory snapshot...",
+      inventoryExportChoiceTitle: "CSV Export Source",
+      inventoryExportChoiceSubtitle: "A point-in-time snapshot is active. Choose whether to export that snapshot or the latest live inventory.",
+      inventoryExportSnapshot: "Export Snapshot",
+      inventoryExportSnapshotDescription: "Download the inventory captured at the selected snapshot time.",
+      inventoryExportCurrent: "Export Current Inventory",
+      inventoryExportCurrentDescription: "Ignore the active snapshot and download the latest live inventory.",
+      inventoryExportPreparing: "Preparing inventory CSV...",
       
       // NODA Tab Specific
       nodaTitle: "NODA Warehouse Management",
@@ -2563,6 +2570,13 @@ const translations = {
       inventorySnapshotTimeRequired: "08:00 から 17:00 の間で時刻を選択してください。",
       inventorySnapshotTimeInvalid: "時刻は 08:00 から 17:00 の間で 30 分刻みにしてください。",
       loadingInventorySnapshot: "在庫スナップショットを読み込み中...",
+      inventoryExportChoiceTitle: "CSV出力対象",
+      inventoryExportChoiceSubtitle: "時点指定のスナップショットが有効です。スナップショットを出力するか、最新在庫を出力するか選択してください。",
+      inventoryExportSnapshot: "スナップショットを出力",
+      inventoryExportSnapshotDescription: "選択中の日時で記録された在庫をCSVでダウンロードします。",
+      inventoryExportCurrent: "現在在庫を出力",
+      inventoryExportCurrentDescription: "時点指定を無視して、最新の在庫をCSVでダウンロードします。",
+      inventoryExportPreparing: "在庫CSVを準備中...",
       
       // NODA Tab Specific
       nodaTitle: "NODA倉庫管理",

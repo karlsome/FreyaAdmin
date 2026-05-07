@@ -550,7 +550,7 @@ async function loadInventoryData() {
 /**
  * Build query filters from UI controls
  */
-function buildInventoryQueryFilters() {
+function buildInventoryQueryFilters({ includeSnapshot = true } = {}) {
     const filters = {};
     
     // Part number filter
@@ -580,7 +580,7 @@ function buildInventoryQueryFilters() {
         filters.thresholdStatus = inventoryThresholdStatusFilter;
     }
 
-    if (inventorySnapshotState.snapshotAt) {
+    if (includeSnapshot && inventorySnapshotState.snapshotAt) {
         filters.snapshotAt = inventorySnapshotState.snapshotAt;
     }
     
@@ -1494,11 +1494,11 @@ function updateInventoryFilterOptions(options) {
 /**
  * Show loading state
  */
-function showInventoryLoadingState() {
+function showInventoryLoadingState(overrideLabel = '') {
     const container = document.getElementById('inventoryTableContainer');
-    const loadingLabel = inventorySnapshotState.snapshotAt
+    const loadingLabel = overrideLabel || (inventorySnapshotState.snapshotAt
         ? t('loadingInventorySnapshot')
-        : t('loadingInventory');
+        : t('loadingInventory'));
     container.innerHTML = `<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>${loadingLabel}</div>`;
 }
 
@@ -2299,11 +2299,25 @@ async function getUserFullName(username) {
 /**
  * Export inventory data to CSV
  */
-window.exportInventoryData = async function() {
+window.closeInventoryExportChoiceModal = function() {
+    const modal = document.getElementById('inventoryExportChoiceModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+};
+
+window.openInventoryExportChoiceModal = function() {
+    const modal = document.getElementById('inventoryExportChoiceModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+};
+
+async function executeInventoryCsvExport({ includeSnapshot = true, exportVariant = 'current' } = {}) {
     try {
-        showInventoryLoadingState();
+        showInventoryLoadingState(t('inventoryExportPreparing'));
         
-        const filters = buildInventoryQueryFilters();
+        const filters = buildInventoryQueryFilters({ includeSnapshot });
         const response = await fetch(`${BASE_URL}api/inventory-management`, {
             method: 'POST',
             headers: {
@@ -2320,19 +2334,63 @@ window.exportInventoryData = async function() {
             throw new Error(data.error || `HTTP error! status: ${response.status}`);
         }
 
-        downloadInventoryCSV(data.data);
+        downloadInventoryCSV(data.data, {
+            exportVariant,
+            snapshotAt: includeSnapshot ? inventorySnapshotState.snapshotAt : null
+        });
         
         loadInventoryData(); // Restore normal view
     } catch (error) {
         console.error('Error exporting inventory data:', error);
         showInventoryErrorState('Failed to export inventory data');
     }
+}
+
+window.exportInventoryData = async function() {
+    if (inventorySnapshotState.snapshotAt) {
+        openInventoryExportChoiceModal();
+        return;
+    }
+
+    await executeInventoryCsvExport({
+        includeSnapshot: false,
+        exportVariant: 'current'
+    });
 };
+
+window.exportInventorySnapshotCsv = async function() {
+    closeInventoryExportChoiceModal();
+    await executeInventoryCsvExport({
+        includeSnapshot: true,
+        exportVariant: 'snapshot'
+    });
+};
+
+window.exportCurrentInventoryCsv = async function() {
+    closeInventoryExportChoiceModal();
+    await executeInventoryCsvExport({
+        includeSnapshot: false,
+        exportVariant: 'current'
+    });
+};
+
+function buildInventoryCsvFileName({ exportVariant = 'current', snapshotAt = null } = {}) {
+    if (exportVariant === 'snapshot' && snapshotAt) {
+        const snapshotDate = new Date(snapshotAt);
+        if (!Number.isNaN(snapshotDate.getTime())) {
+            const datePart = formatInventoryLocalDateValue(snapshotDate);
+            const timePart = `${String(snapshotDate.getHours()).padStart(2, '0')}${String(snapshotDate.getMinutes()).padStart(2, '0')}`;
+            return `inventory_snapshot_${datePart}_${timePart}.csv`;
+        }
+    }
+
+    return `inventory_data_${new Date().toISOString().split('T')[0]}.csv`;
+}
 
 /**
  * Download inventory data as CSV
  */
-function downloadInventoryCSV(data) {
+function downloadInventoryCSV(data, { exportVariant = 'current', snapshotAt = null } = {}) {
     if (!data || data.length === 0) {
         alert(t('noDataToExport'));
         return;
@@ -2360,8 +2418,9 @@ function downloadInventoryCSV(data) {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `inventory_data_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = buildInventoryCsvFileName({ exportVariant, snapshotAt });
     link.click();
+    URL.revokeObjectURL(link.href);
 }
 
 // ==================== UTILITY FUNCTIONS ====================
