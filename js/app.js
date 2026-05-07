@@ -1432,7 +1432,7 @@ function loadPage(page) {
                     <!-- Stats Cards -->
                     <!-- Data Range Toggle -->
                     <div id="approvalDateRangeBar" class="mb-4 flex flex-wrap items-center justify-between gap-4">
-                        <div class="flex items-center space-x-4">
+                        <div class="flex flex-wrap items-center gap-4">
                             <div class="bg-white rounded-lg border border-gray-200 p-1 flex items-center">
                                 <button 
                                     id="currentDateModeBtn" 
@@ -7000,6 +7000,9 @@ function loadPage(page) {
                               <i class="ri-alarm-warning-line mr-2"></i><span>Threshold Rules</span>
                             </button>
                           </div>
+                            <button onclick="openInventorySnapshotModal()" class="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
+                                <i class="ri-time-line mr-2"></i><span data-i18n="inventorySnapshotButton">Point in Time</span>
+                            </button>
                             <button onclick="exportInventoryData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                                 <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
                             </button>
@@ -7052,6 +7055,8 @@ function loadPage(page) {
                             </div>
                         </div>
                     </div>
+
+                      <div id="inventorySnapshotBanner"></div>
 
                     <!-- Summary Cards -->
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -7122,18 +7127,17 @@ function loadPage(page) {
                         
                         <!-- Pagination -->
                         <div class="px-6 py-4 border-t border-gray-200">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center space-x-2">
+                            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                              <div class="flex items-center space-x-2">
                                     <label class="text-sm text-gray-500" data-i18n="itemsPerPage">Items per page</label>
                                     <select id="inventoryItemsPerPage" class="border border-gray-300 rounded px-2 py-1 text-sm">
                                         <option value="10">10</option>
-                                        <option value="25">25</option>
-                                        <option value="50">50</option>
+                                    <option value="50" selected>50</option>
                                         <option value="100">100</option>
                                     </select>
                                 </div>
-                                <div id="inventoryPageInfo" class="text-sm text-gray-600"></div>
-                                <div class="flex items-center space-x-2">
+                              <div id="inventoryPageInfo" class="text-sm text-gray-600"></div>
+                              <div class="flex items-center space-x-2 self-start lg:self-auto">
                                     <button id="inventoryPrevPage" class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" disabled>
                                         <i class="ri-arrow-left-line"></i>
                                     </button>
@@ -7176,6 +7180,97 @@ function loadPage(page) {
                             <button type="button" onclick="saveInventoryThresholdConfig()" class="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors">
                               <i class="ri-save-line mr-2"></i>Save Rules
                             </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div id="inventorySnapshotModal" class="fixed inset-0 hidden z-[65]">
+                      <div class="absolute inset-0 bg-slate-900/50" onclick="closeInventorySnapshotModal()"></div>
+                      <div class="absolute inset-0 flex items-center justify-center p-4">
+                        <div class="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+                          <div class="border-b border-slate-200 bg-slate-900 px-6 py-5 text-white">
+                            <div class="flex items-start justify-between gap-4">
+                              <div>
+                                <div class="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-slate-100" data-i18n="inventorySnapshotButton">Point in Time</div>
+                                <h3 class="mt-3 text-2xl font-semibold" data-i18n="inventorySnapshotModalTitle">Inventory Snapshot</h3>
+                                <p class="mt-2 max-w-xl text-sm text-slate-200" data-i18n="inventorySnapshotModalSubtitle">Show the inventory state recorded at or before a specific date and time.</p>
+                              </div>
+                              <button onclick="closeInventorySnapshotModal()" class="text-slate-300 transition-colors hover:text-white">
+                                <i class="ri-close-line text-2xl"></i>
+                              </button>
+                            </div>
+                          </div>
+
+                          <div class="space-y-6 px-6 py-6">
+                            <div class="grid grid-cols-1 gap-6 lg:grid-cols-[0.9fr,1.1fr]">
+                              <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                                <label class="mb-2 block text-sm font-medium text-slate-700" for="inventorySnapshotDateInput" data-i18n="inventorySnapshotDate">Date</label>
+                                <input
+                                  type="date"
+                                  id="inventorySnapshotDateInput"
+                                  class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                                  onchange="updateInventorySnapshotModalPreview()">
+                              </div>
+
+                              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
+                                <div class="flex items-center justify-between gap-3">
+                                  <label class="block text-sm font-medium text-slate-700" for="inventorySnapshotTimeSlider" data-i18n="inventorySnapshotSlider">Time Slider</label>
+                                  <span id="inventorySnapshotSelectedTime" class="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-900 shadow-sm">08:00</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  id="inventorySnapshotTimeSlider"
+                                  min="0"
+                                  max="18"
+                                  step="1"
+                                  value="0"
+                                  class="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-slate-900"
+                                  oninput="handleInventorySnapshotSliderInput(this.value)">
+                                <div class="mt-2 flex items-center justify-between text-xs font-medium text-slate-500">
+                                  <span>08:00</span>
+                                  <span>12:30</span>
+                                  <span>17:00</span>
+                                </div>
+
+                                <div class="mt-5">
+                                  <label class="mb-2 block text-sm font-medium text-slate-700" for="inventorySnapshotTimeInput" data-i18n="inventorySnapshotTime">Time</label>
+                                  <input
+                                    type="time"
+                                    id="inventorySnapshotTimeInput"
+                                    min="08:00"
+                                    max="17:00"
+                                    step="1800"
+                                    class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+                                    onchange="handleInventorySnapshotTimeInput(this.value)"
+                                    onblur="handleInventorySnapshotTimeInput(this.value)">
+                                </div>
+
+                                <p class="mt-3 text-xs leading-5 text-slate-500" data-i18n="inventorySnapshotRangeHelp">Choose a 30-minute slot from 08:00 to 17:00. Drag the slider or type the exact time.</p>
+                              </div>
+                            </div>
+
+                            <div class="rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4">
+                              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500" data-i18n="inventorySnapshotSelectedMoment">Selected Moment</p>
+                                  <p id="inventorySnapshotPreview" class="mt-2 text-lg font-semibold text-slate-900">--</p>
+                                </div>
+                                <div class="text-sm text-indigo-700" data-i18n="inventorySnapshotModalSubtitle">Show the inventory state recorded at or before a specific date and time.</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                            <button type="button" onclick="clearInventorySnapshot()" class="inline-flex items-center justify-center rounded-lg border border-rose-200 px-4 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-50">
+                              <i class="ri-close-circle-line mr-2"></i><span data-i18n="inventorySnapshotClear">Clear Snapshot</span>
+                            </button>
+                            <div class="flex items-center gap-3">
+                              <button type="button" onclick="closeInventorySnapshotModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors" data-i18n="cancel">Cancel</button>
+                              <button type="button" onclick="applyInventorySnapshot()" class="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800">
+                                <i class="ri-check-line mr-2"></i><span data-i18n="inventorySnapshotApply">Apply Snapshot</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
