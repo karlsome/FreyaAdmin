@@ -3754,6 +3754,12 @@ function renderPlannerPreview() {
                                         <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewDiscardUnsaved', {}, 'Discard Unsaved'))}</span>
                                     </button>
                                 ` : ''}
+                                ${hasSavedPreviewDraft ? `
+                                    <button onclick="deletePlannerPreviewSavedDraft()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/40">
+                                        <i class="ri-delete-bin-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewDeleteSavedDraft', {}, 'Delete Saved Draft'))}</span>
+                                    </button>
+                                ` : ''}
                                 ${hasPreviewDraft && plannerState.preview.draftChanged ? `
                                     <span class="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-2 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
                                         <i class="ri-edit-2-line"></i>
@@ -10060,6 +10066,64 @@ window.resetPlannerPreviewDraft = function() {
             : plannerTranslate('plannerPreviewDraftResetAuto', {}, 'Preview Draft reset to the auto-generated calendar.'),
         'success'
     );
+};
+
+window.deletePlannerPreviewSavedDraft = async function() {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview || !hasPlannerPreviewSavedDraft(preview)) {
+        showPlannerNotification(plannerTranslate('plannerPreviewDeleteSavedDraftMissing', {}, 'There is no saved Preview Draft to delete.'), 'warning');
+        return;
+    }
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNeedFactoryDate', {}, 'Select factory and date before saving the Preview Draft.'), 'warning');
+        return;
+    }
+
+    const confirmed = window.confirm(
+        plannerTranslate(
+            'plannerPreviewDeleteSavedDraftConfirm',
+            {},
+            'Delete the saved Preview Draft and return to Auto view? Any unsaved local draft changes will also be discarded.'
+        )
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(
+            `${BASE_URL}api/production-planner/preview-draft?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}`,
+            { method: 'DELETE' }
+        );
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || result.message || plannerTranslate('plannerPreviewDeleteSavedDraftFailed', {}, 'Failed to delete the saved Preview Draft.'));
+        }
+
+        plannerState.preview.data = applyLocalPlanToPlannerPreview({
+            ...preview,
+            savedDraft: null,
+        });
+        resetPlannerPreviewDraftState();
+        plannerState.preview.viewMode = 'auto';
+        plannerState.preview.lastLoadedAt = Date.now();
+        plannerState.preview.error = '';
+
+        renderPlannerPreview();
+        showPlannerNotification(
+            plannerTranslate('plannerPreviewDeleteSavedDraftSuccess', {}, 'Saved Preview Draft deleted. Showing Auto preview.'),
+            'success'
+        );
+    } catch (error) {
+        console.error('Failed to delete saved planner preview draft:', error);
+        showPlannerNotification(error.message || plannerTranslate('plannerPreviewDeleteSavedDraftFailed', {}, 'Failed to delete the saved Preview Draft.'), 'error');
+    }
 };
 
 window.savePlannerPreviewDraft = async function() {
