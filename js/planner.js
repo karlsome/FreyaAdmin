@@ -3568,12 +3568,6 @@ function renderPlannerPreview() {
                                 <i class="ri-broadcast-line"></i>
                                 <span>${escapePlannerPreviewHtml(openPublishedText)}</span>
                             </button>
-                            ${canManagePublishedSchedules ? `
-                                <button onclick="publishPlannerPreviewSchedule()" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors">
-                                    <i class="ri-send-plane-line"></i>
-                                    <span>${escapePlannerPreviewHtml(publishButtonText)}</span>
-                                </button>
-                            ` : ''}
                             <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
                                 <i class="ri-refresh-line"></i>
                                 <span>${escapePlannerPreviewHtml(refreshButtonText)}</span>
@@ -3830,6 +3824,14 @@ function renderPlannerPreview() {
                 </div>
                 <div class="p-5">
                     ${renderPlannerPreviewTimeline(preview, requestColorMap)}
+                    ${canManagePublishedSchedules ? `
+                        <div class="mt-5 flex justify-end">
+                            <button onclick="publishPlannerPreviewSchedule()" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors shadow-sm">
+                                <i class="ri-send-plane-line"></i>
+                                <span>${escapePlannerPreviewHtml(publishButtonText)}</span>
+                            </button>
+                        </div>
+                    ` : ''}
                     ${timeLimitExceptions.length > 0 ? `
                         <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 dark:border-amber-900 dark:bg-amber-950/20">
                             <p class="text-sm font-semibold text-amber-800 dark:text-amber-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewTimeLimitHeading', { time: scheduleUntilTime }, `Some shortage lines are not included because they do not fit before ${scheduleUntilTime}.`))}</p>
