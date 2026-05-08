@@ -14,11 +14,33 @@ let inventorySnapshotState = createDefaultInventorySnapshotState();
 let inventorySnapshotPendingRequestResolution = null;
 let inventorySnapshotRequestOptions = [];
 let inventorySnapshotModalMode = 'none';
+const INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS = [10, 50, 100];
+let inventoryTransactionsState = createDefaultInventoryTransactionsState();
 
 const INVENTORY_SNAPSHOT_START_MINUTES = 8 * 60;
 const INVENTORY_SNAPSHOT_END_MINUTES = 17 * 60;
 const INVENTORY_SNAPSHOT_INTERVAL_MINUTES = 30;
 const INVENTORY_SNAPSHOT_MAX_STEP = (INVENTORY_SNAPSHOT_END_MINUTES - INVENTORY_SNAPSHOT_START_MINUTES) / INVENTORY_SNAPSHOT_INTERVAL_MINUTES;
+
+function createDefaultInventoryTransactionsState() {
+    return {
+        backNumber: '',
+        currentPage: 1,
+        itemsPerPage: 10,
+        totalPages: 0,
+        totalItems: 0
+    };
+}
+
+function normalizeInventoryTransactionsPositiveInteger(value, fallback = 1) {
+    const parsedValue = Number.parseInt(value, 10);
+    return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
+}
+
+function normalizeInventoryTransactionsPageSize(value, fallback = 10) {
+    const parsedValue = normalizeInventoryTransactionsPositiveInteger(value, fallback);
+    return INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS.includes(parsedValue) ? parsedValue : fallback;
+}
 
 function getDefaultInventoryThresholdConfig() {
     return {
@@ -1978,7 +2000,29 @@ function showInventoryErrorState(errorMessage) {
 /**
  * Open inventory transactions modal
  */
-window.openInventoryTransactions = async function(backNumber) {
+window.openInventoryTransactions = async function(backNumber, options = {}) {
+    const normalizedBackNumber = String(backNumber || '').trim();
+    if (!normalizedBackNumber) {
+        return;
+    }
+
+    const isSameItem = inventoryTransactionsState.backNumber === normalizedBackNumber;
+    const nextPage = normalizeInventoryTransactionsPositiveInteger(
+        options.page ?? (isSameItem ? inventoryTransactionsState.currentPage : 1),
+        1
+    );
+    const nextItemsPerPage = normalizeInventoryTransactionsPageSize(
+        options.itemsPerPage ?? (isSameItem ? inventoryTransactionsState.itemsPerPage : 10),
+        10
+    );
+
+    inventoryTransactionsState = {
+        ...inventoryTransactionsState,
+        backNumber: normalizedBackNumber,
+        currentPage: nextPage,
+        itemsPerPage: nextItemsPerPage
+    };
+
     try {
         const modal = document.getElementById('inventoryTransactionsModal');
         const content = document.getElementById('inventoryTransactionsContent');
@@ -2002,14 +2046,44 @@ window.openInventoryTransactions = async function(backNumber) {
             },
             body: JSON.stringify({
                 action: 'getItemTransactions',
-                背番号: backNumber
+                背番号: normalizedBackNumber,
+                page: nextPage,
+                limit: nextItemsPerPage
             })
         });
         
         if (response.ok) {
             const result = await response.json();
             if (result.success) {
-                renderInventoryTransactions(result.data, backNumber);
+                const paginationInfo = result.pagination || {};
+                const currentPage = Number(paginationInfo.currentPage) > 0
+                    ? Number(paginationInfo.currentPage)
+                    : nextPage;
+                const totalPages = Number(paginationInfo.totalPages) >= 0
+                    ? Number(paginationInfo.totalPages)
+                    : 0;
+                const totalItems = Number(paginationInfo.totalItems) >= 0
+                    ? Number(paginationInfo.totalItems)
+                    : 0;
+                const itemsPerPage = normalizeInventoryTransactionsPageSize(
+                    paginationInfo.itemsPerPage,
+                    nextItemsPerPage
+                );
+
+                inventoryTransactionsState = {
+                    backNumber: normalizedBackNumber,
+                    currentPage: totalPages > 0 ? currentPage : 1,
+                    itemsPerPage,
+                    totalPages,
+                    totalItems
+                };
+
+                renderInventoryTransactions(
+                    Array.isArray(result.data) ? result.data : [],
+                    normalizedBackNumber,
+                    result.currentItem || null,
+                    inventoryTransactionsState
+                );
             } else {
                 throw new Error(result.error || 'Failed to load transactions');
             }
@@ -2032,10 +2106,12 @@ window.openInventoryTransactions = async function(backNumber) {
 /**
  * Render inventory transactions
  */
-function renderInventoryTransactions(transactions, backNumber) {
+function renderInventoryTransactions(transactions, backNumber, currentItem = null, paginationInfo = inventoryTransactionsState) {
     const content = document.getElementById('inventoryTransactionsContent');
+    const transactionList = Array.isArray(transactions) ? transactions : [];
+    const currentStateItem = currentItem || transactionList[0] || null;
     
-    if (transactions.length === 0) {
+    if (!currentStateItem) {
         content.innerHTML = `
             <div class="p-8 text-center text-gray-500">
                 <i class="ri-inbox-line text-4xl mb-4"></i>
@@ -2045,16 +2121,14 @@ function renderInventoryTransactions(transactions, backNumber) {
         return;
     }
     
-    // Sort transactions by timestamp (newest first)
-    transactions.sort((a, b) => new Date(b.timeStamp) - new Date(a.timeStamp));
-    
-    const currentItem = transactions[0]; // Latest transaction has current state
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
     const isAdmin = currentUser.role === 'admin';
-    const currentPhysicalQuantity = currentItem.physicalQuantity ?? currentItem.runningQuantity ?? 0;
-    const currentStockBoxCount = currentItem.stockBoxCount;
-    const currentReservedQuantity = currentItem.reservedQuantity ?? 0;
-    const currentAvailableQuantity = currentItem.availableQuantity ?? currentItem.runningQuantity ?? 0;
+    const currentPhysicalQuantity = currentStateItem.physicalQuantity ?? currentStateItem.runningQuantity ?? 0;
+    const currentStockBoxCount = currentStateItem.stockBoxCount;
+    const currentReservedQuantity = currentStateItem.reservedQuantity ?? 0;
+    const currentAvailableQuantity = currentStateItem.availableQuantity ?? currentStateItem.runningQuantity ?? 0;
+    const currentPage = Number(paginationInfo.currentPage) || 1;
+    const totalPages = Number(paginationInfo.totalPages) || 0;
     
     const contentHTML = `
         <div class="space-y-6">
@@ -2062,17 +2136,17 @@ function renderInventoryTransactions(transactions, backNumber) {
             <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
                 <div class="flex items-center justify-between mb-3">
                     <h4 class="text-lg font-semibold text-blue-900">${t('serialNumber')}: ${backNumber}</h4>
-                    ${currentItem.工場 ? `
+                    ${currentStateItem.工場 ? `
                         <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-600 text-white">
                             <i class="ri-building-line mr-1.5"></i>
-                            ${currentItem.工場}
+                            ${currentStateItem.工場}
                         </span>
                     ` : ''}
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div class="text-center">
                         <p class="text-sm text-blue-600">${t('partNumber')}</p>
-                        <p class="text-lg font-bold text-blue-900">${currentItem.品番}</p>
+                        <p class="text-lg font-bold text-blue-900">${currentStateItem.品番}</p>
                     </div>
                     <div class="text-center">
                         <p class="text-sm text-green-600">${t('physicalStock')}</p>
@@ -2132,7 +2206,7 @@ function renderInventoryTransactions(transactions, backNumber) {
                     </div>
                 </div>
                 <button 
-                    onclick="submitInventoryAdjustment(decodeURIComponent('${encodeURIComponent(backNumber)}'), decodeURIComponent('${encodeURIComponent(currentItem.品番 || '')}'), decodeURIComponent('${encodeURIComponent(currentItem.工場 || '')}'), ${currentPhysicalQuantity})"
+                    onclick="submitInventoryAdjustment(decodeURIComponent('${encodeURIComponent(backNumber)}'), decodeURIComponent('${encodeURIComponent(currentStateItem.品番 || '')}'), decodeURIComponent('${encodeURIComponent(currentStateItem.工場 || '')}'), ${currentPhysicalQuantity})"
                     class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center">
                     <i class="ri-save-line mr-2"></i>
                     在庫を更新
@@ -2158,7 +2232,7 @@ function renderInventoryTransactions(transactions, backNumber) {
                     </label>
                 </div>
                 <button 
-                    onclick="confirmInventoryReset(decodeURIComponent('${encodeURIComponent(backNumber)}'), decodeURIComponent('${encodeURIComponent(currentItem.品番 || '')}'), ${currentPhysicalQuantity}, ${currentReservedQuantity}, ${currentAvailableQuantity}, decodeURIComponent('${encodeURIComponent(currentItem.工場 || '')}'))"
+                    onclick="confirmInventoryReset(decodeURIComponent('${encodeURIComponent(backNumber)}'), decodeURIComponent('${encodeURIComponent(currentStateItem.品番 || '')}'), ${currentPhysicalQuantity}, ${currentReservedQuantity}, ${currentAvailableQuantity}, decodeURIComponent('${encodeURIComponent(currentStateItem.工場 || '')}'))"
                     class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center justify-center">
                     <i class="ri-refresh-line mr-2"></i>
                     在庫をリセット
@@ -2168,7 +2242,23 @@ function renderInventoryTransactions(transactions, backNumber) {
 
             <!-- Transaction History -->
             <div>
-                <h4 class="text-lg font-semibold text-gray-900 mb-4">${t('transactionHistory')}</h4>
+                <div class="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <h4 class="text-lg font-semibold text-gray-900">${t('transactionHistory')}</h4>
+                        <p class="text-sm text-gray-500">${getInventoryTransactionsPageRangeLabel(paginationInfo)}</p>
+                    </div>
+                    <label class="inline-flex items-center gap-2 text-sm text-gray-600">
+                        <span>${t('itemsPerPage')}</span>
+                        <select
+                            id="inventoryTransactionsItemsPerPage"
+                            class="border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            onchange="changeInventoryTransactionsPageSize(this.value)">
+                            ${INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS.map((pageSize) => `
+                                <option value="${pageSize}" ${pageSize === paginationInfo.itemsPerPage ? 'selected' : ''}>${pageSize}</option>
+                            `).join('')}
+                        </select>
+                    </label>
+                </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm border border-gray-200 rounded-lg">
                         <thead class="bg-gray-50">
@@ -2183,7 +2273,7 @@ function renderInventoryTransactions(transactions, backNumber) {
                             </tr>
                         </thead>
                         <tbody>
-                            ${transactions.map((transaction, index) => {
+                            ${transactionList.map((transaction, index) => {
                                 const timestamp = new Date(transaction.timeStamp).toLocaleString();
                                 const actionInfo = getTransactionActionInfo(transaction.action);
                                 const physicalValue = transaction.physicalQuantity ?? transaction.runningQuantity ?? 0;
@@ -2191,7 +2281,7 @@ function renderInventoryTransactions(transactions, backNumber) {
                                 const availableValue = transaction.availableQuantity ?? transaction.runningQuantity ?? 0;
                                 
                                 return `
-                                    <tr class="border-b hover:bg-gray-50 ${index === 0 ? 'bg-blue-50' : ''}">
+                                    <tr class="border-b hover:bg-gray-50 ${currentPage === 1 && index === 0 ? 'bg-blue-50' : ''}">
                                         <td class="px-4 py-3 text-gray-600">${timestamp}</td>
                                         <td class="px-4 py-3">
                                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${actionInfo.badgeClass}">
@@ -2210,12 +2300,107 @@ function renderInventoryTransactions(transactions, backNumber) {
                         </tbody>
                     </table>
                 </div>
+                ${totalPages > 1 ? `
+                    <div class="flex flex-col gap-3 mt-4 sm:flex-row sm:items-center sm:justify-between">
+                        <p class="text-sm text-gray-500">${t('page')} ${currentPage} / ${totalPages}</p>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onclick="changeInventoryTransactionsPage(-1)"
+                                class="px-3 py-2 border rounded-lg text-sm transition-colors ${currentPage <= 1 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+                                ${currentPage <= 1 ? 'disabled' : ''}>
+                                ${t('previous')}
+                            </button>
+                            ${buildInventoryTransactionsPageButtons(paginationInfo)}
+                            <button
+                                type="button"
+                                onclick="changeInventoryTransactionsPage(1)"
+                                class="px-3 py-2 border rounded-lg text-sm transition-colors ${currentPage >= totalPages ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+                                ${currentPage >= totalPages ? 'disabled' : ''}>
+                                ${t('next')}
+                            </button>
+                        </div>
+                    </div>
+                ` : ''}
             </div>
         </div>
     `;
     
     content.innerHTML = contentHTML;
 }
+
+function getInventoryTransactionsPageRangeLabel(paginationInfo) {
+    const totalItems = Number(paginationInfo.totalItems) || 0;
+    if (totalItems === 0) {
+        return t('noItemsToDisplay');
+    }
+
+    const currentPage = Number(paginationInfo.currentPage) || 1;
+    const itemsPerPage = Number(paginationInfo.itemsPerPage) || 10;
+    const startItem = ((currentPage - 1) * itemsPerPage) + 1;
+    const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+
+    return `${startItem}-${endItem} / ${totalItems}`;
+}
+
+function buildInventoryTransactionsPageButtons(paginationInfo) {
+    const currentPage = Number(paginationInfo.currentPage) || 1;
+    const totalPages = Number(paginationInfo.totalPages) || 0;
+    let buttonsHtml = '';
+
+    for (let pageNumber = Math.max(1, currentPage - 2); pageNumber <= Math.min(totalPages, currentPage + 2); pageNumber++) {
+        buttonsHtml += `
+            <button
+                type="button"
+                onclick="goToInventoryTransactionsPage(${pageNumber})"
+                class="px-3 py-2 border rounded-lg text-sm transition-colors ${pageNumber === currentPage ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+                ${pageNumber === currentPage ? 'aria-current="page"' : ''}>
+                ${pageNumber}
+            </button>
+        `;
+    }
+
+    return buttonsHtml;
+}
+
+window.changeInventoryTransactionsPage = async function(direction) {
+    if (!inventoryTransactionsState.backNumber) {
+        return;
+    }
+
+    const targetPage = inventoryTransactionsState.currentPage + Number(direction || 0);
+    if (targetPage < 1 || (inventoryTransactionsState.totalPages > 0 && targetPage > inventoryTransactionsState.totalPages)) {
+        return;
+    }
+
+    await openInventoryTransactions(inventoryTransactionsState.backNumber, {
+        page: targetPage,
+        itemsPerPage: inventoryTransactionsState.itemsPerPage
+    });
+};
+
+window.goToInventoryTransactionsPage = async function(page) {
+    const targetPage = normalizeInventoryTransactionsPositiveInteger(page, 1);
+    if (!inventoryTransactionsState.backNumber) {
+        return;
+    }
+
+    await openInventoryTransactions(inventoryTransactionsState.backNumber, {
+        page: targetPage,
+        itemsPerPage: inventoryTransactionsState.itemsPerPage
+    });
+};
+
+window.changeInventoryTransactionsPageSize = async function(pageSize) {
+    if (!inventoryTransactionsState.backNumber) {
+        return;
+    }
+
+    await openInventoryTransactions(inventoryTransactionsState.backNumber, {
+        page: 1,
+        itemsPerPage: normalizeInventoryTransactionsPageSize(pageSize, 10)
+    });
+};
 
 /**
  * Get transaction action information for display
@@ -2244,6 +2429,7 @@ function getTransactionActionInfo(action) {
 window.closeInventoryTransactionsModal = function() {
     const modal = document.getElementById('inventoryTransactionsModal');
     modal.classList.add('hidden');
+    inventoryTransactionsState = createDefaultInventoryTransactionsState();
     // Reset admin section visibility when closing modal
     const adminSection = document.getElementById('adminResetSection');
     if (adminSection) {
@@ -2342,7 +2528,10 @@ window.submitInventoryAdjustment = async function(backNumber, partNumber, factor
         }
 
         alert('✅ 現在在庫が更新されました');
-        await openInventoryTransactions(backNumber);
+        await openInventoryTransactions(backNumber, {
+            page: 1,
+            itemsPerPage: inventoryTransactionsState.itemsPerPage
+        });
         loadInventoryData();
     } catch (error) {
         console.error('Error adjusting inventory:', error);
