@@ -53,9 +53,11 @@ let plannerState = {
         pendingPromise: null,
         scheduleUntilTime: PLANNER_CONFIG.workEndTime,
         draftAssignments: null,
+        seedSimulation: null,
         isDraftMode: false,
         draftChanged: false,
         draggedAssignmentId: null,
+        quantityEditorDraftId: null,
         viewMode: 'auto'
     },
     published: {
@@ -955,18 +957,66 @@ function doesPlannerPreviewEquipmentShareParts(leftEquipment = '', rightEquipmen
     return leftParts.some((part) => rightParts.includes(part));
 }
 
-function getPlannerPreviewAssignmentEndMinutes(assignment = {}) {
-    if (assignment.previewEndTime) {
-        return timeToMinutes(assignment.previewEndTime);
+function getPlannerPreviewAssignmentEstimatedTime(assignment = {}) {
+    const existingEstimatedTime = assignment.estimatedTime
+        && Number.isFinite(Number(assignment.estimatedTime.totalSeconds))
+        && Number(assignment.estimatedTime.totalSeconds) > 0
+        ? { ...assignment.estimatedTime }
+        : null;
+
+    if (existingEstimatedTime) {
+        return existingEstimatedTime;
     }
 
-    if (!assignment.startTime || !assignment.estimatedTime) {
+    const quantity = Math.max(0, Number(assignment.quantity || 0));
+    const equipment = String(assignment.equipment || '').trim();
+    if (quantity <= 0 || !equipment) {
+        return null;
+    }
+
+    const productRecord = getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment,
+    });
+    const calculatedEstimatedTime = calculateProductionTime(productRecord, quantity, equipment);
+    if (
+        !calculatedEstimatedTime
+        || !Number.isFinite(Number(calculatedEstimatedTime.totalSeconds))
+        || Number(calculatedEstimatedTime.totalSeconds) <= 0
+    ) {
+        return null;
+    }
+
+    return calculatedEstimatedTime;
+}
+
+function getPlannerPreviewAssignmentEndMinutes(assignment = {}) {
+    const startMinutes = assignment.startTime
+        ? timeToMinutes(assignment.startTime)
+        : timeToMinutes(PLANNER_CONFIG.workStartTime);
+
+    if (!Number.isFinite(startMinutes)) {
         return timeToMinutes(PLANNER_CONFIG.workStartTime);
     }
 
-    const startMinutes = timeToMinutes(assignment.startTime);
-    const durationMinutes = Number(assignment.estimatedTime.totalSeconds || 0) / 60;
+    if (assignment.previewEndTime) {
+        const previewEndMinutes = timeToMinutes(assignment.previewEndTime);
+        if (Number.isFinite(previewEndMinutes) && previewEndMinutes > startMinutes) {
+            return previewEndMinutes;
+        }
+    }
+
+    const estimatedTime = getPlannerPreviewAssignmentEstimatedTime(assignment);
+    if (!estimatedTime) {
+        return roundPlannerPreviewMinutesToInterval(startMinutes + PLANNER_CONFIG.intervalMinutes, 'ceil');
+    }
+
+    const durationMinutes = Number(estimatedTime.totalSeconds || 0) / 60;
     const actualEndMinutes = findNextAvailableTime(startMinutes, durationMinutes, assignment.equipment).endTime;
+    if (!Number.isFinite(actualEndMinutes) || actualEndMinutes <= startMinutes) {
+        return roundPlannerPreviewMinutesToInterval(startMinutes + PLANNER_CONFIG.intervalMinutes, 'ceil');
+    }
+
     return roundPlannerPreviewMinutesToInterval(actualEndMinutes, 'ceil');
 }
 
@@ -1965,13 +2015,48 @@ function clonePlannerPreviewAssignment(assignment = {}, index = 0) {
     ).trim();
     const equipment = String(assignment.equipment || '').trim() || 'preview';
     const startTime = String(assignment.startTime || PLANNER_CONFIG.workStartTime).trim();
+    const previewEndTime = String(assignment.previewEndTime || '').trim();
+    const productRecord = getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment,
+    });
+    const boxCapacity = resolvePlannerBoxQuantity(productRecord, equipment);
+    const parsedQuantity = Number(assignment.quantity);
+    const parsedBoxes = Number(assignment.boxes);
+    const derivedQuantityFromBoxes = Number.isFinite(parsedBoxes) && parsedBoxes > 0 && Number.isFinite(boxCapacity) && boxCapacity > 0
+        ? parsedBoxes * boxCapacity
+        : 0;
+    const quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0
+        ? parsedQuantity
+        : derivedQuantityFromBoxes;
+    const boxes = Number.isFinite(parsedBoxes) && parsedBoxes > 0
+        ? parsedBoxes
+        : (quantity > 0 && Number.isFinite(boxCapacity) && boxCapacity > 0
+            ? Math.ceil(quantity / boxCapacity)
+            : null);
+    const estimatedTime = getPlannerPreviewAssignmentEstimatedTime({
+        ...assignment,
+        ...productRecord,
+        equipment,
+        quantity,
+    });
+    const draftMaxQuantity = Number.isFinite(Number(assignment.draftMaxQuantity))
+        ? Math.max(0, Number(assignment.draftMaxQuantity))
+        : quantity;
 
     return {
         ...assignment,
+        ...productRecord,
+        equipment,
+        startTime,
+        previewEndTime,
+        quantity,
+        boxes,
+        draftMaxQuantity,
         draftId: assignment.draftId || `${sourceId}::${equipment}::${startTime}::${index}`,
         sourceRowIds,
         groupedRequestNumbers,
-        estimatedTime: assignment.estimatedTime ? { ...assignment.estimatedTime } : null,
+        estimatedTime,
     };
 }
 
@@ -1999,6 +2084,34 @@ function hasPlannerPreviewDraft() {
     return Array.isArray(plannerState.preview.draftAssignments) && plannerState.preview.draftAssignments.length > 0;
 }
 
+function normalizePlannerPreviewDraftBasisRowsClient(rows = []) {
+    return (Array.isArray(rows) ? rows : [])
+        .map((row = {}) => {
+            const id = String(row.id || '').trim();
+            const requestId = String(row.requestId || '').trim();
+            const requestNumber = String(row.requestNumber || '').trim();
+            const lineNumber = Number.isFinite(Number(row.lineNumber)) ? Number(row.lineNumber) : null;
+            const sebanggo = String(row.背番号 || '').trim();
+            const hinban = String(row.品番 || '').trim();
+            const shortfallQuantity = Number(row.shortfallQuantity || 0);
+
+            if (!id && !requestNumber && !requestId && !sebanggo && !hinban) {
+                return null;
+            }
+
+            return {
+                id: id || null,
+                requestId: requestId || null,
+                requestNumber,
+                lineNumber,
+                背番号: sebanggo,
+                品番: hinban,
+                shortfallQuantity,
+            };
+        })
+        .filter(Boolean);
+}
+
 function hasPlannerPreviewSavedDraft(preview = {}) {
     return Array.isArray(preview?.savedDraft?.assignments) && preview.savedDraft.assignments.length > 0;
 }
@@ -2011,13 +2124,46 @@ function getPlannerPreviewSavedDraftAssignments(preview = {}) {
 
 function resetPlannerPreviewDraftState() {
     plannerState.preview.draftAssignments = null;
+    plannerState.preview.seedSimulation = null;
     plannerState.preview.isDraftMode = false;
     plannerState.preview.draftChanged = false;
     plannerState.preview.draggedAssignmentId = null;
+    plannerState.preview.quantityEditorDraftId = null;
+
+    const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+    if (modal) {
+        modal.remove();
+    }
 }
 
 function getPlannerPreviewDraftAssignmentId(assignment = {}) {
     return String(assignment.draftId || '').trim();
+}
+
+function getPlannerPreviewAssignmentEquipmentList(assignments = []) {
+    return Array.from(new Set(
+        (Array.isArray(assignments) ? assignments : [])
+            .map((assignment) => String(assignment?.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+}
+
+function shouldUsePlannerPreviewSeedSimulation(preview = {}) {
+    return !!(
+        hasPlannerPreviewDraft()
+        && plannerState.preview.draftChanged !== true
+        && plannerState.preview.seedSimulation
+        && !hasPlannerPreviewSavedDraft(preview)
+        && String(plannerState.preview.seedSimulation.scheduleUntilTime || '') === getPlannerPreviewScheduleUntilTime()
+    );
+}
+
+function getPlannerPreviewEditableDraftAssignments(preview = {}) {
+    const sourceAssignments = shouldUsePlannerPreviewSeedSimulation(preview)
+        ? (plannerState.preview.seedSimulation?.assignments || [])
+        : (plannerState.preview.draftAssignments || []);
+
+    return normalizePlannerPreviewDraftAssignments(sourceAssignments);
 }
 
 function ensurePlannerPreviewDraft(preview = {}) {
@@ -2036,10 +2182,228 @@ function ensurePlannerPreviewDraft(preview = {}) {
     }
 
     plannerState.preview.draftAssignments = draftAssignments;
+    plannerState.preview.seedSimulation = savedDraftAssignments.length > 0
+        ? null
+        : {
+            ...simulation,
+            assignments: draftAssignments,
+            equipmentList: getPlannerPreviewAssignmentEquipmentList(draftAssignments),
+        };
     plannerState.preview.isDraftMode = true;
     plannerState.preview.draftChanged = false;
     plannerState.preview.viewMode = 'draft';
     return plannerState.preview.draftAssignments;
+}
+
+function getPlannerPreviewDraftBasisRowsForSimulation(preview = {}) {
+    const savedBasisRows = normalizePlannerPreviewDraftBasisRowsClient(preview?.savedDraft?.basisRows || []);
+    if (savedBasisRows.length > 0) {
+        return savedBasisRows;
+    }
+
+    return buildPlannerPreviewDraftBasisRows(preview);
+}
+
+function getPlannerPreviewDraftSourceRowIds(assignment = {}) {
+    const sourceRowIds = Array.isArray(assignment.sourceRowIds)
+        ? assignment.sourceRowIds.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+
+    if (sourceRowIds.length > 0) {
+        return sourceRowIds;
+    }
+
+    const sourceRowId = String(assignment.sourceRowId || '').trim();
+    return sourceRowId ? [sourceRowId] : [];
+}
+
+function getPlannerPreviewDraftPriorityRowMap(preview = {}) {
+    return new Map(
+        (Array.isArray(preview.priorityRows) ? preview.priorityRows : [])
+            .map((row) => [String(row?.id || '').trim(), row])
+            .filter(([id]) => id)
+    );
+}
+
+function buildPlannerPreviewDraftSimulation(preview = {}, baseSimulation = null, draftAssignments = []) {
+    const simulation = baseSimulation || preview.simulation || buildPlannerPreviewSimulation(preview);
+    const assignments = normalizePlannerPreviewDraftAssignments(draftAssignments)
+        .filter((assignment) => Number(assignment.quantity || 0) > 0);
+    const equipmentList = Array.from(new Set(
+        assignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+
+    const basisRows = getPlannerPreviewDraftBasisRowsForSimulation(preview);
+    const priorityRowMap = getPlannerPreviewDraftPriorityRowMap(preview);
+    const remainingByRowId = new Map();
+
+    basisRows.forEach((row) => {
+        const id = String(row.id || '').trim();
+        if (!id) {
+            return;
+        }
+
+        remainingByRowId.set(id, Math.max(0, Number(row.shortfallQuantity || 0)));
+    });
+
+    assignments.forEach((assignment) => {
+        let quantityRemaining = Math.max(0, Number(assignment.quantity || 0));
+        const sourceRowIds = getPlannerPreviewDraftSourceRowIds(assignment);
+
+        sourceRowIds.forEach((sourceRowId) => {
+            if (quantityRemaining <= 0) {
+                return;
+            }
+
+            const currentRemaining = Math.max(0, Number(remainingByRowId.get(sourceRowId) || 0));
+            if (currentRemaining <= 0) {
+                return;
+            }
+
+            const allocatedQuantity = Math.min(quantityRemaining, currentRemaining);
+            remainingByRowId.set(sourceRowId, Math.max(0, currentRemaining - allocatedQuantity));
+            quantityRemaining -= allocatedQuantity;
+        });
+    });
+
+    const exceptions = [];
+    let unscheduledShortfallQuantity = 0;
+    let timeLimitMissedQuantity = 0;
+    let timeLimitExceptionCount = 0;
+    let otherExceptionCount = 0;
+
+    basisRows.forEach((row) => {
+        const rowId = String(row.id || '').trim();
+        const shortfallQuantity = Math.max(0, Number(remainingByRowId.get(rowId) || 0));
+        if (shortfallQuantity <= 0) {
+            return;
+        }
+
+        const priorityRow = priorityRowMap.get(rowId) || null;
+        const candidateMachines = priorityRow ? getPlannerPreviewCandidateMachines(priorityRow) : [];
+        const isCapabilityException = !!(
+            priorityRow
+            && (priorityRow.capabilityStatus !== 'mapped' || candidateMachines.length === 0)
+        );
+        const reason = isCapabilityException
+            ? (priorityRow.capabilityStatus || 'unmapped')
+            : 'time-limit';
+        const exception = {
+            id: rowId || null,
+            reason,
+            requestNumber: String(row.requestNumber || '').trim(),
+            lineNumber: Number.isFinite(Number(row.lineNumber)) ? Number(row.lineNumber) : null,
+            背番号: String(row.背番号 || '').trim(),
+            品番: String(row.品番 || '').trim(),
+            shortfallQuantity,
+        };
+
+        if (reason === 'time-limit') {
+            exception.scheduleUntilTime = simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime();
+            exception.candidateEquipment = candidateMachines.map((machine) => (
+                machine.preferred ? `${machine.equipment}*` : machine.equipment
+            ));
+            timeLimitMissedQuantity += shortfallQuantity;
+            timeLimitExceptionCount += 1;
+        } else {
+            otherExceptionCount += 1;
+        }
+
+        unscheduledShortfallQuantity += shortfallQuantity;
+        exceptions.push(exception);
+    });
+
+    return {
+        ...simulation,
+        assignments,
+        equipmentList,
+        exceptions,
+        scheduledShortfallQuantity: assignments.reduce((sum, assignment) => sum + Math.max(0, Number(assignment.quantity || 0)), 0),
+        unscheduledShortfallQuantity,
+        timeLimitMissedQuantity,
+        timeLimitExceptionCount,
+        otherExceptionCount,
+        previewInsertCount: assignments.filter((assignment) => assignment.previewSource === 'priority').length,
+    };
+}
+
+function getPlannerPreviewDraftAssignmentCapacity(assignment = {}) {
+    const productRecord = getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment: assignment.equipment,
+    });
+
+    return resolvePlannerBoxQuantity(productRecord, assignment.equipment);
+}
+
+function getPlannerPreviewDraftAssignmentBoxCount(assignment = {}) {
+    const quantity = Math.max(0, Number(assignment.quantity || 0));
+    if (quantity <= 0) {
+        return 0;
+    }
+
+    return calculateBoxesNeeded(getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment: assignment.equipment,
+    }), quantity, assignment.equipment);
+}
+
+function getPlannerPreviewDraftAssignmentTotalSourceQuantity(preview = {}, assignment = {}) {
+    const basisRows = getPlannerPreviewDraftBasisRowsForSimulation(preview);
+    const basisQuantityById = new Map(
+        basisRows
+            .map((row) => [String(row.id || '').trim(), Math.max(0, Number(row.shortfallQuantity || 0))])
+            .filter(([id]) => id)
+    );
+    const sourceRowIds = getPlannerPreviewDraftSourceRowIds(assignment);
+    const totalSourceQuantity = sourceRowIds.reduce((sum, sourceRowId) => (
+        sum + Math.max(0, Number(basisQuantityById.get(sourceRowId) || 0))
+    ), 0);
+
+    return totalSourceQuantity > 0
+        ? totalSourceQuantity
+        : Math.max(0, Number(assignment.quantity || 0));
+}
+
+function getPlannerPreviewDraftAssignmentLimitQuantity(assignment = {}) {
+    return Math.max(
+        0,
+        Number.isFinite(Number(assignment.draftMaxQuantity))
+            ? Number(assignment.draftMaxQuantity)
+            : Number(assignment.quantity || 0)
+    );
+}
+
+function getPlannerPreviewDraftAssignmentMaxBoxes(preview = {}, assignment = {}) {
+    const capacity = getPlannerPreviewDraftAssignmentCapacity(assignment);
+    const limitQuantity = getPlannerPreviewDraftAssignmentLimitQuantity(assignment);
+    if (!Number.isFinite(capacity) || capacity <= 0 || limitQuantity <= 0) {
+        return 0;
+    }
+
+    return Math.ceil(limitQuantity / capacity);
+}
+
+function getPlannerPreviewDraftQuantityForBoxes(preview = {}, assignment = {}, targetBoxes = 0) {
+    const normalizedBoxes = Math.max(0, Number(targetBoxes || 0));
+    if (normalizedBoxes <= 0) {
+        return 0;
+    }
+
+    const capacity = getPlannerPreviewDraftAssignmentCapacity(assignment);
+    const limitQuantity = getPlannerPreviewDraftAssignmentLimitQuantity(assignment);
+    if (!Number.isFinite(capacity) || capacity <= 0 || limitQuantity <= 0) {
+        return Math.max(0, Number(assignment.quantity || 0));
+    }
+
+    const maxBoxes = Math.ceil(limitQuantity / capacity);
+    if (normalizedBoxes >= maxBoxes) {
+        return limitQuantity;
+    }
+
+    return Math.min(limitQuantity, normalizedBoxes * capacity);
 }
 
 function getPlannerPreviewRenderSimulation(preview = {}) {
@@ -2056,17 +2420,16 @@ function getPlannerPreviewRenderSimulation(preview = {}) {
         plannerState.preview.draftAssignments = assignments;
     }
 
-    const equipmentList = Array.from(new Set(
-        assignments
-            .map((assignment) => String(assignment.equipment || '').trim())
-            .filter(Boolean)
-    )).sort((left, right) => left.localeCompare(right));
+    if (shouldUsePlannerPreviewSeedSimulation(preview)) {
+        return {
+            ...plannerState.preview.seedSimulation,
+            assignments,
+            equipmentList: getPlannerPreviewAssignmentEquipmentList(assignments),
+            draftSource: 'local-unsaved-draft',
+        };
+    }
 
-    return {
-        ...simulation,
-        assignments,
-        equipmentList,
-    };
+    return buildPlannerPreviewDraftSimulation(preview, simulation, assignments);
 }
 
 function getPlannerPreviewExportSimulation(preview = {}, mode = 'auto') {
@@ -2088,16 +2451,17 @@ function getPlannerPreviewExportSimulation(preview = {}, mode = 'auto') {
         return null;
     }
 
-    const equipmentList = Array.from(new Set(
-        draftAssignments
-            .map((assignment) => String(assignment.equipment || '').trim())
-            .filter(Boolean)
-    )).sort((left, right) => left.localeCompare(right));
+    if (shouldUsePlannerPreviewSeedSimulation(preview)) {
+        return {
+            ...plannerState.preview.seedSimulation,
+            assignments: draftAssignments,
+            equipmentList: getPlannerPreviewAssignmentEquipmentList(draftAssignments),
+            draftSource: 'local-unsaved-draft',
+        };
+    }
 
     return {
-        ...simulation,
-        assignments: draftAssignments,
-        equipmentList,
+        ...buildPlannerPreviewDraftSimulation(preview, simulation, draftAssignments),
         draftSource: hasPlannerPreviewDraft() ? 'local-unsaved-draft' : 'saved-draft',
     };
 }
@@ -2753,11 +3117,21 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
 
         const timingDetail = timingDetailParts.join(' | ');
         const draftId = getPlannerPreviewDraftAssignmentId(assignmentForSlot);
+        const escapedDraftId = escapePlannerPreviewHtml(draftId);
         const requestNumberColorClass = getPlannerPreviewRequestColorClass(assignmentForSlot, requestColorMap);
         const tileRequestLabel = getPlannerPreviewTileRequestLabel(assignmentForSlot)
             || plannerTranslate('plannerPreviewInsertLabel', {}, 'Preview insert');
+        const quantityEditAttributes = isDraftMode && isAssignmentHead && draftId
+            ? `
+                type="button"
+                data-preview-draft-id="${escapedDraftId}"
+                onclick="handlePlannerPreviewDraftQuantityButtonClick(event, this)"
+                title="${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewEditQuantityAction', {}, 'Edit draft quantity'))}"
+            `
+            : '';
         const headMarkerHtml = isAssignmentHead
             ? `
+                ${quantityEditAttributes ? `<button class="absolute inset-y-0 left-0 z-10 w-4 rounded-l-md bg-transparent focus:outline-none focus:ring-2 focus:ring-sky-400/70" ${quantityEditAttributes}></button>` : ''}
                 <div class="absolute inset-y-0 left-0 w-1.5 bg-slate-900/80 dark:bg-slate-100/90"></div>
                 <div class="absolute left-1 top-1 h-2 w-2 rounded-full bg-white ring-1 ring-slate-900/70 dark:bg-slate-100 dark:ring-slate-200/80"></div>
             `
@@ -2777,7 +3151,8 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
         const dragAttributes = isDraftMode && isAssignmentHead && draftId
             ? `
                 draggable="true"
-                ondragstart='handlePlannerPreviewDraftDragStart(event, ${JSON.stringify(draftId)})'
+                data-preview-draft-id="${escapedDraftId}"
+                ondragstart="handlePlannerPreviewDraftDragStartFromElement(event, this)"
                 ondragend="handlePlannerPreviewDraftDragEnd(event)"
             `
             : '';
@@ -3355,10 +3730,20 @@ function renderPlannerPreview() {
 
     plannerState.preview.data = preview;
 
-    const summary = preview.summary || {};
+    const simulation = getPlannerPreviewRenderSimulation(preview);
+    const summary = {
+        ...(preview.summary || {}),
+        previewInsertCount: Number.isFinite(Number(simulation.previewInsertCount)) ? Number(simulation.previewInsertCount) : Number(preview.summary?.previewInsertCount || 0),
+        scheduledShortfallQuantity: Number.isFinite(Number(simulation.scheduledShortfallQuantity)) ? Number(simulation.scheduledShortfallQuantity) : Number(preview.summary?.scheduledShortfallQuantity || 0),
+        unscheduledShortfallQuantity: Number.isFinite(Number(simulation.unscheduledShortfallQuantity)) ? Number(simulation.unscheduledShortfallQuantity) : Number(preview.summary?.unscheduledShortfallQuantity || 0),
+        previewExceptionCount: Array.isArray(simulation.exceptions) ? simulation.exceptions.length : Number(preview.summary?.previewExceptionCount || 0),
+        timeLimitExceptionCount: Number.isFinite(Number(simulation.timeLimitExceptionCount)) ? Number(simulation.timeLimitExceptionCount) : Number(preview.summary?.timeLimitExceptionCount || 0),
+        timeLimitMissedQuantity: Number.isFinite(Number(simulation.timeLimitMissedQuantity)) ? Number(simulation.timeLimitMissedQuantity) : Number(preview.summary?.timeLimitMissedQuantity || 0),
+        otherExceptionCount: Number.isFinite(Number(simulation.otherExceptionCount)) ? Number(simulation.otherExceptionCount) : Number(preview.summary?.otherExceptionCount || 0),
+        scheduleUntilTime: simulation.scheduleUntilTime || preview.summary?.scheduleUntilTime || getPlannerPreviewScheduleUntilTime(),
+    };
     const priorityRows = Array.isArray(preview.priorityRows) ? preview.priorityRows : [];
     const inventoryRows = Array.isArray(preview.inventoryRows) ? preview.inventoryRows : [];
-    const simulation = preview.simulation || buildPlannerPreviewSimulation(preview);
     const scheduleUntilTime = getPlannerPreviewScheduleUntilTime();
     const hasPreviewDraft = hasPlannerPreviewDraft();
     const hasSavedPreviewDraft = hasPlannerPreviewSavedDraft(preview);
@@ -9831,6 +10216,12 @@ window.setPlannerPreviewViewMode = function(mode) {
     plannerState.preview.viewMode = nextMode;
     if (nextMode !== 'draft') {
         plannerState.preview.isDraftMode = false;
+        plannerState.preview.quantityEditorDraftId = null;
+
+        const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+        if (modal) {
+            modal.remove();
+        }
     }
 
     renderPlannerPreview();
@@ -10042,6 +10433,14 @@ window.togglePlannerPreviewDraftMode = function() {
         showPlannerNotification(plannerTranslate('plannerPreviewDraftCreated', {}, 'Preview Draft created. Drag a block head to move it, or drop it onto another eligible block to swap and auto-arrange timing.'), 'success');
     } else {
         plannerState.preview.isDraftMode = !plannerState.preview.isDraftMode;
+        if (!plannerState.preview.isDraftMode) {
+            plannerState.preview.quantityEditorDraftId = null;
+
+            const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
     }
 
     plannerState.preview.viewMode = 'draft';
@@ -10068,6 +10467,197 @@ window.resetPlannerPreviewDraft = function() {
             : plannerTranslate('plannerPreviewDraftResetAuto', {}, 'Preview Draft reset to the auto-generated calendar.'),
         'success'
     );
+};
+
+function renderPlannerPreviewDraftQuantityModal(preview = null) {
+    const activePreview = preview
+        ? applyLocalPlanToPlannerPreview(preview)
+        : (plannerState.preview.data ? applyLocalPlanToPlannerPreview(plannerState.preview.data) : null);
+    const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+    if (modal) {
+        modal.remove();
+    }
+
+    const draftId = String(plannerState.preview.quantityEditorDraftId || '').trim();
+    if (!activePreview || !draftId || plannerState.preview.viewMode !== 'draft' || plannerState.preview.isDraftMode !== true || !hasPlannerPreviewDraft()) {
+        plannerState.preview.quantityEditorDraftId = null;
+        return;
+    }
+
+    const assignments = getPlannerPreviewEditableDraftAssignments(activePreview);
+    const assignment = assignments.find((item) => getPlannerPreviewDraftAssignmentId(item) === draftId) || null;
+    if (!assignment) {
+        plannerState.preview.quantityEditorDraftId = null;
+        return;
+    }
+
+    const currentBoxes = getPlannerPreviewDraftAssignmentBoxCount(assignment);
+    const maxBoxes = getPlannerPreviewDraftAssignmentMaxBoxes(activePreview, assignment);
+    const capacity = getPlannerPreviewDraftAssignmentCapacity(assignment);
+    const requestLabel = getPlannerPreviewTileRequestLabel(assignment)
+        || String(assignment.requestNumberLabel || assignment.requestNumber || '').trim()
+        || plannerTranslate('plannerPreviewInsertLabel', {}, 'Preview insert');
+    const blockLabel = `${getPlannerPreviewBlockLabel(assignment, plannerTranslate('plannerPreviewBlockFallback', {}, 'Block'))} (${requestLabel})`;
+    const removedQuantity = Math.max(0, getPlannerPreviewDraftAssignmentLimitQuantity(assignment) - Math.max(0, Number(assignment.quantity || 0)));
+
+    document.body.insertAdjacentHTML('beforeend', `
+        <div id="plannerPreviewDraftQuantityModal" class="fixed inset-0 bg-black bg-opacity-50 z-[70] flex items-center justify-center p-4">
+            <div class="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-600 dark:text-sky-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewEditQuantityAction', {}, 'Edit draft quantity'))}</div>
+                        <h4 class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(blockLabel)}</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewEditQuantityDescription', {}, 'Adjust this draft block in box units. Removed boxes return to the draft time-limit list.'))}</p>
+                    </div>
+                    <button type="button" onclick="closePlannerPreviewDraftQuantityModal()" class="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-lg"></i>
+                    </button>
+                </div>
+                <div class="mt-5 grid grid-cols-3 gap-3 text-center">
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-900/30">
+                        <div class="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewBoxesLabel', {}, 'Boxes'))}</div>
+                        <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">${formatPlannerPreviewNumber(currentBoxes)}</div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-900/30">
+                        <div class="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewQuantityLabel', {}, 'Quantity'))}</div>
+                        <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">${formatPlannerPreviewNumber(assignment.quantity || 0)}</div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-900/30">
+                        <div class="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewBoxCapacityLabel', {}, 'Per Box'))}</div>
+                        <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">${formatPlannerPreviewNumber(capacity || 0)}</div>
+                    </div>
+                </div>
+                <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                    ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewRemovedToExceptionNotice', { quantity: formatPlannerPreviewNumber(removedQuantity) }, `${formatPlannerPreviewNumber(removedQuantity)} pcs are currently outside the draft schedule window for this block.`))}
+                </div>
+                <div class="mt-5 flex items-center justify-center gap-3">
+                    <button type="button" onclick="adjustPlannerPreviewDraftAssignmentBoxes(-1)" class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-xl font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-950/40" ${currentBoxes <= 0 ? 'disabled' : ''}>
+                        <i class="ri-subtract-line"></i>
+                    </button>
+                    <div class="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-slate-100 dark:text-slate-900">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewBoxRangeLabel', { current: formatPlannerPreviewNumber(currentBoxes), max: formatPlannerPreviewNumber(maxBoxes) }, `${formatPlannerPreviewNumber(currentBoxes)} / ${formatPlannerPreviewNumber(maxBoxes)} boxes`))}</div>
+                    <button type="button" onclick="adjustPlannerPreviewDraftAssignmentBoxes(1)" class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xl font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/40" ${currentBoxes >= maxBoxes ? 'disabled' : ''}>
+                        <i class="ri-add-line"></i>
+                    </button>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button type="button" onclick="closePlannerPreviewDraftQuantityModal()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800">
+                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewDoneAction', {}, 'Done'))}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `);
+}
+
+window.closePlannerPreviewDraftQuantityModal = function() {
+    plannerState.preview.quantityEditorDraftId = null;
+    const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+window.showPlannerPreviewDraftQuantityModal = function(draftId) {
+    if (plannerState.preview.viewMode !== 'draft' || plannerState.preview.isDraftMode !== true || !hasPlannerPreviewDraft()) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedEditDraftQuantity', {}, 'Turn on Draft editing before adjusting block quantity.'), 'warning');
+        return;
+    }
+
+    plannerState.preview.quantityEditorDraftId = String(draftId || '').trim();
+    renderPlannerPreviewDraftQuantityModal();
+};
+
+window.handlePlannerPreviewDraftQuantityButtonClick = function(event, element) {
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+
+    const draftId = String(element?.dataset?.previewDraftId || '').trim();
+    if (!draftId) {
+        return;
+    }
+
+    window.showPlannerPreviewDraftQuantityModal(draftId);
+};
+
+window.adjustPlannerPreviewDraftAssignmentBoxes = function(delta = 0) {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+    if (!preview || !hasPlannerPreviewDraft() || plannerState.preview.viewMode !== 'draft' || plannerState.preview.isDraftMode !== true) {
+        return;
+    }
+
+    const draftId = String(plannerState.preview.quantityEditorDraftId || '').trim();
+    if (!draftId) {
+        return;
+    }
+
+    const assignments = getPlannerPreviewEditableDraftAssignments(preview);
+    const targetAssignment = assignments.find((assignment) => getPlannerPreviewDraftAssignmentId(assignment) === draftId) || null;
+    if (!targetAssignment) {
+        window.closePlannerPreviewDraftQuantityModal();
+        return;
+    }
+
+    const currentBoxes = getPlannerPreviewDraftAssignmentBoxCount(targetAssignment);
+    const maxBoxes = getPlannerPreviewDraftAssignmentMaxBoxes(preview, targetAssignment);
+    const nextBoxes = Math.max(0, Math.min(maxBoxes, currentBoxes + Number(delta || 0)));
+    if (nextBoxes === currentBoxes) {
+        return;
+    }
+
+    const nextQuantity = getPlannerPreviewDraftQuantityForBoxes(preview, targetAssignment, nextBoxes);
+    const laneAssignments = getPlannerPreviewDraftLaneAssignments(assignments, targetAssignment.equipment);
+    const laneIndex = laneAssignments.findIndex((assignment) => getPlannerPreviewDraftAssignmentId(assignment) === draftId);
+    if (laneIndex === -1) {
+        window.closePlannerPreviewDraftQuantityModal();
+        return;
+    }
+
+    const productRecord = getPlannerPreviewProductRecord({
+        ...targetAssignment,
+        equipment: targetAssignment.equipment,
+    });
+    const nextAssignment = nextQuantity > 0
+        ? {
+            ...targetAssignment,
+            quantity: nextQuantity,
+            boxes: calculateBoxesNeeded(productRecord, nextQuantity, targetAssignment.equipment),
+            estimatedTime: calculateProductionTime(productRecord, nextQuantity, targetAssignment.equipment),
+        }
+        : null;
+    const nextLaneAssignments = nextQuantity > 0
+        ? laneAssignments.map((assignment, index) => (index === laneIndex ? nextAssignment : assignment))
+        : laneAssignments.filter((assignment) => getPlannerPreviewDraftAssignmentId(assignment) !== draftId);
+    const repackedLane = repackPlannerPreviewDraftLane(
+        assignments,
+        targetAssignment.equipment,
+        nextLaneAssignments,
+        laneIndex,
+    );
+
+    if (!repackedLane.ok) {
+        showPlannerNotification(repackedLane.message || plannerTranslate('plannerPreviewDraftQuantityAdjustFailed', {}, 'Unable to adjust the draft quantity for this block.'), 'warning');
+        return;
+    }
+
+    plannerState.preview.draftAssignments = mergePlannerPreviewDraftLaneAssignments(assignments, {
+        [targetAssignment.equipment]: repackedLane.assignments,
+    });
+    plannerState.preview.seedSimulation = null;
+    plannerState.preview.draftChanged = true;
+    plannerState.preview.draggedAssignmentId = null;
+    plannerState.preview.viewMode = 'draft';
+
+    renderPlannerPreview();
+
+    if (nextQuantity > 0) {
+        plannerState.preview.quantityEditorDraftId = draftId;
+        renderPlannerPreviewDraftQuantityModal(preview);
+    } else {
+        window.closePlannerPreviewDraftQuantityModal();
+    }
 };
 
 window.deletePlannerPreviewSavedDraft = async function() {
@@ -10198,6 +10788,18 @@ window.handlePlannerPreviewDraftDragStart = function(event, draftId) {
     event.dataTransfer.effectAllowed = 'move';
 };
 
+window.handlePlannerPreviewDraftDragStartFromElement = function(event, element) {
+    const draftId = String(element?.dataset?.previewDraftId || '').trim();
+    if (!draftId) {
+        if (event?.preventDefault) {
+            event.preventDefault();
+        }
+        return;
+    }
+
+    window.handlePlannerPreviewDraftDragStart(event, draftId);
+};
+
 window.handlePlannerPreviewDraftDragEnd = function(event) {
     event.currentTarget.style.opacity = '1';
     plannerState.preview.draggedAssignmentId = null;
@@ -10259,6 +10861,7 @@ window.handlePlannerPreviewDraftDrop = function(event, targetEquipment, targetTi
         }
 
         plannerState.preview.draftAssignments = normalizePlannerPreviewDraftAssignments(swapEvaluation.assignments || []);
+        plannerState.preview.seedSimulation = null;
         plannerState.preview.draftChanged = true;
         plannerState.preview.draggedAssignmentId = null;
         plannerState.preview.viewMode = 'draft';
@@ -10306,6 +10909,7 @@ window.handlePlannerPreviewDraftDrop = function(event, targetEquipment, targetTi
 
     otherAssignments.push(movingAssignment);
     plannerState.preview.draftAssignments = normalizePlannerPreviewDraftAssignments(otherAssignments);
+    plannerState.preview.seedSimulation = null;
     plannerState.preview.draftChanged = true;
     plannerState.preview.draggedAssignmentId = null;
     plannerState.preview.viewMode = 'draft';
