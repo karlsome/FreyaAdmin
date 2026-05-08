@@ -398,7 +398,7 @@ function formatPlannerPreviewDate(value = '') {
 
 function formatPlannerPreviewTimestamp(value = '') {
     if (!value) {
-        return 'Not refreshed yet';
+        return plannerTranslate('plannerPreviewStatusNever', {}, 'Not refreshed yet');
     }
 
     const parsed = new Date(value);
@@ -412,6 +412,84 @@ function formatPlannerPreviewTimestamp(value = '') {
         hour: '2-digit',
         minute: '2-digit'
     });
+}
+
+function plannerTranslate(key, replacements = {}, fallback = key) {
+    let text = fallback;
+
+    if (typeof window !== 'undefined' && typeof window.t === 'function') {
+        const translated = window.t(key);
+        if (translated && translated !== key) {
+            text = translated;
+        }
+    }
+
+    return Object.entries(replacements || {}).reduce((message, [token, value]) => (
+        message.split(`{${token}}`).join(String(value ?? ''))
+    ), text);
+}
+
+function getPlannerPreviewModeLabel(mode = 'auto') {
+    return plannerTranslate(
+        mode === 'draft' ? 'plannerPreviewModeDraft' : 'plannerPreviewModeAuto',
+        {},
+        mode === 'draft' ? 'Draft' : 'Auto'
+    );
+}
+
+function getPlannerPreviewActionLabel(action = 'print') {
+    return plannerTranslate(
+        action === 'calendar' ? 'plannerPreviewActionCalendar' : 'plannerPreviewActionPrint',
+        {},
+        action === 'calendar' ? 'Calendar View' : 'Print'
+    );
+}
+
+function getPlannerPreviewBreakName(breakItem = {}) {
+    const normalizedName = String(breakItem?.name || '').trim();
+
+    if (breakItem?.id === 'default-lunch' || normalizedName === 'Lunch Break') {
+        return plannerTranslate('lunchBreak', {}, 'Lunch Break');
+    }
+
+    if (breakItem?.id === 'default-break' || normalizedName === 'Break') {
+        return plannerTranslate('shortBreak', {}, 'Short Break');
+    }
+
+    return normalizedName || plannerTranslate('plannerPreviewBreakDefault', {}, 'Break');
+}
+
+function getPlannerPreviewCapabilityStatusLabel(status = '') {
+    switch (String(status || '').trim()) {
+        case 'mapped':
+            return plannerTranslate('plannerPreviewCapabilityMapped', {}, 'Mapped');
+        case 'disabled':
+            return plannerTranslate('plannerPreviewCapabilityDisabled', {}, 'Disabled');
+        case 'empty':
+            return plannerTranslate('plannerPreviewCapabilityEmpty', {}, 'No machines');
+        case 'unmapped':
+            return plannerTranslate('plannerPreviewCapabilityUnmapped', {}, 'Unmapped');
+        default:
+            return String(status || '-');
+    }
+}
+
+function getPlannerPreviewExceptionReasonLabel(reason = '') {
+    const normalizedReason = String(reason || '').trim();
+    if (normalizedReason === 'time-limit') {
+        return plannerTranslate('plannerPreviewReasonTimeLimit', {}, 'Time limit');
+    }
+
+    return getPlannerPreviewCapabilityStatusLabel(normalizedReason || 'unmapped');
+}
+
+function getPlannerPreviewBlockLabel(item = {}, fallbackText = '') {
+    const label = String(item?.背番号 || item?.品番 || '').trim();
+    if (label) {
+        return label;
+    }
+
+    return fallbackText || plannerTranslate('plannerPreviewBlockFallback', {}, 'Block');
 }
 
 const PLANNER_PREVIEW_REQUEST_COLOR_CLASSES = [
@@ -542,7 +620,7 @@ function roundPlannerPreviewMinutesToInterval(minutes, mode = 'ceil') {
 function getPlannerPreviewPossibleEquipmentText(row = {}) {
     const machines = Array.isArray(row.eligibleMachines) ? row.eligibleMachines : [];
     if (machines.length === 0) {
-        return String(row.capabilityStatus || '-');
+        return getPlannerPreviewCapabilityStatusLabel(row.capabilityStatus || '-');
     }
 
     return machines
@@ -1452,14 +1530,21 @@ async function ensurePlannerPreviewLoaded(options = {}) {
             plannerState.preview.error = '';
 
             if (showNotifications) {
-                showPlannerNotification('Preview refreshed', 'success');
+                showPlannerNotification(plannerTranslate('plannerPreviewRefreshed', {}, 'Preview refreshed'), 'success');
             }
 
             return plannerState.preview.data;
         } catch (error) {
             plannerState.preview.error = error.message || 'Failed to load planner preview';
             if (showNotifications) {
-                showPlannerNotification('Failed to refresh preview: ' + plannerState.preview.error, 'error');
+                showPlannerNotification(
+                    plannerTranslate(
+                        'plannerPreviewRefreshFailed',
+                        { error: plannerState.preview.error },
+                        `Failed to refresh preview: ${plannerState.preview.error}`
+                    ),
+                    'error'
+                );
             }
             throw error;
         } finally {
@@ -1820,7 +1905,10 @@ function getPlannerPreviewDraftLaneAssignments(assignments = [], equipment = '')
 function repackPlannerPreviewDraftLane(assignments = [], equipment = '', orderedLaneAssignments = [], earliestAffectedIndex = 0) {
     const normalizedEquipment = String(equipment || '').trim();
     if (!normalizedEquipment) {
-        return { ok: false, message: 'Select a valid machine lane for this draft move.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSelectValidMoveLane', {}, 'Select a valid machine lane for this draft move.')
+        };
     }
 
     const laneAssignments = getPlannerPreviewDraftLaneAssignments(assignments, normalizedEquipment);
@@ -1863,7 +1951,14 @@ function repackPlannerPreviewDraftLane(assignments = [], equipment = '', ordered
         if (endMinutes > getPlannerPreviewScheduleUntilMinutes()) {
             return {
                 ok: false,
-                message: `This swap would push ${nextAssignment.背番号 || nextAssignment.品番 || 'a block'} beyond ${getPlannerPreviewScheduleUntilTime()}.`
+                message: plannerTranslate(
+                    'plannerPreviewSwapPastLimit',
+                    {
+                        block: getPlannerPreviewBlockLabel(nextAssignment, 'a block'),
+                        time: getPlannerPreviewScheduleUntilTime()
+                    },
+                    `This swap would push ${getPlannerPreviewBlockLabel(nextAssignment, 'a block')} beyond ${getPlannerPreviewScheduleUntilTime()}.`
+                )
             };
         }
 
@@ -1912,34 +2007,57 @@ function mergePlannerPreviewDraftLaneAssignments(assignments = [], laneAssignmen
 function getPlannerPreviewDraftPlacement(movingAssignment = {}, targetEquipment = '', targetTime = '') {
     const normalizedEquipment = String(targetEquipment || '').trim();
     if (!normalizedEquipment) {
-        return { ok: false, message: 'Select a valid machine lane for this draft move.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSelectValidMoveLane', {}, 'Select a valid machine lane for this draft move.')
+        };
     }
 
     if (!canPlannerPreviewDraftAssignmentUseEquipment(movingAssignment, normalizedEquipment)) {
         return {
             ok: false,
-            message: `${movingAssignment.背番号 || movingAssignment.品番 || 'This block'} is not eligible to run on ${normalizedEquipment}.`
+            message: plannerTranslate(
+                'plannerPreviewIneligibleEquipment',
+                {
+                    block: getPlannerPreviewBlockLabel(movingAssignment, 'This block'),
+                    equipment: normalizedEquipment
+                },
+                `${getPlannerPreviewBlockLabel(movingAssignment, 'This block')} is not eligible to run on ${normalizedEquipment}.`
+            )
         };
     }
 
     const targetStartMinutes = timeToMinutes(targetTime || movingAssignment.startTime || PLANNER_CONFIG.workStartTime);
     if (!Number.isFinite(targetStartMinutes)) {
-        return { ok: false, message: 'Choose a valid 15-minute slot.' };
+        return { ok: false, message: plannerTranslate('plannerPreviewInvalidSlot', {}, 'Choose a valid 15-minute slot.') };
     }
 
     if (isPlannerPreviewBreakAtMinutes(normalizedEquipment, targetStartMinutes)) {
-        return { ok: false, message: 'That slot is inside a break. Drop the block on a working tile.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewBreakSlot', {}, 'That slot is inside a break. Drop the block on a working tile.')
+        };
     }
 
     const durationMinutes = Number(movingAssignment.estimatedTime?.totalSeconds || 0) / 60;
     const timing = findNextAvailableTime(targetStartMinutes, durationMinutes, normalizedEquipment);
     if (timing.startTime !== targetStartMinutes) {
-        return { ok: false, message: 'That tile cannot be used as the block start.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewInvalidStartTile', {}, 'That tile cannot be used as the block start.')
+        };
     }
 
     const endMinutes = roundPlannerPreviewMinutesToInterval(timing.endTime, 'ceil');
     if (endMinutes > getPlannerPreviewScheduleUntilMinutes()) {
-        return { ok: false, message: `This move would push the block beyond ${getPlannerPreviewScheduleUntilTime()}.` };
+        return {
+            ok: false,
+            message: plannerTranslate(
+                'plannerPreviewMovePastLimit',
+                { time: getPlannerPreviewScheduleUntilTime() },
+                `This move would push the block beyond ${getPlannerPreviewScheduleUntilTime()}.`
+            )
+        };
     }
 
     return {
@@ -1990,7 +2108,10 @@ function evaluatePlannerPreviewDraftMove(assignments = [], movingAssignment = {}
 
     const occupiedWindows = getPlannerPreviewOccupiedWindows(assignments, placement.equipment);
     if (doesPlannerPreviewDraftWindowOverlap(placement, occupiedWindows)) {
-        return { ok: false, message: 'That slot overlaps another block on the target machine.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewOverlapSlot', {}, 'That slot overlaps another block on the target machine.')
+        };
     }
 
     return placement;
@@ -2003,24 +2124,44 @@ function evaluatePlannerPreviewDraftSwap(assignments = [], movingAssignment = {}
     const targetDraftId = getPlannerPreviewDraftAssignmentId(targetAssignment);
 
     if (!movingDraftId || !targetDraftId || movingDraftId === targetDraftId) {
-        return { ok: false, message: 'Choose another block to swap with.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewChooseAnotherBlock', {}, 'Choose another block to swap with.')
+        };
     }
 
     if (!movingEquipment || !targetEquipment) {
-        return { ok: false, message: 'Select a valid machine lane for this draft swap.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSelectValidSwapLane', {}, 'Select a valid machine lane for this draft swap.')
+        };
     }
 
     if (!canPlannerPreviewDraftAssignmentUseEquipment(movingAssignment, targetEquipment)) {
         return {
             ok: false,
-            message: `${movingAssignment.背番号 || movingAssignment.品番 || 'This block'} is not eligible to run on ${targetEquipment}.`
+            message: plannerTranslate(
+                'plannerPreviewIneligibleEquipment',
+                {
+                    block: getPlannerPreviewBlockLabel(movingAssignment, 'This block'),
+                    equipment: targetEquipment
+                },
+                `${getPlannerPreviewBlockLabel(movingAssignment, 'This block')} is not eligible to run on ${targetEquipment}.`
+            )
         };
     }
 
     if (!canPlannerPreviewDraftAssignmentUseEquipment(targetAssignment, movingEquipment)) {
         return {
             ok: false,
-            message: `${targetAssignment.背番号 || targetAssignment.品番 || 'This block'} is not eligible to run on ${movingEquipment}.`
+            message: plannerTranslate(
+                'plannerPreviewIneligibleEquipment',
+                {
+                    block: getPlannerPreviewBlockLabel(targetAssignment, 'This block'),
+                    equipment: movingEquipment
+                },
+                `${getPlannerPreviewBlockLabel(targetAssignment, 'This block')} is not eligible to run on ${movingEquipment}.`
+            )
         };
     }
 
@@ -2031,7 +2172,10 @@ function evaluatePlannerPreviewDraftSwap(assignments = [], movingAssignment = {}
     const targetLaneIndex = targetLaneAssignments.findIndex((assignment) => getPlannerPreviewDraftAssignmentId(assignment) === targetDraftId);
 
     if (movingLaneIndex === -1 || targetLaneIndex === -1) {
-        return { ok: false, message: 'One of the draft blocks could not be located for swapping.' };
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSwapBlockNotFound', {}, 'One of the draft blocks could not be located for swapping.')
+        };
     }
 
     if (movingEquipment === targetEquipment) {
@@ -2124,7 +2268,7 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
 
             html += `
                 <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-slate-200 dark:bg-slate-700 relative" style="width:${slotWidth}px">
-                    ${isBreakStart ? `<div class="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-slate-600 dark:text-slate-200">${escapePlannerPreviewHtml(breakAtSlot.name || 'Break')}</div>` : ''}
+                    ${isBreakStart ? `<div class="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-slate-600 dark:text-slate-200">${escapePlannerPreviewHtml(getPlannerPreviewBreakName(breakAtSlot))}</div>` : ''}
                 </div>
             `;
             return;
@@ -2173,7 +2317,14 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
 
         if (Number.isFinite(secondsPerPiece) && Number(assignmentForSlot.quantity || 0) > 0) {
             timingDetailParts.push(
-                `${formatPlannerPreviewNumber(assignmentForSlot.quantity || 0)} pcs × ${formatPlannerPreviewNumber(secondsPerPiece)}s/pc`
+                plannerTranslate(
+                    'plannerPreviewTimingPieces',
+                    {
+                        quantity: formatPlannerPreviewNumber(assignmentForSlot.quantity || 0),
+                        seconds: formatPlannerPreviewNumber(secondsPerPiece)
+                    },
+                    `${formatPlannerPreviewNumber(assignmentForSlot.quantity || 0)} pcs x ${formatPlannerPreviewNumber(secondsPerPiece)}s/pc`
+                )
             );
         }
 
@@ -2183,14 +2334,22 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
             && Number(estimatedTime.pcPerCycle) > 0
         ) {
             timingDetailParts.push(
-                `${formatPlannerPreviewNumber(estimatedTime.cyclesNeeded)} cycles @ ${formatPlannerPreviewNumber(estimatedTime.pcPerCycle)} pcs/cycle`
+                plannerTranslate(
+                    'plannerPreviewTimingCycles',
+                    {
+                        cycles: formatPlannerPreviewNumber(estimatedTime.cyclesNeeded),
+                        pcPerCycle: formatPlannerPreviewNumber(estimatedTime.pcPerCycle)
+                    },
+                    `${formatPlannerPreviewNumber(estimatedTime.cyclesNeeded)} cycles @ ${formatPlannerPreviewNumber(estimatedTime.pcPerCycle)} pcs/cycle`
+                )
             );
         }
 
         const timingDetail = timingDetailParts.join(' | ');
         const draftId = getPlannerPreviewDraftAssignmentId(assignmentForSlot);
         const requestNumberColorClass = getPlannerPreviewRequestColorClass(assignmentForSlot, requestColorMap);
-        const tileRequestLabel = getPlannerPreviewTileRequestLabel(assignmentForSlot) || 'Preview insert';
+        const tileRequestLabel = getPlannerPreviewTileRequestLabel(assignmentForSlot)
+            || plannerTranslate('plannerPreviewInsertLabel', {}, 'Preview insert');
         const headMarkerHtml = isAssignmentHead
             ? `
                 <div class="absolute inset-y-0 left-0 w-1.5 bg-slate-900/80 dark:bg-slate-100/90"></div>
@@ -2216,17 +2375,30 @@ function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProduct
                 ondragend="handlePlannerPreviewDraftDragEnd(event)"
             `
             : '';
+        const requestTitle = assignmentForSlot.requestNumber
+            ? Array.isArray(assignmentForSlot.groupedRequestNumbers) && assignmentForSlot.groupedRequestNumbers.length > 1
+                ? plannerTranslate(
+                    'plannerPreviewTitleRequests',
+                    { requests: assignmentForSlot.groupedRequestNumbers.join(', ') },
+                    `Requests ${assignmentForSlot.groupedRequestNumbers.join(', ')}`
+                )
+                : plannerTranslate(
+                    'plannerPreviewTitleRequest',
+                    { request: assignmentForSlot.requestNumber },
+                    `Request ${assignmentForSlot.requestNumber}`
+                )
+            : plannerTranslate('plannerPreviewTitleRow', {}, 'Preview row');
         const titleText = [
-            assignmentForSlot.requestNumber
-                ? Array.isArray(assignmentForSlot.groupedRequestNumbers) && assignmentForSlot.groupedRequestNumbers.length > 1
-                    ? `Requests ${assignmentForSlot.groupedRequestNumbers.join(', ')}`
-                    : `Request ${assignmentForSlot.requestNumber}`
-                : 'Preview row',
+            requestTitle,
             assignmentForSlot.背番号 || assignmentForSlot.品番 || '-',
-            `${formatPlannerPreviewNumber(assignmentForSlot.quantity || 0)} pcs`,
+            plannerTranslate(
+                'plannerPreviewTitleQuantity',
+                { quantity: formatPlannerPreviewNumber(assignmentForSlot.quantity || 0) },
+                `${formatPlannerPreviewNumber(assignmentForSlot.quantity || 0)} pcs`
+            ),
             assignmentForSlot.estimatedTime?.formattedTime || '',
             timingDetail,
-            `${escapePlannerPreviewHtml(assignmentForSlot.startTime || slot)} - ${escapePlannerPreviewHtml(endTimeLabel)}`
+            `${assignmentForSlot.startTime || slot} - ${endTimeLabel}`
         ].filter(Boolean).join(' | ');
 
         html += `
@@ -2247,18 +2419,23 @@ function renderPlannerPreviewTimeline(preview = {}, requestColorMap = {}) {
     const simulation = getPlannerPreviewRenderSimulation(preview);
     const equipmentList = Array.isArray(simulation.equipmentList) ? simulation.equipmentList : [];
     const isDraftTimelineEditing = plannerState.preview.viewMode === 'draft' && plannerState.preview.isDraftMode === true;
+    const machineLabel = plannerTranslate('plannerPreviewMachineColumn', {}, 'Machine');
     const machineColumnWidth = Math.max(
         112,
         ((Math.max(
-            'Machine'.length,
+            machineLabel.length,
             ...equipmentList.map((equipment) => String(equipment || '').trim().length)
         ) * 8) + 28)
     );
 
     if (equipmentList.length === 0) {
         const emptyMessage = simulation.timeLimitExceptionCount > 0
-            ? `No preview rows fit before ${simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime()}.`
-            : 'No machine assignments are available for preview yet.';
+            ? plannerTranslate(
+                'plannerPreviewNoRowsBeforeTime',
+                { time: simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime() },
+                `No preview rows fit before ${simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime()}.`
+            )
+            : plannerTranslate('plannerPreviewNoAssignmentsYet', {}, 'No machine assignments are available for preview yet.');
         return `
             <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 ${escapePlannerPreviewHtml(emptyMessage)}
@@ -2268,7 +2445,7 @@ function renderPlannerPreviewTimeline(preview = {}, requestColorMap = {}) {
 
     const timeSlots = getPlannerPreviewTimeSlots(simulation.assignments || []);
     const slotWidth = 60;
-    let headerHtml = `<div class="flex-shrink-0 whitespace-nowrap bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">Machine</div>`;
+    let headerHtml = `<div class="flex-shrink-0 whitespace-nowrap bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">${escapePlannerPreviewHtml(machineLabel)}</div>`;
 
     timeSlots.forEach((slot) => {
         headerHtml += `
@@ -2315,24 +2492,36 @@ function renderPlannerPreview() {
     }
 
     if (!plannerState.currentFactory) {
+        const emptyTitle = plannerTranslate('plannerPreviewSelectFactoryTitle', {}, 'Select a factory to build the preview queue');
+        const emptyDescription = plannerTranslate(
+            'plannerPreviewSelectFactoryDescription',
+            {},
+            'The left table shows unfinished shortage line-items, the right table shows current inventory, and the bottom calendar shows the planned-only preview.'
+        );
         container.innerHTML = `
             <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
                 <i class="ri-layout-grid-line text-5xl mb-3 block"></i>
-                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Select a factory to build the preview queue</p>
-                <p class="mt-2 text-sm">The left table shows unfinished shortage line-items, the right table shows current inventory, and the bottom calendar shows the planned-only preview.</p>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(emptyTitle)}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(emptyDescription)}</p>
             </div>
         `;
         return;
     }
 
     if (plannerState.preview.isLoading && !plannerState.preview.data) {
+        const loadingTitle = plannerTranslate('plannerPreviewLoadingTitle', {}, 'Building priority preview');
+        const loadingDescription = plannerTranslate(
+            'plannerPreviewLoadingDescription',
+            {},
+            'Collecting unfinished shortage lines, current inventory, and machine assignments.'
+        );
         container.innerHTML = `
             <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8">
                 <div class="flex items-center gap-4 text-gray-700 dark:text-gray-200">
                     <div class="h-10 w-10 rounded-full border-4 border-sky-200 border-t-sky-600 animate-spin"></div>
                     <div>
-                        <p class="text-lg font-semibold">Building priority preview</p>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Collecting unfinished shortage lines, current inventory, and machine assignments.</p>
+                        <p class="text-lg font-semibold">${escapePlannerPreviewHtml(loadingTitle)}</p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(loadingDescription)}</p>
                     </div>
                 </div>
             </div>
@@ -2341,14 +2530,16 @@ function renderPlannerPreview() {
     }
 
     if (!plannerState.preview.data && plannerState.preview.error) {
+        const errorTitle = plannerTranslate('plannerPreviewLoadFailedTitle', {}, 'Preview failed to load');
+        const retryLabel = plannerTranslate('plannerPreviewRetry', {}, 'Retry');
         container.innerHTML = `
             <div class="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
                 <i class="ri-error-warning-line text-5xl text-rose-500 mb-3 block"></i>
-                <p class="text-lg font-semibold text-rose-800">Preview failed to load</p>
+                <p class="text-lg font-semibold text-rose-800">${escapePlannerPreviewHtml(errorTitle)}</p>
                 <p class="mt-2 text-sm text-rose-700">${escapePlannerPreviewHtml(plannerState.preview.error)}</p>
                 <button onclick="refreshPlannerPreview(true)" class="mt-5 inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 transition-colors">
                     <i class="ri-refresh-line"></i>
-                    <span>Retry</span>
+                    <span>${escapePlannerPreviewHtml(retryLabel)}</span>
                 </button>
             </div>
         `;
@@ -2359,11 +2550,17 @@ function renderPlannerPreview() {
         ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
         : null;
     if (!preview) {
+        const readyTitle = plannerTranslate('plannerPreviewReadyTitle', {}, 'Preview is ready when you are');
+        const readyDescription = plannerTranslate(
+            'plannerPreviewReadyDescription',
+            {},
+            'Refresh to rebuild the priority table, inventory table, and preview calendar.'
+        );
         container.innerHTML = `
             <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
                 <i class="ri-layout-grid-line text-5xl mb-3 block"></i>
-                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Preview is ready when you are</p>
-                <p class="mt-2 text-sm">Refresh to rebuild the priority table, inventory table, and preview calendar.</p>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(readyTitle)}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(readyDescription)}</p>
             </div>
         `;
         return;
@@ -2388,39 +2585,173 @@ function renderPlannerPreview() {
     const isSavedDraftBasisUntracked = hasSavedPreviewDraft && savedDraftBasisComparison?.tracked === false;
     const savedDraftDifferenceParts = hasTrackedSavedDraftBasis
         ? [
-            savedDraftBasisComparison.missingCount > 0 ? `${formatPlannerPreviewNumber(savedDraftBasisComparison.missingCount)} missing` : '',
-            savedDraftBasisComparison.newCount > 0 ? `${formatPlannerPreviewNumber(savedDraftBasisComparison.newCount)} new` : '',
-            savedDraftBasisComparison.changedQuantityCount > 0 ? `${formatPlannerPreviewNumber(savedDraftBasisComparison.changedQuantityCount)} quantity changed` : '',
+            savedDraftBasisComparison.missingCount > 0
+                ? plannerTranslate(
+                    'plannerPreviewSavedDraftMissingCount',
+                    { count: formatPlannerPreviewNumber(savedDraftBasisComparison.missingCount) },
+                    `${formatPlannerPreviewNumber(savedDraftBasisComparison.missingCount)} missing`
+                )
+                : '',
+            savedDraftBasisComparison.newCount > 0
+                ? plannerTranslate(
+                    'plannerPreviewSavedDraftNewCount',
+                    { count: formatPlannerPreviewNumber(savedDraftBasisComparison.newCount) },
+                    `${formatPlannerPreviewNumber(savedDraftBasisComparison.newCount)} new`
+                )
+                : '',
+            savedDraftBasisComparison.changedQuantityCount > 0
+                ? plannerTranslate(
+                    'plannerPreviewSavedDraftChangedCount',
+                    { count: formatPlannerPreviewNumber(savedDraftBasisComparison.changedQuantityCount) },
+                    `${formatPlannerPreviewNumber(savedDraftBasisComparison.changedQuantityCount)} quantity changed`
+                )
+                : '',
         ].filter(Boolean)
         : [];
     const savedDraftDifferenceSummary = savedDraftDifferenceParts.join(' | ');
     const savedDraftDifferenceExamples = hasTrackedSavedDraftBasis && isSavedDraftStale
         ? [
-            ...(savedDraftBasisComparison.sampleMissingRows || []).slice(0, 2).map((row) => `Missing: ${formatPlannerPreviewDraftBasisRowLabel(row)}`),
-            ...(savedDraftBasisComparison.sampleNewRows || []).slice(0, 2).map((row) => `New: ${formatPlannerPreviewDraftBasisRowLabel(row)}`),
-            ...(savedDraftBasisComparison.sampleChangedRows || []).slice(0, 2).map((row) => `Qty: ${formatPlannerPreviewDraftBasisRowLabel(row)} ${formatPlannerPreviewNumber(row.savedShortfallQuantity || 0)} -> ${formatPlannerPreviewNumber(row.currentShortfallQuantity || 0)}`),
+            ...(savedDraftBasisComparison.sampleMissingRows || []).slice(0, 2).map((row) => (
+                plannerTranslate(
+                    'plannerPreviewDifferenceMissingExample',
+                    { label: formatPlannerPreviewDraftBasisRowLabel(row) },
+                    `Missing: ${formatPlannerPreviewDraftBasisRowLabel(row)}`
+                )
+            )),
+            ...(savedDraftBasisComparison.sampleNewRows || []).slice(0, 2).map((row) => (
+                plannerTranslate(
+                    'plannerPreviewDifferenceNewExample',
+                    { label: formatPlannerPreviewDraftBasisRowLabel(row) },
+                    `New: ${formatPlannerPreviewDraftBasisRowLabel(row)}`
+                )
+            )),
+            ...(savedDraftBasisComparison.sampleChangedRows || []).slice(0, 2).map((row) => (
+                plannerTranslate(
+                    'plannerPreviewDifferenceQtyExample',
+                    {
+                        label: formatPlannerPreviewDraftBasisRowLabel(row),
+                        from: formatPlannerPreviewNumber(row.savedShortfallQuantity || 0),
+                        to: formatPlannerPreviewNumber(row.currentShortfallQuantity || 0)
+                    },
+                    `Qty: ${formatPlannerPreviewDraftBasisRowLabel(row)} ${formatPlannerPreviewNumber(row.savedShortfallQuantity || 0)} -> ${formatPlannerPreviewNumber(row.currentShortfallQuantity || 0)}`
+                )
+            )),
         ].slice(0, 3)
         : [];
     const requestColorMap = buildPlannerPreviewRequestColorMap(preview);
     const timeLimitExceptions = (simulation.exceptions || []).filter((exception) => exception.reason === 'time-limit');
     const otherExceptions = (simulation.exceptions || []).filter((exception) => exception.reason !== 'time-limit');
     const statusText = plannerState.preview.isLoading
-        ? 'Refreshing live data...'
+        ? plannerTranslate('plannerPreviewStatusRefreshing', {}, 'Refreshing live data...')
         : plannerState.preview.isDirty
-            ? 'Planner draft changed. Refresh pending.'
-            : `Last refresh ${formatPlannerPreviewTimestamp(preview.generatedAt)}`;
+            ? plannerTranslate('plannerPreviewStatusDirty', {}, 'Planner draft changed. Refresh pending.')
+            : plannerTranslate(
+                'plannerPreviewStatusLastRefresh',
+                { timestamp: formatPlannerPreviewTimestamp(preview.generatedAt) },
+                `Last refresh ${formatPlannerPreviewTimestamp(preview.generatedAt)}`
+            );
     const savedDraftStatusText = savedPreviewDraft
-        ? `Saved draft ${formatPlannerPreviewTimestamp(savedPreviewDraft.updatedAt || savedPreviewDraft.createdAt)} by ${savedPreviewDraft.updatedBy || savedPreviewDraft.createdBy || 'system'}`
+        ? plannerTranslate(
+            'plannerPreviewSavedDraftStatus',
+            {
+                timestamp: formatPlannerPreviewTimestamp(savedPreviewDraft.updatedAt || savedPreviewDraft.createdAt),
+                user: savedPreviewDraft.updatedBy || savedPreviewDraft.createdBy || 'system'
+            },
+            `Saved draft ${formatPlannerPreviewTimestamp(savedPreviewDraft.updatedAt || savedPreviewDraft.createdAt)} by ${savedPreviewDraft.updatedBy || savedPreviewDraft.createdBy || 'system'}`
+        )
         : '';
     const previewCalendarDescription = isPreviewDraftEditing
-        ? 'Draft editing is on. Drag the first tile of a block to move it, or drop it onto another block to swap and auto-arrange timing when both machines are eligible.'
+        ? plannerTranslate(
+            'plannerPreviewCalendarDescriptionEditing',
+            {},
+            'Draft editing is on. Drag the first tile of a block to move it, or drop it onto another block to swap and auto-arrange timing when both machines are eligible.'
+        )
         : isViewingDraft
             ? hasPreviewDraft
-                ? 'Showing the Draft calendar with local changes. Save it to keep this edited order, or switch back to Auto to compare.'
-                : 'Showing the saved Draft calendar. Switch back to Auto any time without overwriting the generated preview.'
+                ? plannerTranslate(
+                    'plannerPreviewCalendarDescriptionLocalDraft',
+                    {},
+                    'Showing the Draft calendar with local changes. Save it to keep this edited order, or switch back to Auto to compare.'
+                )
+                : plannerTranslate(
+                    'plannerPreviewCalendarDescriptionSavedDraft',
+                    {},
+                    'Showing the saved Draft calendar. Switch back to Auto any time without overwriting the generated preview.'
+                )
             : hasSavedPreviewDraft
-                ? 'Showing the auto-generated calendar. Switch to Draft to compare it with the saved edited version.'
-                : 'Read-only 15-minute machine view. Create a Preview Draft to drag block heads and make local adjustments.';
+                ? plannerTranslate(
+                    'plannerPreviewCalendarDescriptionAutoWithSavedDraft',
+                    {},
+                    'Showing the auto-generated calendar. Switch to Draft to compare it with the saved edited version.'
+                )
+                : plannerTranslate(
+                    'plannerPreviewCalendarDescriptionAutoReadOnly',
+                    {},
+                    'Read-only 15-minute machine view. Create a Preview Draft to drag block heads and make local adjustments.'
+                );
+    const previewQueueLabel = plannerTranslate('plannerPreviewQueue', {}, 'Preview Queue');
+    const planDateLabel = plannerTranslate(
+        'plannerPreviewPlanDate',
+        { date: preview.targetDate || plannerState.currentDate },
+        `Plan date ${preview.targetDate || plannerState.currentDate}`
+    );
+    const mainTitle = plannerTranslate(
+        'plannerPreviewMainTitle',
+        {},
+        'Priority shortages, current inventory, and planned-only machine preview'
+    );
+    const mainDescription = plannerTranslate(
+        'plannerPreviewMainDescription',
+        {},
+        'Left is the unfinished shortage queue. Right is the current inventory snapshot. Bottom is the 15-minute machine calendar built from that queue, with separate Auto and Draft views when a saved draft exists.'
+    );
+    const shortageSummaryText = plannerTranslate(
+        'plannerPreviewShortageSummary',
+        {
+            lineCount: formatPlannerPreviewNumber(summary.priorityRowCount || 0),
+            quantity: formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)
+        },
+        `${formatPlannerPreviewNumber(summary.priorityRowCount || 0)} shortage line-items | ${formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)} pcs waiting`
+    );
+    const refreshButtonText = plannerState.preview.isLoading
+        ? plannerTranslate('plannerPreviewRefreshingAction', {}, 'Refreshing...')
+        : plannerTranslate('plannerPreviewRefreshAction', {}, 'Refresh Preview');
+    const linesSuffix = plannerTranslate('plannerPreviewLinesSuffix', {}, 'lines');
+    const productsSuffix = plannerTranslate('plannerPreviewProductsSuffix', {}, 'products');
+    const draftToggleLabel = hasPreviewDraft
+        ? (isPreviewDraftEditing
+            ? plannerTranslate('plannerPreviewStopEditingDraft', {}, 'Stop Editing Draft')
+            : plannerTranslate('plannerPreviewEditDraft', {}, 'Edit Draft'))
+        : plannerTranslate('plannerPreviewCreateDraft', {}, 'Create Preview Draft');
+    const scheduledBeforeText = plannerTranslate(
+        'plannerPreviewScheduledBefore',
+        {
+            time: scheduleUntilTime,
+            quantity: formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)
+        },
+        `Scheduled before ${scheduleUntilTime}: ${formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)} pcs`
+    );
+    const outsideLimitText = plannerTranslate(
+        'plannerPreviewOutsideLimit',
+        { quantity: formatPlannerPreviewNumber(summary.timeLimitMissedQuantity || 0) },
+        `Outside limit ${formatPlannerPreviewNumber(summary.timeLimitMissedQuantity || 0)} pcs`
+    );
+    const staleDraftDescription = savedDraftDifferenceSummary
+        ? plannerTranslate(
+            'plannerPreviewSavedDraftStaleDescriptionWithSummary',
+            { summary: savedDraftDifferenceSummary },
+            `The latest auto preview no longer matches the draft basis: ${savedDraftDifferenceSummary}. Review View Auto before relying on the saved Draft.`
+        )
+        : plannerTranslate(
+            'plannerPreviewSavedDraftStaleDescription',
+            {},
+            'The latest auto preview no longer matches the draft basis. Review View Auto before relying on the saved Draft.'
+        );
+    const lastRefreshWarning = plannerTranslate(
+        'plannerPreviewLastRefreshWarning',
+        { message: plannerState.preview.error },
+        `Last refresh warning: ${plannerState.preview.error}`
+    );
 
     container.innerHTML = `
         <div class="space-y-6">
@@ -2428,43 +2759,43 @@ function renderPlannerPreview() {
                 <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                         <div class="flex flex-wrap gap-2 mb-3 text-xs font-medium uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
-                            <span class="rounded-full bg-sky-100 px-3 py-1 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">Preview Queue</span>
+                            <span class="rounded-full bg-sky-100 px-3 py-1 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${escapePlannerPreviewHtml(previewQueueLabel)}</span>
                             <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(preview.factory || plannerState.currentFactory)}</span>
-                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">Plan date ${escapePlannerPreviewHtml(preview.targetDate || plannerState.currentDate)}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(planDateLabel)}</span>
                         </div>
-                        <h3 class="text-2xl font-semibold text-gray-900 dark:text-white">Priority shortages, current inventory, and planned-only machine preview</h3>
-                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Left is the unfinished shortage queue. Right is the current inventory snapshot. Bottom is the 15-minute machine calendar built from that queue, with separate Auto and Draft views when a saved draft exists.</p>
+                        <h3 class="text-2xl font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(mainTitle)}</h3>
+                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(mainDescription)}</p>
                     </div>
                     <div class="flex flex-col items-stretch gap-3 lg:items-end">
                         <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
                             <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
-                            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${formatPlannerPreviewNumber(summary.priorityRowCount || 0)} shortage line-items | ${formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)} pcs waiting</div>
+                            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(shortageSummaryText)}</div>
                         </div>
                         <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
                             <i class="ri-refresh-line"></i>
-                            <span>${plannerState.preview.isLoading ? 'Refreshing...' : 'Refresh Preview'}</span>
+                            <span>${escapePlannerPreviewHtml(refreshButtonText)}</span>
                         </button>
                     </div>
                 </div>
                 <div class="mt-5 grid grid-cols-2 md:grid-cols-5 gap-3">
                     <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/30">
-                        <p class="text-xs uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">Priority Lines</p>
+                        <p class="text-xs uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityLines', {}, 'Priority Lines'))}</p>
                         <p class="mt-2 text-2xl font-semibold text-amber-900 dark:text-amber-100">${formatPlannerPreviewNumber(summary.priorityRowCount || 0)}</p>
                     </div>
                     <div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 dark:border-rose-900 dark:bg-rose-950/30">
-                        <p class="text-xs uppercase tracking-[0.16em] text-rose-700 dark:text-rose-300">Waiting Qty</p>
+                        <p class="text-xs uppercase tracking-[0.16em] text-rose-700 dark:text-rose-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewWaitingQty', {}, 'Waiting Qty'))}</p>
                         <p class="mt-2 text-2xl font-semibold text-rose-900 dark:text-rose-100">${formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)}</p>
                     </div>
                     <div class="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:border-cyan-900 dark:bg-cyan-950/30">
-                        <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">Preview Inserts</p>
+                        <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInserts', {}, 'Preview Inserts'))}</p>
                         <p class="mt-2 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(summary.previewInsertCount || 0)}</p>
                     </div>
                     <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
-                        <p class="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">Scheduled Qty</p>
+                        <p class="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewScheduledQty', {}, 'Scheduled Qty'))}</p>
                         <p class="mt-2 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">${formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)}</p>
                     </div>
                     <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
-                        <p class="text-xs uppercase tracking-[0.16em] text-slate-700 dark:text-slate-300">Exceptions</p>
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-700 dark:text-slate-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptions', {}, 'Exceptions'))}</p>
                         <p class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">${formatPlannerPreviewNumber(summary.previewExceptionCount || 0)}</p>
                     </div>
                 </div>
@@ -2475,22 +2806,22 @@ function renderPlannerPreview() {
                     <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                         <div class="flex items-center justify-between gap-3">
                             <div>
-                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Priority Table</h4>
-                                <p class="text-sm text-gray-500 dark:text-gray-400">Basic shortage queue for the current preview.</p>
+                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityTableTitle', {}, 'Priority Table'))}</h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityTableDescription', {}, 'Basic shortage queue for the current preview.'))}</p>
                             </div>
-                            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">${formatPlannerPreviewNumber(priorityRows.length)} lines</span>
+                            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">${formatPlannerPreviewNumber(priorityRows.length)} ${escapePlannerPreviewHtml(linesSuffix)}</span>
                         </div>
                     </div>
                     <div class="overflow-auto max-h-[520px]">
                         <table class="min-w-full text-sm text-left">
                             <thead class="sticky top-0 z-10 bg-gray-50 text-gray-600 dark:bg-gray-900/40 dark:text-gray-300">
                                 <tr>
-                                    <th class="px-4 py-2 font-medium">Priority</th>
-                                    <th class="px-4 py-2 font-medium">Request #</th>
+                                    <th class="px-4 py-2 font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityHeader', {}, 'Priority'))}</th>
+                                    <th class="px-4 py-2 font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewRequestNumberHeader', {}, 'Request #'))}</th>
                                     <th class="px-4 py-2 font-medium">背番号</th>
                                     <th class="px-4 py-2 text-right font-medium">不足枚数</th>
                                     <th class="px-4 py-2 text-right font-medium">不足箱数</th>
-                                    <th class="px-4 py-2 font-medium">possible 設備</th>
+                                    <th class="px-4 py-2 font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPossibleEquipmentHeader', {}, 'Possible Equipment'))}</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -2499,7 +2830,7 @@ function renderPlannerPreview() {
                                         <td class="px-4 py-3 text-gray-700 dark:text-gray-200">
                                             ${formatPlannerPreviewNumber(row.priorityRank || row.queueOrder || 0)}
                                         </td>
-                                        <td class="px-4 py-3 font-medium ${getPlannerPreviewRequestColorClass(row, requestColorMap)}" title="Line ${formatPlannerPreviewNumber(row.lineNumber || 0)}">
+                                        <td class="px-4 py-3 font-medium ${getPlannerPreviewRequestColorClass(row, requestColorMap)}" title="${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLineTitle', { line: formatPlannerPreviewNumber(row.lineNumber || 0) }, `Line ${formatPlannerPreviewNumber(row.lineNumber || 0)}`))}">
                                             ${escapePlannerPreviewHtml(row.requestNumber || '-')}
                                         </td>
                                         <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">
@@ -2518,7 +2849,7 @@ function renderPlannerPreview() {
                                 `).join('') : `
                                     <tr>
                                         <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
-                                            No unfinished shortage line-items are waiting right now.
+                                            ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewNoPriorityRows', {}, 'No unfinished shortage line-items are waiting right now.'))}
                                         </td>
                                     </tr>
                                 `}
@@ -2526,7 +2857,7 @@ function renderPlannerPreview() {
                         </table>
                     </div>
                     <div class="px-4 py-2 border-t border-gray-200 bg-gray-50 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-900/30 dark:text-gray-400">
-                        * means preferred 設備.
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPreferredEquipmentNote', {}, '* means preferred equipment.'))}
                     </div>
                 </div>
 
@@ -2534,10 +2865,10 @@ function renderPlannerPreview() {
                     <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                         <div class="flex items-center justify-between gap-3">
                             <div>
-                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Current Inventory Table</h4>
-                                <p class="text-sm text-gray-500 dark:text-gray-400">Latest inventory snapshot for the active products relevant to this preview.</p>
+                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInventoryTableTitle', {}, 'Current Inventory Table'))}</h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInventoryTableDescription', {}, 'Latest inventory snapshot for the active products relevant to this preview.'))}</p>
                             </div>
-                            <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${formatPlannerPreviewNumber(inventoryRows.length)} products</span>
+                            <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${formatPlannerPreviewNumber(inventoryRows.length)} ${escapePlannerPreviewHtml(productsSuffix)}</span>
                         </div>
                     </div>
                     <div class="overflow-auto max-h-[520px]">
@@ -2546,10 +2877,10 @@ function renderPlannerPreview() {
                                 <tr>
                                     <th class="px-4 py-2 font-medium">背番号</th>
                                     <th class="px-4 py-2 font-medium">品番</th>
-                                    <th class="px-4 py-2 text-right font-medium">Physical</th>
-                                    <th class="px-4 py-2 text-right font-medium">Reserved</th>
-                                    <th class="px-4 py-2 text-right font-medium">Available</th>
-                                    <th class="px-4 py-2 text-right font-medium">Waiting</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPhysical', {}, 'Physical'))}</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewReserved', {}, 'Reserved'))}</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewAvailable', {}, 'Available'))}</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewWaiting', {}, 'Waiting'))}</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -2565,7 +2896,7 @@ function renderPlannerPreview() {
                                 `).join('') : `
                                     <tr>
                                         <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
-                                            No inventory rows are available for the current preview scope.
+                                            ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewNoInventoryRows', {}, 'No inventory rows are available for the current preview scope.'))}
                                         </td>
                                     </tr>
                                 `}
@@ -2577,12 +2908,12 @@ function renderPlannerPreview() {
             <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
                 <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
-                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">Planned Preview Calendar</h4>
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewCalendarTitle', {}, 'Planned Preview Calendar'))}</h4>
                         <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(previewCalendarDescription)}</p>
                     </div>
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
                         <label class="flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-300">
-                            <span class="font-medium">Schedule Until</span>
+                            <span class="font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewScheduleUntil', {}, 'Schedule Until'))}</span>
                             <input
                                 type="time"
                                 step="${PLANNER_CONFIG.intervalMinutes * 60}"
@@ -2598,43 +2929,43 @@ function renderPlannerPreview() {
                                 ${hasAnyPreviewDraft ? `
                                     <button onclick="setPlannerPreviewViewMode('auto')" class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-medium transition-colors ${!isViewingDraft ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
                                         <i class="ri-calendar-line"></i>
-                                        <span>View Auto</span>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewViewAuto', {}, 'View Auto'))}</span>
                                     </button>
                                     <button onclick="setPlannerPreviewViewMode('draft')" class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-medium transition-colors ${isViewingDraft ? 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/60' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
                                         <i class="ri-draft-line"></i>
-                                        <span>View Draft</span>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewViewDraft', {}, 'View Draft'))}</span>
                                     </button>
                                 ` : ''}
                                 <button onclick="togglePlannerPreviewDraftMode()" class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-medium transition-colors ${isPreviewDraftEditing ? 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/60' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
                                     <i class="ri-drag-move-line"></i>
-                                    <span>${hasPreviewDraft ? (isPreviewDraftEditing ? 'Stop Editing Draft' : 'Edit Draft') : 'Create Preview Draft'}</span>
+                                    <span>${escapePlannerPreviewHtml(draftToggleLabel)}</span>
                                 </button>
                                 ${hasPreviewDraft ? `
                                     <button onclick="savePlannerPreviewDraft()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-medium text-emerald-700 hover:bg-emerald-100 transition-colors dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/40">
                                         <i class="ri-save-3-line"></i>
-                                        <span>Save Draft</span>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSaveDraft', {}, 'Save Draft'))}</span>
                                     </button>
                                     <button onclick="resetPlannerPreviewDraft()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-medium text-rose-700 hover:bg-rose-100 transition-colors dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-950/40">
                                         <i class="ri-arrow-go-back-line"></i>
-                                        <span>Discard Unsaved</span>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewDiscardUnsaved', {}, 'Discard Unsaved'))}</span>
                                     </button>
                                 ` : ''}
                                 ${hasPreviewDraft && plannerState.preview.draftChanged ? `
                                     <span class="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-2 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
                                         <i class="ri-edit-2-line"></i>
-                                        <span>Unsaved changes</span>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUnsavedChanges', {}, 'Unsaved changes'))}</span>
                                     </span>
                                 ` : ''}
                             </div>
                             <div class="flex flex-wrap gap-2 text-xs">
                                 <button onclick="exportPlannerPreviewScheduleJson('auto')" class="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 font-medium text-cyan-700 hover:bg-cyan-100 transition-colors dark:border-cyan-900 dark:bg-cyan-950/30 dark:text-cyan-200 dark:hover:bg-cyan-950/40">
                                     <i class="ri-file-copy-line"></i>
-                                    <span>Copy Auto JSON</span>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewCopyAutoJson', {}, 'Copy Auto JSON'))}</span>
                                 </button>
                                 ${hasAnyPreviewDraft ? `
                                     <button onclick="exportPlannerPreviewScheduleJson('draft')" class="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 font-medium text-sky-700 hover:bg-sky-100 transition-colors dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-950/40">
                                         <i class="ri-file-copy-2-line"></i>
-                                        <span>Copy Draft JSON</span>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewCopyDraftJson', {}, 'Copy Draft JSON'))}</span>
                                     </button>
                                 ` : ''}
                             </div>
@@ -2642,25 +2973,25 @@ function renderPlannerPreview() {
                                 ${hasSavedPreviewDraft ? `
                                     <span class="rounded-full bg-sky-100 px-3 py-1 font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${escapePlannerPreviewHtml(savedDraftStatusText)}</span>
                                 ` : ''}
-                                <span class="rounded-full bg-cyan-100 px-3 py-1 font-medium text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-200">Scheduled before ${escapePlannerPreviewHtml(scheduleUntilTime)}: ${formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)} pcs</span>
-                                <span class="rounded-full bg-amber-100 px-3 py-1 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">Outside limit ${formatPlannerPreviewNumber(summary.timeLimitMissedQuantity || 0)} pcs</span>
+                                <span class="rounded-full bg-cyan-100 px-3 py-1 font-medium text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-200">${escapePlannerPreviewHtml(scheduledBeforeText)}</span>
+                                <span class="rounded-full bg-amber-100 px-3 py-1 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">${escapePlannerPreviewHtml(outsideLimitText)}</span>
                             </div>
                         </div>
                     </div>
                 </div>
                 ${hasPreviewDraft ? `
                     <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-amber-50/80 text-xs text-amber-700 dark:bg-amber-950/20 dark:text-amber-200">
-                        Unsaved Preview Draft changes are local until you click Save Draft. Refreshing the preview or changing factory/date will discard only the unsaved layer.
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUnsavedNotice', {}, 'Unsaved Preview Draft changes are local until you click Save Draft. Refreshing the preview or changing factory/date will discard only the unsaved layer.'))}
                     </div>
                 ` : hasSavedPreviewDraft ? `
                     <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-sky-50/70 text-xs text-sky-700 dark:bg-sky-950/20 dark:text-sky-200">
-                        Saved Preview Draft is stored separately from the auto-generated preview. Use View Auto and View Draft to compare both calendars without overwriting either one.
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSavedDraftNotice', {}, 'Saved Preview Draft is stored separately from the auto-generated preview. Use View Auto and View Draft to compare both calendars without overwriting either one.'))}
                     </div>
                 ` : ''}
                 ${isSavedDraftStale ? `
                     <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-rose-50/80 text-xs text-rose-700 dark:bg-rose-950/20 dark:text-rose-200">
-                        <div class="font-semibold">Saved Preview Draft is based on older priority-table data.</div>
-                        <div class="mt-1">The latest auto preview no longer matches the draft basis${savedDraftDifferenceSummary ? `: ${escapePlannerPreviewHtml(savedDraftDifferenceSummary)}.` : '.'} Review View Auto before relying on the saved Draft.</div>
+                        <div class="font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSavedDraftStaleTitle', {}, 'Saved Preview Draft is based on older priority-table data.'))}</div>
+                        <div class="mt-1">${escapePlannerPreviewHtml(staleDraftDescription)}</div>
                         ${savedDraftDifferenceExamples.length > 0 ? `
                             <div class="mt-2 flex flex-wrap gap-2">
                                 ${savedDraftDifferenceExamples.map((example) => `
@@ -2671,24 +3002,24 @@ function renderPlannerPreview() {
                     </div>
                 ` : isSavedDraftBasisUntracked ? `
                     <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-amber-50/80 text-xs text-amber-700 dark:bg-amber-950/20 dark:text-amber-200">
-                        Saved Preview Draft was created before stale-data tracking was enabled. Save the draft again once to compare it against future priority-table changes automatically.
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSavedDraftLegacyNotice', {}, 'Saved Preview Draft was created before stale-data tracking was enabled. Save the draft again once to compare it against future priority-table changes automatically.'))}
                     </div>
                 ` : ''}
                 <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
-                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-cyan-200 dark:bg-cyan-800"></span>Priority preview inserts</span>
-                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-300 dark:bg-slate-600"></span>Break time</span>
-                    ${isPreviewDraftEditing ? `<span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded border border-sky-400 bg-white dark:bg-gray-900"></span>Drag the first tile of a block to move the whole block</span>` : ''}
+                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-cyan-200 dark:bg-cyan-800"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendInserts', {}, 'Priority preview inserts'))}</span>
+                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-300 dark:bg-slate-600"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendBreak', {}, 'Break time'))}</span>
+                    ${isPreviewDraftEditing ? `<span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded border border-sky-400 bg-white dark:bg-gray-900"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendDragHead', {}, 'Drag the first tile of a block to move the whole block'))}</span>` : ''}
                 </div>
                 <div class="p-5">
                     ${renderPlannerPreviewTimeline(preview, requestColorMap)}
                     ${timeLimitExceptions.length > 0 ? `
                         <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 dark:border-amber-900 dark:bg-amber-950/20">
-                            <p class="text-sm font-semibold text-amber-800 dark:text-amber-200">Some shortage lines are not included because they do not fit before ${escapePlannerPreviewHtml(scheduleUntilTime)}.</p>
+                            <p class="text-sm font-semibold text-amber-800 dark:text-amber-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewTimeLimitHeading', { time: scheduleUntilTime }, `Some shortage lines are not included because they do not fit before ${scheduleUntilTime}.`))}</p>
                             <div class="mt-3 space-y-2">
                                 ${timeLimitExceptions.slice(0, 8).map((exception) => `
                                     <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
                                         <div class="text-amber-900 dark:text-amber-100">${escapePlannerPreviewHtml(exception.requestNumber || '-')} - ${escapePlannerPreviewHtml(exception.背番号 || exception.品番 || '-')}</div>
-                                        <div class="text-amber-700 dark:text-amber-300">${formatPlannerPreviewNumber(exception.shortfallQuantity || 0)} pcs · ${escapePlannerPreviewHtml((exception.candidateEquipment || []).join(' / ') || '-')}</div>
+                                        <div class="text-amber-700 dark:text-amber-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptionRow', { quantity: formatPlannerPreviewNumber(exception.shortfallQuantity || 0), detail: (exception.candidateEquipment || []).join(' / ') || '-' }, formatPlannerPreviewNumber(exception.shortfallQuantity || 0) + ' pcs · ' + ((exception.candidateEquipment || []).join(' / ') || '-')))}</div>
                                     </div>
                                 `).join('')}
                             </div>
@@ -2696,12 +3027,12 @@ function renderPlannerPreview() {
                     ` : ''}
                     ${otherExceptions.length > 0 ? `
                         <div class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-4 dark:border-rose-900 dark:bg-rose-950/20">
-                            <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">Capability or mapping issues still need review.</p>
+                            <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewOtherExceptionsHeading', {}, 'Capability or mapping issues still need review.'))}</p>
                             <div class="mt-3 space-y-2">
                                 ${otherExceptions.slice(0, 8).map((exception) => `
                                     <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
-                                        <div class="text-rose-800 dark:text-rose-200">${escapePlannerPreviewHtml(exception.requestNumber || '-')}, line ${formatPlannerPreviewNumber(exception.lineNumber || 0)} - ${escapePlannerPreviewHtml(exception.背番号 || exception.品番 || '-')}</div>
-                                        <div class="text-rose-700 dark:text-rose-300">${formatPlannerPreviewNumber(exception.shortfallQuantity || 0)} pcs · ${escapePlannerPreviewHtml(exception.reason || 'unmapped')}</div>
+                                        <div class="text-rose-800 dark:text-rose-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptionIdentity', { request: exception.requestNumber || '-', line: formatPlannerPreviewNumber(exception.lineNumber || 0), item: exception.背番号 || exception.品番 || '-' }, `${exception.requestNumber || '-'}, line ${formatPlannerPreviewNumber(exception.lineNumber || 0)} - ${exception.背番号 || exception.品番 || '-'}`))}</div>
+                                        <div class="text-rose-700 dark:text-rose-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptionRow', { quantity: formatPlannerPreviewNumber(exception.shortfallQuantity || 0), detail: getPlannerPreviewExceptionReasonLabel(exception.reason || 'unmapped') }, formatPlannerPreviewNumber(exception.shortfallQuantity || 0) + ' pcs · ' + getPlannerPreviewExceptionReasonLabel(exception.reason || 'unmapped')))}</div>
                                     </div>
                                 `).join('')}
                             </div>
@@ -2711,7 +3042,7 @@ function renderPlannerPreview() {
             </div>
             ${plannerState.preview.error ? `
                 <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                    Last refresh warning: ${escapePlannerPreviewHtml(plannerState.preview.error)}
+                    ${escapePlannerPreviewHtml(lastRefreshWarning)}
                 </div>
             ` : ''}
         </div>
@@ -8637,13 +8968,13 @@ window.setPlannerPreviewViewMode = function(mode) {
         : null;
 
     if (!preview) {
-        showPlannerNotification('Load the preview first before switching preview modes.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadSwitchMode', {}, 'Load the preview first before switching preview modes.'), 'warning');
         return;
     }
 
     const nextMode = mode === 'draft' ? 'draft' : 'auto';
     if (nextMode === 'draft' && !hasPlannerPreviewDraft() && !hasPlannerPreviewSavedDraft(preview)) {
-        showPlannerNotification('Create or save a Preview Draft first before switching to Draft view.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedDraftForView', {}, 'Create or save a Preview Draft first before switching to Draft view.'), 'warning');
         return;
     }
 
@@ -8661,26 +8992,47 @@ window.exportPlannerPreviewScheduleJson = async function(mode = 'auto') {
         : null;
 
     if (!preview) {
-        showPlannerNotification('Load the preview first before exporting schedule JSON.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadExport', {}, 'Load the preview first before exporting schedule JSON.'), 'warning');
         return;
     }
 
     const exportData = buildPlannerPreviewScheduleExport(preview, mode);
     if (!exportData) {
-        showPlannerNotification('No Draft schedule is available to export yet.', 'warning');
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewNoScheduleExport',
+                { mode: getPlannerPreviewModeLabel(mode) },
+                `No ${getPlannerPreviewModeLabel(mode)} schedule is available to export yet.`
+            ),
+            'warning'
+        );
         return;
     }
 
     const exportText = JSON.stringify(exportData, null, 2);
     const copied = await copyPlannerPreviewTextToClipboard(exportText);
-    const exportLabel = mode === 'draft' ? 'Draft' : 'Auto';
+    const exportLabel = getPlannerPreviewModeLabel(mode);
 
     if (!copied) {
-        showPlannerNotification(`Unable to copy ${exportLabel} JSON to the clipboard.`, 'error');
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewCopyFailed',
+                { mode: exportLabel },
+                `Unable to copy ${exportLabel} JSON to the clipboard.`
+            ),
+            'error'
+        );
         return;
     }
 
-    showPlannerNotification(`${exportLabel} schedule JSON copied to clipboard. Paste it here when you want me to inspect it.`, 'success');
+    showPlannerNotification(
+        plannerTranslate(
+            'plannerPreviewCopySuccess',
+            { mode: exportLabel },
+            `${exportLabel} schedule JSON copied to clipboard. Paste it here when you want me to inspect it.`
+        ),
+        'success'
+    );
 };
 
 window.togglePlannerPreviewDraftMode = function() {
@@ -8689,17 +9041,17 @@ window.togglePlannerPreviewDraftMode = function() {
         : null;
 
     if (!preview) {
-        showPlannerNotification('Load the preview first before creating a draft.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadDraft', {}, 'Load the preview first before creating a draft.'), 'warning');
         return;
     }
 
     if (!hasPlannerPreviewDraft()) {
         const draftAssignments = ensurePlannerPreviewDraft(preview);
         if (!Array.isArray(draftAssignments) || draftAssignments.length === 0) {
-            showPlannerNotification('No preview rows are available to draft yet.', 'warning');
+            showPlannerNotification(plannerTranslate('plannerPreviewNoRowsDraft', {}, 'No preview rows are available to draft yet.'), 'warning');
             return;
         }
-        showPlannerNotification('Preview Draft created. Drag a block head to move it, or drop it onto another eligible block to swap and auto-arrange timing.', 'success');
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftCreated', {}, 'Preview Draft created. Drag a block head to move it, or drop it onto another eligible block to swap and auto-arrange timing.'), 'success');
     } else {
         plannerState.preview.isDraftMode = !plannerState.preview.isDraftMode;
     }
@@ -8724,8 +9076,8 @@ window.resetPlannerPreviewDraft = function() {
     renderPlannerPreview();
     showPlannerNotification(
         hasSavedDraft
-            ? 'Unsaved Preview Draft changes discarded. Showing the saved draft again.'
-            : 'Preview Draft reset to the auto-generated calendar.',
+            ? plannerTranslate('plannerPreviewDraftDiscardedSaved', {}, 'Unsaved Preview Draft changes discarded. Showing the saved draft again.')
+            : plannerTranslate('plannerPreviewDraftResetAuto', {}, 'Preview Draft reset to the auto-generated calendar.'),
         'success'
     );
 };
@@ -8736,18 +9088,18 @@ window.savePlannerPreviewDraft = async function() {
         : null;
 
     if (!preview || !hasPlannerPreviewDraft()) {
-        showPlannerNotification('Create or edit a Preview Draft before saving it.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNeedBeforeSaving', {}, 'Create or edit a Preview Draft before saving it.'), 'warning');
         return;
     }
 
     if (!plannerState.currentFactory || !plannerState.currentDate) {
-        showPlannerNotification('Select factory and date before saving the Preview Draft.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNeedFactoryDate', {}, 'Select factory and date before saving the Preview Draft.'), 'warning');
         return;
     }
 
     const assignments = normalizePlannerPreviewDraftAssignments(plannerState.preview.draftAssignments || []);
     if (assignments.length === 0) {
-        showPlannerNotification('There are no Preview Draft blocks to save.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNoBlocksToSave', {}, 'There are no Preview Draft blocks to save.'), 'warning');
         return;
     }
 
@@ -8770,7 +9122,7 @@ window.savePlannerPreviewDraft = async function() {
         const result = await response.json();
 
         if (!response.ok || !result.success) {
-            throw new Error(result.error || result.message || 'Failed to save Preview Draft');
+            throw new Error(result.error || result.message || plannerTranslate('plannerPreviewDraftSaveFailed', {}, 'Failed to save Preview Draft.'));
         }
 
         plannerState.preview.data = applyLocalPlanToPlannerPreview({
@@ -8783,10 +9135,10 @@ window.savePlannerPreviewDraft = async function() {
         plannerState.preview.error = '';
 
         renderPlannerPreview();
-        showPlannerNotification('Preview Draft saved. Use View Auto and View Draft to compare both calendars.', 'success');
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftSaved', {}, 'Preview Draft saved. Use View Auto and View Draft to compare both calendars.'), 'success');
     } catch (error) {
         console.error('Failed to save planner preview draft:', error);
-        showPlannerNotification(error.message || 'Failed to save Preview Draft.', 'error');
+        showPlannerNotification(error.message || plannerTranslate('plannerPreviewDraftSaveFailed', {}, 'Failed to save Preview Draft.'), 'error');
     }
 };
 
@@ -8854,7 +9206,7 @@ window.handlePlannerPreviewDraftDrop = function(event, targetEquipment, targetTi
         );
 
         if (!swapEvaluation.ok) {
-            showPlannerNotification(swapEvaluation.message || 'That draft swap is not available.', 'warning');
+            showPlannerNotification(swapEvaluation.message || plannerTranslate('plannerPreviewSwapUnavailable', {}, 'That draft swap is not available.'), 'warning');
             plannerState.preview.draggedAssignmentId = null;
             renderPlannerPreview();
             return;
@@ -8868,8 +9220,22 @@ window.handlePlannerPreviewDraftDrop = function(event, targetEquipment, targetTi
         renderPlannerPreview();
         showPlannerNotification(
             swapEvaluation.startTimesChanged
-                ? `${movingAssignment.背番号 || movingAssignment.品番 || 'Block'} swapped with ${occupiedTargetAssignment.背番号 || occupiedTargetAssignment.品番 || 'block'} and the lane timing was auto-arranged.`
-                : `${movingAssignment.背番号 || movingAssignment.品番 || 'Block'} swapped with ${occupiedTargetAssignment.背番号 || occupiedTargetAssignment.品番 || 'block'}.`,
+                ? plannerTranslate(
+                    'plannerPreviewSwapSuccessRepacked',
+                    {
+                        source: getPlannerPreviewBlockLabel(movingAssignment, 'Block'),
+                        target: getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')
+                    },
+                    `${getPlannerPreviewBlockLabel(movingAssignment, 'Block')} swapped with ${getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')} and the lane timing was auto-arranged.`
+                )
+                : plannerTranslate(
+                    'plannerPreviewSwapSuccess',
+                    {
+                        source: getPlannerPreviewBlockLabel(movingAssignment, 'Block'),
+                        target: getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')
+                    },
+                    `${getPlannerPreviewBlockLabel(movingAssignment, 'Block')} swapped with ${getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')}.`
+                ),
             'success'
         );
         return;
@@ -8883,7 +9249,7 @@ window.handlePlannerPreviewDraftDrop = function(event, targetEquipment, targetTi
     );
 
     if (!moveEvaluation.ok) {
-        showPlannerNotification(moveEvaluation.message || 'That draft move is not available.', 'warning');
+        showPlannerNotification(moveEvaluation.message || plannerTranslate('plannerPreviewMoveUnavailable', {}, 'That draft move is not available.'), 'warning');
         plannerState.preview.draggedAssignmentId = null;
         renderPlannerPreview();
         return;
@@ -8900,7 +9266,15 @@ window.handlePlannerPreviewDraftDrop = function(event, targetEquipment, targetTi
 
     renderPlannerPreview();
     showPlannerNotification(
-        `${movingAssignment.背番号 || movingAssignment.品番 || 'Block'} moved to ${movingAssignment.startTime} on ${movingAssignment.equipment}.`,
+        plannerTranslate(
+            'plannerPreviewMoveSuccess',
+            {
+                block: getPlannerPreviewBlockLabel(movingAssignment, 'Block'),
+                time: movingAssignment.startTime,
+                equipment: movingAssignment.equipment
+            },
+            `${getPlannerPreviewBlockLabel(movingAssignment, 'Block')} moved to ${movingAssignment.startTime} on ${movingAssignment.equipment}.`
+        ),
         'success'
     );
 };
@@ -12211,7 +12585,7 @@ function showPlannerPreviewSourceModal(action = 'print') {
         : null;
 
     if (!preview) {
-        showPlannerNotification('Load the preview first before using this action.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadAction', {}, 'Load the preview first before using this action.'), 'warning');
         return;
     }
 
@@ -12225,14 +12599,14 @@ function showPlannerPreviewSourceModal(action = 'print') {
         return;
     }
 
-    const actionLabel = action === 'calendar' ? 'Calendar View' : 'Print';
+    const actionLabel = getPlannerPreviewActionLabel(action);
     const iconClass = action === 'calendar' ? 'ri-calendar-line' : 'ri-printer-line';
 
     const modalHTML = `
         <div id="plannerPreviewSourceModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full">
                 <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Choose Preview Source</h3>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewChooseSource', {}, 'Choose Preview Source'))}</h3>
                     <button onclick="closePlannerPreviewSourceModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                         <i class="ri-close-line text-xl"></i>
                     </button>
@@ -12241,20 +12615,20 @@ function showPlannerPreviewSourceModal(action = 'print') {
                     <button onclick="runPlannerPreviewSourceAction('${action}', 'auto')" class="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-300 px-4 py-3 text-left hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700">
                         <span class="flex items-center gap-3 text-gray-900 dark:text-white">
                             <i class="${iconClass}"></i>
-                            <span>Use Auto Schedule</span>
+                            <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUseAutoSchedule', {}, 'Use Auto Schedule'))}</span>
                         </span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">Auto</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(getPlannerPreviewModeLabel('auto'))}</span>
                     </button>
                     <button onclick="runPlannerPreviewSourceAction('${action}', 'draft')" class="w-full flex items-center justify-between gap-3 rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-left hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/30 dark:hover:bg-sky-950/40">
                         <span class="flex items-center gap-3 text-sky-800 dark:text-sky-100">
                             <i class="${iconClass}"></i>
-                            <span>Use Draft Schedule</span>
+                            <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUseDraftSchedule', {}, 'Use Draft Schedule'))}</span>
                         </span>
-                        <span class="text-xs text-sky-600 dark:text-sky-300">Draft</span>
+                        <span class="text-xs text-sky-600 dark:text-sky-300">${escapePlannerPreviewHtml(getPlannerPreviewModeLabel('draft'))}</span>
                     </button>
                 </div>
                 <div class="px-4 pb-4 text-xs text-gray-500 dark:text-gray-400">
-                    ${escapePlannerPreviewHtml(actionLabel)} can use either the current Auto preview or the current Draft preview.
+                    ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewActionExplain', { action: actionLabel }, `${actionLabel} can use either the current Auto preview or the current Draft preview.`))}
                 </div>
             </div>
         </div>
@@ -12282,7 +12656,7 @@ window.showPlannerPreviewPrintModal = function(mode = null) {
         : null;
 
     if (!preview) {
-        showPlannerNotification('Load the preview first before printing it.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadPrint', {}, 'Load the preview first before printing it.'), 'warning');
         return;
     }
 
@@ -12293,18 +12667,25 @@ window.showPlannerPreviewPrintModal = function(mode = null) {
 
     const previewAssignments = getPlannerPreviewActionAssignments(preview, mode);
     if (previewAssignments.length === 0) {
-        showPlannerNotification(mode === 'draft' ? 'No Draft preview blocks are available to print.' : 'No Auto preview blocks are available to print.', 'warning');
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewNoBlocksPrint',
+                { mode: getPlannerPreviewModeLabel(mode) },
+                `No ${getPlannerPreviewModeLabel(mode)} preview blocks are available to print.`
+            ),
+            'warning'
+        );
         return;
     }
 
-    const modeLabel = mode === 'draft' ? 'Draft' : 'Auto';
+    const modeLabel = getPlannerPreviewModeLabel(mode);
     showSchedulePrintModal(previewAssignments, {
-        modalTitle: `Select Preview ${modeLabel} Equipment to Print`,
-        emptyMessage: `No Preview ${modeLabel} blocks are available to print.`,
-        loadingMessage: `Generating Preview ${modeLabel} print preview...`,
-        errorMessage: `Failed to generate Preview ${modeLabel} print table.`,
-        scheduleTitle: `Preview ${modeLabel} Schedule`,
-        headerTitle: `プレビュー生産スケジュール (${modeLabel})`,
+        modalTitle: plannerTranslate('plannerPreviewPrintSelectEquipment', { mode: modeLabel }, `Select Preview ${modeLabel} Equipment to Print`),
+        emptyMessage: plannerTranslate('plannerPreviewPrintEmpty', { mode: modeLabel }, `No Preview ${modeLabel} blocks are available to print.`),
+        loadingMessage: plannerTranslate('plannerPreviewPrintLoading', { mode: modeLabel }, `Generating Preview ${modeLabel} print preview...`),
+        errorMessage: plannerTranslate('plannerPreviewPrintError', { mode: modeLabel }, `Failed to generate Preview ${modeLabel} print table.`),
+        scheduleTitle: plannerTranslate('plannerPreviewScheduleTitle', { mode: modeLabel }, `Preview ${modeLabel} Schedule`),
+        headerTitle: plannerTranslate('plannerPreviewScheduleHeaderTitle', { mode: modeLabel }, `Preview Production Schedule (${modeLabel})`),
         date: preview.targetDate || plannerState.currentDate,
     });
 };
@@ -12319,21 +12700,28 @@ window.openPlannerPreviewCalendarView = async function(mode = 'auto') {
         : null;
 
     if (!preview) {
-        showPlannerNotification('Load the preview first before opening calendar view.', 'warning');
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadCalendar', {}, 'Load the preview first before opening calendar view.'), 'warning');
         return;
     }
 
     const previewAssignments = getPlannerPreviewActionAssignments(preview, mode);
     if (previewAssignments.length === 0) {
-        showPlannerNotification(mode === 'draft' ? 'No Draft preview blocks are available for calendar view.' : 'No Auto preview blocks are available for calendar view.', 'warning');
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewNoBlocksCalendar',
+                { mode: getPlannerPreviewModeLabel(mode) },
+                `No ${getPlannerPreviewModeLabel(mode)} preview blocks are available for calendar view.`
+            ),
+            'warning'
+        );
         return;
     }
 
-    const modeLabel = mode === 'draft' ? 'Draft' : 'Auto';
+    const modeLabel = getPlannerPreviewModeLabel(mode);
     await openScheduleCalendarWindow(previewAssignments, {
-        emptyMessage: `No Preview ${modeLabel} blocks are available for calendar view.`,
-        title: `Preview ${modeLabel} Schedule`,
-        headerTitle: `プレビュー生産スケジュール (${modeLabel})`,
+        emptyMessage: plannerTranslate('plannerPreviewCalendarEmpty', { mode: modeLabel }, `No Preview ${modeLabel} blocks are available for calendar view.`),
+        title: plannerTranslate('plannerPreviewScheduleTitle', { mode: modeLabel }, `Preview ${modeLabel} Schedule`),
+        headerTitle: plannerTranslate('plannerPreviewScheduleHeaderTitle', { mode: modeLabel }, `Preview Production Schedule (${modeLabel})`),
         includeProductionStats: false,
         date: preview.targetDate || plannerState.currentDate,
         factory: preview.factory || plannerState.currentFactory,
