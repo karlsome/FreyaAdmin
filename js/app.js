@@ -2753,6 +2753,9 @@ function loadPage(page) {
                     <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-main-tab="preview">
                       <i class="ri-radar-line mr-2"></i><span>Preview</span>
                     </button>
+                    <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-main-tab="published">
+                      <i class="ri-broadcast-line mr-2"></i><span>Published</span>
+                    </button>
                     <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-main-tab="planning">
                       <i class="ri-calendar-schedule-line mr-2"></i><span>Planning</span>
                     </button>
@@ -2800,6 +2803,17 @@ function loadPage(page) {
                         <i class="ri-radar-line text-5xl mb-3 block"></i>
                         <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Live preview will appear here</p>
                         <p class="mt-2 text-sm">Select a factory to compare current inventory, 3-day request demand, and the planner draft.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Published Tab Content -->
+                  <div id="planner-published-tab" class="planner-main-tab-content hidden">
+                    <div id="plannerPublishedContainer" class="space-y-6">
+                      <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
+                        <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                        <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Published schedule will appear here</p>
+                        <p class="mt-2 text-sm">This tab is reserved for the latest frozen version released to the factory floor.</p>
                       </div>
                     </div>
                   </div>

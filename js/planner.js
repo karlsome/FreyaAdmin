@@ -57,6 +57,14 @@ let plannerState = {
         draftChanged: false,
         draggedAssignmentId: null,
         viewMode: 'auto'
+    },
+    published: {
+        data: null,
+        error: '',
+        isLoading: false,
+        isDirty: true,
+        lastLoadedAt: 0,
+        pendingPromise: null,
     }
 };
 
@@ -70,6 +78,8 @@ const PRODUCT_COLORS = [
 
 const PLANNER_PREVIEW_CACHE_MS = 60 * 1000;
 const PLANNER_PREVIEW_AUTO_REFRESH_DELAY_MS = 400;
+const PLANNER_PUBLISHED_CACHE_MS = 60 * 1000;
+const PLANNER_PUBLISHED_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
 
 // Get random color from palette or assign next color
 function getRandomColor() {
@@ -442,6 +452,66 @@ function getPlannerPreviewActionLabel(action = 'print') {
         action === 'calendar' ? 'plannerPreviewActionCalendar' : 'plannerPreviewActionPrint',
         {},
         action === 'calendar' ? 'Calendar View' : 'Print'
+    );
+}
+
+function encodePlannerAuthBase64Unicode(value = '') {
+    const bytes = new TextEncoder().encode(String(value || ''));
+    let binary = '';
+    bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+    });
+    return btoa(binary);
+}
+
+function getPlannerAuthUser() {
+    try {
+        return JSON.parse(localStorage.getItem('authUser') || '{}');
+    } catch (_) {
+        return {};
+    }
+}
+
+function getPlannerAuthHeaders(extraHeaders = {}) {
+    const authUser = getPlannerAuthUser();
+    const hasIdentity = authUser && (authUser.username || authUser.role);
+
+    return {
+        ...(hasIdentity ? {
+            Authorization: `Bearer ${encodePlannerAuthBase64Unicode(JSON.stringify({
+                username: authUser.username || 'unknown',
+                role: authUser.role || 'viewer',
+            }))}`,
+        } : {}),
+        ...extraHeaders,
+    };
+}
+
+function canPlannerManagePublishedSchedules() {
+    return PLANNER_PUBLISHED_MANAGE_ROLES.has(String(getPlannerAuthUser().role || 'viewer').trim());
+}
+
+function getPlannerPublishedSourceModeLabel(mode = '') {
+    return plannerTranslate(
+        mode === 'draft' ? 'plannerPublishedSourceDraft' : 'plannerPublishedSourceAuto',
+        {},
+        mode === 'draft' ? 'Published from Draft' : 'Published from Auto'
+    );
+}
+
+function getPlannerPublishedSourceTypeLabel(type = '') {
+    return plannerTranslate(
+        type === 'auto-scheduled'
+            ? 'plannerPublishedTypeAutoScheduled'
+            : type === 'restore'
+                ? 'plannerPublishedTypeRestore'
+                : 'plannerPublishedTypeManual',
+        {},
+        type === 'auto-scheduled'
+            ? 'Auto-published'
+            : type === 'restore'
+                ? 'Restored version'
+                : 'Manual publish'
     );
 }
 
@@ -1634,6 +1704,22 @@ function markPlannerPreviewDirty(options = {}) {
     }
 }
 
+function markPlannerPublishedDirty(options = {}) {
+    const clearData = options.clearData === true;
+
+    plannerState.published.isDirty = true;
+
+    if (clearData) {
+        plannerState.published.data = null;
+        plannerState.published.error = '';
+        plannerState.published.lastLoadedAt = 0;
+    }
+
+    if (plannerState.activeMainTab === 'published') {
+        renderPlannerPublished();
+    }
+}
+
 async function ensurePlannerPreviewLoaded(options = {}) {
     const forceRefresh = options.forceRefresh === true;
     const showNotifications = options.showNotifications === true;
@@ -1729,10 +1815,83 @@ async function ensurePlannerPreviewLoaded(options = {}) {
     return plannerState.preview.pendingPromise;
 }
 
-function getPlannerPreviewTimeSlots(assignments = []) {
+async function ensurePlannerPublishedLoaded(options = {}) {
+    const forceRefresh = options.forceRefresh === true;
+    const showNotifications = options.showNotifications === true;
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        renderPlannerPublished();
+        return null;
+    }
+
+    if (
+        !forceRefresh
+        && plannerState.published.data
+        && !plannerState.published.isDirty
+        && (Date.now() - plannerState.published.lastLoadedAt) < PLANNER_PUBLISHED_CACHE_MS
+    ) {
+        renderPlannerPublished();
+        return plannerState.published.data;
+    }
+
+    if (plannerState.published.pendingPromise) {
+        return plannerState.published.pendingPromise;
+    }
+
+    plannerState.published.isLoading = true;
+    plannerState.published.error = '';
+    renderPlannerPublished();
+
+    const requestUrl = `${BASE_URL}api/production-planner/published?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}`;
+
+    plannerState.published.pendingPromise = (async () => {
+        try {
+            const response = await fetch(requestUrl);
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || result.message || 'Failed to load published schedule');
+            }
+
+            plannerState.published.data = result.data || null;
+            plannerState.published.isDirty = false;
+            plannerState.published.lastLoadedAt = Date.now();
+            plannerState.published.error = '';
+
+            if (showNotifications) {
+                showPlannerNotification(plannerTranslate('plannerPublishedRefreshed', {}, 'Published schedule refreshed'), 'success');
+            }
+
+            return plannerState.published.data;
+        } catch (error) {
+            plannerState.published.error = error.message || 'Failed to load published schedule';
+            if (showNotifications) {
+                showPlannerNotification(
+                    plannerTranslate(
+                        'plannerPublishedRefreshFailed',
+                        { error: plannerState.published.error },
+                        `Failed to refresh published schedule: ${plannerState.published.error}`
+                    ),
+                    'error'
+                );
+            }
+            throw error;
+        } finally {
+            plannerState.published.isLoading = false;
+            plannerState.published.pendingPromise = null;
+            renderPlannerPublished();
+        }
+    })();
+
+    return plannerState.published.pendingPromise;
+}
+
+function getPlannerPreviewTimeSlots(assignments = [], scheduleUntilTime = '') {
     const slots = [];
     const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
-    const endMinutes = getPlannerPreviewScheduleUntilMinutes();
+    const endMinutes = scheduleUntilTime
+        ? timeToMinutes(normalizePlannerPreviewScheduleUntilTime(scheduleUntilTime))
+        : getPlannerPreviewScheduleUntilMinutes();
 
     for (let minutes = startMinutes; minutes < endMinutes; minutes += PLANNER_CONFIG.intervalMinutes) {
         slots.push(minutesToTime(minutes));
@@ -2681,6 +2840,322 @@ function renderPlannerPreviewTimeline(preview = {}, requestColorMap = {}) {
     `;
 }
 
+function renderPlannerPublishedTimeline(published = {}, requestColorMap = {}) {
+    const activeVersion = published?.activeVersion || null;
+    const assignments = normalizePlannerPreviewDraftAssignments(activeVersion?.assignments || []);
+    const equipmentList = Array.from(new Set(
+        assignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+    const machineLabel = plannerTranslate('plannerPreviewMachineColumn', {}, 'Machine');
+    const machineColumnWidth = Math.max(
+        112,
+        ((Math.max(
+            machineLabel.length,
+            ...equipmentList.map((equipment) => String(equipment || '').trim().length)
+        ) * 8) + 28)
+    );
+
+    if (equipmentList.length === 0) {
+        return `
+            <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                ${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedNoAssignmentsYet', {}, 'No published machine assignments are available for this date yet.'))}
+            </div>
+        `;
+    }
+
+    const timeSlots = getPlannerPreviewTimeSlots(assignments, activeVersion?.scheduleUntilTime || PLANNER_CONFIG.workEndTime);
+    const slotWidth = 60;
+    let headerHtml = `<div class="flex-shrink-0 whitespace-nowrap bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">${escapePlannerPreviewHtml(machineLabel)}</div>`;
+
+    timeSlots.forEach((slot) => {
+        headerHtml += `
+            <div class="flex-shrink-0 border-r dark:border-gray-600 text-center text-xs text-gray-500 dark:text-gray-400" style="width:${slotWidth}px">${slot}</div>
+        `;
+    });
+
+    const rowsHtml = equipmentList.map((equipment) => {
+        const assignedProducts = assignments
+            .filter((assignment) => assignment.equipment === equipment)
+            .sort((left, right) => timeToMinutes(left.startTime || PLANNER_CONFIG.workStartTime) - timeToMinutes(right.startTime || PLANNER_CONFIG.workStartTime));
+        return `
+            <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-published-equipment="${escapePlannerPreviewHtml(equipment)}">
+                <div class="flex-shrink-0 whitespace-nowrap bg-gray-50 dark:bg-gray-700/40 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">
+                    ${escapePlannerPreviewHtml(equipment)}
+                </div>
+                <div class="flex-1 flex relative">
+                    ${renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth, { requestColorMap })}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="border rounded-xl dark:border-gray-700 overflow-hidden">
+            <div class="overflow-auto max-h-[560px]">
+                <div class="min-w-max">
+                    <div class="flex border-b dark:border-gray-600 bg-gray-50 dark:bg-gray-700 sticky top-0 z-20">
+                        ${headerHtml}
+                    </div>
+                    <div class="bg-white dark:bg-gray-800">
+                        ${rowsHtml}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderPlannerPublished() {
+    const container = document.getElementById('plannerPublishedContainer');
+    if (!container) {
+        return;
+    }
+
+    if (!plannerState.currentFactory) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedSelectFactoryTitle', {}, 'Select a factory to view the published schedule'))}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedSelectFactoryDescription', {}, 'Published schedules are frozen, read-only releases for the factory floor.'))}</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (plannerState.published.isLoading && !plannerState.published.data) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                <div class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-500 dark:border-emerald-950 dark:border-t-emerald-400"></div>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedLoadingTitle', {}, 'Loading published schedule'))}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedLoadingDescription', {}, 'Fetching the latest released schedule and version history for this factory.'))}</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (plannerState.published.error && !plannerState.published.data) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/20 p-6 text-rose-700 dark:text-rose-200">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p class="text-lg font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedLoadFailedTitle', {}, 'Published schedule failed to load'))}</p>
+                        <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerState.published.error)}</p>
+                    </div>
+                    <button onclick="refreshPlannerPublished(true)" class="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/60">
+                        <i class="ri-refresh-line"></i>
+                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedRetry', {}, 'Retry'))}</span>
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    const published = plannerState.published.data;
+    if (!published) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedReadyTitle', {}, 'Published schedule will appear here'))}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedReadyDescription', {}, 'Open Preview and publish a frozen schedule when the plan is ready for the factory floor.'))}</p>
+            </div>
+        `;
+        return;
+    }
+
+    const activeVersion = published.activeVersion || null;
+    const versions = Array.isArray(published.versions) ? published.versions : [];
+    const canManagePublishedSchedules = canPlannerManagePublishedSchedules();
+
+    if (!activeVersion) {
+        container.innerHTML = `
+            <div class="space-y-6">
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                    <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                    <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedEmptyTitle', {}, 'No published schedule exists yet'))}</p>
+                    <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedEmptyDescription', {}, 'Publish from Preview to freeze the first factory schedule for this date.'))}</p>
+                    <button onclick="switchPlannerMainTab('preview')" class="mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
+                        <i class="ri-radar-line"></i>
+                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedOpenPreviewAction', {}, 'Open Preview'))}</span>
+                    </button>
+                </div>
+                ${versions.length > 0 ? `
+                    <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryTitle', {}, 'Version History'))}</h3>
+                        <div class="mt-4 space-y-3">
+                            ${versions.map((version) => `
+                                <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedVersionBadge', { version: formatPlannerPreviewNumber(version.version || 1) }, `Version ${formatPlannerPreviewNumber(version.version || 1)}`))}</span>
+                                        <span class="text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(formatPlannerPreviewTimestamp(version.publishedAt || version.createdAt))}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        return;
+    }
+
+    const assignments = normalizePlannerPreviewDraftAssignments(activeVersion.assignments || []);
+    const requestColorMap = buildPlannerPreviewRequestColorMap({
+        simulation: { assignments },
+        priorityRows: [],
+        savedDraft: { assignments: [] },
+    });
+    const equipmentCount = Array.from(new Set(assignments.map((assignment) => String(assignment.equipment || '').trim()).filter(Boolean))).length;
+    const statusText = plannerTranslate(
+        'plannerPublishedStatus',
+        {
+            timestamp: formatPlannerPreviewTimestamp(activeVersion.publishedAt || activeVersion.createdAt),
+            user: activeVersion.publishedBy || activeVersion.createdBy || 'system'
+        },
+        `Published ${formatPlannerPreviewTimestamp(activeVersion.publishedAt || activeVersion.createdAt)} by ${activeVersion.publishedBy || activeVersion.createdBy || 'system'}`
+    );
+    const versionBadgeText = plannerTranslate(
+        'plannerPublishedVersionBadge',
+        { version: formatPlannerPreviewNumber(activeVersion.version || 1) },
+        `Version ${formatPlannerPreviewNumber(activeVersion.version || 1)}`
+    );
+    const scheduleUntilText = plannerTranslate(
+        'plannerPublishedScheduleUntil',
+        { time: activeVersion.scheduleUntilTime || PLANNER_CONFIG.workEndTime },
+        `Frozen through ${activeVersion.scheduleUntilTime || PLANNER_CONFIG.workEndTime}`
+    );
+    const lastRefreshWarning = plannerState.published.error
+        ? plannerTranslate(
+            'plannerPublishedLastRefreshWarning',
+            { message: plannerState.published.error },
+            `Last refresh warning: ${plannerState.published.error}`
+        )
+        : '';
+
+    container.innerHTML = `
+        <div class="space-y-6">
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <div class="flex flex-wrap gap-2 mb-3 text-xs font-medium uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                            <span class="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedBadge', {}, 'Published Schedule'))}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(activeVersion.factory || plannerState.currentFactory)}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPlanDate', { date: activeVersion.date || plannerState.currentDate }, `Plan date ${activeVersion.date || plannerState.currentDate}`))}</span>
+                            <span class="rounded-full bg-slate-900 px-3 py-1 text-white dark:bg-slate-100 dark:text-slate-900">${escapePlannerPreviewHtml(versionBadgeText)}</span>
+                        </div>
+                        <h3 class="text-2xl font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedMainTitle', {}, 'Released schedule for the factory floor'))}</h3>
+                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedMainDescription', {}, 'This tab shows the latest frozen version that operators should follow. Preview can continue changing without affecting this released schedule.'))}</p>
+                    </div>
+                    <div class="flex flex-col items-stretch gap-3 lg:items-end">
+                        <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
+                            <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
+                            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(activeVersion.sourceMode))} · ${escapePlannerPreviewHtml(getPlannerPublishedSourceTypeLabel(activeVersion.sourceType))}</div>
+                            ${activeVersion.sourceLabel ? `<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(activeVersion.sourceLabel)}</div>` : ''}
+                        </div>
+                        <div class="flex flex-wrap gap-2 justify-end">
+                            <button onclick="switchPlannerMainTab('preview')" class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 transition-colors">
+                                <i class="ri-radar-line"></i>
+                                <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedOpenPreviewAction', {}, 'Open Preview'))}</span>
+                            </button>
+                            <button onclick="refreshPlannerPublished(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors">
+                                <i class="ri-refresh-line"></i>
+                                <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedRefreshAction', {}, 'Refresh Published'))}</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedVersionLabel', {}, 'Active Version'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">${formatPlannerPreviewNumber(activeVersion.version || 1)}</p>
+                    </div>
+                    <div class="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:border-cyan-900 dark:bg-cyan-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedAssignmentCount', {}, 'Assignments'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(activeVersion.assignmentCount || assignments.length)}</p>
+                    </div>
+                    <div class="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedEquipmentCount', {}, 'Machines'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-violet-900 dark:text-violet-100">${formatPlannerPreviewNumber(equipmentCount)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-700 dark:text-slate-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedScheduleWindow', {}, 'Schedule Window'))}</p>
+                        <p class="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-100">${escapePlannerPreviewHtml(scheduleUntilText)}</p>
+                    </div>
+                </div>
+                ${activeVersion.note ? `
+                    <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                        <div class="font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedNoteLabel', {}, 'Publish note'))}</div>
+                        <div class="mt-1">${escapePlannerPreviewHtml(activeVersion.note)}</div>
+                    </div>
+                ` : ''}
+            </div>
+
+            <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedCalendarTitle', {}, 'Published Calendar'))}</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedCalendarDescription', {}, 'Read-only 15-minute machine view for the currently active released version.'))}</p>
+                    </div>
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+                        <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-cyan-200 dark:bg-cyan-800"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendInserts', {}, 'Priority preview inserts'))}</span>
+                        <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-300 dark:bg-slate-600"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendBreak', {}, 'Break time'))}</span>
+                    </div>
+                    <div class="p-5">
+                        ${renderPlannerPublishedTimeline(published, requestColorMap)}
+                    </div>
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryTitle', {}, 'Version History'))}</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryDescription', {}, 'Each publish creates a new version. The active version is what the factory should follow now.'))}</p>
+                    </div>
+                    <div class="max-h-[640px] overflow-auto p-5 space-y-3">
+                        ${versions.map((version) => `
+                            <div class="rounded-xl border px-4 py-3 ${version.id === activeVersion.id ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/20' : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/30'}">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <span class="text-sm font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedVersionBadge', { version: formatPlannerPreviewNumber(version.version || 1) }, `Version ${formatPlannerPreviewNumber(version.version || 1)}`))}</span>
+                                            ${version.id === activeVersion.id ? `<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedActivePill', {}, 'Active'))}</span>` : ''}
+                                        </div>
+                                        <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(formatPlannerPreviewTimestamp(version.publishedAt || version.createdAt))}</div>
+                                    </div>
+                                    <div class="text-right text-xs text-gray-500 dark:text-gray-400">
+                                        <div>${escapePlannerPreviewHtml(version.publishedBy || version.createdBy || 'system')}</div>
+                                        <div class="mt-1">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(version.sourceMode))}</div>
+                                        ${version.sourceLabel ? `<div class="mt-1">${escapePlannerPreviewHtml(version.sourceLabel)}</div>` : ''}
+                                    </div>
+                                </div>
+                                <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-600 dark:text-gray-300">
+                                    <span class="rounded-full bg-white/80 px-2 py-1 dark:bg-gray-800/80">${escapePlannerPreviewHtml(getPlannerPublishedSourceTypeLabel(version.sourceType))}</span>
+                                    <span class="rounded-full bg-white/80 px-2 py-1 dark:bg-gray-800/80">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedAssignmentsPill', { count: formatPlannerPreviewNumber(version.assignmentCount || 0) }, `${formatPlannerPreviewNumber(version.assignmentCount || 0)} assignments`))}</span>
+                                </div>
+                                ${canManagePublishedSchedules && version.id !== activeVersion.id ? `
+                                    <div class="mt-4 flex justify-end">
+                                        <button onclick="restorePlannerPublishedVersion(${Number(version.version || 0)})" class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/40">
+                                            <i class="ri-history-line"></i>
+                                            <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedRestoreAction', {}, 'Restore as New Version'))}</span>
+                                        </button>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+
+            ${plannerState.published.error ? `
+                <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    ${escapePlannerPreviewHtml(lastRefreshWarning)}
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
 function renderPlannerPreview() {
     const container = document.getElementById('plannerPreviewContainer');
     if (!container) {
@@ -2912,6 +3387,11 @@ function renderPlannerPreview() {
     const refreshButtonText = plannerState.preview.isLoading
         ? plannerTranslate('plannerPreviewRefreshingAction', {}, 'Refreshing...')
         : plannerTranslate('plannerPreviewRefreshAction', {}, 'Refresh Preview');
+    const publishButtonText = isViewingDraft
+        ? plannerTranslate('plannerPreviewPublishDraftAction', {}, 'Publish Draft')
+        : plannerTranslate('plannerPreviewPublishAutoAction', {}, 'Publish Auto');
+    const openPublishedText = plannerTranslate('plannerPreviewOpenPublishedAction', {}, 'Open Published');
+    const canManagePublishedSchedules = canPlannerManagePublishedSchedules();
     const linesSuffix = plannerTranslate('plannerPreviewLinesSuffix', {}, 'lines');
     const productsSuffix = plannerTranslate('plannerPreviewProductsSuffix', {}, 'products');
     const draftToggleLabel = hasPreviewDraft
@@ -2967,10 +3447,22 @@ function renderPlannerPreview() {
                             <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
                             <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(shortageSummaryText)}</div>
                         </div>
-                        <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
-                            <i class="ri-refresh-line"></i>
-                            <span>${escapePlannerPreviewHtml(refreshButtonText)}</span>
-                        </button>
+                        <div class="flex flex-wrap gap-2 justify-end">
+                            <button onclick="switchPlannerMainTab('published')" class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 transition-colors">
+                                <i class="ri-broadcast-line"></i>
+                                <span>${escapePlannerPreviewHtml(openPublishedText)}</span>
+                            </button>
+                            ${canManagePublishedSchedules ? `
+                                <button onclick="publishPlannerPreviewSchedule()" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors">
+                                    <i class="ri-send-plane-line"></i>
+                                    <span>${escapePlannerPreviewHtml(publishButtonText)}</span>
+                                </button>
+                            ` : ''}
+                            <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
+                                <i class="ri-refresh-line"></i>
+                                <span>${escapePlannerPreviewHtml(refreshButtonText)}</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="mt-5 grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -3406,6 +3898,15 @@ function switchPlannerMainTab(tab) {
         if (plannerState.currentFactory) {
             ensurePlannerPreviewLoaded({ forceRefresh: plannerState.preview.isDirty }).catch((error) => {
                 console.error('Failed to load planner preview:', error);
+            });
+        }
+    } else if (tab === 'published') {
+        document.getElementById('planner-published-tab')?.classList.remove('hidden');
+        renderPlannerPublished();
+
+        if (plannerState.currentFactory) {
+            ensurePlannerPublishedLoaded({ forceRefresh: plannerState.published.isDirty }).catch((error) => {
+                console.error('Failed to load published schedule:', error);
             });
         }
     } else if (tab === 'planning') {
@@ -3910,6 +4411,7 @@ async function handleFactoryChange(e) {
     const factory = e.target.value;
     plannerState.currentFactory = factory;
     markPlannerPreviewDirty({ clearData: true, scheduleIfActive: false });
+    markPlannerPublishedDirty({ clearData: true });
     
     // Save selected factory to localStorage
     if (factory) {
@@ -3954,6 +4456,7 @@ async function handleFactoryChange(e) {
 async function handleDateChange(e) {
     plannerState.currentDate = e.target.value;
     markPlannerPreviewDirty({ clearData: true, scheduleIfActive: false });
+    markPlannerPublishedDirty({ clearData: true });
     
     if (plannerState.currentFactory) {
         // Ensure products are loaded for capacity lookups
@@ -6078,6 +6581,17 @@ window.refreshPlannerPreview = async function(forceRefresh = true) {
     }
 };
 
+window.refreshPlannerPublished = async function(forceRefresh = true) {
+    try {
+        await ensurePlannerPublishedLoaded({
+            forceRefresh: forceRefresh === true,
+            showNotifications: true
+        });
+    } catch (error) {
+        console.error('Failed to refresh published schedule:', error);
+    }
+};
+
 window.setPlannerPreviewScheduleUntilTime = function(value) {
     plannerState.preview.scheduleUntilTime = normalizePlannerPreviewScheduleUntilTime(value);
     renderPlannerPreview();
@@ -6123,6 +6637,11 @@ function clearPlannerViews() {
     plannerState.preview.autoRefreshTimer = null;
     resetPlannerPreviewDraftState();
     plannerState.preview.viewMode = 'auto';
+    plannerState.published.data = null;
+    plannerState.published.error = '';
+    plannerState.published.isDirty = true;
+    plannerState.published.lastLoadedAt = 0;
+    plannerState.published.pendingPromise = null;
     
     document.getElementById('productListContainer').innerHTML = '';
     document.getElementById('selectedProductsSummary').innerHTML = '';
@@ -6130,6 +6649,7 @@ function clearPlannerViews() {
     document.getElementById('kanbanContainer').innerHTML = '';
     document.getElementById('tableContainer').innerHTML = '';
     renderPlannerPreview();
+    renderPlannerPublished();
 }
 
 // ============================================
@@ -9237,6 +9757,144 @@ window.exportPlannerPreviewScheduleJson = async function(mode = 'auto') {
         ),
         'success'
     );
+};
+
+window.publishPlannerPreviewSchedule = async function() {
+    if (!canPlannerManagePublishedSchedules()) {
+        showPlannerNotification(plannerTranslate('plannerPublishedPermissionDenied', {}, 'You do not have permission to publish or restore schedules.'), 'warning');
+        return;
+    }
+
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNeedPreviewFirst', {}, 'Load the preview first before publishing a schedule.'), 'warning');
+        return;
+    }
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNeedFactoryDate', {}, 'Select a factory and date before publishing a schedule.'), 'warning');
+        return;
+    }
+
+    let sourceMode = plannerState.preview.viewMode === 'draft' ? 'draft' : 'auto';
+    let simulation = getPlannerPreviewExportSimulation(preview, sourceMode);
+    if (!simulation && sourceMode === 'draft') {
+        sourceMode = 'auto';
+        simulation = getPlannerPreviewExportSimulation(preview, sourceMode);
+    }
+
+    const assignments = normalizePlannerPreviewDraftAssignments(simulation?.assignments || []);
+    if (assignments.length === 0) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNoAssignmentsToPublish', {}, 'There are no schedule blocks to publish yet.'), 'warning');
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        const currentUsername = currentUser?.username || 'system';
+        const publishedBy = await getUserFullName(currentUsername);
+        const response = await fetch(`${BASE_URL}api/production-planner/published/publish`, {
+            method: 'POST',
+            headers: getPlannerAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: plannerState.currentDate,
+                scheduleUntilTime: getPlannerPreviewScheduleUntilTime(),
+                sourceMode,
+                sourceType: 'manual',
+                sourceLabel: getPlannerPublishedSourceModeLabel(sourceMode),
+                assignments,
+                basisRows: buildPlannerPreviewDraftBasisRows(preview),
+                publishedBy,
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || result.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'));
+        }
+
+        markPlannerPublishedDirty({ clearData: true });
+        await ensurePlannerPublishedLoaded({ forceRefresh: true });
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPublishedPublishSuccess',
+                { version: formatPlannerPreviewNumber(result.data?.version || 1) },
+                `Published schedule version ${formatPlannerPreviewNumber(result.data?.version || 1)} is now active.`
+            ),
+            'success'
+        );
+        switchPlannerMainTab('published');
+    } catch (error) {
+        console.error('Failed to publish planner schedule:', error);
+        showPlannerNotification(error.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'), 'error');
+    }
+};
+
+window.restorePlannerPublishedVersion = async function(versionNumber) {
+    if (!canPlannerManagePublishedSchedules()) {
+        showPlannerNotification(plannerTranslate('plannerPublishedPermissionDenied', {}, 'You do not have permission to publish or restore schedules.'), 'warning');
+        return;
+    }
+
+    const published = plannerState.published.data || null;
+    const versions = Array.isArray(published?.versions) ? published.versions : [];
+    const selectedVersion = versions.find((version) => Number(version.version || 0) === Number(versionNumber || 0));
+
+    if (!selectedVersion || selectedVersion.isActive) {
+        showPlannerNotification(plannerTranslate('plannerPublishedRestoreUnavailable', {}, 'That published version cannot be restored right now.'), 'warning');
+        return;
+    }
+
+    const confirmMessage = plannerTranslate(
+        'plannerPublishedRestoreConfirm',
+        { version: formatPlannerPreviewNumber(selectedVersion.version || 0) },
+        `Restore Version ${formatPlannerPreviewNumber(selectedVersion.version || 0)} as a new active version?`
+    );
+    if (!window.confirm(confirmMessage)) {
+        return;
+    }
+
+    try {
+        const currentUser = getPlannerAuthUser();
+        const currentUsername = currentUser?.username || 'system';
+        const publishedBy = await getUserFullName(currentUsername);
+        const response = await fetch(`${BASE_URL}api/production-planner/published/restore`, {
+            method: 'POST',
+            headers: getPlannerAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: plannerState.currentDate,
+                sourceVersion: Number(selectedVersion.version || 0),
+                publishedBy,
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || result.message || plannerTranslate('plannerPublishedRestoreFailed', {}, 'Failed to restore published version.'));
+        }
+
+        markPlannerPublishedDirty({ clearData: true });
+        await ensurePlannerPublishedLoaded({ forceRefresh: true });
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPublishedRestoreSuccess',
+                {
+                    sourceVersion: formatPlannerPreviewNumber(selectedVersion.version || 0),
+                    version: formatPlannerPreviewNumber(result.data?.version || 0),
+                },
+                `Version ${formatPlannerPreviewNumber(selectedVersion.version || 0)} was restored as Version ${formatPlannerPreviewNumber(result.data?.version || 0)}.`
+            ),
+            'success'
+        );
+    } catch (error) {
+        console.error('Failed to restore published schedule version:', error);
+        showPlannerNotification(error.message || plannerTranslate('plannerPublishedRestoreFailed', {}, 'Failed to restore published version.'), 'error');
+    }
 };
 
 window.togglePlannerPreviewDraftMode = function() {
