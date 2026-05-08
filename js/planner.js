@@ -1159,6 +1159,107 @@ function getPlannerPreviewMachineBatchPotential(remainingRows = [], anchorRow = 
     });
 }
 
+function getPlannerPreviewAvailableProductionMinutes(startMinutes = 0, endMinutes = 0, equipment = '') {
+    const normalizedStart = Math.round(Number(startMinutes));
+    const normalizedEnd = Math.round(Number(endMinutes));
+
+    if (!Number.isFinite(normalizedStart) || !Number.isFinite(normalizedEnd) || normalizedEnd <= normalizedStart) {
+        return 0;
+    }
+
+    let availableMinutes = 0;
+
+    for (let minute = normalizedStart; minute < normalizedEnd; minute += 1) {
+        const isInBreak = plannerState.breaks.some((breakItem) => {
+            const breakStart = timeToMinutes(breakItem.start);
+            const breakEnd = timeToMinutes(breakItem.end);
+            const appliesToEquipment = !breakItem.equipment || breakItem.equipment === equipment;
+            return minute >= breakStart && minute < breakEnd && appliesToEquipment;
+        });
+
+        if (!isInBreak) {
+            availableMinutes += 1;
+        }
+    }
+
+    return availableMinutes;
+}
+
+function buildPlannerPreviewMachineChoice(assignments = [], priorityRow = {}, quantity = 0, remainingRows = [], scheduleUntilMinutes = 0, machine = {}, options = {}) {
+    const normalizedQuantity = Number.isFinite(Number(quantity)) ? Math.max(0, Number(quantity)) : 0;
+    if (normalizedQuantity <= 0 || !machine.equipment) {
+        return null;
+    }
+
+    const productRecord = getPlannerPreviewProductRecord(priorityRow);
+    const productForEquipment = { ...productRecord, equipment: machine.equipment };
+    const estimatedTime = calculateProductionTime(productForEquipment, normalizedQuantity, machine.equipment);
+    const timing = findPlannerPreviewAvailableWindow(
+        assignments,
+        machine.equipment,
+        estimatedTime.totalSeconds / 60,
+        { earliestStartMinutes: options.earliestStartMinutes }
+    );
+    const endMinutes = roundPlannerPreviewMinutesToInterval(timing.endTime, 'ceil');
+    const boxes = calculateBoxesNeeded(productForEquipment, normalizedQuantity, machine.equipment);
+    const affinityRank = getPlannerPreviewAffinityRank(
+        assignments,
+        machine.equipment,
+        priorityRow,
+        timing.startTime,
+    );
+    const batchPotential = getPlannerPreviewMachineBatchPotential(remainingRows, priorityRow, machine.equipment);
+
+    return {
+        ...machine,
+        startMinutes: timing.startTime,
+        endMinutes,
+        estimatedTime,
+        boxes,
+        affinityRank,
+        slackMinutes: scheduleUntilMinutes - endMinutes,
+        scheduledQuantity: normalizedQuantity,
+        ...batchPotential,
+    };
+}
+
+function comparePlannerPreviewMachineChoices(left = {}, right = {}) {
+    if (left.groupingTier !== right.groupingTier) {
+        return left.groupingTier - right.groupingTier;
+    }
+    if (right.sameProductCount !== left.sameProductCount) {
+        return right.sameProductCount - left.sameProductCount;
+    }
+    if (right.sameProductQuantity !== left.sameProductQuantity) {
+        return right.sameProductQuantity - left.sameProductQuantity;
+    }
+    if (right.sameMaterialCount !== left.sameMaterialCount) {
+        return right.sameMaterialCount - left.sameMaterialCount;
+    }
+    if (right.sameMaterialQuantity !== left.sameMaterialQuantity) {
+        return right.sameMaterialQuantity - left.sameMaterialQuantity;
+    }
+    if (left.startMinutes !== right.startMinutes) {
+        return left.startMinutes - right.startMinutes;
+    }
+    if (left.endMinutes !== right.endMinutes) {
+        return left.endMinutes - right.endMinutes;
+    }
+    if (left.preferred !== right.preferred) {
+        return left.preferred ? -1 : 1;
+    }
+    if (left.affinityRank !== right.affinityRank) {
+        return left.affinityRank - right.affinityRank;
+    }
+    if (left.priority !== right.priority) {
+        return left.priority - right.priority;
+    }
+    if (right.slackMinutes !== left.slackMinutes) {
+        return right.slackMinutes - left.slackMinutes;
+    }
+    return left.order - right.order;
+}
+
 function getPlannerPreviewMachineChoicesForRow(assignments = [], priorityRow = {}, remainingRows = [], scheduleUntilMinutes = 0, options = {}) {
     const quantity = Number(priorityRow.shortfallQuantity || 0);
     if (quantity <= 0) {
@@ -1169,39 +1270,17 @@ function getPlannerPreviewMachineChoicesForRow(assignments = [], priorityRow = {
     const candidateMachines = getPlannerPreviewCandidateMachines(priorityRow)
         .filter((machine) => !equipmentFilter || machine.equipment === equipmentFilter);
 
-    const productRecord = getPlannerPreviewProductRecord(priorityRow);
-
     let machineChoices = candidateMachines
-        .map((machine) => {
-            const productForEquipment = { ...productRecord, equipment: machine.equipment };
-            const estimatedTime = calculateProductionTime(productForEquipment, quantity, machine.equipment);
-            const timing = findPlannerPreviewAvailableWindow(
-                assignments,
-                machine.equipment,
-                estimatedTime.totalSeconds / 60,
-                { earliestStartMinutes: options.earliestStartMinutes }
-            );
-            const boxes = calculateBoxesNeeded(productForEquipment, quantity, machine.equipment);
-            const affinityRank = getPlannerPreviewAffinityRank(
-                assignments,
-                machine.equipment,
-                priorityRow,
-                timing.startTime,
-            );
-            const batchPotential = getPlannerPreviewMachineBatchPotential(remainingRows, priorityRow, machine.equipment);
-
-            return {
-                ...machine,
-                startMinutes: timing.startTime,
-                endMinutes: roundPlannerPreviewMinutesToInterval(timing.endTime, 'ceil'),
-                estimatedTime,
-                boxes,
-                affinityRank,
-                slackMinutes: scheduleUntilMinutes - roundPlannerPreviewMinutesToInterval(timing.endTime, 'ceil'),
-                ...batchPotential,
-            };
-        })
-        .filter((machine) => machine.endMinutes <= scheduleUntilMinutes);
+        .map((machine) => buildPlannerPreviewMachineChoice(
+            assignments,
+            priorityRow,
+            quantity,
+            remainingRows,
+            scheduleUntilMinutes,
+            machine,
+            { earliestStartMinutes: options.earliestStartMinutes }
+        ))
+        .filter((machine) => machine && machine.endMinutes <= scheduleUntilMinutes);
 
     const earliestStartMinutes = machineChoices.reduce((earliestMinutes, machine) => (
         Math.min(earliestMinutes, machine.startMinutes)
@@ -1223,48 +1302,118 @@ function getPlannerPreviewMachineChoicesForRow(assignments = [], priorityRow = {
         };
     });
 
-    return machineChoices
-        .sort((left, right) => {
-            if (left.groupingTier !== right.groupingTier) {
-                return left.groupingTier - right.groupingTier;
-            }
-            if (right.sameProductCount !== left.sameProductCount) {
-                return right.sameProductCount - left.sameProductCount;
-            }
-            if (right.sameProductQuantity !== left.sameProductQuantity) {
-                return right.sameProductQuantity - left.sameProductQuantity;
-            }
-            if (right.sameMaterialCount !== left.sameMaterialCount) {
-                return right.sameMaterialCount - left.sameMaterialCount;
-            }
-            if (right.sameMaterialQuantity !== left.sameMaterialQuantity) {
-                return right.sameMaterialQuantity - left.sameMaterialQuantity;
-            }
-            if (left.startMinutes !== right.startMinutes) {
-                return left.startMinutes - right.startMinutes;
-            }
-            if (left.endMinutes !== right.endMinutes) {
-                return left.endMinutes - right.endMinutes;
-            }
-            if (left.preferred !== right.preferred) {
-                return left.preferred ? -1 : 1;
-            }
-            if (left.affinityRank !== right.affinityRank) {
-                return left.affinityRank - right.affinityRank;
-            }
-            if (left.priority !== right.priority) {
-                return left.priority - right.priority;
-            }
-            if (right.slackMinutes !== left.slackMinutes) {
-                return right.slackMinutes - left.slackMinutes;
-            }
-            return left.order - right.order;
-        });
+    return machineChoices.sort(comparePlannerPreviewMachineChoices);
 }
 
-function buildPlannerPreviewAssignment(priorityRow = {}, machineChoice = {}) {
-    const productRecord = getPlannerPreviewProductRecord(priorityRow);
+function getPlannerPreviewPartialMachineChoicesForRow(assignments = [], priorityRow = {}, remainingRows = [], scheduleUntilMinutes = 0, options = {}) {
     const quantity = Number(priorityRow.shortfallQuantity || 0);
+    if (quantity <= 0) {
+        return [];
+    }
+
+    const equipmentFilter = String(options.equipmentFilter || '').trim();
+    const candidateMachines = getPlannerPreviewCandidateMachines(priorityRow)
+        .filter((machine) => !equipmentFilter || machine.equipment === equipmentFilter);
+    const productRecord = getPlannerPreviewProductRecord(priorityRow);
+
+    let machineChoices = candidateMachines
+        .map((machine) => {
+            const startTiming = findPlannerPreviewAvailableWindow(
+                assignments,
+                machine.equipment,
+                0,
+                { earliestStartMinutes: options.earliestStartMinutes }
+            );
+            const startMinutes = startTiming.startTime;
+            if (!Number.isFinite(startMinutes) || startMinutes >= scheduleUntilMinutes) {
+                return null;
+            }
+
+            const occupiedWindows = getPlannerPreviewOccupiedWindows(assignments, machine.equipment);
+            const nextOccupiedWindow = occupiedWindows.find((window) => window.startMinutes > startMinutes);
+            const availableWindowEnd = Math.min(
+                scheduleUntilMinutes,
+                nextOccupiedWindow ? nextOccupiedWindow.startMinutes : scheduleUntilMinutes
+            );
+            const availableProductionMinutes = getPlannerPreviewAvailableProductionMinutes(
+                startMinutes,
+                availableWindowEnd,
+                machine.equipment
+            );
+            if (availableProductionMinutes <= 0) {
+                return null;
+            }
+
+            const secondsPerPiece = resolvePlannerCycleTimeSeconds(productRecord, machine.equipment);
+            if (!Number.isFinite(secondsPerPiece) || secondsPerPiece <= 0) {
+                return null;
+            }
+
+            const partialQuantity = Math.min(
+                quantity,
+                Math.floor((availableProductionMinutes * 60) / secondsPerPiece)
+            );
+            if (partialQuantity <= 0) {
+                return null;
+            }
+
+            const machineChoice = buildPlannerPreviewMachineChoice(
+                assignments,
+                priorityRow,
+                partialQuantity,
+                remainingRows,
+                scheduleUntilMinutes,
+                machine,
+                { earliestStartMinutes: startMinutes }
+            );
+            if (!machineChoice || machineChoice.endMinutes > scheduleUntilMinutes) {
+                return null;
+            }
+
+            return {
+                ...machineChoice,
+                partialQuantity,
+                availableProductionMinutes,
+            };
+        })
+        .filter(Boolean);
+
+    const earliestStartMinutes = machineChoices.reduce((earliestMinutes, machine) => (
+        Math.min(earliestMinutes, machine.startMinutes)
+    ), Number.POSITIVE_INFINITY);
+    const groupingDelayLimitMinutes = getPlannerPreviewGroupingDelayLimitMinutes();
+
+    machineChoices = machineChoices.map((machine) => {
+        const startDelayMinutes = Number.isFinite(earliestStartMinutes)
+            ? Math.max(0, machine.startMinutes - earliestStartMinutes)
+            : 0;
+        const canUseGroupingPreference = startDelayMinutes <= groupingDelayLimitMinutes;
+
+        return {
+            ...machine,
+            startDelayMinutes,
+            groupingTier: canUseGroupingPreference
+                ? getPlannerPreviewGroupingTier(machine.affinityRank)
+                : 2,
+        };
+    });
+
+    return machineChoices.sort((left, right) => {
+        if (right.partialQuantity !== left.partialQuantity) {
+            return right.partialQuantity - left.partialQuantity;
+        }
+        if (left.startMinutes !== right.startMinutes) {
+            return left.startMinutes - right.startMinutes;
+        }
+        return comparePlannerPreviewMachineChoices(left, right);
+    });
+}
+
+function buildPlannerPreviewAssignment(priorityRow = {}, machineChoice = {}, quantityOverride = null) {
+    const productRecord = getPlannerPreviewProductRecord(priorityRow);
+    const quantity = Number.isFinite(Number(quantityOverride))
+        ? Math.max(0, Number(quantityOverride))
+        : Number(priorityRow.shortfallQuantity || 0);
 
     return {
         ...productRecord,
@@ -1358,7 +1507,30 @@ function buildPlannerPreviewSimulation(preview = {}) {
         );
         const selectedMachine = fitChoices[0];
         if (!selectedMachine) {
-            queueUnscheduledPreviewRow(priorityRow, 'time-limit');
+            const partialChoices = getPlannerPreviewPartialMachineChoicesForRow(
+                assignments,
+                priorityRow,
+                pendingRows,
+                scheduleUntilMinutes
+            );
+            const partialMachine = partialChoices[0];
+            const partialQuantity = Number(partialMachine?.partialQuantity || 0);
+
+            if (!partialMachine || partialQuantity <= 0) {
+                queueUnscheduledPreviewRow(priorityRow, 'time-limit');
+                continue;
+            }
+
+            assignments.push(buildPlannerPreviewAssignment(priorityRow, partialMachine, partialQuantity));
+            scheduledShortfallQuantity += partialQuantity;
+
+            const remainingQuantity = Math.max(0, shortageQuantity - partialQuantity);
+            if (remainingQuantity > 0) {
+                pendingRows.unshift({
+                    ...priorityRow,
+                    shortfallQuantity: remainingQuantity,
+                });
+            }
             continue;
         }
 
