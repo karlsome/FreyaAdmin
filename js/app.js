@@ -7204,56 +7204,96 @@ function loadPage(page) {
                           </div>
 
                           <div class="p-6">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" for="inventorySnapshotDateInput" data-i18n="inventorySnapshotDate">Date</label>
-                                <input
-                                  type="date"
-                                  id="inventorySnapshotDateInput"
-                                  class="w-full p-3 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                  onchange="updateInventorySnapshotModalPreview()">
+                            <div id="inventorySnapshotRequestSection" class="mb-6 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                              <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                                <div class="flex-1">
+                                  <label class="block text-sm font-medium text-indigo-900 mb-2" for="inventorySnapshotRequestNumberInput" data-i18n="inventorySnapshotRequestTitle">Before Request Number</label>
+                                  <select
+                                    id="inventorySnapshotRequestNumberInput"
+                                    class="w-full p-3 border border-indigo-200 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                    onchange="handleInventorySnapshotRequestInput(this.value)">
+                                    <option value="" data-i18n="inventorySnapshotRequestLoading">Loading requests...</option>
+                                  </select>
+                                  <p class="mt-2 text-xs text-indigo-700" data-i18n="inventorySnapshotRequestHelp">Choose a NODA request number and load the inventory right before its first picking transaction.</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  id="inventorySnapshotResetRequestBtn"
+                                  onclick="resetInventorySnapshotRequestSelection()"
+                                  class="hidden inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-4 py-3 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-50">
+                                  <i class="ri-close-circle-line mr-2"></i><span data-i18n="inventorySnapshotResetRequest">Reset Request</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            <div id="inventorySnapshotShowRequestSectionRow" class="hidden mb-6">
+                              <button
+                                type="button"
+                                onclick="showInventorySnapshotRequestSelector()"
+                                class="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-50">
+                                <i class="ri-arrow-go-back-line mr-2"></i><span data-i18n="inventorySnapshotShowRequestSelector">Show Request Picker</span>
+                              </button>
+                            </div>
+
+                            <div id="inventorySnapshotManualSection">
+                              <div class="mb-6 flex items-center gap-3">
+                                <div class="h-px flex-1 bg-gray-200"></div>
+                                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400" data-i18n="inventorySnapshotManualDivider">Or choose a time</span>
+                                <div class="h-px flex-1 bg-gray-200"></div>
                               </div>
 
-                              <div>
-                                <div class="flex items-center justify-between gap-3 mb-2">
-                                  <label class="block text-sm font-medium text-gray-700" for="inventorySnapshotTimeSlider" data-i18n="inventorySnapshotSlider">Time Slider</label>
-                                  <span id="inventorySnapshotSelectedTime" class="px-3 py-1 rounded-full bg-gray-100 text-sm font-semibold text-gray-700">08:00</span>
-                                </div>
-                                <input
-                                  type="range"
-                                  id="inventorySnapshotTimeSlider"
-                                  min="0"
-                                  max="18"
-                                  step="1"
-                                  value="0"
-                                  class="mt-2 h-2 w-full cursor-pointer appearance-none rounded-full bg-gray-200 accent-indigo-600"
-                                  oninput="handleInventorySnapshotSliderInput(this.value)">
-                                <div class="mt-2 flex items-center justify-between text-xs text-gray-500">
-                                  <span>08:00</span>
-                                  <span>12:30</span>
-                                  <span>17:00</span>
-                                </div>
-
-                                <div class="mt-5">
-                                  <label class="block text-sm font-medium text-gray-700 mb-2" for="inventorySnapshotTimeInput" data-i18n="inventorySnapshotTime">Time</label>
+                              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                  <label class="block text-sm font-medium text-gray-700 mb-2" for="inventorySnapshotDateInput" data-i18n="inventorySnapshotDate">Date</label>
                                   <input
-                                    type="time"
-                                    id="inventorySnapshotTimeInput"
-                                    min="08:00"
-                                    max="17:00"
-                                    step="1800"
+                                    type="date"
+                                    id="inventorySnapshotDateInput"
                                     class="w-full p-3 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                    onchange="handleInventorySnapshotTimeInput(this.value)"
-                                    onblur="handleInventorySnapshotTimeInput(this.value)">
+                                    onchange="handleInventorySnapshotDateInput(this.value)">
                                 </div>
 
-                                <p class="mt-2 text-xs text-gray-500" data-i18n="inventorySnapshotRangeHelp">Choose a 30-minute slot from 08:00 to 17:00. Drag the slider or type the exact time.</p>
+                                <div>
+                                  <div class="flex items-center justify-between gap-3 mb-2">
+                                    <label class="block text-sm font-medium text-gray-700" for="inventorySnapshotTimeSlider" data-i18n="inventorySnapshotSlider">Time Slider</label>
+                                    <span id="inventorySnapshotSelectedTime" class="px-3 py-1 rounded-full bg-gray-100 text-sm font-semibold text-gray-700">08:00</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    id="inventorySnapshotTimeSlider"
+                                    min="0"
+                                    max="18"
+                                    step="1"
+                                    value="0"
+                                    class="mt-2 h-2 w-full cursor-pointer appearance-none rounded-full bg-gray-200 accent-indigo-600"
+                                    oninput="handleInventorySnapshotSliderInput(this.value)">
+                                  <div class="mt-2 flex items-center justify-between text-xs text-gray-500">
+                                    <span>08:00</span>
+                                    <span>12:30</span>
+                                    <span>17:00</span>
+                                  </div>
+
+                                  <div class="mt-5">
+                                    <label class="block text-sm font-medium text-gray-700 mb-2" for="inventorySnapshotTimeInput" data-i18n="inventorySnapshotTime">Time</label>
+                                    <input
+                                      type="time"
+                                      id="inventorySnapshotTimeInput"
+                                      min="08:00"
+                                      max="17:00"
+                                      step="1800"
+                                      class="w-full p-3 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                      onchange="handleInventorySnapshotTimeInput(this.value)"
+                                      onblur="handleInventorySnapshotTimeInput(this.value)">
+                                  </div>
+
+                                  <p class="mt-2 text-xs text-gray-500" data-i18n="inventorySnapshotRangeHelp">Choose a 30-minute slot from 08:00 to 17:00. Drag the slider or type the exact time.</p>
+                                </div>
                               </div>
                             </div>
 
                             <div class="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
                               <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600" data-i18n="inventorySnapshotSelectedMoment">Selected Moment</p>
                               <p id="inventorySnapshotPreview" class="mt-2 text-lg font-semibold text-gray-900">--</p>
+                              <p id="inventorySnapshotPreviewMeta" class="mt-2 text-sm text-gray-500"></p>
                             </div>
                           </div>
 

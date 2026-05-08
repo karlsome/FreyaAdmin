@@ -11,6 +11,9 @@ let inventoryThresholdSummary = createDefaultInventoryThresholdSummary();
 let inventoryThresholdStatusFilter = 'all';
 let inventoryThresholdConfig = getDefaultInventoryThresholdConfig();
 let inventorySnapshotState = createDefaultInventorySnapshotState();
+let inventorySnapshotPendingRequestResolution = null;
+let inventorySnapshotRequestOptions = [];
+let inventorySnapshotModalMode = 'none';
 
 const INVENTORY_SNAPSHOT_START_MINUTES = 8 * 60;
 const INVENTORY_SNAPSHOT_END_MINUTES = 17 * 60;
@@ -51,7 +54,10 @@ function createDefaultInventorySnapshotState() {
     return {
         snapshotAt: null,
         date: '',
-        time: ''
+        time: '',
+        mode: 'manual',
+        requestNumber: '',
+        pickedAt: null
     };
 }
 
@@ -131,7 +137,12 @@ function getInventorySnapshotDefaultSelection() {
 }
 
 function getInventorySnapshotSelection() {
-    if (inventorySnapshotState.snapshotAt && inventorySnapshotState.date && inventorySnapshotState.time) {
+    if (
+        inventorySnapshotState.mode !== 'request'
+        && inventorySnapshotState.snapshotAt
+        && inventorySnapshotState.date
+        && inventorySnapshotState.time
+    ) {
         return {
             date: inventorySnapshotState.date,
             time: inventorySnapshotState.time
@@ -155,7 +166,10 @@ function setInventorySnapshotState(dateValue, timeValue) {
     inventorySnapshotState = {
         snapshotAt: snapshotDate.toISOString(),
         date: dateValue,
-        time: normalizedTime
+        time: normalizedTime,
+        mode: 'manual',
+        requestNumber: '',
+        pickedAt: null
     };
 
     return true;
@@ -174,6 +188,258 @@ function formatInventorySnapshotDisplayValue(dateValue, timeValue) {
         hour: '2-digit',
         minute: '2-digit'
     });
+}
+
+function formatInventorySnapshotIsoDisplayValue(snapshotAt) {
+    const snapshotDate = new Date(snapshotAt || '');
+    if (Number.isNaN(snapshotDate.getTime())) {
+        return '';
+    }
+
+    return snapshotDate.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function formatInventorySnapshotIsoTimeValue(snapshotAt) {
+    const snapshotDate = new Date(snapshotAt || '');
+    if (Number.isNaN(snapshotDate.getTime())) {
+        return '';
+    }
+
+    return `${String(snapshotDate.getHours()).padStart(2, '0')}:${String(snapshotDate.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatInventorySnapshotRequestOptionLabel(requestOption = {}) {
+    const requestNumber = String(requestOption?.requestNumber || '').trim();
+    const deliveryDate = String(requestOption?.deliveryDate || requestOption?.pickupDate || '').trim();
+    const status = String(requestOption?.status || '').trim();
+    const completedCount = Number(requestOption?.completedCount) || 0;
+    const totalItems = Number(requestOption?.totalItems) || 0;
+    const pieces = [requestNumber];
+
+    if (deliveryDate) {
+        pieces.push(deliveryDate);
+    }
+
+    if (status) {
+        pieces.push(status);
+    }
+
+    if (totalItems > 0) {
+        pieces.push(`${completedCount}/${totalItems}`);
+    }
+
+    return pieces.join(' | ');
+}
+
+function renderInventorySnapshotRequestOptions(selectedRequestNumber = '') {
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+    if (!requestSelect) return;
+
+    const _t = typeof t === 'function' ? t : (key) => key;
+    const normalizedSelectedRequest = String(selectedRequestNumber || '').trim();
+    const options = [
+        `<option value="">${escapeInventoryAttribute(_t('inventorySnapshotRequestPlaceholder'))}</option>`
+    ];
+
+    inventorySnapshotRequestOptions.forEach((requestOption) => {
+        const requestNumber = String(requestOption?.requestNumber || '').trim();
+        if (!requestNumber) {
+            return;
+        }
+
+        options.push(
+            `<option value="${escapeInventoryAttribute(requestNumber)}">${escapeInventoryAttribute(formatInventorySnapshotRequestOptionLabel(requestOption))}</option>`
+        );
+    });
+
+    requestSelect.innerHTML = options.join('');
+    requestSelect.disabled = false;
+    requestSelect.value = normalizedSelectedRequest && inventorySnapshotRequestOptions.some((requestOption) => requestOption.requestNumber === normalizedSelectedRequest)
+        ? normalizedSelectedRequest
+        : '';
+}
+
+function setInventorySnapshotRequestSelectLoadingState(message) {
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+    if (!requestSelect) return;
+
+    requestSelect.disabled = true;
+    requestSelect.innerHTML = `<option value="">${escapeInventoryAttribute(message)}</option>`;
+    requestSelect.value = '';
+}
+
+async function loadInventorySnapshotRequestOptions({ force = false } = {}) {
+    const selectedRequestNumber = inventorySnapshotState.mode === 'request'
+        ? (inventorySnapshotState.requestNumber || '')
+        : '';
+
+    if (!force && inventorySnapshotRequestOptions.length > 0) {
+        renderInventorySnapshotRequestOptions(selectedRequestNumber);
+        updateInventorySnapshotModalPreview();
+        return;
+    }
+
+    const _t = typeof t === 'function' ? t : (key) => key;
+    setInventorySnapshotRequestSelectLoadingState(_t('inventorySnapshotRequestLoading'));
+
+    try {
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'getSnapshotRequestOptions'
+            })
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.success || !Array.isArray(result.data)) {
+            throw new Error(result.error || _t('inventorySnapshotRequestLoadFailed'));
+        }
+
+        inventorySnapshotRequestOptions = result.data
+            .map((requestOption) => ({
+                ...requestOption,
+                requestNumber: String(requestOption?.requestNumber || '').trim()
+            }))
+            .filter((requestOption) => requestOption.requestNumber);
+
+        if (inventorySnapshotRequestOptions.length === 0) {
+            setInventorySnapshotRequestSelectLoadingState(_t('inventorySnapshotRequestEmpty'));
+            return;
+        }
+
+        renderInventorySnapshotRequestOptions(selectedRequestNumber);
+        updateInventorySnapshotModalPreview();
+    } catch (error) {
+        console.error('❌ Error loading inventory snapshot request options:', error);
+        inventorySnapshotRequestOptions = [];
+        setInventorySnapshotRequestSelectLoadingState(_t('inventorySnapshotRequestLoadFailed'));
+    }
+}
+
+function getInventorySnapshotResolvedRequestValue() {
+    return String(
+        inventorySnapshotPendingRequestResolution?.requestNumber
+        || inventorySnapshotPendingRequestResolution?.requestReference
+        || ''
+    ).trim();
+}
+
+function isInventorySnapshotRequestLoaded() {
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+    const selectedRequestValue = String(requestSelect?.value || '').trim();
+    const resolvedRequestValue = getInventorySnapshotResolvedRequestValue();
+
+    return Boolean(
+        inventorySnapshotPendingRequestResolution
+        && resolvedRequestValue
+        && (!selectedRequestValue || selectedRequestValue === resolvedRequestValue)
+    );
+}
+
+function updateInventorySnapshotModalLayout() {
+    const requestSection = document.getElementById('inventorySnapshotRequestSection');
+    const requestSwitcherRow = document.getElementById('inventorySnapshotShowRequestSectionRow');
+    const manualSection = document.getElementById('inventorySnapshotManualSection');
+    const resetRequestButton = document.getElementById('inventorySnapshotResetRequestBtn');
+    const requestLoaded = isInventorySnapshotRequestLoaded();
+
+    if (requestSection) {
+        requestSection.classList.toggle('hidden', inventorySnapshotModalMode === 'manual');
+    }
+
+    if (requestSwitcherRow) {
+        requestSwitcherRow.classList.toggle('hidden', inventorySnapshotModalMode !== 'manual');
+    }
+
+    if (manualSection) {
+        manualSection.classList.toggle('hidden', inventorySnapshotModalMode === 'request' && requestLoaded);
+    }
+
+    if (resetRequestButton) {
+        resetRequestButton.classList.toggle('hidden', !requestLoaded);
+    }
+}
+
+function setInventorySnapshotModalMode(nextMode = 'none') {
+    inventorySnapshotModalMode = ['none', 'request', 'manual'].includes(nextMode)
+        ? nextMode
+        : 'none';
+
+    updateInventorySnapshotModalLayout();
+}
+
+function setInventorySnapshotRequestLoadingState(isLoading) {
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+    const resetRequestButton = document.getElementById('inventorySnapshotResetRequestBtn');
+
+    if (requestSelect && inventorySnapshotRequestOptions.length > 0) {
+        requestSelect.disabled = Boolean(isLoading);
+        requestSelect.classList.toggle('opacity-70', Boolean(isLoading));
+        requestSelect.classList.toggle('cursor-not-allowed', Boolean(isLoading));
+    }
+
+    if (resetRequestButton) {
+        resetRequestButton.disabled = Boolean(isLoading);
+        resetRequestButton.classList.toggle('opacity-70', Boolean(isLoading));
+        resetRequestButton.classList.toggle('cursor-not-allowed', Boolean(isLoading));
+    }
+}
+
+function clearInventorySnapshotRequestSelection({ nextMode = 'none' } = {}) {
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+    if (requestSelect) {
+        requestSelect.value = '';
+    }
+
+    inventorySnapshotPendingRequestResolution = null;
+    setInventorySnapshotModalMode(nextMode);
+}
+
+function activateInventorySnapshotManualMode() {
+    clearInventorySnapshotRequestSelection({ nextMode: 'manual' });
+}
+
+window.resetInventorySnapshotRequestSelection = function() {
+    clearInventorySnapshotRequestSelection({ nextMode: 'none' });
+    updateInventorySnapshotModalPreview();
+};
+
+window.showInventorySnapshotRequestSelector = function() {
+    setInventorySnapshotModalMode('none');
+    updateInventorySnapshotModalPreview();
+
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+    if (requestSelect) {
+        requestSelect.focus();
+    }
+};
+
+function setInventorySnapshotStateFromResolvedRequest(resolution = {}) {
+    const snapshotDate = new Date(resolution?.snapshotAt || '');
+    if (Number.isNaN(snapshotDate.getTime())) {
+        return false;
+    }
+
+    const pickedAtDate = resolution?.pickedAt ? new Date(resolution.pickedAt) : null;
+    inventorySnapshotState = {
+        snapshotAt: snapshotDate.toISOString(),
+        date: formatInventoryLocalDateValue(snapshotDate),
+        time: formatInventorySnapshotIsoTimeValue(snapshotDate),
+        mode: 'request',
+        requestNumber: String(resolution?.requestNumber || resolution?.requestReference || '').trim(),
+        pickedAt: pickedAtDate && !Number.isNaN(pickedAtDate.getTime()) ? pickedAtDate.toISOString() : null
+    };
+
+    return true;
 }
 
 function renderInventorySnapshotBanner() {
@@ -206,7 +472,12 @@ function renderInventorySnapshotBanner() {
         return;
     }
 
-    const snapshotLabel = formatInventorySnapshotDisplayValue(inventorySnapshotState.date, inventorySnapshotState.time);
+    const isRequestSnapshot = inventorySnapshotState.mode === 'request' && inventorySnapshotState.requestNumber;
+    const snapshotLabel = isRequestSnapshot
+        ? formatInventorySnapshotIsoDisplayValue(inventorySnapshotState.snapshotAt)
+        : formatInventorySnapshotDisplayValue(inventorySnapshotState.date, inventorySnapshotState.time);
+    const requestLabel = escapeInventoryAttribute(inventorySnapshotState.requestNumber);
+    const pickedAtLabel = formatInventorySnapshotIsoDisplayValue(inventorySnapshotState.pickedAt) || snapshotLabel;
     container.innerHTML = `
         <div class="rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 shadow-sm">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -216,7 +487,12 @@ function renderInventorySnapshotBanner() {
                     </div>
                     <div>
                         <div class="inline-flex items-center rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white">${_t('inventorySnapshotActive')}</div>
-                        <p class="mt-3 text-sm text-indigo-950">${_t('inventorySnapshotCurrentViewAt')} <span class="font-semibold">${snapshotLabel}</span>.</p>
+                        ${isRequestSnapshot
+                            ? `<p class="mt-3 text-sm text-indigo-950">${_t('inventorySnapshotCurrentViewBeforeRequest')} <span class="font-semibold">${requestLabel}</span>.</p>`
+                            : `<p class="mt-3 text-sm text-indigo-950">${_t('inventorySnapshotCurrentViewAt')} <span class="font-semibold">${snapshotLabel}</span>.</p>`}
+                        ${isRequestSnapshot && pickedAtLabel
+                            ? `<p class="mt-2 text-xs text-indigo-800">${_t('inventorySnapshotResolvedPickAt')} <span class="font-semibold">${pickedAtLabel}</span>.</p>`
+                            : ''}
                     </div>
                 </div>
                 <div class="flex flex-wrap items-center gap-3">
@@ -235,9 +511,33 @@ function renderInventorySnapshotBanner() {
 }
 
 function syncInventorySnapshotModalFields(selection = getInventorySnapshotSelection()) {
+    const _t = typeof t === 'function' ? t : (key) => key;
     const dateInput = document.getElementById('inventorySnapshotDateInput');
     const timeInput = document.getElementById('inventorySnapshotTimeInput');
     const sliderInput = document.getElementById('inventorySnapshotTimeSlider');
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+
+    inventorySnapshotModalMode = inventorySnapshotState.mode === 'request' && inventorySnapshotState.requestNumber
+        ? 'request'
+        : (inventorySnapshotState.mode === 'manual' && inventorySnapshotState.snapshotAt ? 'manual' : 'none');
+
+    inventorySnapshotPendingRequestResolution = inventorySnapshotState.mode === 'request' && inventorySnapshotState.snapshotAt
+        ? {
+            requestReference: inventorySnapshotState.requestNumber || '',
+            requestNumber: inventorySnapshotState.requestNumber || '',
+            snapshotAt: inventorySnapshotState.snapshotAt,
+            pickedAt: inventorySnapshotState.pickedAt || null
+        }
+        : null;
+
+    if (requestSelect) {
+        const selectedRequestNumber = inventorySnapshotState.mode === 'request' ? (inventorySnapshotState.requestNumber || '') : '';
+        if (inventorySnapshotRequestOptions.length > 0) {
+            renderInventorySnapshotRequestOptions(selectedRequestNumber);
+        } else {
+            setInventorySnapshotRequestSelectLoadingState(_t('inventorySnapshotRequestLoading'));
+        }
+    }
 
     if (dateInput) {
         dateInput.value = selection.date;
@@ -251,17 +551,51 @@ function syncInventorySnapshotModalFields(selection = getInventorySnapshotSelect
         sliderInput.value = String(getInventorySnapshotStepValue(selection.time));
     }
 
+    setInventorySnapshotRequestLoadingState(false);
+    updateInventorySnapshotModalLayout();
     updateInventorySnapshotModalPreview();
 }
 
 window.updateInventorySnapshotModalPreview = function() {
+    const _t = typeof t === 'function' ? t : (key) => key;
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
     const dateInput = document.getElementById('inventorySnapshotDateInput');
     const timeInput = document.getElementById('inventorySnapshotTimeInput');
     const sliderInput = document.getElementById('inventorySnapshotTimeSlider');
     const selectedTime = document.getElementById('inventorySnapshotSelectedTime');
     const preview = document.getElementById('inventorySnapshotPreview');
+    const previewMeta = document.getElementById('inventorySnapshotPreviewMeta');
 
     if (!timeInput || !selectedTime || !preview) return;
+
+    const requestValue = String(requestSelect?.value || '').trim();
+    if (requestValue) {
+        const resolvedRequestValue = getInventorySnapshotResolvedRequestValue();
+
+        if (inventorySnapshotPendingRequestResolution && requestValue === resolvedRequestValue) {
+            const requestSnapshotLabel = formatInventorySnapshotIsoDisplayValue(inventorySnapshotPendingRequestResolution.snapshotAt);
+            const pickedAtLabel = formatInventorySnapshotIsoDisplayValue(inventorySnapshotPendingRequestResolution.pickedAt) || requestSnapshotLabel;
+
+            selectedTime.textContent = formatInventorySnapshotIsoTimeValue(inventorySnapshotPendingRequestResolution.snapshotAt) || '--:--';
+            preview.textContent = `${_t('inventorySnapshotPreviewBeforeRequest')} ${requestValue}`;
+
+            if (previewMeta) {
+                previewMeta.textContent = pickedAtLabel
+                    ? `${_t('inventorySnapshotResolvedPickAt')} ${pickedAtLabel}.`
+                    : '';
+            }
+            return;
+        }
+
+        selectedTime.textContent = '--:--';
+        preview.textContent = '--';
+        if (previewMeta) {
+            previewMeta.textContent = requestSelect?.disabled
+                ? _t('inventorySnapshotResolvingRequest')
+                : _t('inventorySnapshotRequestResolveHint');
+        }
+        return;
+    }
 
     const normalizedTime = normalizeInventorySnapshotTimeValue(timeInput.value);
     if (normalizedTime && timeInput.value !== normalizedTime) {
@@ -273,6 +607,9 @@ window.updateInventorySnapshotModalPreview = function() {
     }
 
     selectedTime.textContent = normalizedTime || '--:--';
+    if (previewMeta) {
+        previewMeta.textContent = '';
+    }
 
     if (dateInput?.value && normalizedTime) {
         preview.textContent = formatInventorySnapshotDisplayValue(dateInput.value, normalizedTime);
@@ -282,10 +619,21 @@ window.updateInventorySnapshotModalPreview = function() {
     preview.textContent = '--';
 };
 
+window.handleInventorySnapshotDateInput = function(dateValue) {
+    const dateInput = document.getElementById('inventorySnapshotDateInput');
+    if (dateInput) {
+        dateInput.value = dateValue;
+    }
+
+    activateInventorySnapshotManualMode();
+    updateInventorySnapshotModalPreview();
+};
+
 window.handleInventorySnapshotSliderInput = function(stepValue) {
     const timeInput = document.getElementById('inventorySnapshotTimeInput');
     if (!timeInput) return;
 
+    activateInventorySnapshotManualMode();
     timeInput.value = getInventorySnapshotTimeFromStep(stepValue);
     updateInventorySnapshotModalPreview();
 };
@@ -299,15 +647,97 @@ window.handleInventorySnapshotTimeInput = function(timeValue) {
         timeInput.value = normalizedTime;
     }
 
+    activateInventorySnapshotManualMode();
     updateInventorySnapshotModalPreview();
 };
 
-window.openInventorySnapshotModal = function() {
+window.handleInventorySnapshotRequestInput = async function(requestValue) {
+    const normalizedValue = String(requestValue || '').trim();
+    const resolvedRequestValue = getInventorySnapshotResolvedRequestValue();
+
+    if (!normalizedValue) {
+        clearInventorySnapshotRequestSelection({ nextMode: 'none' });
+        updateInventorySnapshotModalPreview();
+        return;
+    }
+
+    if (inventorySnapshotPendingRequestResolution && normalizedValue === resolvedRequestValue) {
+        setInventorySnapshotModalMode('request');
+        updateInventorySnapshotModalPreview();
+        return;
+    }
+
+    inventorySnapshotPendingRequestResolution = null;
+    setInventorySnapshotModalMode('request');
+    updateInventorySnapshotModalPreview();
+    await resolveInventorySnapshotRequest();
+};
+
+window.resolveInventorySnapshotRequest = async function() {
+    const _t = typeof t === 'function' ? t : (key) => key;
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
+    const requestReference = String(requestSelect?.value || '').trim();
+
+    if (!requestReference) {
+        alert(_t('inventorySnapshotRequestRequired'));
+        return;
+    }
+
+    try {
+        setInventorySnapshotRequestLoadingState(true);
+        inventorySnapshotPendingRequestResolution = null;
+        updateInventorySnapshotModalPreview();
+
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'resolveSnapshotForRequest',
+                requestReference
+            })
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.success || !result.data?.snapshotAt) {
+            throw new Error(result.error || _t('inventorySnapshotRequestNotFound'));
+        }
+
+        inventorySnapshotPendingRequestResolution = {
+            requestReference,
+            requestNumber: String(result.data.requestNumber || requestReference).trim(),
+            snapshotAt: result.data.snapshotAt,
+            pickedAt: result.data.pickedAt || null
+        };
+
+        if (requestSelect) {
+            requestSelect.value = inventorySnapshotPendingRequestResolution.requestNumber;
+        }
+
+        setInventorySnapshotModalMode('request');
+        updateInventorySnapshotModalPreview();
+    } catch (error) {
+        console.error('❌ Error resolving inventory snapshot request:', error);
+        if (requestSelect) {
+            requestSelect.value = '';
+        }
+        inventorySnapshotPendingRequestResolution = null;
+        setInventorySnapshotModalMode('none');
+        updateInventorySnapshotModalPreview();
+        alert(error.message || _t('inventorySnapshotRequestNotFound'));
+    } finally {
+        setInventorySnapshotRequestLoadingState(false);
+    }
+};
+
+window.openInventorySnapshotModal = async function() {
     const modal = document.getElementById('inventorySnapshotModal');
     if (!modal) return;
 
     syncInventorySnapshotModalFields();
     modal.classList.remove('hidden');
+    await loadInventorySnapshotRequestOptions();
 };
 
 window.closeInventorySnapshotModal = function() {
@@ -319,10 +749,36 @@ window.closeInventorySnapshotModal = function() {
 
 window.applyInventorySnapshot = function() {
     const _t = typeof t === 'function' ? t : (key) => key;
+    const requestSelect = document.getElementById('inventorySnapshotRequestNumberInput');
     const dateInput = document.getElementById('inventorySnapshotDateInput');
     const timeInput = document.getElementById('inventorySnapshotTimeInput');
+    const requestReference = String(requestSelect?.value || '').trim();
     const dateValue = String(dateInput?.value || '').trim();
     const normalizedTime = normalizeInventorySnapshotTimeValue(timeInput?.value || '');
+
+    if (requestReference) {
+        const resolvedRequestValue = String(
+            inventorySnapshotPendingRequestResolution?.requestNumber
+            || inventorySnapshotPendingRequestResolution?.requestReference
+            || ''
+        ).trim();
+
+        if (!inventorySnapshotPendingRequestResolution || requestReference !== resolvedRequestValue) {
+            alert(_t('inventorySnapshotRequestResolveRequired'));
+            return;
+        }
+
+        if (!setInventorySnapshotStateFromResolvedRequest(inventorySnapshotPendingRequestResolution)) {
+            alert(_t('inventorySnapshotRequestNotFound'));
+            return;
+        }
+
+        currentInventoryPage = 1;
+        renderInventorySnapshotBanner();
+        closeInventorySnapshotModal();
+        loadInventoryData();
+        return;
+    }
 
     if (!dateValue) {
         alert(_t('inventorySnapshotDateRequired'));
@@ -351,6 +807,7 @@ window.applyInventorySnapshot = function() {
 
 window.clearInventorySnapshot = function() {
     const hadSnapshot = Boolean(inventorySnapshotState.snapshotAt);
+    inventorySnapshotPendingRequestResolution = null;
     inventorySnapshotState = createDefaultInventorySnapshotState();
     renderInventorySnapshotBanner();
     closeInventorySnapshotModal();
