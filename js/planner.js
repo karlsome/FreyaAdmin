@@ -1720,6 +1720,30 @@ function getPlannerPreviewExportSimulation(preview = {}, mode = 'auto') {
     };
 }
 
+function getPlannerPreviewActionAssignments(preview = {}, mode = 'auto') {
+    const normalizedMode = mode === 'draft' ? 'draft' : 'auto';
+    const simulation = getPlannerPreviewExportSimulation(preview, normalizedMode);
+    if (!simulation) {
+        return [];
+    }
+
+    return normalizePlannerPreviewDraftAssignments(simulation.assignments || []).map((assignment, index) => ({
+        ...assignment,
+        _id: assignment._id || getPlannerPreviewDraftAssignmentId(assignment) || `preview-${normalizedMode}-${index}`,
+        color: assignment.color || '#6B7280',
+    }));
+}
+
+function getPlannerPreviewActionModes(preview = {}) {
+    const modes = ['auto'];
+
+    if (getPlannerPreviewActionAssignments(preview, 'draft').length > 0) {
+        modes.push('draft');
+    }
+
+    return modes;
+}
+
 function buildPlannerPreviewScheduleExport(preview = {}, mode = 'auto') {
     const normalizedMode = mode === 'draft' ? 'draft' : 'auto';
     const simulation = getPlannerPreviewExportSimulation(preview, normalizedMode);
@@ -2968,6 +2992,14 @@ function renderPlannerPreview() {
                                         <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewCopyDraftJson', {}, 'Copy Draft JSON'))}</span>
                                     </button>
                                 ` : ''}
+                                <button onclick="showPlannerPreviewPrintModal()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-700 hover:bg-indigo-100 transition-colors dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-950/40">
+                                    <i class="ri-printer-line"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewActionPrint', {}, 'Print'))}</span>
+                                </button>
+                                <button onclick="showPlannerPreviewCalendarView()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
+                                    <i class="ri-calendar-event-line"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewActionCalendar', {}, 'Calendar View'))}</span>
+                                </button>
                             </div>
                             <div class="flex flex-wrap gap-2 text-xs">
                                 ${hasSavedPreviewDraft ? `
