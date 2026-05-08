@@ -66,6 +66,7 @@ let plannerState = {
         lastLoadedAt: 0,
         pendingPromise: null,
         viewedVersionId: null,
+        isVersionEditMode: false,
     }
 };
 
@@ -523,6 +524,16 @@ function getPlannerPublishedViewedVersion(published = null) {
         || published?.activeVersion
         || versions[0]
         || null;
+}
+
+function getPlannerPublishedDisplaySourceLabel(version = {}) {
+    const sourceLabel = String(version?.sourceLabel || '').trim();
+    if (!sourceLabel) {
+        return '';
+    }
+
+    const sourceModeLabel = getPlannerPublishedSourceModeLabel(version?.sourceMode);
+    return sourceLabel === sourceModeLabel ? '' : sourceLabel;
 }
 
 function getPlannerPublishedSourceModeLabel(mode = '') {
@@ -1748,6 +1759,7 @@ function markPlannerPublishedDirty(options = {}) {
         plannerState.published.error = '';
         plannerState.published.lastLoadedAt = 0;
         plannerState.published.viewedVersionId = null;
+        plannerState.published.isVersionEditMode = false;
     }
 
     if (plannerState.activeMainTab === 'published') {
@@ -3007,6 +3019,7 @@ function renderPlannerPublished() {
     const versions = Array.isArray(published.versions) ? published.versions : [];
     const viewedVersion = getPlannerPublishedViewedVersion(published);
     const canManagePublishedSchedules = canPlannerManagePublishedSchedules();
+    const isVersionEditMode = canManagePublishedSchedules && plannerState.published.isVersionEditMode === true;
 
     if (!activeVersion || !viewedVersion) {
         container.innerHTML = `
@@ -3061,6 +3074,7 @@ function renderPlannerPublished() {
         { version: formatPlannerPreviewNumber(viewedVersion.version || 1) },
         `Version ${formatPlannerPreviewNumber(viewedVersion.version || 1)}`
     );
+    const viewedSourceLabel = getPlannerPublishedDisplaySourceLabel(viewedVersion);
     const scheduleUntilText = plannerTranslate(
         'plannerPublishedScheduleUntil',
         { time: viewedVersion.scheduleUntilTime || PLANNER_CONFIG.workEndTime },
@@ -3107,7 +3121,7 @@ function renderPlannerPublished() {
                         <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
                             <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
                             <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(viewedVersion.sourceMode))} · ${escapePlannerPreviewHtml(getPlannerPublishedSourceTypeLabel(viewedVersion.sourceType))}</div>
-                            ${viewedVersion.sourceLabel ? `<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(viewedVersion.sourceLabel)}</div>` : ''}
+                            ${viewedSourceLabel ? `<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(viewedSourceLabel)}</div>` : ''}
                         </div>
                         <div class="flex flex-wrap gap-2 justify-end">
                             ${isViewingHistoricalVersion ? `
@@ -3134,7 +3148,7 @@ function renderPlannerPublished() {
                     </div>
                     <div class="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:border-cyan-900 dark:bg-cyan-950/30">
                         <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedAssignmentCount', {}, 'Assignments'))}</p>
-                        <p class="mt-2 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(activeVersion.assignmentCount || assignments.length)}</p>
+                        <p class="mt-2 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(viewedVersion.assignmentCount || assignments.length)}</p>
                     </div>
                     <div class="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30">
                         <p class="text-xs uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedEquipmentCount', {}, 'Machines'))}</p>
@@ -3177,6 +3191,14 @@ function renderPlannerPublished() {
                     <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
                         <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryTitle', {}, 'Version History'))}</h4>
                         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryDescription', {}, 'Each publish creates a new version. The active version is what the factory should follow now.'))}</p>
+                        ${canManagePublishedSchedules ? `
+                            <div class="mt-4">
+                                <button onclick="togglePlannerPublishedVersionEditMode()" class="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${isVersionEditMode ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white' : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
+                                    <i class="${isVersionEditMode ? 'ri-check-line' : 'ri-pencil-line'}"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate(isVersionEditMode ? 'plannerPublishedDoneEditingVersionsAction' : 'plannerPublishedEditVersionAction', {}, isVersionEditMode ? 'Done Editing' : 'Edit Version'))}</span>
+                                </button>
+                            </div>
+                        ` : ''}
                     </div>
                     <div class="max-h-[640px] overflow-auto p-5 space-y-3">
                         ${versions.map((version) => `
@@ -3193,7 +3215,7 @@ function renderPlannerPublished() {
                                     <div class="text-right text-xs text-gray-500 dark:text-gray-400">
                                         <div>${escapePlannerPreviewHtml(version.publishedBy || version.createdBy || 'system')}</div>
                                         <div class="mt-1">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(version.sourceMode))}</div>
-                                        ${version.sourceLabel ? `<div class="mt-1">${escapePlannerPreviewHtml(version.sourceLabel)}</div>` : ''}
+                                        ${getPlannerPublishedDisplaySourceLabel(version) ? `<div class="mt-1">${escapePlannerPreviewHtml(getPlannerPublishedDisplaySourceLabel(version))}</div>` : ''}
                                     </div>
                                 </div>
                                 <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-600 dark:text-gray-300">
@@ -3201,7 +3223,7 @@ function renderPlannerPublished() {
                                     <span class="rounded-full bg-white/80 px-2 py-1 dark:bg-gray-800/80">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedAssignmentsPill', { count: formatPlannerPreviewNumber(version.assignmentCount || 0) }, `${formatPlannerPreviewNumber(version.assignmentCount || 0)} assignments`))}</span>
                                     <span class="rounded-full bg-white/80 px-2 py-1 dark:bg-gray-800/80">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedViewVersionHint', {}, 'Click to view this calendar'))}</span>
                                 </div>
-                                ${canManagePublishedSchedules && version.id !== activeVersion.id ? `
+                                ${isVersionEditMode && version.id !== activeVersion.id ? `
                                     <div class="mt-4 flex justify-end">
                                         <button onclick="event.stopPropagation(); restorePlannerPublishedVersion(${Number(version.version || 0)})" class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/40">
                                             <i class="ri-history-line"></i>
@@ -3223,6 +3245,15 @@ function renderPlannerPublished() {
         </div>
     `;
 }
+
+window.togglePlannerPublishedVersionEditMode = function() {
+    if (!canPlannerManagePublishedSchedules()) {
+        return;
+    }
+
+    plannerState.published.isVersionEditMode = !plannerState.published.isVersionEditMode;
+    renderPlannerPublished();
+};
 
 window.viewPlannerPublishedVersion = function(versionId) {
     const published = plannerState.published.data || null;
@@ -6727,6 +6758,8 @@ function clearPlannerViews() {
     plannerState.published.isDirty = true;
     plannerState.published.lastLoadedAt = 0;
     plannerState.published.pendingPromise = null;
+    plannerState.published.viewedVersionId = null;
+    plannerState.published.isVersionEditMode = false;
     
     document.getElementById('productListContainer').innerHTML = '';
     document.getElementById('selectedProductsSummary').innerHTML = '';
