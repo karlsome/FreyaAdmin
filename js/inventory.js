@@ -15,7 +15,11 @@ let inventorySnapshotPendingRequestResolution = null;
 let inventorySnapshotRequestOptions = [];
 let inventorySnapshotModalMode = 'none';
 const INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS = [10, 50, 100];
+const INVENTORY_ADD_HISTORY_PAGE_SIZE_OPTIONS = [10, 50, 100];
 let inventoryTransactionsState = createDefaultInventoryTransactionsState();
+let inventoryAddHistoryGroups = [];
+let inventoryAddHistoryState = createDefaultInventoryAddHistoryState();
+let inventoryAddHistoryDetailState = createDefaultInventoryAddHistoryDetailState();
 
 const INVENTORY_SNAPSHOT_START_MINUTES = 8 * 60;
 const INVENTORY_SNAPSHOT_END_MINUTES = 17 * 60;
@@ -32,6 +36,23 @@ function createDefaultInventoryTransactionsState() {
     };
 }
 
+function createDefaultInventoryAddHistoryState() {
+    return {
+        currentPage: 1,
+        itemsPerPage: 50,
+        totalPages: 0,
+        totalItems: 0
+    };
+}
+
+function createDefaultInventoryAddHistoryDetailState() {
+    return {
+        timeStamp: '',
+        itemCount: 0,
+        items: []
+    };
+}
+
 function normalizeInventoryTransactionsPositiveInteger(value, fallback = 1) {
     const parsedValue = Number.parseInt(value, 10);
     return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
@@ -40,6 +61,11 @@ function normalizeInventoryTransactionsPositiveInteger(value, fallback = 1) {
 function normalizeInventoryTransactionsPageSize(value, fallback = 10) {
     const parsedValue = normalizeInventoryTransactionsPositiveInteger(value, fallback);
     return INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS.includes(parsedValue) ? parsedValue : fallback;
+}
+
+function normalizeInventoryAddHistoryPageSize(value, fallback = 50) {
+    const parsedValue = normalizeInventoryTransactionsPositiveInteger(value, fallback);
+    return INVENTORY_ADD_HISTORY_PAGE_SIZE_OPTIONS.includes(parsedValue) ? parsedValue : fallback;
 }
 
 function getDefaultInventoryThresholdConfig() {
@@ -1327,6 +1353,485 @@ function formatInventoryBoxCount(boxCount) {
         maximumFractionDigits: isWholeNumber ? 0 : 2
     });
 }
+
+// ==================== INVENTORY ADD HISTORY ====================
+
+function formatInventoryAddHistoryDateLabel(timeStamp) {
+    const dateValue = new Date(timeStamp || '');
+    if (Number.isNaN(dateValue.getTime())) {
+        return '--';
+    }
+
+    return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, '0')}-${String(dateValue.getDate()).padStart(2, '0')}`;
+}
+
+function formatInventoryAddHistoryTimeLabel(timeStamp) {
+    const dateValue = new Date(timeStamp || '');
+    if (Number.isNaN(dateValue.getTime())) {
+        return '--:--';
+    }
+
+    return `${String(dateValue.getHours()).padStart(2, '0')}:${String(dateValue.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatInventoryAddHistoryCountLabel(itemCount) {
+    const _t = typeof t === 'function' ? t : (key) => key;
+    const normalizedCount = Number(itemCount) || 0;
+    return `${normalizedCount.toLocaleString()} ${_t('inventoryAddHistoryItemsLabel')}`;
+}
+
+function setInventoryAddHistoryListLoadingState(message) {
+    const content = document.getElementById('inventoryAddHistoryListContent');
+    if (!content) {
+        return;
+    }
+
+    content.innerHTML = `
+        <div class="p-8 text-center text-gray-500">
+            <i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>
+            ${escapeInventoryAttribute(message)}
+        </div>
+    `;
+}
+
+function showInventoryAddHistoryListError(message) {
+    const content = document.getElementById('inventoryAddHistoryListContent');
+    if (!content) {
+        return;
+    }
+
+    content.innerHTML = `
+        <div class="p-8 text-center text-red-500">
+            <i class="ri-error-warning-line text-2xl mr-2"></i>
+            ${escapeInventoryAttribute(message)}
+        </div>
+    `;
+}
+
+function renderInventoryAddHistoryGroups(groups = [], paginationInfo = inventoryAddHistoryState) {
+    const content = document.getElementById('inventoryAddHistoryListContent');
+    if (!content) {
+        return;
+    }
+
+    const _t = typeof t === 'function' ? t : (key) => key;
+    const groupList = Array.isArray(groups) ? groups : [];
+    const totalPages = Number(paginationInfo?.totalPages) || 0;
+
+    if (groupList.length === 0) {
+        content.innerHTML = `
+            <div class="p-8 text-center text-gray-500">
+                <i class="ri-inbox-line text-4xl mb-4"></i>
+                <p>${_t('inventoryAddHistoryEmpty')}</p>
+            </div>
+        `;
+        return;
+    }
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p class="text-sm text-gray-500">${getInventoryAddHistoryPageRangeLabel(paginationInfo)}</p>
+                <label class="inline-flex items-center gap-2 text-sm text-gray-600">
+                    <span>${_t('itemsPerPage')}</span>
+                    <select
+                        class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
+                        onchange="changeInventoryAddHistoryPageSize(this.value)">
+                        ${INVENTORY_ADD_HISTORY_PAGE_SIZE_OPTIONS.map((pageSize) => `
+                            <option value="${pageSize}" ${pageSize === paginationInfo.itemsPerPage ? 'selected' : ''}>${pageSize}</option>
+                        `).join('')}
+                    </select>
+                </label>
+            </div>
+
+            <div class="space-y-3">
+                ${groupList.map((group) => {
+                    const timeStamp = String(group?.timeStamp || '').trim();
+                    const encodedTimeStamp = encodeURIComponent(timeStamp);
+                    const dateLabel = formatInventoryAddHistoryDateLabel(timeStamp);
+                    const timeLabel = formatInventoryAddHistoryTimeLabel(timeStamp);
+
+                    return `
+                        <button
+                            type="button"
+                            onclick="openInventoryAddHistoryDetail('${encodedTimeStamp}')"
+                            class="group w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left shadow-sm transition-all hover:border-emerald-200 hover:bg-emerald-50/60">
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="min-w-0">
+                                    <p class="text-sm font-semibold text-slate-900">${escapeInventoryAttribute(`${dateLabel} | ${timeLabel}`)}</p>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <span class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">${escapeInventoryAttribute(formatInventoryAddHistoryCountLabel(group?.itemCount))}</span>
+                                    <i class="ri-arrow-right-line text-lg text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-600"></i>
+                                </div>
+                            </div>
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+
+            ${totalPages > 1 ? `
+                <div class="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
+                    <p class="text-sm text-gray-500">${_t('page')} ${paginationInfo.currentPage} / ${totalPages}</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onclick="changeInventoryAddHistoryPage(-1)"
+                            class="px-3 py-2 border rounded-lg text-sm transition-colors ${paginationInfo.currentPage <= 1 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+                            ${paginationInfo.currentPage <= 1 ? 'disabled' : ''}>
+                            ${_t('previous')}
+                        </button>
+                        ${buildInventoryAddHistoryPageButtons(paginationInfo)}
+                        <button
+                            type="button"
+                            onclick="changeInventoryAddHistoryPage(1)"
+                            class="px-3 py-2 border rounded-lg text-sm transition-colors ${paginationInfo.currentPage >= totalPages ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+                            ${paginationInfo.currentPage >= totalPages ? 'disabled' : ''}>
+                            ${_t('next')}
+                        </button>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function getInventoryAddHistoryPageRangeLabel(paginationInfo) {
+    const totalItems = Number(paginationInfo?.totalItems) || 0;
+    if (totalItems === 0) {
+        return t('noItemsToDisplay');
+    }
+
+    const currentPage = Number(paginationInfo?.currentPage) || 1;
+    const itemsPerPage = Number(paginationInfo?.itemsPerPage) || 50;
+    const startItem = ((currentPage - 1) * itemsPerPage) + 1;
+    const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+
+    return `${startItem}-${endItem} / ${totalItems}`;
+}
+
+function buildInventoryAddHistoryPageButtons(paginationInfo) {
+    const currentPage = Number(paginationInfo?.currentPage) || 1;
+    const totalPages = Number(paginationInfo?.totalPages) || 0;
+    let buttonsHtml = '';
+
+    for (let pageNumber = Math.max(1, currentPage - 2); pageNumber <= Math.min(totalPages, currentPage + 2); pageNumber++) {
+        buttonsHtml += `
+            <button
+                type="button"
+                onclick="goToInventoryAddHistoryPage(${pageNumber})"
+                class="px-3 py-2 border rounded-lg text-sm transition-colors ${pageNumber === currentPage ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}"
+                ${pageNumber === currentPage ? 'aria-current="page"' : ''}>
+                ${pageNumber}
+            </button>
+        `;
+    }
+
+    return buttonsHtml;
+}
+
+async function loadInventoryAddHistoryGroups(options = {}) {
+    const _t = typeof t === 'function' ? t : (key) => key;
+    const nextPage = normalizeInventoryTransactionsPositiveInteger(
+        options.page ?? inventoryAddHistoryState.currentPage,
+        1
+    );
+    const nextItemsPerPage = normalizeInventoryAddHistoryPageSize(
+        options.itemsPerPage ?? inventoryAddHistoryState.itemsPerPage,
+        50
+    );
+
+    inventoryAddHistoryState = {
+        ...inventoryAddHistoryState,
+        currentPage: nextPage,
+        itemsPerPage: nextItemsPerPage
+    };
+
+    setInventoryAddHistoryListLoadingState(_t('inventoryAddHistoryLoading'));
+
+    try {
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'getInventoryAddHistoryGroups',
+                page: nextPage,
+                limit: nextItemsPerPage
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || _t('inventoryAddHistoryLoadFailed'));
+        }
+
+        const paginationInfo = result.pagination || {};
+        inventoryAddHistoryGroups = Array.isArray(result.data) ? result.data : [];
+        inventoryAddHistoryState = {
+            currentPage: normalizeInventoryTransactionsPositiveInteger(
+                paginationInfo.currentPage,
+                nextPage
+            ),
+            itemsPerPage: normalizeInventoryAddHistoryPageSize(
+                paginationInfo.itemsPerPage,
+                nextItemsPerPage
+            ),
+            totalPages: Math.max(0, Number(paginationInfo.totalPages) || 0),
+            totalItems: Math.max(0, Number(paginationInfo.totalItems) || 0)
+        };
+
+        renderInventoryAddHistoryGroups(inventoryAddHistoryGroups, inventoryAddHistoryState);
+    } catch (error) {
+        console.error('Error loading inventory add history:', error);
+        showInventoryAddHistoryListError(error.message || _t('inventoryAddHistoryLoadFailed'));
+    }
+}
+
+window.openInventoryAddHistoryModal = async function() {
+    const modal = document.getElementById('inventoryAddHistoryModal');
+    if (!modal) {
+        return;
+    }
+
+    inventoryAddHistoryGroups = [];
+    inventoryAddHistoryState = createDefaultInventoryAddHistoryState();
+    closeInventoryAddHistoryDetailModal();
+    modal.classList.remove('hidden');
+    await loadInventoryAddHistoryGroups({
+        page: inventoryAddHistoryState.currentPage,
+        itemsPerPage: inventoryAddHistoryState.itemsPerPage
+    });
+};
+
+window.closeInventoryAddHistoryModal = function() {
+    const modal = document.getElementById('inventoryAddHistoryModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+
+    closeInventoryAddHistoryDetailModal();
+};
+
+window.changeInventoryAddHistoryPage = async function(direction) {
+    const targetPage = inventoryAddHistoryState.currentPage + Number(direction || 0);
+    if (targetPage < 1 || (inventoryAddHistoryState.totalPages > 0 && targetPage > inventoryAddHistoryState.totalPages)) {
+        return;
+    }
+
+    await loadInventoryAddHistoryGroups({
+        page: targetPage,
+        itemsPerPage: inventoryAddHistoryState.itemsPerPage
+    });
+};
+
+window.goToInventoryAddHistoryPage = async function(page) {
+    const targetPage = normalizeInventoryTransactionsPositiveInteger(page, 1);
+    if (targetPage < 1 || (inventoryAddHistoryState.totalPages > 0 && targetPage > inventoryAddHistoryState.totalPages)) {
+        return;
+    }
+
+    await loadInventoryAddHistoryGroups({
+        page: targetPage,
+        itemsPerPage: inventoryAddHistoryState.itemsPerPage
+    });
+};
+
+window.changeInventoryAddHistoryPageSize = async function(pageSize) {
+    await loadInventoryAddHistoryGroups({
+        page: 1,
+        itemsPerPage: normalizeInventoryAddHistoryPageSize(pageSize, 50)
+    });
+};
+
+function setInventoryAddHistoryDetailLoadingState(selectedGroup = null) {
+    const content = document.getElementById('inventoryAddHistoryDetailContent');
+    const meta = document.getElementById('inventoryAddHistoryDetailMeta');
+    if (!content) {
+        return;
+    }
+
+    if (meta) {
+        meta.textContent = selectedGroup?.timeStamp
+            ? `${formatInventoryAddHistoryDateLabel(selectedGroup.timeStamp)} | ${formatInventoryAddHistoryTimeLabel(selectedGroup.timeStamp)} | ${formatInventoryAddHistoryCountLabel(selectedGroup.itemCount)}`
+            : '';
+    }
+
+    content.innerHTML = `
+        <div class="p-8 text-center text-gray-500">
+            <i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>
+            ${escapeInventoryAttribute(typeof t === 'function' ? t('inventoryAddHistoryDetailLoading') : 'Loading inserted items...')}
+        </div>
+    `;
+}
+
+function showInventoryAddHistoryDetailError(message, selectedGroup = null) {
+    const content = document.getElementById('inventoryAddHistoryDetailContent');
+    const meta = document.getElementById('inventoryAddHistoryDetailMeta');
+    if (!content) {
+        return;
+    }
+
+    if (meta) {
+        meta.textContent = selectedGroup?.timeStamp
+            ? `${formatInventoryAddHistoryDateLabel(selectedGroup.timeStamp)} | ${formatInventoryAddHistoryTimeLabel(selectedGroup.timeStamp)}`
+            : '';
+    }
+
+    content.innerHTML = `
+        <div class="p-8 text-center text-red-500">
+            <i class="ri-error-warning-line text-2xl mr-2"></i>
+            ${escapeInventoryAttribute(message)}
+        </div>
+    `;
+}
+
+function renderInventoryAddHistoryDetail(items = [], meta = {}) {
+    const content = document.getElementById('inventoryAddHistoryDetailContent');
+    const metaLabel = document.getElementById('inventoryAddHistoryDetailMeta');
+    if (!content) {
+        return;
+    }
+
+    const _t = typeof t === 'function' ? t : (key) => key;
+    const itemList = Array.isArray(items) ? items : [];
+    const timeStamp = String(meta?.timeStamp || '').trim();
+    const itemCount = Number(meta?.itemCount) || itemList.length;
+    const totalInsertedQuantity = itemList.reduce((sum, item) => {
+        return sum + (Number(item?.insertedQuantity) || 0);
+    }, 0);
+    const totalBoxQuantity = itemList.reduce((sum, item) => {
+        const numericBoxQuantity = Number(item?.boxQuantity);
+        return sum + (Number.isFinite(numericBoxQuantity) ? numericBoxQuantity : 0);
+    }, 0);
+
+    inventoryAddHistoryDetailState = {
+        timeStamp,
+        itemCount,
+        items: itemList
+    };
+
+    if (metaLabel) {
+        metaLabel.textContent = timeStamp
+            ? `${formatInventoryAddHistoryDateLabel(timeStamp)} | ${formatInventoryAddHistoryTimeLabel(timeStamp)} | ${formatInventoryAddHistoryCountLabel(itemCount)}`
+            : '';
+    }
+
+    if (itemList.length === 0) {
+        content.innerHTML = `
+            <div class="p-8 text-center text-gray-500">
+                <i class="ri-inbox-line text-4xl mb-4"></i>
+                <p>${_t('inventoryAddHistoryNoItems')}</p>
+            </div>
+        `;
+        return;
+    }
+
+    content.innerHTML = `
+        <div class="overflow-x-auto rounded-xl border border-slate-200">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-medium text-slate-700">${_t('serialNumber')}</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-700">${_t('partNumber')}</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-700">${_t('inventoryAddHistoryInsertedQuantity')}</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-700">${_t('inventoryAddHistoryBoxQuantity')}</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-700">${_t('inventoryAddHistoryInsertedBy')}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${itemList.map((item) => `
+                        <tr class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/80">
+                            <td class="px-4 py-3 font-semibold text-slate-900">${escapeInventoryAttribute(item?.背番号 || '-')}</td>
+                            <td class="px-4 py-3 text-slate-700">${escapeInventoryAttribute(item?.品番 || '-')}</td>
+                            <td class="px-4 py-3 font-medium text-emerald-700">${Number(item?.insertedQuantity || 0).toLocaleString()}</td>
+                            <td class="px-4 py-3 font-medium text-sky-700">${formatInventoryBoxCount(item?.boxQuantity)}</td>
+                            <td class="px-4 py-3 font-medium text-slate-700">${escapeInventoryAttribute(item?.insertedBy || '-')}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+                <tfoot class="bg-slate-50 border-t-2 border-slate-200">
+                    <tr>
+                        <td colspan="2" class="px-4 py-3 text-sm font-semibold uppercase tracking-wide text-slate-600">${_t('total')}</td>
+                        <td class="px-4 py-3 text-sm font-bold text-emerald-700">${totalInsertedQuantity.toLocaleString()}</td>
+                        <td class="px-4 py-3 text-sm font-bold text-sky-700">${formatInventoryBoxCount(totalBoxQuantity)}</td>
+                        <td class="px-4 py-3 text-sm text-slate-400">-</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    `;
+}
+
+window.openInventoryAddHistoryDetail = async function(encodedTimeStamp) {
+    const selectedTimeStamp = decodeURIComponent(String(encodedTimeStamp || '').trim());
+    if (!selectedTimeStamp) {
+        return;
+    }
+
+    const selectedGroup = inventoryAddHistoryGroups.find((group) => group.timeStamp === selectedTimeStamp) || {
+        timeStamp: selectedTimeStamp,
+        itemCount: 0
+    };
+
+    const modal = document.getElementById('inventoryAddHistoryDetailModal');
+    if (!modal) {
+        return;
+    }
+
+    const _t = typeof t === 'function' ? t : (key) => key;
+    setInventoryAddHistoryDetailLoadingState(selectedGroup);
+    modal.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'getInventoryAddHistoryItems',
+                timeStamp: selectedTimeStamp
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || _t('inventoryAddHistoryDetailLoadFailed'));
+        }
+
+        renderInventoryAddHistoryDetail(result.data, {
+            timeStamp: result?.meta?.timeStamp || selectedTimeStamp,
+            itemCount: result?.meta?.itemCount ?? selectedGroup.itemCount
+        });
+    } catch (error) {
+        console.error('Error loading inventory add history detail:', error);
+        showInventoryAddHistoryDetailError(error.message || _t('inventoryAddHistoryDetailLoadFailed'), selectedGroup);
+    }
+};
+
+window.closeInventoryAddHistoryDetailModal = function() {
+    const modal = document.getElementById('inventoryAddHistoryDetailModal');
+    const metaLabel = document.getElementById('inventoryAddHistoryDetailMeta');
+    const content = document.getElementById('inventoryAddHistoryDetailContent');
+
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+
+    if (metaLabel) {
+        metaLabel.textContent = '';
+    }
+
+    if (content) {
+        content.innerHTML = '';
+    }
+
+    inventoryAddHistoryDetailState = createDefaultInventoryAddHistoryDetailState();
+};
+
+// ==================== END INVENTORY ADD HISTORY ====================
 
 /**
  * Sort inventory table by column

@@ -7000,8 +7000,8 @@ function loadPage(page) {
                               <i class="ri-alarm-warning-line mr-2"></i><span>Threshold Rules</span>
                             </button>
                           </div>
-                            <button onclick="openInventorySnapshotModal()" class="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
-                                <i class="ri-time-line mr-2"></i><span data-i18n="inventorySnapshotButton">Point in Time</span>
+                            <button onclick="openInventoryAddHistoryModal()" class="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
+                                <i class="ri-inbox-archive-line mr-2"></i><span data-i18n="inventoryAddHistoryButton">Inventory Add History</span>
                             </button>
                             <button onclick="exportInventoryData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                                 <i class="ri-download-line mr-2"></i><span data-i18n="csvExport">CSV Export</span>
@@ -7361,6 +7361,60 @@ function loadPage(page) {
                           <div class="p-6 border-t border-gray-200 bg-gray-50">
                             <div class="flex justify-end">
                               <button type="button" onclick="closeInventoryExportChoiceModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors" data-i18n="cancel">Cancel</button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div id="inventoryAddHistoryModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[67]">
+                      <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+                          <div class="p-6 border-b border-gray-200">
+                            <div class="flex items-center justify-between gap-4">
+                              <div class="flex items-start space-x-3">
+                                <i class="ri-inbox-archive-line text-3xl text-emerald-600"></i>
+                                <div>
+                                  <h3 class="text-xl font-bold text-gray-900" data-i18n="inventoryAddHistoryModalTitle">Inventory Add History</h3>
+                                  <p class="text-sm text-gray-600" data-i18n="inventoryAddHistoryModalSubtitle">Grouped by the exact inventory input timestamp. Select a batch to view the inserted items.</p>
+                                </div>
+                              </div>
+                              <button onclick="closeInventoryAddHistoryModal()" class="text-gray-400 hover:text-gray-600">
+                                <i class="ri-close-line text-2xl"></i>
+                              </button>
+                            </div>
+                          </div>
+                          <div id="inventoryAddHistoryListContent" class="flex-1 overflow-y-auto p-6">
+                            <div class="p-8 text-center text-gray-500">
+                              <i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>
+                              Loading inventory add history...
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div id="inventoryAddHistoryDetailModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[68]">
+                      <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+                          <div class="p-6 border-b border-gray-200">
+                            <div class="flex items-center justify-between gap-4">
+                              <div class="flex items-start space-x-3">
+                                <i class="ri-list-check-3 text-3xl text-blue-600"></i>
+                                <div>
+                                  <h3 class="text-xl font-bold text-gray-900" data-i18n="inventoryAddHistoryDetailTitle">Inserted Items</h3>
+                                  <p id="inventoryAddHistoryDetailMeta" class="text-sm text-gray-600"></p>
+                                </div>
+                              </div>
+                              <button onclick="closeInventoryAddHistoryDetailModal()" class="text-gray-400 hover:text-gray-600">
+                                <i class="ri-close-line text-2xl"></i>
+                              </button>
+                            </div>
+                          </div>
+                          <div id="inventoryAddHistoryDetailContent" class="flex-1 overflow-y-auto p-6">
+                            <div class="p-8 text-center text-gray-500">
+                              <i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>
+                              Loading inserted items...
                             </div>
                           </div>
                         </div>
