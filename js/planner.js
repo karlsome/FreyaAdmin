@@ -429,6 +429,45 @@ function formatPlannerPreviewTimestamp(value = '') {
     });
 }
 
+function getPlannerLocalDateString(date = new Date()) {
+    const targetDate = date instanceof Date ? new Date(date.getTime()) : new Date(date);
+    if (Number.isNaN(targetDate.getTime())) {
+        return '';
+    }
+
+    const year = targetDate.getFullYear();
+    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const day = String(targetDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getPlannerDefaultPublishedTargetDate() {
+    const targetDate = new Date();
+    targetDate.setHours(12, 0, 0, 0);
+    targetDate.setDate(targetDate.getDate() + 1);
+    return getPlannerLocalDateString(targetDate);
+}
+
+async function syncPlannerDateSelection(targetDate = '') {
+    const normalizedDate = String(targetDate || '').trim();
+    if (!normalizedDate) {
+        return;
+    }
+
+    const dateInput = document.getElementById('plannerDate');
+    if (dateInput) {
+        dateInput.value = normalizedDate;
+    }
+
+    if (plannerState.currentDate === normalizedDate) {
+        return;
+    }
+
+    await handleDateChange({
+        target: { value: normalizedDate }
+    });
+}
+
 function plannerTranslate(key, replacements = {}, fallback = key) {
     let text = fallback;
 
@@ -4691,6 +4730,31 @@ function switchPlannerMainTab(tab) {
     }
 }
 
+async function refreshPlannerCurrentMainTabData() {
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        return;
+    }
+
+    if (plannerState.activeMainTab === 'preview') {
+        renderPlannerPreview();
+        try {
+            await ensurePlannerPreviewLoaded({ forceRefresh: true });
+        } catch (error) {
+            console.error('Failed to refresh planner preview after selection change:', error);
+        }
+        return;
+    }
+
+    if (plannerState.activeMainTab === 'published') {
+        renderPlannerPublished();
+        try {
+            await ensurePlannerPublishedLoaded({ forceRefresh: true });
+        } catch (error) {
+            console.error('Failed to refresh published schedule after selection change:', error);
+        }
+    }
+}
+
 // ============================================
 // DATA LOADING
 // ============================================
@@ -5160,6 +5224,7 @@ async function handleFactoryChange(e) {
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        await refreshPlannerCurrentMainTabData();
         
     } catch (error) {
         console.error('❌ Error loading factory data:', error);
@@ -5190,6 +5255,7 @@ async function handleDateChange(e) {
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        await refreshPlannerCurrentMainTabData();
         return; // Early return to avoid double rendering
     }
     
@@ -5207,6 +5273,7 @@ async function handleDateChange(e) {
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        await refreshPlannerCurrentMainTabData();
     }
 }
 
@@ -10489,10 +10556,10 @@ window.exportPlannerPreviewScheduleJson = async function(mode = 'auto') {
     );
 };
 
-window.publishPlannerPreviewSchedule = async function() {
+function getPlannerPreviewPublishContext() {
     if (!canPlannerManagePublishedSchedules()) {
         showPlannerNotification(plannerTranslate('plannerPublishedPermissionDenied', {}, 'You do not have permission to publish or restore schedules.'), 'warning');
-        return;
+        return null;
     }
 
     const preview = plannerState.preview.data
@@ -10501,12 +10568,12 @@ window.publishPlannerPreviewSchedule = async function() {
 
     if (!preview) {
         showPlannerNotification(plannerTranslate('plannerPublishedNeedPreviewFirst', {}, 'Load the preview first before publishing a schedule.'), 'warning');
-        return;
+        return null;
     }
 
     if (!plannerState.currentFactory || !plannerState.currentDate) {
         showPlannerNotification(plannerTranslate('plannerPublishedNeedFactoryDate', {}, 'Select a factory and date before publishing a schedule.'), 'warning');
-        return;
+        return null;
     }
 
     let sourceMode = plannerState.preview.viewMode === 'draft' ? 'draft' : 'auto';
@@ -10519,11 +10586,176 @@ window.publishPlannerPreviewSchedule = async function() {
     const assignments = normalizePlannerPreviewDraftAssignments(simulation?.assignments || []);
     if (assignments.length === 0) {
         showPlannerNotification(plannerTranslate('plannerPublishedNoAssignmentsToPublish', {}, 'There are no schedule blocks to publish yet.'), 'warning');
+        return null;
+    }
+
+    return {
+        preview,
+        sourceMode,
+        assignments,
+    };
+}
+
+async function fetchPlannerPublishedScheduleSnapshot(factory = '', date = '') {
+    const targetFactory = String(factory || '').trim();
+    const targetDate = String(date || '').trim();
+    if (!targetFactory || !targetDate) {
+        return null;
+    }
+
+    const requestUrl = `${BASE_URL}api/production-planner/published?factory=${encodeURIComponent(targetFactory)}&date=${encodeURIComponent(targetDate)}`;
+    const response = await fetch(requestUrl);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+        throw new Error(result.error || result.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'));
+    }
+
+    return result.data || null;
+}
+
+function closePlannerPublishedDateModal() {
+    const modal = document.getElementById('plannerPublishedDateModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function setPlannerPublishedDateModalBusy(isBusy = false) {
+    const confirmButton = document.getElementById('plannerPublishedDateConfirmButton');
+    const topCancelButton = document.getElementById('plannerPublishedDateCancelButton');
+    const bottomCancelButton = document.getElementById('plannerPublishedDateSecondaryCancelButton');
+    const targetDateInput = document.getElementById('plannerPublishedTargetDateInput');
+
+    [confirmButton, topCancelButton, bottomCancelButton].forEach((element) => {
+        if (!element) {
+            return;
+        }
+
+        element.disabled = isBusy;
+        element.classList.toggle('opacity-60', isBusy);
+        element.classList.toggle('cursor-not-allowed', isBusy);
+    });
+
+    if (targetDateInput) {
+        targetDateInput.disabled = isBusy;
+    }
+}
+
+function showPlannerPublishedDateModal(sourceMode = 'auto') {
+    closePlannerPublishedDateModal();
+
+    const publishActionLabel = sourceMode === 'draft'
+        ? plannerTranslate('plannerPreviewPublishDraftAction', {}, 'Publish Draft')
+        : plannerTranslate('plannerPreviewPublishAutoAction', {}, 'Publish Auto');
+    const defaultTargetDate = getPlannerDefaultPublishedTargetDate();
+
+    const modalHTML = `
+        <div id="plannerPublishedDateModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full overflow-hidden">
+                <div class="flex items-start justify-between gap-4 p-4 border-b border-gray-200 dark:border-gray-700">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedChooseDateTitle', {}, 'Choose Published Date'))}</h3>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedChooseDateDescription', {}, 'Choose which calendar date this schedule should be published to.'))}</p>
+                    </div>
+                    <button id="plannerPublishedDateCancelButton" onclick="closePlannerPublishedDateModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+                <div class="p-4 space-y-4">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                        <div class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(sourceMode))}</div>
+                        <div class="mt-2 text-sm text-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(plannerState.currentFactory || '-')}</div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedPreviewDateHint', { date: formatPlannerPreviewDate(plannerState.currentDate) }, `Current preview plan date: ${formatPlannerPreviewDate(plannerState.currentDate)}`))}</div>
+                    </div>
+                    <div>
+                        <label for="plannerPublishedTargetDateInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedTargetDateLabel', {}, 'Published Date'))}</label>
+                        <input type="date" id="plannerPublishedTargetDateInput" value="${escapePlannerPreviewHtml(defaultTargetDate)}" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-emerald-500 dark:bg-gray-700 dark:text-white">
+                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedTargetDateHint', {}, 'Default is tomorrow. You can choose any date.'))}</p>
+                    </div>
+                </div>
+                <div class="flex items-center justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
+                    <button id="plannerPublishedDateSecondaryCancelButton" onclick="closePlannerPublishedDateModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700">
+                        ${escapePlannerPreviewHtml(plannerTranslate('cancel', {}, 'Cancel'))}
+                    </button>
+                    <button id="plannerPublishedDateConfirmButton" onclick="confirmPlannerPublishedDate()" class="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors">
+                        <i class="ri-send-plane-line"></i>
+                        <span>${escapePlannerPreviewHtml(publishActionLabel)}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    const targetDateInput = document.getElementById('plannerPublishedTargetDateInput');
+    if (targetDateInput) {
+        requestAnimationFrame(() => {
+            targetDateInput.focus();
+
+            if (typeof targetDateInput.showPicker === 'function') {
+                try {
+                    targetDateInput.showPicker();
+                } catch (error) {
+                    console.debug('Planner publish date picker could not be opened automatically:', error);
+                }
+            }
+        });
+    }
+}
+
+window.closePlannerPublishedDateModal = closePlannerPublishedDateModal;
+
+window.publishPlannerPreviewSchedule = function() {
+    const publishContext = getPlannerPreviewPublishContext();
+    if (!publishContext) {
         return;
     }
 
+    showPlannerPublishedDateModal(publishContext.sourceMode);
+};
+
+window.confirmPlannerPublishedDate = async function() {
+    const publishContext = getPlannerPreviewPublishContext();
+    if (!publishContext) {
+        closePlannerPublishedDateModal();
+        return;
+    }
+
+    const targetDateInput = document.getElementById('plannerPublishedTargetDateInput');
+    const targetDate = String(targetDateInput?.value || '').trim();
+
+    if (!targetDate) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNeedTargetDate', {}, 'Choose a published date before continuing.'), 'warning');
+        targetDateInput?.focus();
+        return;
+    }
+
+    setPlannerPublishedDateModalBusy(true);
+
     try {
-        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        const existingPublished = await fetchPlannerPublishedScheduleSnapshot(plannerState.currentFactory, targetDate);
+        const existingVersionCount = Array.isArray(existingPublished?.versions) ? existingPublished.versions.length : 0;
+        if (existingVersionCount > 0) {
+            const shouldContinue = window.confirm(
+                plannerTranslate(
+                    'plannerPublishedOverwriteConfirm',
+                    {
+                        date: formatPlannerPreviewDate(targetDate),
+                        count: formatPlannerPreviewNumber(existingVersionCount),
+                    },
+                    `There is already a published schedule on ${formatPlannerPreviewDate(targetDate)}. Continue publishing anyway?`
+                )
+            );
+
+            if (!shouldContinue) {
+                setPlannerPublishedDateModalBusy(false);
+                return;
+            }
+        }
+
+        const currentUser = getPlannerAuthUser() || {};
         const currentUsername = currentUser?.username || 'system';
         const publishedBy = await getUserFullName(currentUsername);
         const response = await fetch(`${BASE_URL}api/production-planner/published/publish`, {
@@ -10531,13 +10763,13 @@ window.publishPlannerPreviewSchedule = async function() {
             headers: getPlannerAuthHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 factory: plannerState.currentFactory,
-                date: plannerState.currentDate,
+                date: targetDate,
                 scheduleUntilTime: getPlannerPreviewScheduleUntilTime(),
-                sourceMode,
+                sourceMode: publishContext.sourceMode,
                 sourceType: 'manual',
-                sourceLabel: getPlannerPublishedSourceModeLabel(sourceMode),
-                assignments,
-                basisRows: buildPlannerPreviewDraftBasisRows(preview),
+                sourceLabel: getPlannerPublishedSourceModeLabel(publishContext.sourceMode),
+                assignments: publishContext.assignments,
+                basisRows: buildPlannerPreviewDraftBasisRows(publishContext.preview),
                 publishedBy,
             })
         });
@@ -10547,13 +10779,21 @@ window.publishPlannerPreviewSchedule = async function() {
             throw new Error(result.error || result.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'));
         }
 
+        closePlannerPublishedDateModal();
+
+        if (targetDate !== plannerState.currentDate) {
+            await syncPlannerDateSelection(targetDate);
+        }
+
         markPlannerPublishedDirty({ clearData: true });
-        await ensurePlannerPublishedLoaded({ forceRefresh: true });
         showPlannerNotification(
             plannerTranslate(
                 'plannerPublishedPublishSuccess',
-                { version: formatPlannerPreviewNumber(result.data?.version || 1) },
-                `Published schedule version ${formatPlannerPreviewNumber(result.data?.version || 1)} is now active.`
+                {
+                    version: formatPlannerPreviewNumber(result.data?.version || 1),
+                    date: formatPlannerPreviewDate(targetDate),
+                },
+                `Published schedule version ${formatPlannerPreviewNumber(result.data?.version || 1)} is now active for ${formatPlannerPreviewDate(targetDate)}.`
             ),
             'success'
         );
@@ -10561,6 +10801,7 @@ window.publishPlannerPreviewSchedule = async function() {
     } catch (error) {
         console.error('Failed to publish planner schedule:', error);
         showPlannerNotification(error.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'), 'error');
+        setPlannerPublishedDateModalBusy(false);
     }
 };
 
