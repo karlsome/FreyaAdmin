@@ -10,6 +10,10 @@ let inventorySelectedSebanggoArray = []; // currently active sebanggo tags
 let inventoryThresholdSummary = createDefaultInventoryThresholdSummary();
 let inventoryThresholdStatusFilter = 'all';
 let inventoryThresholdConfig = getDefaultInventoryThresholdConfig();
+let inventoryRepairPreviewItems = [];
+let inventoryRefreshLongPressTimer = null;
+let inventoryRefreshLongPressTriggered = false;
+let inventoryRepairModalContext = { trigger: 'manual', backNumbers: [] };
 let inventorySnapshotState = createDefaultInventorySnapshotState();
 let inventorySnapshotPendingRequestResolution = null;
 let inventorySnapshotRequestOptions = [];
@@ -25,6 +29,7 @@ const INVENTORY_SNAPSHOT_START_MINUTES = 8 * 60;
 const INVENTORY_SNAPSHOT_END_MINUTES = 17 * 60;
 const INVENTORY_SNAPSHOT_INTERVAL_MINUTES = 30;
 const INVENTORY_SNAPSHOT_MAX_STEP = (INVENTORY_SNAPSHOT_END_MINUTES - INVENTORY_SNAPSHOT_START_MINUTES) / INVENTORY_SNAPSHOT_INTERVAL_MINUTES;
+const INVENTORY_REFRESH_LONG_PRESS_DURATION_MS = 1500;
 
 function createDefaultInventoryTransactionsState() {
     return {
@@ -964,12 +969,63 @@ function initializeInventorySystem() {
     loadInventoryData();
 }
 
+function handleInventoryRefreshButtonClick(event) {
+    if (inventoryRefreshLongPressTriggered) {
+        event.preventDefault();
+        event.stopPropagation();
+        inventoryRefreshLongPressTriggered = false;
+        return;
+    }
+
+    loadInventoryData();
+}
+
+function setupInventoryRefreshLongPress(button) {
+    const startLongPress = (event) => {
+        if (event.type === 'mousedown' && event.button !== 0) {
+            return;
+        }
+
+        clearTimeout(inventoryRefreshLongPressTimer);
+        inventoryRefreshLongPressTriggered = false;
+        inventoryRefreshLongPressTimer = setTimeout(async () => {
+            inventoryRefreshLongPressTriggered = true;
+            try {
+                await openInventoryRepairModal({ trigger: 'refresh-hold' });
+            } catch (error) {
+                console.error('Failed to open inventory repair modal:', error);
+            }
+        }, INVENTORY_REFRESH_LONG_PRESS_DURATION_MS);
+    };
+
+    const cancelLongPress = () => {
+        clearTimeout(inventoryRefreshLongPressTimer);
+        inventoryRefreshLongPressTimer = null;
+    };
+
+    button.addEventListener('mousedown', startLongPress);
+    button.addEventListener('touchstart', startLongPress, { passive: true });
+    button.addEventListener('mouseup', cancelLongPress);
+    button.addEventListener('mouseleave', cancelLongPress);
+    button.addEventListener('touchend', cancelLongPress);
+    button.addEventListener('touchcancel', cancelLongPress);
+}
+
 /**
  * Setup event listeners for Inventory system
  */
 function setupInventoryEventListeners() {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+
     // Filter and search listeners
-    document.getElementById('refreshInventoryBtn').addEventListener('click', loadInventoryData);
+    const refreshInventoryBtn = document.getElementById('refreshInventoryBtn');
+    if (refreshInventoryBtn) {
+        refreshInventoryBtn.addEventListener('click', handleInventoryRefreshButtonClick);
+        if (currentUser.role === 'admin') {
+            setupInventoryRefreshLongPress(refreshInventoryBtn);
+            refreshInventoryBtn.title = 'Click to refresh. Hold for 1.5 seconds to repair reserved / available.';
+        }
+    }
     document.getElementById('inventoryPartNumberFilter').addEventListener('change', applyInventoryFilters);
     document.getElementById('inventoryBackNumberFilter').addEventListener('change', applyInventoryFilters);
     document.getElementById('inventorySearchInput').addEventListener('input', debounce(applyInventoryFilters, 500));
@@ -3597,6 +3653,415 @@ let batchResetFilters = [];
 let batchResetFilteredItems = [];
 let batchResetSelectedItems = [];
 
+function ensureInventoryRepairModal() {
+    let modal = document.getElementById('inventoryRepairModal');
+    if (modal) {
+        return modal;
+    }
+
+    const modalHTML = `
+        <div id="inventoryRepairModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[70]">
+            <div class="flex min-h-screen items-center justify-center p-4">
+                <div class="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+                    <div class="px-6 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
+                        <div>
+                            <h2 class="text-xl font-semibold text-gray-900">Repair Reserved / Available</h2>
+                            <p class="mt-1 text-sm text-gray-500">Reserved is recalculated from open NODA line items. Available is recalculated as physical - reserved and may be negative.</p>
+                        </div>
+                        <button id="inventoryRepairCloseBtn" onclick="closeInventoryRepairModal()" class="text-gray-400 hover:text-gray-600">
+                            <i class="ri-close-line text-2xl"></i>
+                        </button>
+                    </div>
+                    <div id="inventoryRepairModalBanner" class="px-6 py-4 border-b border-gray-200 bg-slate-50"></div>
+                    <div id="inventoryRepairModalContent" class="flex-1 overflow-auto px-6 py-4"></div>
+                    <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between gap-4">
+                        <div id="inventoryRepairSelectionSummary" class="text-sm text-gray-500">Loading repair preview...</div>
+                        <div class="flex items-center gap-3">
+                            <button onclick="closeInventoryRepairModal()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                                Close
+                            </button>
+                            <button id="inventoryRepairApplyBtn" onclick="applyInventoryRepair()" disabled class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                Apply Repair
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    modal = document.getElementById('inventoryRepairModal');
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closeInventoryRepairModal();
+        }
+    });
+
+    return modal;
+}
+
+function formatInventoryRepairNumber(value) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue.toLocaleString() : '-';
+}
+
+function formatInventoryRepairRequestSummary(requestNumbers = []) {
+    const normalizedRequestNumbers = [...new Set((requestNumbers || []).map((value) => String(value || '').trim()).filter(Boolean))];
+    if (normalizedRequestNumbers.length <= 4) {
+        return normalizedRequestNumbers.join(', ');
+    }
+
+    return `${normalizedRequestNumbers.slice(0, 4).join(', ')} +${normalizedRequestNumbers.length - 4} more`;
+}
+
+function renderInventoryRepairBanner(summary = {}) {
+    const banner = document.getElementById('inventoryRepairModalBanner');
+    if (!banner) return;
+
+    const mismatchCount = Number(summary?.mismatchCount) || 0;
+    const totalTrackedItems = Number(summary?.totalTrackedItems) || 0;
+
+    if (inventoryRepairModalContext.trigger === 'batch-reset') {
+        banner.className = 'px-6 py-4 border-b border-emerald-200 bg-emerald-50';
+        banner.innerHTML = `
+            <div class="flex flex-col gap-1 text-sm text-emerald-900">
+                <div class="font-semibold">Batch reset completed. Repair is optional.</div>
+                <div>${inventoryRepairModalContext.successCount || 0} inventory item(s) were reset${inventoryRepairModalContext.batchResetId ? ` (Batch ID: ${escapeInventoryAttribute(inventoryRepairModalContext.batchResetId)})` : ''}.</div>
+                <div>${mismatchCount} open NODA-linked item(s) in this scope need repair out of ${totalTrackedItems} tracked item(s).</div>
+            </div>
+        `;
+        return;
+    }
+
+    banner.className = 'px-6 py-4 border-b border-blue-200 bg-blue-50';
+    banner.innerHTML = `
+        <div class="flex flex-col gap-1 text-sm text-blue-900">
+            <div class="font-semibold">Long-press repair preview</div>
+            <div>This preview shows open NODA items whose reserved or available values do not match the latest inventory state.</div>
+            <div>${mismatchCount} mismatch item(s) found across ${totalTrackedItems} tracked open NODA item(s).</div>
+        </div>
+    `;
+}
+
+function setInventoryRepairLoadingState() {
+    const content = document.getElementById('inventoryRepairModalContent');
+    const selectionSummary = document.getElementById('inventoryRepairSelectionSummary');
+    const applyButton = document.getElementById('inventoryRepairApplyBtn');
+
+    if (content) {
+        content.innerHTML = `
+            <div class="flex items-center justify-center py-16 text-sm text-gray-500">
+                <i class="ri-loader-4-line animate-spin mr-2"></i>
+                Loading repair preview...
+            </div>
+        `;
+    }
+
+    if (selectionSummary) {
+        selectionSummary.textContent = 'Loading repair preview...';
+    }
+
+    if (applyButton) {
+        applyButton.disabled = true;
+    }
+}
+
+function getSelectedInventoryRepairBackNumbers() {
+    return Array.from(document.querySelectorAll('.inventory-repair-item-checkbox:checked'))
+        .map((checkbox) => checkbox.dataset.backNumber || '')
+        .filter(Boolean);
+}
+
+window.toggleSelectAllInventoryRepair = function() {
+    const selectAllCheckbox = document.getElementById('inventoryRepairSelectAll');
+    const rowCheckboxes = document.querySelectorAll('.inventory-repair-item-checkbox');
+    rowCheckboxes.forEach((checkbox) => {
+        checkbox.checked = Boolean(selectAllCheckbox?.checked);
+    });
+    updateInventoryRepairSelectionState();
+};
+
+window.updateInventoryRepairSelectionState = function() {
+    const rowCheckboxes = Array.from(document.querySelectorAll('.inventory-repair-item-checkbox'));
+    const selectedBackNumbers = getSelectedInventoryRepairBackNumbers();
+    const selectAllCheckbox = document.getElementById('inventoryRepairSelectAll');
+    const selectionSummary = document.getElementById('inventoryRepairSelectionSummary');
+    const applyButton = document.getElementById('inventoryRepairApplyBtn');
+
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = rowCheckboxes.length > 0 && selectedBackNumbers.length === rowCheckboxes.length;
+        selectAllCheckbox.indeterminate = selectedBackNumbers.length > 0 && selectedBackNumbers.length < rowCheckboxes.length;
+    }
+
+    if (selectionSummary) {
+        selectionSummary.textContent = rowCheckboxes.length === 0
+            ? 'No mismatches found.'
+            : `${selectedBackNumbers.length} of ${rowCheckboxes.length} item(s) selected for repair`;
+    }
+
+    if (applyButton) {
+        applyButton.disabled = selectedBackNumbers.length === 0;
+    }
+};
+
+function renderInventoryRepairPreview(previewResult = {}) {
+    const content = document.getElementById('inventoryRepairModalContent');
+    const items = Array.isArray(previewResult.data) ? previewResult.data : [];
+    const summary = previewResult.summary || {};
+
+    inventoryRepairPreviewItems = items;
+    renderInventoryRepairBanner(summary);
+
+    if (!content) {
+        return;
+    }
+
+    if (items.length === 0) {
+        content.innerHTML = `
+            <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-12 text-center text-gray-500">
+                <i class="ri-checkbox-circle-line text-4xl text-emerald-500"></i>
+                <div class="mt-3 text-lg font-semibold text-gray-800">No repair needed</div>
+                <p class="mt-2 text-sm text-gray-500">The latest inventory records already match the open NODA requests for this scope.</p>
+            </div>
+        `;
+        updateInventoryRepairSelectionState();
+        return;
+    }
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Tracked Items</div>
+                    <div class="mt-2 text-2xl font-semibold text-gray-900">${formatInventoryRepairNumber(summary.totalTrackedItems || items.length)}</div>
+                </div>
+                <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-amber-700">Mismatch Items</div>
+                    <div class="mt-2 text-2xl font-semibold text-amber-900">${formatInventoryRepairNumber(summary.mismatchCount || items.length)}</div>
+                </div>
+                <div class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-blue-700">Open NODA Lines</div>
+                    <div class="mt-2 text-2xl font-semibold text-blue-900">${formatInventoryRepairNumber(summary.totalOpenLineCount || 0)}</div>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto border border-gray-200 rounded-xl">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-100 border-b border-gray-200">
+                        <tr>
+                            <th class="px-3 py-3 text-left">
+                                <input id="inventoryRepairSelectAll" type="checkbox" checked onchange="toggleSelectAllInventoryRepair()" class="w-4 h-4 text-indigo-600 rounded" title="Select all repair rows">
+                            </th>
+                            <th class="px-3 py-3 text-left font-medium text-gray-700">品番</th>
+                            <th class="px-3 py-3 text-left font-medium text-gray-700">背番号</th>
+                            <th class="px-3 py-3 text-right font-medium text-gray-700">Physical</th>
+                            <th class="px-3 py-3 text-right font-medium text-gray-700">Reserved Now</th>
+                            <th class="px-3 py-3 text-right font-medium text-gray-700">Reserved Repair</th>
+                            <th class="px-3 py-3 text-right font-medium text-gray-700">Available Now</th>
+                            <th class="px-3 py-3 text-right font-medium text-gray-700">Available Repair</th>
+                            <th class="px-3 py-3 text-right font-medium text-gray-700">Delta</th>
+                            <th class="px-3 py-3 text-left font-medium text-gray-700">Source Requests</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map((item) => {
+                            const reservedDeltaClass = item.deltaReservedQuantity === 0
+                                ? 'text-gray-500'
+                                : item.deltaReservedQuantity > 0
+                                    ? 'text-amber-700 font-semibold'
+                                    : 'text-green-700 font-semibold';
+                            const availableRepairClass = item.repairedAvailableQuantity < 0 ? 'text-red-700 font-semibold' : 'text-slate-900 font-semibold';
+                            const availableNowClass = item.currentAvailableQuantity < 0 ? 'text-red-700 font-semibold' : 'text-gray-700';
+                            const requestSummary = formatInventoryRepairRequestSummary(item.requestNumbers || []);
+
+                            return `
+                                <tr class="border-b border-gray-100 hover:bg-indigo-50/40">
+                                    <td class="px-3 py-3 align-top">
+                                        <input
+                                            type="checkbox"
+                                            class="inventory-repair-item-checkbox w-4 h-4 text-indigo-600 rounded"
+                                            data-back-number="${escapeInventoryAttribute(item.背番号)}"
+                                            checked
+                                            onchange="updateInventoryRepairSelectionState()">
+                                    </td>
+                                    <td class="px-3 py-3 align-top font-medium text-gray-900">${escapeInventoryAttribute(item.品番 || '-')}</td>
+                                    <td class="px-3 py-3 align-top font-medium text-gray-900">${escapeInventoryAttribute(item.背番号)}</td>
+                                    <td class="px-3 py-3 align-top text-right text-gray-700">${formatInventoryRepairNumber(item.currentPhysicalQuantity)}</td>
+                                    <td class="px-3 py-3 align-top text-right text-gray-700">${formatInventoryRepairNumber(item.currentReservedQuantity)}</td>
+                                    <td class="px-3 py-3 align-top text-right font-semibold text-amber-700">${formatInventoryRepairNumber(item.repairedReservedQuantity)}</td>
+                                    <td class="px-3 py-3 align-top text-right ${availableNowClass}">${formatInventoryRepairNumber(item.currentAvailableQuantity)}</td>
+                                    <td class="px-3 py-3 align-top text-right ${availableRepairClass}">${formatInventoryRepairNumber(item.repairedAvailableQuantity)}</td>
+                                    <td class="px-3 py-3 align-top text-right ${reservedDeltaClass}">
+                                        R ${item.deltaReservedQuantity >= 0 ? '+' : ''}${formatInventoryRepairNumber(item.deltaReservedQuantity)}<br>
+                                        <span class="${item.deltaAvailableQuantity === 0 ? 'text-gray-500' : item.deltaAvailableQuantity > 0 ? 'text-green-700 font-semibold' : 'text-red-700 font-semibold'}">
+                                            A ${item.deltaAvailableQuantity >= 0 ? '+' : ''}${formatInventoryRepairNumber(item.deltaAvailableQuantity)}
+                                        </span>
+                                    </td>
+                                    <td class="px-3 py-3 align-top text-xs text-gray-600">
+                                        <div class="font-medium text-gray-800">${formatInventoryRepairNumber(item.requestCount || 0)} request(s), ${formatInventoryRepairNumber(item.openLineCount || 0)} line(s)</div>
+                                        <div class="mt-1 break-words">${escapeInventoryAttribute(requestSummary || 'n/a')}</div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+    updateInventoryRepairSelectionState();
+}
+
+function renderInventoryRepairError(error) {
+    const content = document.getElementById('inventoryRepairModalContent');
+    const selectionSummary = document.getElementById('inventoryRepairSelectionSummary');
+    const applyButton = document.getElementById('inventoryRepairApplyBtn');
+
+    if (content) {
+        content.innerHTML = `
+            <div class="rounded-xl border border-red-200 bg-red-50 px-6 py-10 text-center text-red-700">
+                <i class="ri-error-warning-line text-4xl"></i>
+                <div class="mt-3 text-lg font-semibold">Failed to load repair preview</div>
+                <p class="mt-2 text-sm">${escapeInventoryAttribute(error.message || 'Unknown error')}</p>
+            </div>
+        `;
+    }
+
+    if (selectionSummary) {
+        selectionSummary.textContent = 'Repair preview unavailable.';
+    }
+
+    if (applyButton) {
+        applyButton.disabled = true;
+    }
+}
+
+async function fetchInventoryRepairPreview(backNumbers = []) {
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    const response = await fetch(`${BASE_URL}api/inventory-management`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'previewRepairReservedAvailable',
+            role: currentUser.role,
+            backNumbers
+        })
+    });
+
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to load repair preview');
+    }
+
+    return result;
+}
+
+async function openInventoryRepairModal(options = {}) {
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    if (currentUser.role !== 'admin') {
+        alert('Only admin can use inventory repair.');
+        return false;
+    }
+
+    inventoryRepairModalContext = {
+        trigger: options.trigger || 'manual',
+        backNumbers: Array.isArray(options.backNumbers) ? options.backNumbers : [],
+        successCount: Number(options.successCount) || 0,
+        batchResetId: options.batchResetId || ''
+    };
+
+    const modal = ensureInventoryRepairModal();
+    modal.classList.remove('hidden');
+    setInventoryRepairLoadingState();
+    renderInventoryRepairBanner({ totalTrackedItems: 0, mismatchCount: 0, totalOpenLineCount: 0 });
+
+    try {
+        const previewResult = await fetchInventoryRepairPreview(inventoryRepairModalContext.backNumbers);
+        renderInventoryRepairPreview(previewResult);
+        return true;
+    } catch (error) {
+        console.error('Inventory repair preview error:', error);
+        renderInventoryRepairError(error);
+        return false;
+    }
+}
+
+window.closeInventoryRepairModal = function() {
+    const modal = document.getElementById('inventoryRepairModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+
+    inventoryRepairPreviewItems = [];
+    inventoryRepairModalContext = { trigger: 'manual', backNumbers: [] };
+};
+
+window.applyInventoryRepair = async function() {
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    if (currentUser.role !== 'admin') {
+        alert('Only admin can apply inventory repair.');
+        return;
+    }
+
+    const selectedBackNumbers = getSelectedInventoryRepairBackNumbers();
+    if (selectedBackNumbers.length === 0) {
+        alert('Select at least one item to repair.');
+        return;
+    }
+
+    const fullNameElement = document.getElementById('userFullName');
+    const fullName = fullNameElement ? fullNameElement.textContent.trim() : (currentUser.username || 'admin');
+    const applyButton = document.getElementById('inventoryRepairApplyBtn');
+    const closeButton = document.getElementById('inventoryRepairCloseBtn');
+    const originalButtonText = applyButton ? applyButton.textContent : 'Apply Repair';
+
+    if (applyButton) {
+        applyButton.disabled = true;
+        applyButton.textContent = 'Applying...';
+    }
+
+    if (closeButton) {
+        closeButton.disabled = true;
+    }
+
+    try {
+        const response = await fetch(`${BASE_URL}api/inventory-management`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'repairReservedAvailable',
+                role: currentUser.role,
+                selectedBackNumbers,
+                submittedBy: currentUser.username || 'admin',
+                fullName
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to apply inventory repair');
+        }
+
+        closeInventoryRepairModal();
+        await loadInventoryData();
+        alert(`✅ Inventory repair completed.\n\nRepaired: ${result.successCount || 0} item(s)`);
+    } catch (error) {
+        console.error('Inventory repair apply error:', error);
+        alert('❌ Inventory repair failed: ' + error.message);
+    } finally {
+        if (applyButton) {
+            applyButton.disabled = false;
+            applyButton.textContent = originalButtonText;
+        }
+
+        if (closeButton) {
+            closeButton.disabled = false;
+        }
+    }
+};
+
 /**
  * Open batch reset modal
  */
@@ -4014,7 +4479,7 @@ async function executeBatchReset() {
         const result = await response.json();
         
         if (result.success) {
-            showBatchResetResults(result);
+            await showBatchResetResults(result);
         } else {
             throw new Error(result.error || 'Batch reset failed');
         }
@@ -4045,21 +4510,32 @@ function createProgressModal() {
 /**
  * Show batch reset results
  */
-function showBatchResetResults(result) {
+async function showBatchResetResults(result) {
     // Remove progress modal
     const progressModal = document.getElementById('batchResetProgressModal');
     if (progressModal) progressModal.remove();
+
+    const repairScopeBackNumbers = [...new Set(batchResetSelectedItems.map((item) => String(item?.背番号 || '').trim()).filter(Boolean))];
     
     // Close batch reset modal
     closeBatchResetModal();
-    
-    // Show results
-    const message = `✅ Batch Reset Completed!\n\nSuccessfully reset: ${result.successCount} items\nBatch ID: ${result.batchResetId}\n\nInventory has been updated.`;
-    alert(message);
-    
+
     // Reload inventory data
-    loadInventoryData();
+    await loadInventoryData();
+
+    if (repairScopeBackNumbers.length > 0) {
+        await openInventoryRepairModal({
+            trigger: 'batch-reset',
+            backNumbers: repairScopeBackNumbers,
+            successCount: result.successCount,
+            batchResetId: result.batchResetId
+        });
+        return;
+    }
+
+    alert(`✅ Batch Reset Completed!\n\nSuccessfully reset: ${result.successCount} items\nBatch ID: ${result.batchResetId}\n\nInventory has been updated.`);
 }
 
 // Make functions globally available
 window.initializeInventorySystem = initializeInventorySystem;
+window.openInventoryRepairModal = openInventoryRepairModal;
