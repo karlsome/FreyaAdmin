@@ -317,9 +317,10 @@ function renderNodaTable() {
                 ${nodaData.map((item, index) => {
                     // ✅ FIX: Use dynamic inventory status for display instead of stored status
                     // The stored status might be outdated (e.g., "partial-inventory" when inventory has since improved)
-                    const isCompleted = item.status === 'completed' || item.status === 'cancelled';
-                    const isPastDeadline = item.isPastDeadline || item.dynamicInventoryStatus === 'past-deadline';
-                    const dynamicStatus = isCompleted ? 'completed' : (item.dynamicInventoryStatus || item.overallInventoryStatus);
+                    const isCancelled = isNodaCancelledStatus(item.status);
+                    const isCompleted = isNodaCompletedStatus(item.status) || isCancelled;
+                    const isPastDeadline = !isCompleted && (item.isPastDeadline || item.dynamicInventoryStatus === 'past-deadline');
+                    const dynamicStatus = isCompleted ? item.status : (item.dynamicInventoryStatus || item.overallInventoryStatus);
                     
                     // Determine which status to show in the badge
                     let displayStatus = item.status;
@@ -379,8 +380,9 @@ function renderNodaTable() {
                     let itemsDisplay = '';
                     if (isBulkRequest && item.lineItems) {
                         const totalItems = item.lineItems.length;
-                        const pendingItems = item.lineItems.filter(line => line.status === 'pending').length;
-                        const completedItems = item.lineItems.filter(line => line.status === 'completed').length;
+                        const pendingItems = item.lineItems.filter(line => !isNodaCompletedStatus(line.status) && !isNodaCancelledStatus(line.status)).length;
+                        const completedItems = item.lineItems.filter(line => isNodaCompletedStatus(line.status)).length;
+                        const cancelledItems = item.lineItems.filter(line => isNodaCancelledStatus(line.status)).length;
                         
                         // ✅ FIFO-based inventory status from server calculation
                         // This uses PHYSICAL inventory allocated in FIFO order (oldest requests first)
@@ -404,7 +406,9 @@ function renderNodaTable() {
                             <div class="text-xs">
                                 <div class="font-medium">${totalItems} ${t('items')}</div>
                                 <div class="text-gray-500">
-                                    ${completedItems} ${t('done')}, ${pendingItems} ${t('statusPending').toLowerCase()}
+                                    ${isCancelled
+                                        ? `${completedItems} ${t('done')}, ${cancelledItems} ${t('statusCancelled').toLowerCase()}`
+                                        : `${completedItems} ${t('done')}, ${pendingItems} ${t('statusPending').toLowerCase()}`}
                                 </div>
                                 ${isPastDeadline ? `
                                     <div class="mt-1 text-xs">
@@ -463,9 +467,20 @@ function renderNodaTable() {
                             <td class="px-4 py-3" onclick="event.stopPropagation()">
                                 <div class="flex items-center space-x-2">
                                     ${canEdit ? `
-                                        <button onclick="editNodaRequest('${item._id}')" class="text-green-600 hover:text-green-800" title="Edit">
-                                            <i class="ri-edit-line"></i>
-                                        </button>
+                                        ${isCancelled ? `
+                                            <button class="text-gray-300 cursor-not-allowed" title="${t('statusCancelled')}" disabled>
+                                                <i class="ri-edit-line"></i>
+                                            </button>
+                                        ` : `
+                                            <button onclick="editNodaRequest('${item._id}')" class="text-green-600 hover:text-green-800" title="Edit">
+                                                <i class="ri-edit-line"></i>
+                                            </button>
+                                        `}
+                                        ${!isCompleted ? `
+                                            <button onclick="cancelNodaRequest('${item._id}')" class="text-orange-600 hover:text-orange-800" title="${t('cancel')}">
+                                                <i class="ri-close-circle-line"></i>
+                                            </button>
+                                        ` : ''}
                                         <button onclick="deleteNodaRequest('${item._id}')" class="text-red-600 hover:text-red-800" title="Delete">
                                             <i class="ri-delete-bin-line"></i>
                                         </button>
@@ -482,6 +497,16 @@ function renderNodaTable() {
     `;
     
     container.innerHTML = tableHTML;
+}
+
+function isNodaCompletedStatus(status) {
+    const normalizedStatus = String(status || '').toLowerCase();
+    return normalizedStatus === 'completed' || normalizedStatus === 'complete';
+}
+
+function isNodaCancelledStatus(status) {
+    const normalizedStatus = String(status || '').toLowerCase();
+    return normalizedStatus === 'cancelled' || normalizedStatus === 'canceled';
 }
 
 /**
@@ -507,6 +532,9 @@ function getNodaStatusInfo(status) {
             return { text: t('statusComplete'), icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
         case 'complete':
             return { text: t('statusComplete'), icon: 'ri-checkbox-circle-line', badgeClass: 'bg-green-100 text-green-800', rowClass: '' };
+        case 'cancelled':
+        case 'canceled':
+            return { text: t('statusCancelled'), icon: 'ri-close-circle-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
         case 'failed':
             return { text: t('statusFailed'), icon: 'ri-close-circle-line', badgeClass: 'bg-red-100 text-red-800', rowClass: '' };
         default:
@@ -3456,6 +3484,46 @@ window.saveNodaRequest = async function(requestId) {
     } catch (error) {
         console.error('Error updating request:', error);
         alert(t('alertErrorUpdatingRequest') + error.message);
+    }
+};
+
+window.cancelNodaRequest = async function(requestId) {
+    if (!confirm(t('alertConfirmCancelRequest'))) {
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userName = await getUserFullName(currentUser.username || 'Unknown User');
+
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'changeRequestStatus',
+                requestId: requestId,
+                data: {
+                    status: 'cancelled',
+                    userName: userName
+                }
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            closeNodaModal();
+            alert(t('alertRequestCancelledSuccess'));
+            loadNodaData();
+        } else {
+            alert(t('alertErrorCancellingRequest') + (result.error || t('unknownError')));
+        }
+
+    } catch (error) {
+        console.error('Error cancelling request:', error);
+        alert(t('alertErrorCancellingRequest') + error.message);
     }
 };
 
