@@ -614,16 +614,19 @@ function renderNodaTable() {
                                             <button class="text-gray-300 cursor-not-allowed" title="${t('statusCancelled')}" disabled>
                                                 <i class="ri-edit-line"></i>
                                             </button>
+                                            <button onclick="uncancelNodaRequest('${item._id}')" class="text-blue-600 hover:text-blue-800" title="${t('uncancelRequest')}">
+                                                <i class="ri-refresh-line"></i>
+                                            </button>
                                         ` : `
                                             <button onclick="editNodaRequest('${item._id}')" class="text-green-600 hover:text-green-800" title="Edit">
                                                 <i class="ri-edit-line"></i>
                                             </button>
+                                            ${!isCompleted ? `
+                                                <button onclick="cancelNodaRequest('${item._id}')" class="text-orange-600 hover:text-orange-800" title="${t('cancel')}">
+                                                    <i class="ri-close-circle-line"></i>
+                                                </button>
+                                            ` : ''}
                                         `}
-                                        ${!isCompleted ? `
-                                            <button onclick="cancelNodaRequest('${item._id}')" class="text-orange-600 hover:text-orange-800" title="${t('cancel')}">
-                                                <i class="ri-close-circle-line"></i>
-                                            </button>
-                                        ` : ''}
                                         <button onclick="deleteNodaRequest('${item._id}')" class="text-red-600 hover:text-red-800" title="Delete">
                                             <i class="ri-delete-bin-line"></i>
                                         </button>
@@ -3843,6 +3846,47 @@ window.cancelNodaRequest = async function(requestId) {
     } catch (error) {
         console.error('Error cancelling request:', error);
         alert(t('alertErrorCancellingRequest') + error.message);
+    }
+};
+
+window.uncancelNodaRequest = async function(requestId) {
+    if (!confirm(t('alertConfirmUncancelRequest'))) {
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userName = await getUserFullName(currentUser.username || 'Unknown User');
+
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'changeRequestStatus',
+                requestId: requestId,
+                data: {
+                    status: 'pending',
+                    restoreCancelled: true,
+                    userName: userName
+                }
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            closeNodaModal();
+            alert(t('alertRequestUncancelledSuccess'));
+            loadNodaData();
+        } else {
+            alert(t('alertErrorUncancellingRequest') + (result.error || t('unknownError')));
+        }
+
+    } catch (error) {
+        console.error('Error uncancelling request:', error);
+        alert(t('alertErrorUncancellingRequest') + error.message);
     }
 };
 
