@@ -3,9 +3,13 @@
 let currentNodaPage = 1;
 let nodaItemsPerPage = 10;
 let nodaData = [];
+let nodaTrashData = [];
 let nodaStatistics = {};
 let nodaSortState = { column: null, direction: 1 };
+let nodaTrashSortState = { column: 'deletedAt', direction: -1 };
 let activeNodaStatusFilter = 'all'; // Track which status card is active
+let nodaCurrentView = 'active';
+let nodaIsAdminUser = false;
 let nodaDetailModalState = {
     request: null,
     isEditMode: false,
@@ -38,13 +42,21 @@ function initializeNodaSystem() {
     
     // Get current user data
     const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    nodaIsAdminUser = currentUser.role === 'admin';
+    nodaCurrentView = 'active';
+    currentNodaPage = 1;
     
     // Show add request section for authorized roles
     const authorizedRoles = ['admin', '課長', '係長'];
     const addRequestSection = document.getElementById('nodaAddRequestSection');
+    const trashTabButton = document.getElementById('nodaTrashViewTab');
     
-    if (authorizedRoles.includes(currentUser.role)) {
+    if (addRequestSection && authorizedRoles.includes(currentUser.role)) {
         addRequestSection.style.display = 'flex';
+    }
+
+    if (trashTabButton) {
+        trashTabButton.classList.toggle('hidden', !nodaIsAdminUser);
     }
     
     // Leave date filters blank by default - users can set them if they want to filter
@@ -52,26 +64,89 @@ function initializeNodaSystem() {
     
     // Event listeners
     setupNodaEventListeners();
+    updateNodaViewMode();
     
     // Load initial data
-    loadNodaData();
+    loadCurrentNodaView();
     
     // ✅ OPTIMIZED: Removed auto-check on page load - it can be triggered manually via button
     // This reduces initial page load time significantly
 }
+
+function loadCurrentNodaView() {
+    if (nodaCurrentView === 'trash') {
+        return loadNodaTrashData();
+    }
+    return loadNodaData();
+}
+
+function updateNodaViewMode() {
+    const activeControls = document.getElementById('nodaActiveViewControls');
+    const trashControls = document.getElementById('nodaTrashControls');
+    const trashSummary = document.getElementById('nodaTrashSummary');
+    const activeTab = document.getElementById('nodaActiveViewTab');
+    const trashTab = document.getElementById('nodaTrashViewTab');
+    const tableTitle = document.getElementById('nodaTableTitle');
+
+    const isTrashView = nodaCurrentView === 'trash';
+
+    if (activeControls) {
+        activeControls.classList.toggle('hidden', isTrashView);
+    }
+    if (trashControls) {
+        trashControls.classList.toggle('hidden', !isTrashView);
+    }
+    if (trashSummary) {
+        trashSummary.classList.toggle('hidden', !isTrashView);
+    }
+
+    if (activeTab) {
+        activeTab.className = isTrashView
+            ? 'px-4 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100'
+            : 'px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium';
+    }
+
+    if (trashTab) {
+        trashTab.className = isTrashView
+            ? 'px-4 py-2 rounded-md bg-red-600 text-white text-sm font-medium'
+            : 'px-4 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100';
+    }
+
+    if (tableTitle) {
+        tableTitle.textContent = isTrashView ? t('nodaTrashBin') : t('pickingRequests');
+    }
+}
+
+window.switchNodaView = function(view) {
+    if (view === 'trash' && !nodaIsAdminUser) {
+        return;
+    }
+
+    nodaCurrentView = view === 'trash' ? 'trash' : 'active';
+    currentNodaPage = 1;
+    updateNodaViewMode();
+    loadCurrentNodaView();
+};
 
 /**
  * Setup event listeners for NODA system
  */
 function setupNodaEventListeners() {
     // Filter and search listeners
-    document.getElementById('refreshNodaBtn').addEventListener('click', loadNodaData);
+    document.getElementById('refreshNodaBtn').addEventListener('click', loadCurrentNodaView);
     document.getElementById('nodaStatusFilter').addEventListener('change', applyNodaFilters);
     document.getElementById('nodaPartNumberFilter').addEventListener('change', applyNodaFilters);
     document.getElementById('nodaBackNumberFilter').addEventListener('change', applyNodaFilters);
     document.getElementById('nodaDateFrom').addEventListener('change', applyNodaFilters);
     document.getElementById('nodaDateTo').addEventListener('change', applyNodaFilters);
     document.getElementById('nodaSearchInput').addEventListener('input', applyNodaFilters);
+    document.getElementById('nodaTrashSearchInput')?.addEventListener('input', function() {
+        if (nodaCurrentView !== 'trash') {
+            return;
+        }
+        currentNodaPage = 1;
+        loadNodaTrashData();
+    });
     
     // ✅ NEW: Check Inventory button (if it exists in the HTML)
     const checkInventoryBtn = document.getElementById('checkInventoryBtn');
@@ -83,7 +158,7 @@ function setupNodaEventListeners() {
     document.getElementById('nodaItemsPerPage').addEventListener('change', function() {
         nodaItemsPerPage = parseInt(this.value);
         currentNodaPage = 1;
-        loadNodaData();
+        loadCurrentNodaView();
     });
     
     document.getElementById('nodaPrevPage').addEventListener('click', () => changeNodaPage(-1));
@@ -95,6 +170,10 @@ function setupNodaEventListeners() {
  */
 async function loadNodaData() {
     try {
+        if (nodaCurrentView !== 'active') {
+            return;
+        }
+
         console.log('📊 Loading NODA data...');
         showNodaLoadingState();
         
@@ -120,6 +199,10 @@ async function loadNodaData() {
         }
 
         const result = await response.json();
+
+        if (nodaCurrentView !== 'active') {
+            return;
+        }
         
         if (result.success) {
             nodaData = result.data;
@@ -138,6 +221,66 @@ async function loadNodaData() {
         
     } catch (error) {
         console.error('❌ Error loading NODA data:', error);
+        showNodaErrorState(error.message);
+    }
+}
+
+function buildNodaTrashQueryFilters() {
+    const filters = {};
+    const searchTerm = document.getElementById('nodaTrashSearchInput')?.value?.trim();
+    if (searchTerm) {
+        filters.search = searchTerm;
+    }
+    return filters;
+}
+
+async function loadNodaTrashData() {
+    try {
+        if (nodaCurrentView !== 'trash') {
+            return;
+        }
+
+        console.log('🗑️ Loading NODA trash data...');
+        showNodaLoadingState();
+
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'getTrashRequests',
+                filters: buildNodaTrashQueryFilters(),
+                page: currentNodaPage,
+                limit: nodaItemsPerPage,
+                sort: nodaTrashSortState,
+                data: {
+                    userRole: currentUser.role || ''
+                }
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        if (nodaCurrentView !== 'trash') {
+            return;
+        }
+
+        if (result.success) {
+            nodaTrashData = result.data || [];
+            renderNodaTrashTable();
+            updateNodaPagination(result.pagination);
+            console.log('✅ NODA trash data loaded successfully');
+        } else {
+            throw new Error(result.error || 'Failed to load NODA trash data');
+        }
+    } catch (error) {
+        console.error('❌ Error loading NODA trash data:', error);
         showNodaErrorState(error.message);
     }
 }
@@ -194,7 +337,7 @@ function buildNodaQueryFilters() {
  */
 function applyNodaFilters() {
     currentNodaPage = 1;
-    loadNodaData();
+    loadCurrentNodaView();
 }
 
 /**
@@ -497,6 +640,143 @@ function renderNodaTable() {
     `;
     
     container.innerHTML = tableHTML;
+}
+
+function renderNodaTrashTable() {
+    const container = document.getElementById('nodaTableContainer');
+
+    if (!nodaTrashData.length) {
+        container.innerHTML = `
+            <div class="p-8 text-center text-gray-500">
+                <i class="ri-delete-bin-line text-4xl mb-4"></i>
+                <p>${t('noTrashRequestsFound')}</p>
+            </div>
+        `;
+        return;
+    }
+
+    const formatDate = (dateStr) => {
+        if (!dateStr) return '-';
+        const date = new Date(dateStr);
+        if (Number.isNaN(date.getTime())) return '-';
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}/${month}/${day}`;
+    };
+
+    const formatDateTime = (dateStr) => {
+        if (!dateStr) return '-';
+        const date = new Date(dateStr);
+        if (Number.isNaN(date.getTime())) return '-';
+        return date.toLocaleString();
+    };
+
+    const tableHTML = `
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 border-b">
+                <tr>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTrashTable('requestNumber')">
+                        ${t('requestNumber')} ${getNodaTrashSortArrow('requestNumber')}
+                    </th>
+                    <th class="px-3 py-3 text-left font-medium text-gray-700">${t('type')}</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTrashTable('status')">
+                        ${t('status')} ${getNodaTrashSortArrow('status')}
+                    </th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('items')}</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('pickupDate').replace(':', '')}</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('deliveryDeadline')}</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTrashTable('deletedBy')">
+                        ${t('deletedBy')} ${getNodaTrashSortArrow('deletedBy')}
+                    </th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTrashTable('deletedAt')">
+                        ${t('deletedAt')} ${getNodaTrashSortArrow('deletedAt')}
+                    </th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100" onclick="sortNodaTrashTable('trashExpiresAt')">
+                        ${t('trashExpiresAt')} ${getNodaTrashSortArrow('trashExpiresAt')}
+                    </th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-700">${t('actions')}</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${nodaTrashData.map((item) => {
+                    const statusInfo = getNodaStatusInfo(item.status);
+                    const isBulkRequest = item.requestType === 'bulk';
+                    const pickupDate = isBulkRequest ? formatDate(item.pickupDate) : formatDate(item.date);
+                    const deadlineDate = formatDate(item.納入指示日);
+                    const totalItems = isBulkRequest ? (item.lineItems?.length || item.totalItems || 0) : 1;
+                    const completedItems = isBulkRequest ? (item.lineItems || []).filter(line => isNodaCompletedStatus(line.status)).length : (isNodaCompletedStatus(item.status) ? 1 : 0);
+                    const cancelledItems = isBulkRequest ? (item.lineItems || []).filter(line => isNodaCancelledStatus(line.status)).length : (isNodaCancelledStatus(item.status) ? 1 : 0);
+                    const itemSummary = isBulkRequest
+                        ? `${totalItems} ${t('items')} • ${completedItems} ${t('done')} • ${cancelledItems} ${t('statusCancelled').toLowerCase()}`
+                        : `${item.品番 || '-'} (${t('qty')}: ${item.quantity || 0})`;
+
+                    return `
+                        <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="openNodaTrashDetail('${item._id}')">
+                            <td class="px-4 py-3 font-medium text-blue-600">
+                                <span class="hover:underline">${item.requestNumber || '-'}</span>
+                            </td>
+                            <td class="px-3 py-3 text-xs">
+                                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium ${isBulkRequest ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'}">
+                                    <i class="${isBulkRequest ? 'ri-stack-line' : 'ri-file-line'} mr-1"></i>
+                                    ${isBulkRequest ? t('bulkType') : t('singleType')}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusInfo.badgeClass}">
+                                    <i class="${statusInfo.icon} mr-1"></i>
+                                    ${statusInfo.text}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 text-xs text-gray-700">${itemSummary}</td>
+                            <td class="px-4 py-3 text-xs">${pickupDate}</td>
+                            <td class="px-4 py-3 text-xs">${deadlineDate}</td>
+                            <td class="px-4 py-3 text-xs">${item.deletedBy || '-'}</td>
+                            <td class="px-4 py-3 text-xs">${formatDateTime(item.deletedAt)}</td>
+                            <td class="px-4 py-3 text-xs">${formatDate(item.trashExpiresAt)}</td>
+                            <td class="px-4 py-3" onclick="event.stopPropagation()">
+                                <div class="flex items-center space-x-2">
+                                    <button onclick="restoreNodaRequestFromTrash('${item._id}')" class="text-blue-600 hover:text-blue-800" title="${t('restoreRequest')}">
+                                        <i class="ri-arrow-go-back-line"></i>
+                                    </button>
+                                    <button onclick="permanentlyDeleteNodaRequestFromTrash('${item._id}')" class="text-red-600 hover:text-red-800" title="${t('permanentlyDeleteRequest')}">
+                                        <i class="ri-delete-bin-2-line"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+
+    container.innerHTML = tableHTML;
+}
+
+function renderNodaTrashDetailBanner(request) {
+    if (!request?.isDeleted) {
+        return '';
+    }
+
+    const deletedAt = request.deletedAt ? new Date(request.deletedAt).toLocaleString() : '-';
+    const trashExpiresAt = request.trashExpiresAt ? new Date(request.trashExpiresAt).toLocaleDateString() : '-';
+
+    return `
+        <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <div class="flex items-start gap-3">
+                <i class="ri-delete-bin-line text-lg text-red-600"></i>
+                <div class="space-y-1">
+                    <p class="font-semibold">${t('nodaTrashBin')}</p>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-red-700">
+                        <span>${t('deletedBy')}: ${request.deletedBy || '-'}</span>
+                        <span>${t('deletedAt')}: ${deletedAt}</span>
+                        <span>${t('trashExpiresAt')}: ${trashExpiresAt}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function isNodaCompletedStatus(status) {
@@ -1121,6 +1401,10 @@ window.sortNodaDetailLineItems = function(column) {
  * Sort NODA table by column
  */
 window.sortNodaTable = function(column) {
+    if (nodaCurrentView !== 'active') {
+        return;
+    }
+
     if (nodaSortState.column === column) {
         nodaSortState.direction *= -1;
     } else {
@@ -1131,12 +1415,28 @@ window.sortNodaTable = function(column) {
     loadNodaData();
 };
 
+window.sortNodaTrashTable = function(column) {
+    if (nodaTrashSortState.column === column) {
+        nodaTrashSortState.direction *= -1;
+    } else {
+        nodaTrashSortState.column = column;
+        nodaTrashSortState.direction = 1;
+    }
+
+    loadNodaTrashData();
+};
+
 /**
  * Get sort arrow for column headers
  */
 function getNodaSortArrow(column) {
     if (nodaSortState.column !== column) return '';
     return nodaSortState.direction === 1 ? ' ↑' : ' ↓';
+}
+
+function getNodaTrashSortArrow(column) {
+    if (nodaTrashSortState.column !== column) return '';
+    return nodaTrashSortState.direction === 1 ? ' ↑' : ' ↓';
 }
 
 /**
@@ -1183,7 +1483,7 @@ function changeNodaPage(direction) {
     const newPage = currentNodaPage + direction;
     if (newPage >= 1) {
         currentNodaPage = newPage;
-        loadNodaData();
+        loadCurrentNodaView();
     }
 }
 
@@ -1193,7 +1493,7 @@ function changeNodaPage(direction) {
 window.goToNodaPage = function(page) {
     if (page >= 1) {
         currentNodaPage = page;
-        loadNodaData();
+        loadCurrentNodaView();
     }
 };
 
@@ -1202,6 +1502,10 @@ window.goToNodaPage = function(page) {
  */
 async function loadFilterOptions() {
     try {
+        if (nodaCurrentView !== 'active') {
+            return;
+        }
+
         const response = await fetch(`${BASE_URL}api/noda-requests`, {
             method: 'POST',
             headers: {
@@ -1257,7 +1561,8 @@ function updateNodaFilterOptions(options) {
  */
 function showNodaLoadingState() {
     const container = document.getElementById('nodaTableContainer');
-    container.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>Loading requests...</div>';
+    const loadingLabel = nodaCurrentView === 'trash' ? t('loadingTrashRequests') : t('loadingRequests');
+    container.innerHTML = `<div class="p-8 text-center text-gray-500"><i class="ri-loader-4-line animate-spin text-2xl mr-2"></i>${loadingLabel}</div>`;
 }
 
 /**
@@ -1269,7 +1574,7 @@ function showNodaErrorState(errorMessage) {
         <div class="p-8 text-center text-red-500">
             <i class="ri-error-warning-line text-2xl mr-2"></i>
             Error: ${errorMessage}
-            <br><button class="mt-2 text-blue-500 hover:underline" onclick="loadNodaData()">Retry</button>
+            <br><button class="mt-2 text-blue-500 hover:underline" onclick="loadCurrentNodaView()">Retry</button>
         </div>
     `;
 }
@@ -2842,6 +3147,17 @@ window.openNodaDetail = async function(requestId) {
     }
 };
 
+window.openNodaTrashDetail = function(requestId) {
+    const request = nodaTrashData.find(item => String(item._id) === String(requestId));
+    if (!request) {
+        alert(t('alertErrorLoadingRequestDetails') + t('notFound'));
+        return;
+    }
+
+    resetNodaDetailModalSort();
+    showNodaDetailModal(request, false);
+};
+
 /**
  * Open NODA edit modal
  */
@@ -2893,6 +3209,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
     
     const statusInfo = getNodaStatusInfo(request.status);
     const createdDate = new Date(request.createdAt).toLocaleString();
+    const trashInfoBanner = renderNodaTrashDetailBanner(request);
     const sortedLineItems = getSortedNodaDetailLineItems(request.lineItems || []);
     const visibleLineItems = getVisibleNodaDetailLineItems(request.lineItems || []);
     const isShowingOnlyInsufficient = nodaDetailModalState.lineItemFilter === 'insufficient';
@@ -2916,6 +3233,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
         // Bulk request display
         contentHTML = `
             <div class="space-y-6">
+                ${trashInfoBanner}
                 <div class="rounded-xl border border-gray-200 bg-gradient-to-b from-white to-gray-50 px-4 py-4 shadow-sm space-y-4">
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div class="min-w-0 flex-1 space-y-3">
@@ -3260,6 +3578,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
         // Single request display (existing functionality)
         contentHTML = `
             <div class="space-y-6">
+                ${trashInfoBanner}
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-4">
                         <div>
@@ -3531,7 +3850,7 @@ window.cancelNodaRequest = async function(requestId) {
  * Delete NODA request
  */
 window.deleteNodaRequest = async function(requestId) {
-    if (!confirm(t('alertConfirmDeleteRequest'))) {
+    if (!confirm(t('alertConfirmMoveRequestToTrash'))) {
         return;
     }
     
@@ -3551,7 +3870,9 @@ window.deleteNodaRequest = async function(requestId) {
             body: JSON.stringify({
                 action: 'deleteRequest',
                 requestId: requestId,
-                userName: userName
+                userName: userName,
+                deletedByUsername: currentUser.username || null,
+                deletedByRole: currentUser.role || null
             })
         });
         
@@ -3560,16 +3881,94 @@ window.deleteNodaRequest = async function(requestId) {
         hideDeleteLoadingOverlay();
         
         if (result.success) {
-            alert(t('alertRequestDeletedSuccess'));
-            loadNodaData();
+            closeNodaModal();
+            alert(t('alertRequestMovedToTrashSuccess'));
+            loadCurrentNodaView();
         } else {
-            alert(t('alertErrorDeletingRequest') + (result.error || t('unknownError')));
+            alert(t('alertErrorMovingRequestToTrash') + (result.error || t('unknownError')));
         }
         
     } catch (error) {
         console.error('Error deleting request:', error);
         hideDeleteLoadingOverlay();
-        alert(t('alertErrorDeletingRequest') + error.message);
+        alert(t('alertErrorMovingRequestToTrash') + error.message);
+    }
+};
+
+window.restoreNodaRequestFromTrash = async function(requestId) {
+    if (!confirm(t('alertConfirmRestoreRequest'))) {
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+        const userName = await getUserFullName(currentUser.username || 'Unknown User');
+
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'restoreDeletedRequest',
+                requestId: requestId,
+                data: {
+                    restoredBy: userName,
+                    restoredByUsername: currentUser.username || null,
+                    userRole: currentUser.role || ''
+                }
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert(t('alertRequestRestoredSuccess'));
+            loadNodaTrashData();
+        } else {
+            alert(t('alertErrorRestoringRequest') + (result.error || t('unknownError')));
+        }
+    } catch (error) {
+        console.error('Error restoring trashed request:', error);
+        alert(t('alertErrorRestoringRequest') + error.message);
+    }
+};
+
+window.permanentlyDeleteNodaRequestFromTrash = async function(requestId) {
+    const currentUser = JSON.parse(localStorage.getItem("authUser") || "{}");
+    if (currentUser.role !== 'admin') {
+        alert(t('alertAdminOnlyTrashDelete'));
+        return;
+    }
+
+    if (!confirm(t('alertConfirmPermanentDeleteRequest'))) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                action: 'permanentlyDeleteTrashedRequest',
+                requestId: requestId,
+                data: {
+                    userRole: currentUser.role || ''
+                }
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert(t('alertRequestPermanentlyDeletedSuccess'));
+            loadNodaTrashData();
+        } else {
+            alert(t('alertErrorPermanentlyDeletingRequest') + (result.error || t('unknownError')));
+        }
+    } catch (error) {
+        console.error('Error permanently deleting trashed request:', error);
+        alert(t('alertErrorPermanentlyDeletingRequest') + error.message);
     }
 };
 

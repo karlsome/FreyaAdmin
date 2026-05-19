@@ -6584,132 +6584,159 @@ function loadPage(page) {
                     <!-- Hidden file input for CSV upload -->
                     <input type="file" id="nodaCsvFileInput" accept=".csv" style="display: none;" onchange="handleNodaCsvUpload(this)">
 
-                    <!-- Filters Section -->
-                    <div class="bg-white p-6 rounded-lg border border-gray-200">
+                    <div class="flex items-center justify-between gap-4 flex-wrap">
+                      <div id="nodaViewTabs" class="inline-flex rounded-lg border border-gray-200 bg-white p-1">
+                        <button id="nodaActiveViewTab" onclick="switchNodaView('active')" class="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium">
+                          <span data-i18n="pickingRequests">Picking Requests</span>
+                        </button>
+                        <button id="nodaTrashViewTab" onclick="switchNodaView('trash')" class="hidden px-4 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100">
+                          <i class="ri-delete-bin-line mr-2"></i><span data-i18n="nodaTrashBin">Trash Bin</span>
+                        </button>
+                      </div>
+                      <div id="nodaTrashSummary" class="hidden text-sm text-gray-500" data-i18n="nodaTrashBinHelp">Deleted requests stay in trash for 6 months unless an admin deletes them permanently.</div>
+                    </div>
+
+                    <div id="nodaActiveViewControls" class="space-y-6">
+                      <!-- Filters Section -->
+                      <div class="bg-white p-6 rounded-lg border border-gray-200">
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="status">Status</label>
-                                <select id="nodaStatusFilter" class="w-full p-2 border border-gray-300 rounded-md" onchange="syncStatusFilterWithCards()">
-                                    <option value="" data-i18n="allStatuses">All Statuses</option>
-                                    <option value="pending" data-i18n="statusPending">Pending</option>
-                                    <option value="in-progress">In Progress</option>
-                                    <option value="completed">Completed</option>
-                                    <option value="partial-inventory">Partial Inventory</option>
-                                    <option value="cancelled">Cancelled</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="partNumber">品番</label>
-                                <select id="nodaPartNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
-                                    <option value="" data-i18n="allPartNumbers">All Part Numbers</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="backNumber">背番号</label>
-                                <select id="nodaBackNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
-                                    <option value="" data-i18n="allBackNumbers">All Back Numbers</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateFrom">Date From</label>
-                                <input type="date" id="nodaDateFrom" class="w-full p-2 border border-gray-300 rounded-md">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateTo">Date To</label>
-                                <input type="date" id="nodaDateTo" class="w-full p-2 border border-gray-300 rounded-md">
-                            </div>
-                            <div>
-                                <button onclick="applyNodaFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-                                    <i class="ri-filter-line mr-2"></i><span data-i18n="applyFilters">Apply Filters</span>
-                                </button>
-                            </div>
+                          <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="status">Status</label>
+                            <select id="nodaStatusFilter" class="w-full p-2 border border-gray-300 rounded-md" onchange="syncStatusFilterWithCards()">
+                              <option value="" data-i18n="allStatuses">All Statuses</option>
+                              <option value="pending" data-i18n="statusPending">Pending</option>
+                              <option value="in-progress">In Progress</option>
+                              <option value="completed">Completed</option>
+                              <option value="partial-inventory">Partial Inventory</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="partNumber">品番</label>
+                            <select id="nodaPartNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                              <option value="" data-i18n="allPartNumbers">All Part Numbers</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="backNumber">背番号</label>
+                            <select id="nodaBackNumberFilter" class="w-full p-2 border border-gray-300 rounded-md">
+                              <option value="" data-i18n="allBackNumbers">All Back Numbers</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateFrom">Date From</label>
+                            <input type="date" id="nodaDateFrom" class="w-full p-2 border border-gray-300 rounded-md">
+                          </div>
+                          <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2" data-i18n="dateTo">Date To</label>
+                            <input type="date" id="nodaDateTo" class="w-full p-2 border border-gray-300 rounded-md">
+                          </div>
+                          <div>
+                            <button onclick="applyNodaFilters()" class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                              <i class="ri-filter-line mr-2"></i><span data-i18n="applyFilters">Apply Filters</span>
+                            </button>
+                          </div>
                         </div>
                         <div class="mt-4">
-                            <input type="text" id="nodaSearchInput" data-i18n-placeholder="searchRequests" placeholder="Search requests..." class="w-full p-2 border border-gray-300 rounded-md">
+                          <input type="text" id="nodaSearchInput" data-i18n-placeholder="searchRequests" placeholder="Search requests..." class="w-full p-2 border border-gray-300 rounded-md">
                         </div>
-                    </div>
+                      </div>
 
-                    <!-- Statistics Cards - Compact & Clickable -->
-                    <div class="grid grid-cols-2 md:grid-cols-6 gap-3" id="nodaStatusCards">
+                      <!-- Statistics Cards - Compact & Clickable -->
+                      <div class="grid grid-cols-2 md:grid-cols-6 gap-3" id="nodaStatusCards">
                         <div class="bg-white px-4 py-3 rounded-lg border-2 border-gray-300 cursor-pointer hover:shadow-md transition-all noda-status-card active" data-status="all" onclick="filterNodaByStatus('all')">
-                            <div class="flex items-center">
-                                <div class="p-2 bg-gray-100 rounded-lg">
-                                    <i class="ri-list-check text-xl text-gray-600"></i>
-                                </div>
-                                <div class="ml-3">
-                                    <p class="text-xs text-gray-500">All</p>
-                                    <p id="nodaAllCount" class="text-xl font-bold text-gray-900">0</p>
-                                </div>
+                          <div class="flex items-center">
+                            <div class="p-2 bg-gray-100 rounded-lg">
+                              <i class="ri-list-check text-xl text-gray-600"></i>
                             </div>
+                            <div class="ml-3">
+                              <p class="text-xs text-gray-500">All</p>
+                              <p id="nodaAllCount" class="text-xl font-bold text-gray-900">0</p>
+                            </div>
+                          </div>
                         </div>
                         <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="pending" onclick="filterNodaByStatus('pending')">
-                            <div class="flex items-center">
-                                <div class="p-2 bg-yellow-100 rounded-lg">
-                                    <i class="ri-time-line text-xl text-yellow-600"></i>
-                                </div>
-                                <div class="ml-3">
-                                    <p class="text-xs text-gray-500" data-i18n="statusPending">Pending</p>
-                                    <p id="nodaPendingCount" class="text-xl font-bold text-gray-900">0</p>
-                                </div>
+                          <div class="flex items-center">
+                            <div class="p-2 bg-yellow-100 rounded-lg">
+                              <i class="ri-time-line text-xl text-yellow-600"></i>
                             </div>
+                            <div class="ml-3">
+                              <p class="text-xs text-gray-500" data-i18n="statusPending">Pending</p>
+                              <p id="nodaPendingCount" class="text-xl font-bold text-gray-900">0</p>
+                            </div>
+                          </div>
                         </div>
                         <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="in-progress" onclick="filterNodaByStatus('in-progress')">
-                            <div class="flex items-center">
-                                <div class="p-2 bg-blue-100 rounded-lg">
-                                    <i class="ri-play-line text-xl text-blue-600"></i>
-                                </div>
-                                <div class="ml-3">
-                                    <p class="text-xs text-gray-500">In Progress</p>
-                                    <p id="nodaInProgressCount" class="text-xl font-bold text-gray-900">0</p>
-                                </div>
+                          <div class="flex items-center">
+                            <div class="p-2 bg-blue-100 rounded-lg">
+                              <i class="ri-play-line text-xl text-blue-600"></i>
                             </div>
+                            <div class="ml-3">
+                              <p class="text-xs text-gray-500">In Progress</p>
+                              <p id="nodaInProgressCount" class="text-xl font-bold text-gray-900">0</p>
+                            </div>
+                          </div>
                         </div>
                         <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="completed" onclick="filterNodaByStatus('completed')">
-                            <div class="flex items-center">
-                                <div class="p-2 bg-green-100 rounded-lg">
-                                    <i class="ri-checkbox-circle-line text-xl text-green-600"></i>
-                                </div>
-                                <div class="ml-3">
-                                    <p class="text-xs text-gray-500" data-i18n="statusComplete">Completed</p>
-                                    <p id="nodaCompletedCount" class="text-xl font-bold text-gray-900">0</p>
-                                </div>
+                          <div class="flex items-center">
+                            <div class="p-2 bg-green-100 rounded-lg">
+                              <i class="ri-checkbox-circle-line text-xl text-green-600"></i>
                             </div>
+                            <div class="ml-3">
+                              <p class="text-xs text-gray-500" data-i18n="statusComplete">Completed</p>
+                              <p id="nodaCompletedCount" class="text-xl font-bold text-gray-900">0</p>
+                            </div>
+                          </div>
                         </div>
                         <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="partial-inventory" onclick="filterNodaByStatus('partial-inventory')">
-                            <div class="flex items-center">
-                                <div class="p-2 bg-orange-100 rounded-lg">
-                                    <i class="ri-alert-line text-xl text-orange-600"></i>
-                                </div>
-                                <div class="ml-3">
-                                    <p class="text-xs text-gray-500">Partial Inventory</p>
-                                    <p id="nodaPartialInventoryCount" class="text-xl font-bold text-gray-900">0</p>
-                                </div>
+                          <div class="flex items-center">
+                            <div class="p-2 bg-orange-100 rounded-lg">
+                              <i class="ri-alert-line text-xl text-orange-600"></i>
                             </div>
+                            <div class="ml-3">
+                              <p class="text-xs text-gray-500">Partial Inventory</p>
+                              <p id="nodaPartialInventoryCount" class="text-xl font-bold text-gray-900">0</p>
+                            </div>
+                          </div>
                         </div>
                         <div class="bg-white px-4 py-3 rounded-lg border border-gray-200 cursor-pointer hover:shadow-md transition-all noda-status-card" data-status="cancelled" onclick="filterNodaByStatus('cancelled')">
-                            <div class="flex items-center">
-                                <div class="p-2 bg-red-100 rounded-lg">
-                                    <i class="ri-close-circle-line text-xl text-red-600"></i>
-                                </div>
-                                <div class="ml-3">
-                                    <p class="text-xs text-gray-500">Cancelled</p>
-                                    <p id="nodaCancelledCount" class="text-xl font-bold text-gray-900">0</p>
-                                </div>
+                          <div class="flex items-center">
+                            <div class="p-2 bg-red-100 rounded-lg">
+                              <i class="ri-close-circle-line text-xl text-red-600"></i>
                             </div>
+                            <div class="ml-3">
+                              <p class="text-xs text-gray-500">Cancelled</p>
+                              <p id="nodaCancelledCount" class="text-xl font-bold text-gray-900">0</p>
+                            </div>
+                          </div>
                         </div>
+                      </div>
+
+                      <!-- Add New Request Button (Role-based) -->
+                      <div id="nodaAddRequestSection" class="flex justify-end" style="display: none;">
+                        <button onclick="openNodaAddModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                          <i class="ri-add-line mr-2"></i><span data-i18n="newRequest">New Request</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <!-- Add New Request Button (Role-based) -->
-                    <div id="nodaAddRequestSection" class="flex justify-end" style="display: none;">
-                        <button onclick="openNodaAddModal()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                            <i class="ri-add-line mr-2"></i><span data-i18n="newRequest">New Request</span>
-                        </button>
+                    <div id="nodaTrashControls" class="hidden bg-white p-6 rounded-lg border border-gray-200">
+                      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div>
+                          <h3 class="text-lg font-semibold text-gray-900" data-i18n="nodaTrashBin">Trash Bin</h3>
+                          <p class="mt-1 text-sm text-gray-500" data-i18n="nodaTrashBinHelp">Deleted requests stay in trash for 6 months unless an admin deletes them permanently.</p>
+                        </div>
+                        <div class="relative w-full lg:w-80">
+                          <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                          <input type="text" id="nodaTrashSearchInput" data-i18n-placeholder="searchTrashRequests" placeholder="Search trash..." class="w-full rounded-md border border-gray-300 py-2 pl-10 pr-3">
+                        </div>
+                      </div>
                     </div>
 
                     <!-- Data Table -->
                     <div class="bg-white rounded-lg border border-gray-200">
                         <div class="p-4 border-b border-gray-200">
-                            <h3 class="text-lg font-semibold text-gray-900" data-i18n="pickingRequests">Picking Requests</h3>
+                        <h3 id="nodaTableTitle" class="text-lg font-semibold text-gray-900" data-i18n="pickingRequests">Picking Requests</h3>
                         </div>
                         
                         <div class="overflow-x-auto">
