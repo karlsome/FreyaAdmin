@@ -4317,6 +4317,33 @@ function loadPage(page) {
             document.getElementById('filteredCount').textContent = masterFilteredCount;
           }
 
+          function getMasterDbTableHeaders() {
+            if (currentMasterTab !== 'masterDB' || typeof window.getMasterDbTableFieldDefinitions !== 'function') {
+              return [];
+            }
+
+            return window.getMasterDbTableFieldDefinitions().map(field => ({
+              key: field.key,
+              label: field.label || field.key
+            }));
+          }
+
+          function formatMasterTableCellValue(fieldKey, value) {
+            if (currentMasterTab === 'masterDB' && typeof window.formatMasterDbFieldValueForTable === 'function') {
+              return window.formatMasterDbFieldValueForTable(fieldKey, value);
+            }
+
+            if (value === null || value === undefined || value === '') {
+              return '-';
+            }
+
+            if (typeof value === 'object') {
+              return JSON.stringify(value);
+            }
+
+            return String(value);
+          }
+
           function renderMasterTable() {
             if (!masterData.length) {
               document.getElementById("masterTableContainer").innerHTML = `
@@ -4385,54 +4412,44 @@ function loadPage(page) {
               headers = [...priorityFields, ...otherFields];
               dataFields = headers.filter(h => h.key !== 'imageURL').map(h => h.key);
             } else {
-              // 内装品DB headers (existing logic)
-              // Use page data as the dataset to find a reference header item
-              let referenceItem = null;
-              
-              // Try to find a record with a proper 品番 field
-              for (let item of masterData) {
-                if (item && item.品番 && typeof item.品番 === 'string' && item.品番.trim() !== '') {
-                  referenceItem = item;
-                  break;
-                }
-              }
-              
-              // If no good reference found, use predefined field structure
-              if (!referenceItem) {
-                console.warn('No proper reference item found, using default field structure');
-                referenceItem = {
-                  品番: '',
-                  モデル: '',
-                  背番号: '',
-                  品名: '',
-                形状: '',
-                'R/L': '',
-                色: '',
-                '顧客/納入先': '',
-                備考: '',
-                加工設備: '',
-                'QR CODE': '',
-                型番: '',
-                材料背番号: '',
-                材料: '',
-                収容数: '',
-                工場: '',
-                '秒数(1pcs何秒)': '',
-                '離型紙上/下': '',
-                送りピッチ: '',
-                SRS: '',
-                SLIT: '',
-                imageURL: ''
-              };
-            }
+              const masterDbHeaders = getMasterDbTableHeaders();
 
-            // Get all fields except _id and imageURL for 内装品DB, then add imageURL at the end
-            dataFields = Object.keys(referenceItem).filter(k => k !== "_id" && k !== "imageURL");
-            headers = [
-              ...dataFields.map(field => ({ key: field, label: field })),
-              { key: "imageURL", label: "画像" }
-            ];
-          }
+              if (masterDbHeaders.length > 0) {
+                headers = masterDbHeaders;
+              } else {
+                headers = [
+                  { key: '品番', label: '品番' },
+                  { key: 'モデル', label: 'モデル' },
+                  { key: '背番号', label: '背番号' },
+                  { key: '品名', label: '品名' },
+                  { key: '形状', label: '形状' },
+                  { key: 'R/L', label: 'R/L' },
+                  { key: '色', label: '色' },
+                  { key: '顧客/納入先', label: '顧客/納入先' },
+                  { key: '備考', label: '備考' },
+                  { key: '加工設備', label: '加工設備' },
+                  { key: 'QR CODE', label: 'QR CODE' },
+                  { key: '型番', label: '型番' },
+                  { key: '材料背番号', label: '材料背番号' },
+                  { key: '材料', label: '材料' },
+                  { key: '収容数', label: '収容数' },
+                  { key: '工場', label: '工場' },
+                  { key: '秒数(1pcs何秒)', label: '秒数(1pcs何秒)' },
+                  { key: '離型紙上/下', label: '離型紙上/下' },
+                  { key: '送りピッチ', label: '送りピッチ' },
+                  { key: 'SRS', label: 'SRS' },
+                  { key: 'SLIT', label: 'SLIT' },
+                  { key: 'imageURL', label: '画像' },
+                  { key: 'pickingIOT', label: 'pickingIOT' },
+                  { key: 'pcPerCycle', label: 'pcPerCycle' },
+                  { key: 'machineConfig', label: 'machineConfig' },
+                  { key: 'pricePerBox', label: 'pricePerBox' },
+                  { key: 'pricePerPc', label: 'pricePerPc' }
+                ];
+              }
+
+              dataFields = headers.filter(h => h.key !== 'imageURL').map(h => h.key);
+            }
 
             const getSortArrow = (col) => {
               if (masterSortState.column !== col) return '';
@@ -4472,9 +4489,9 @@ function loadPage(page) {
                           } else {
                             // Render data field
                             const value = row[h.key];
-                            const displayValue = (value === null || value === undefined || value === '') ? "-" : value;
+                            const displayValue = formatMasterTableCellValue(h.key, value);
                             // Highlight main fields for both tabs
-                            const isMainField = h.key === "品番" || h.key === "品名" || h.key === "材料品番" || h.key === "材料" || h.key === "ラベル品番" || h.key === "原材料品番";
+                            const isMainField = h.key === "品番" || h.key === "品名" || h.key === "材料品番" || h.key === "材料背番号" || h.key === "材料" || h.key === "ラベル品番" || h.key === "原材料品番";
                             return `<td class="px-3 py-2 text-sm ${isMainField ? 'font-medium text-blue-600 hover:text-blue-800' : 'text-gray-900'}">${displayValue}</td>`;
                           }
                         }).join('')}
@@ -4687,50 +4704,72 @@ function loadPage(page) {
             container.innerHTML = '';
 
             // Get field structure from existing data or create basic structure
-            let fieldsToShow = [];
+            let fieldDefinitions = [];
+            const masterCreateFieldDefinitions = currentMasterTab === 'masterDB' && typeof window.getMasterDbCreateFieldDefinitions === 'function'
+              ? window.getMasterDbCreateFieldDefinitions()
+              : null;
             
-            if (masterData.length > 0) {
-              // Use existing data structure but ensure boardData is always included for masterDB only
+            if (masterCreateFieldDefinitions && masterCreateFieldDefinitions.length > 0) {
+              fieldDefinitions = masterCreateFieldDefinitions;
+            } else if (masterData.length > 0) {
               const sampleRecord = masterData[0];
               const existingFields = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
-              
-              // Always include boardData if it's not already in the existing fields, but only for masterDB
-              if (currentMasterTab === 'masterDB' && !existingFields.includes('boardData')) {
-                existingFields.push('boardData');
-              }
-              
-              fieldsToShow = existingFields;
+
+              fieldDefinitions = existingFields.map(field => ({ key: field, label: field, inputType: 'text' }));
             } else {
               // Default fields based on tab
               if (currentMasterTab === 'masterDB') {
-                fieldsToShow = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料', 'boardData'];
+                fieldDefinitions = [
+                  '品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料背番号', '材料',
+                  '収容数', '工場', '秒数(1pcs何秒)', '離型紙上/下', '送りピッチ', 'SRS', 'SLIT', 'pickingIOT', 'pcPerCycle', 'machineConfig', 'pricePerBox', 'pricePerPc'
+                ].map(field => ({
+                  key: field,
+                  label: field,
+                  inputType: field === 'machineConfig' ? 'json' : ['pcPerCycle', 'pricePerBox', 'pricePerPc'].includes(field) ? 'number' : field === 'pickingIOT' ? 'select' : 'text',
+                  options: field === 'pickingIOT' ? ['', 'yes', 'no'] : undefined
+                }));
               } else {
-                fieldsToShow = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料'];
+                fieldDefinitions = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料']
+                  .map(field => ({ key: field, label: field, inputType: 'text' }));
               }
             }
 
-            fieldsToShow.forEach(field => {
+            fieldDefinitions.forEach(fieldDefinition => {
+              const field = typeof fieldDefinition === 'string'
+                ? { key: fieldDefinition, label: fieldDefinition, inputType: 'text' }
+                : fieldDefinition;
               const fieldDiv = document.createElement('div');
               
-              // Special handling for boardData field (string input)
-              if (field === 'boardData') {
+              if (field.inputType === 'json') {
                 fieldDiv.innerHTML = `
-                  <label class="block text-sm font-medium text-gray-700 mb-1">${field}</label>
-                  <input type="text" 
-                         name="${field}" 
-                         class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                         placeholder="カンマ区切りで入力してください（例：950A,Cピラー(ア),RH）" />
-                  <p class="text-xs text-gray-500 mt-1">カンマ区切りの文字列として保存されます。</p>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">${field.label}</label>
+                  <textarea name="${field.key}" rows="8" class="w-full p-2 border border-gray-300 rounded text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder='{"OZNC03":{"送りピッチ":1590,"pcPerCycle":8}}'></textarea>
+                  <p class="text-xs text-gray-500 mt-1">JSON形式で入力してください。</p>
+                `;
+              } else if (field.inputType === 'select') {
+                const options = (field.options || [''])
+                  .map(option => `<option value="${option}">${option === '' ? '-' : option}</option>`)
+                  .join('');
+
+                fieldDiv.innerHTML = `
+                  <label class="block text-sm font-medium text-gray-700 mb-1">${field.label}</label>
+                  <select name="${field.key}" class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    ${options}
+                  </select>
                 `;
               } else {
+                const inputType = field.inputType === 'number' ? 'number' : 'text';
+                const stepAttribute = field.inputType === 'number' ? 'step="any"' : '';
+
                 fieldDiv.innerHTML = `
-                  <label class="block text-sm font-medium text-gray-700 mb-1">${field}</label>
-                  <input type="text" 
-                         name="${field}" 
+                  <label class="block text-sm font-medium text-gray-700 mb-1">${field.label}</label>
+                  <input type="${inputType}" ${stepAttribute}
+                         name="${field.key}" 
                          class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-                         placeholder="${field}を入力..." />
+                         placeholder="${field.label}を入力..." />
                 `;
               }
+
               container.appendChild(fieldDiv);
             });
           }
@@ -4753,39 +4792,52 @@ function loadPage(page) {
             try {
               // Prepare record data with ALL fields from the current data structure
               const recordData = {};
+              const masterCreateFieldDefinitions = currentMasterTab === 'masterDB' && typeof window.getMasterDbCreateFieldDefinitions === 'function'
+                ? window.getMasterDbCreateFieldDefinitions()
+                : null;
               
               // Get all possible fields from existing data structure
-              let allFields = [];
-              if (masterData.length > 0) {
-                // Use existing data structure but ensure boardData is always included for masterDB only
+              let fieldDefinitions = [];
+              if (masterCreateFieldDefinitions && masterCreateFieldDefinitions.length > 0) {
+                fieldDefinitions = masterCreateFieldDefinitions;
+              } else if (masterData.length > 0) {
                 const sampleRecord = masterData[0];
                 const existingFields = Object.keys(sampleRecord).filter(key => key !== '_id' && key !== 'imageURL');
-                
-                // Always include boardData if it's not already in the existing fields, but only for masterDB
-                if (currentMasterTab === 'masterDB' && !existingFields.includes('boardData')) {
-                  existingFields.push('boardData');
-                }
-                
-                allFields = existingFields;
+
+                fieldDefinitions = existingFields.map(field => ({ key: field, label: field, inputType: 'text' }));
               } else {
                 // Default fields based on tab if no existing data
                 if (currentMasterTab === 'masterDB') {
-                  allFields = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料品番', '材料', 'boardData'];
+                  fieldDefinitions = [
+                    '品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '加工設備', 'QR CODE', '型番', '材料背番号', '材料',
+                    '収容数', '工場', '秒数(1pcs何秒)', '離型紙上/下', '送りピッチ', 'SRS', 'SLIT', 'pickingIOT', 'pcPerCycle', 'machineConfig', 'pricePerBox', 'pricePerPc'
+                  ].map(field => ({
+                    key: field,
+                    label: field,
+                    inputType: field === 'machineConfig' ? 'json' : ['pcPerCycle', 'pricePerBox', 'pricePerPc'].includes(field) ? 'number' : 'text'
+                  }));
                 } else {
-                  allFields = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料'];
+                  fieldDefinitions = ['品番', 'モデル', '背番号', '品名', '形状', 'R/L', '色', '顧客/納入先', '備考', '次工程', 'QR CODE', '型番', '材料品番', '材料']
+                    .map(field => ({ key: field, label: field, inputType: 'text' }));
                 }
               }
 
+              const allFields = fieldDefinitions.map(field => field.key);
+
               // Initialize all fields with empty strings
-              allFields.forEach(field => {
-                recordData[field] = "";
+              fieldDefinitions.forEach(field => {
+                recordData[field.key] = "";
               });
 
               // Fill in the data from form elements (overwrite empty strings with actual values)
               const formElements = document.getElementById('addRecordForm').elements;
               for (let element of formElements) {
                 if (element.name && allFields.includes(element.name)) {
-                  recordData[element.name] = element.value.trim();
+                  if (currentMasterTab === 'masterDB' && typeof window.parseMasterDbFieldInputValue === 'function') {
+                    recordData[element.name] = window.parseMasterDbFieldInputValue(element.name, element.value);
+                  } else {
+                    recordData[element.name] = element.value.trim();
+                  }
                 }
               }
 
@@ -4968,6 +5020,9 @@ function loadPage(page) {
             try {
               const collectionName = currentMasterTab === 'materialDB' ? 'materialMasterDB2' : 'masterDB';
               const baseQuery = currentMasterTab === 'materialDB' ? { 工程名: "粘着工程" } : {};
+              const canonicalMasterFields = currentMasterTab === 'masterDB' && typeof window.getMasterDbCanonicalFieldDefinitions === 'function'
+                ? window.getMasterDbCanonicalFieldDefinitions()
+                : [];
               
               console.log(`📋 Fetching schema for ${collectionName}...`);
 
@@ -4976,9 +5031,14 @@ function loadPage(page) {
                 query: JSON.stringify(baseQuery),
               });
               const res = await fetch(`${BASE_URL}api/masterdb/schema?${params}`);
-              const fields = await res.json(); // string[]
+              const fetchedFields = await res.json(); // string[]
+              const fields = Array.isArray(fetchedFields) ? fetchedFields : [];
+              const mergedFields = [...new Set([
+                ...canonicalMasterFields.map(field => field.key),
+                ...fields
+              ])];
 
-              if (!Array.isArray(fields) || fields.length === 0) {
+              if (mergedFields.length === 0) {
                 console.warn('No schema fields returned');
                 return {};
               }
@@ -4986,8 +5046,18 @@ function loadPage(page) {
               // Build schemas — for simplicity, classify fields by name heuristics.
               // The server already sampled 200 docs; we just need type hints for the filter UI.
               const schemas = {};
-              fields.forEach(field => {
-                if (field.toLowerCase().includes('date') || field === 'Date') {
+              mergedFields.forEach(field => {
+                const canonicalField = canonicalMasterFields.find(item => item.key === field);
+
+                if (canonicalField?.schemaType === 'number') {
+                  schemas[field] = { type: 'number', label: canonicalField.label || field, operators: ['equals', 'range'] };
+                } else if (canonicalField?.schemaType === 'text') {
+                  schemas[field] = { type: 'text', label: canonicalField.label || field, operators: ['equals', 'contains'] };
+                } else if (canonicalField?.schemaType === 'json') {
+                  schemas[field] = { type: 'json', label: canonicalField.label || field, operators: ['contains'] };
+                } else if (canonicalField?.schemaType === 'select') {
+                  schemas[field] = { type: 'select', label: canonicalField.label || field, operators: ['equals', 'contains', 'in'], autoPopulate: true };
+                } else if (field.toLowerCase().includes('date') || field === 'Date') {
                   schemas[field] = { type: 'date', label: field, operators: ['equals', 'range'] };
                 } else {
                   // All other fields default to select (will auto-populate via distinct).
@@ -4997,7 +5067,7 @@ function loadPage(page) {
               });
 
               masterFieldSchemas = schemas;
-              console.log(`✅ schema loaded: ${fields.length} fields`);
+              console.log(`✅ schema loaded: ${mergedFields.length} fields`);
               return schemas;
             } catch (error) {
               console.error('❌ Error fetching field schema:', error);
@@ -5929,7 +5999,7 @@ function loadPage(page) {
             
             fields.forEach(field => {
               const schema = masterFieldSchemas[field];
-              const currentValue = record[field] !== undefined && record[field] !== null ? String(record[field]) : '';
+              const currentValue = record[field] !== undefined && record[field] !== null ? formatMasterTableCellValue(field, record[field]) : '';
               const hasChange = batchEditChanges[field] !== undefined;
               const newValue = hasChange ? batchEditChanges[field] : '';
               

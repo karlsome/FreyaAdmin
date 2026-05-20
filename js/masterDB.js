@@ -33,8 +33,237 @@ function handleMasterCSVUpload() {
 /**
  * Displays a preview of the uploaded CSV data before import.
  */
+function sanitizeMasterRecordFields(record = {}) {
+  return Object.entries(record).reduce((sanitized, [key, value]) => {
+    if (key === "_id" || String(key).trim() !== "") {
+      sanitized[key] = value;
+    }
+
+    return sanitized;
+  }, {});
+}
+
+const MASTER_DB_CANONICAL_FIELDS = [
+  { key: "品番", label: "品番", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "モデル", label: "モデル", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "背番号", label: "背番号", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "品名", label: "品名", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "形状", label: "形状", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "R/L", label: "R/L", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "色", label: "色", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "顧客/納入先", label: "顧客/納入先", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "備考", label: "備考", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "加工設備", label: "加工設備", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "QR CODE", label: "QR CODE", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "型番", label: "型番", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "材料背番号", label: "材料背番号", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "材料", label: "材料", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "収容数", label: "収容数", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "工場", label: "工場", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "秒数(1pcs何秒)", label: "秒数(1pcs何秒)", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "離型紙上/下", label: "離型紙上/下", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "送りピッチ", label: "送りピッチ", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "SRS", label: "SRS", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "SLIT", label: "SLIT", inputType: "text", schemaType: "select", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "imageURL", label: "画像", inputType: "image", schemaType: "select", showInTable: true, showInSidebar: false, showInCreate: false },
+  { key: "pickingIOT", label: "pickingIOT", inputType: "select", schemaType: "select", options: ["", "yes", "no"], showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "pcPerCycle", label: "pcPerCycle", inputType: "number", schemaType: "number", step: "1", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "machineConfig", label: "machineConfig", inputType: "json", schemaType: "json", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "pricePerBox", label: "pricePerBox", inputType: "number", schemaType: "number", step: "any", showInTable: true, showInSidebar: true, showInCreate: true },
+  { key: "pricePerPc", label: "pricePerPc", inputType: "number", schemaType: "number", step: "any", showInTable: true, showInSidebar: true, showInCreate: true }
+];
+
+const MASTER_DB_CANONICAL_FIELD_KEYS = new Set(MASTER_DB_CANONICAL_FIELDS.map(field => field.key));
+
+function escapeMasterFieldHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function isMasterStructuredValue(value) {
+  return value !== null && typeof value === "object";
+}
+
+function inferMasterFieldInputType(value) {
+  if (typeof value === "number") return "number";
+  if (isMasterStructuredValue(value)) return "json";
+  return "text";
+}
+
+function inferMasterFieldSchemaType(value) {
+  const inputType = inferMasterFieldInputType(value);
+  if (inputType === "number") return "number";
+  if (inputType === "json") return "text";
+  return "select";
+}
+
+function getMasterDbCanonicalFieldDefinitions() {
+  return MASTER_DB_CANONICAL_FIELDS.map(field => ({ ...field }));
+}
+
+function getMasterDbFieldDefinitions(record = {}) {
+  const extraFields = Object.keys(record)
+    .filter(key => key !== "_id" && String(key).trim() !== "" && !MASTER_DB_CANONICAL_FIELD_KEYS.has(key))
+    .map(key => ({
+      key,
+      label: key,
+      inputType: inferMasterFieldInputType(record[key]),
+      schemaType: inferMasterFieldSchemaType(record[key]),
+      showInTable: false,
+      showInSidebar: true,
+      showInCreate: false
+    }));
+
+  return [...getMasterDbCanonicalFieldDefinitions(), ...extraFields];
+}
+
+function getMasterDbSidebarFieldDefinitions(record = {}) {
+  return getMasterDbFieldDefinitions(record).filter(field => field.showInSidebar !== false && field.key !== "imageURL");
+}
+
+function getMasterDbCreateFieldDefinitions() {
+  return getMasterDbCanonicalFieldDefinitions().filter(field => field.showInCreate !== false && field.key !== "imageURL");
+}
+
+function getMasterDbTableFieldDefinitions() {
+  return getMasterDbCanonicalFieldDefinitions().filter(field => field.showInTable !== false);
+}
+
+function getMasterDbFieldDefinition(key, record = {}) {
+  return getMasterDbFieldDefinitions(record).find(field => field.key === key) || {
+    key,
+    label: key,
+    inputType: "text",
+    schemaType: "select"
+  };
+}
+
+function formatMasterDbFieldInputValue(key, value, record = {}) {
+  const fieldDefinition = getMasterDbFieldDefinition(key, record);
+
+  if (fieldDefinition.inputType === "json") {
+    if (value === "" || value === null || value === undefined) {
+      return "";
+    }
+
+    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function parseMasterDbFieldInputValue(key, rawValue, record = {}) {
+  const fieldDefinition = getMasterDbFieldDefinition(key, record);
+  const value = typeof rawValue === "string" ? rawValue.trim() : rawValue;
+
+  if (fieldDefinition.inputType === "number") {
+    if (value === "") return "";
+
+    const parsedNumber = Number(value);
+    if (Number.isNaN(parsedNumber)) {
+      throw new Error(`${fieldDefinition.label} は数値で入力してください`);
+    }
+
+    return parsedNumber;
+  }
+
+  if (fieldDefinition.inputType === "json") {
+    if (value === "") return "";
+
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      throw new Error(`${fieldDefinition.label} は有効なJSON形式で入力してください`);
+    }
+  }
+
+  return value;
+}
+
+function formatMasterDbFieldValueForTable(key, value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+
+  if (key === "machineConfig" && isMasterStructuredValue(value)) {
+    const machineCount = Object.keys(value).length;
+    return machineCount > 0 ? `${machineCount} machines` : "-";
+  }
+
+  if (isMasterStructuredValue(value)) {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function renderMasterSidebarField(fieldDefinition, value, record = {}) {
+  const serializedValue = formatMasterDbFieldInputValue(fieldDefinition.key, value, record);
+  const escapedKey = escapeMasterFieldHtml(fieldDefinition.key);
+  const escapedLabel = escapeMasterFieldHtml(fieldDefinition.label || fieldDefinition.key);
+  const escapedValue = escapeMasterFieldHtml(serializedValue);
+  const inputClasses = "editable-master p-1 border rounded w-full bg-gray-100 disabled:bg-gray-100 disabled:text-gray-700";
+
+  if (fieldDefinition.inputType === "json") {
+    return `
+      <div class="flex items-start gap-2">
+        <label class="font-medium w-32 shrink-0 pt-2">${escapedLabel}</label>
+        <div class="w-full">
+          <textarea class="${inputClasses} min-h-[140px] p-2 font-mono text-xs" data-key="${escapedKey}" data-field-type="json" disabled>${escapedValue}</textarea>
+          <p class="text-xs text-gray-500 mt-1">JSON</p>
+        </div>
+      </div>
+    `;
+  }
+
+  if (fieldDefinition.inputType === "select") {
+    const options = (fieldDefinition.options || [""])
+      .map(option => {
+        const escapedOption = escapeMasterFieldHtml(option);
+        const selected = option === serializedValue ? "selected" : "";
+        const label = option === "" ? "-" : escapedOption;
+        return `<option value="${escapedOption}" ${selected}>${label}</option>`;
+      })
+      .join("");
+
+    return `
+      <div class="flex items-center gap-2">
+        <label class="font-medium w-32 shrink-0">${escapedLabel}</label>
+        <select class="${inputClasses}" data-key="${escapedKey}" data-field-type="select" disabled>
+          ${options}
+        </select>
+      </div>
+    `;
+  }
+
+  const htmlInputType = fieldDefinition.inputType === "number" ? "number" : "text";
+  const stepAttribute = fieldDefinition.inputType === "number" ? `step="${fieldDefinition.step || "any"}"` : "";
+
+  return `
+    <div class="flex items-center gap-2">
+      <label class="font-medium w-32 shrink-0">${escapedLabel}</label>
+      <input type="${htmlInputType}" ${stepAttribute} class="${inputClasses}" data-key="${escapedKey}" data-field-type="${fieldDefinition.inputType}" value="${escapedValue}" disabled />
+    </div>
+  `;
+}
+
+window.getMasterDbCanonicalFieldDefinitions = getMasterDbCanonicalFieldDefinitions;
+window.getMasterDbFieldDefinitions = getMasterDbFieldDefinitions;
+window.getMasterDbSidebarFieldDefinitions = getMasterDbSidebarFieldDefinitions;
+window.getMasterDbCreateFieldDefinitions = getMasterDbCreateFieldDefinitions;
+window.getMasterDbTableFieldDefinitions = getMasterDbTableFieldDefinitions;
+window.getMasterDbFieldDefinition = getMasterDbFieldDefinition;
+window.formatMasterDbFieldInputValue = formatMasterDbFieldInputValue;
+window.parseMasterDbFieldInputValue = parseMasterDbFieldInputValue;
+window.formatMasterDbFieldValueForTable = formatMasterDbFieldValueForTable;
+
 function displayCSVPreview(data) {
-  const preview = data.slice(0, 5); // show only first 5
+  const sanitizedData = data.map(record => sanitizeMasterRecordFields(record));
+  const preview = sanitizedData.slice(0, 5); // show only first 5
   const keys = Object.keys(preview[0]);
 
   const html = `
@@ -52,7 +281,7 @@ function displayCSVPreview(data) {
     <button class="bg-green-500 text-white px-4 py-2 rounded" onclick="confirmMasterInsert()">${t('insertAllToDatabase')}</button>
   `;
 
-  window._csvMasterRecords = data;
+  window._csvMasterRecords = sanitizedData;
   document.getElementById("csvPreviewContainer").innerHTML = html;
 }
 
@@ -140,7 +369,12 @@ function showMasterSidebar(data) {
   const container = document.getElementById("masterSidebarContent");
   const sidebar = document.getElementById("masterSidebar");
   const original = JSON.parse(JSON.stringify(data));
-  const fields = Object.keys(data).filter(k => k !== "_id");
+  const currentTab = window.currentMasterTab || "masterDB";
+  const fieldDefinitions = currentTab === "masterDB"
+    ? getMasterDbSidebarFieldDefinitions(data)
+    : Object.keys(data)
+        .filter(k => k !== "_id" && String(k).trim() !== "")
+        .map(key => ({ key, label: key, inputType: "text" }));
 
   const recordId = data._id?.$oid || data._id;
   const username = currentUser?.username || "unknown";
@@ -162,12 +396,7 @@ function showMasterSidebar(data) {
     </div>
 
     <div class="space-y-2" id="masterSidebarFields">
-      ${fields.map(f => `
-        <div class="flex items-center gap-2">
-          <label class="font-medium w-32 shrink-0">${f}</label>
-          <input type="text" class="editable-master p-1 border rounded w-full bg-gray-100" data-key="${f}" value="${data[f] ?? ""}" disabled />
-        </div>
-      `).join("")}
+      ${fieldDefinitions.map(fieldDefinition => renderMasterSidebarField(fieldDefinition, data[fieldDefinition.key], data)).join("")}
     </div>
 
     <div class="mt-4 flex gap-2">
@@ -194,15 +423,33 @@ function showMasterSidebar(data) {
 
   document.getElementById("saveMasterBtn").onclick = async () => {
     const updated = {};
+    let validationError = null;
+
     inputs().forEach(input => {
-      const key = input.dataset.key;
-      updated[key] = input.value.trim();
+      if (validationError) return;
+
+      const key = input.dataset.key || "";
+      if (!key.trim()) return;
+
+      try {
+        if (currentTab === "masterDB") {
+          updated[key] = parseMasterDbFieldInputValue(key, input.value, data);
+        } else {
+          updated[key] = input.value.trim();
+        }
+      } catch (error) {
+        validationError = error;
+      }
     });
+
+    if (validationError) {
+      alert(validationError.message);
+      return;
+    }
 
     try {
       // Get current tab to determine which collection to update
       // Map materialDB tab to materialMasterDB2 collection
-      const currentTab = window.currentMasterTab || 'masterDB';
       const collectionName = currentTab === 'materialDB' ? 'materialMasterDB2' : currentTab;
       
       const res = await fetch(BASE_URL + "updateMasterRecord", {
