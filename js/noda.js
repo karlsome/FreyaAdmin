@@ -2306,18 +2306,21 @@ async function parseAndShowCsvReview(csvData) {
                 if (backNumber && backNumber !== 'Not found') {
                     const inventoryResult = await getInventoryAvailability(backNumber);
                     if (inventoryResult.success) {
-                        processedItem.availableQuantity = inventoryResult.availableQuantity;
+                        const availableQuantity = Number(inventoryResult.availableQuantity ?? 0);
+                        const reservableQuantity = Math.max(0, availableQuantity);
+
+                        processedItem.availableQuantity = availableQuantity;
                         processedItem.requestedQuantity = processedItem.quantity; // Store original requested amount
                         
-                        // ✅ NEW: Calculate what can be reserved now
-                        processedItem.reservedQuantity = Math.min(inventoryResult.availableQuantity, processedItem.quantity);
-                        processedItem.shortfallQuantity = Math.max(0, processedItem.quantity - inventoryResult.availableQuantity);
+                        // Only non-negative available stock can be reserved immediately.
+                        processedItem.reservedQuantity = Math.min(reservableQuantity, processedItem.quantity);
+                        processedItem.shortfallQuantity = Math.max(0, processedItem.quantity - processedItem.reservedQuantity);
                         
-                        if (inventoryResult.availableQuantity >= processedItem.quantity) {
+                        if (reservableQuantity >= processedItem.quantity) {
                             // Sufficient inventory
                             processedItem.status = 'Valid';
                             processedItem.inventoryStatus = 'sufficient';
-                        } else if (inventoryResult.availableQuantity > 0) {
+                        } else if (reservableQuantity > 0) {
                             // Partial inventory available
                             processedItem.status = 'Partial';
                             processedItem.inventoryStatus = 'insufficient';
@@ -4289,7 +4292,8 @@ async function addItemToCart() {
                 return;
             }
             
-            const availableQuantity = result.inventory.availableQuantity || 0;
+            const availableQuantity = Number(result.inventory.availableQuantity ?? 0);
+            const reservableQuantity = Math.max(0, availableQuantity);
             
             // Allow items with insufficient inventory (like CSV upload)
             // Show warning but still allow adding
@@ -4306,8 +4310,8 @@ async function addItemToCart() {
                 背番号: backNumber,
                 quantity: quantity,
                 availableQuantity: availableQuantity,
-                reservedQuantity: Math.min(availableQuantity, quantity),
-                shortfallQuantity: Math.max(0, quantity - availableQuantity),
+                reservedQuantity: Math.min(reservableQuantity, quantity),
+                shortfallQuantity: Math.max(0, quantity - Math.min(reservableQuantity, quantity)),
                 addedAt: new Date().toISOString()
             });
         } catch (error) {
