@@ -539,6 +539,11 @@ function showFreyaTabletDetail(record) {
                             <span class="text-sm text-red-700">Total NG:</span>
                             <span class="text-sm font-medium text-red-900">${(record.Total_NG || 0).toLocaleString()}</span>
                         </div>
+                        ${Object.prototype.hasOwnProperty.call(record, '疵引処理数') ? `
+                        <div class="flex justify-between">
+                            <span class="text-sm text-red-700">${window.t ? window.t('scratchProcessedQty') : '疵引処理数'}:</span>
+                            <span class="text-sm font-medium text-red-900">${Number(record['疵引処理数'] ?? 0).toLocaleString()}</span>
+                        </div>` : ''}
                         <div class="flex justify-between">
                             <span class="text-sm text-red-700">Non Conforming (Internal):</span>
                             <span class="text-sm font-medium text-red-900">${(record.疵引不良 || 0).toLocaleString()}</span>

@@ -5774,6 +5774,13 @@ function showSidebar(item) {
             { label: _lang.nonConformingSupplier || "Non Conforming (Supplier)", value: Number(item["疵引不良"] ?? 0).toLocaleString() },
             { label: _lang.others || "Others", value: Number(item["その他"] ?? 0).toLocaleString() }
         ];
+
+        if (isPress && Object.prototype.hasOwnProperty.call(item, "疵引処理数")) {
+            ngRows.splice(1, 0, {
+                label: _lang.scratchProcessedQty || "疵引処理数",
+                value: Number(item["疵引処理数"] ?? 0).toLocaleString()
+            });
+        }
     } else if (isSRS) {
         ngRows = [
             { label: _lang.totalNG || "Total NG", value: totalNG.toLocaleString() },
