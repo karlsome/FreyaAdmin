@@ -25,6 +25,7 @@ let plannerState = {
     currentDate: new Date().toISOString().split('T')[0],
     endDate: null, // For date range plans
     equipment: [],
+    productionCapabilities: {},
     products: [], // All available products from masterDB
     goals: [], // Production quantity goals
     plans: [],
@@ -36,10 +37,40 @@ let plannerState = {
         { name: 'Lunch Break', start: '12:00', end: '12:45', isDefault: true, id: 'default-lunch' },
         { name: 'Break', start: '15:00', end: '15:15', isDefault: true, id: 'default-break' }
     ],
+    activeMainTab: 'goals',
     activeTab: 'timeline',
     productColors: {},
     colorIndex: 0,
-    hideUnavailableEquipment: false // Toggle for hiding greyed out equipment
+    hideUnavailableEquipment: false, // Toggle for hiding greyed out equipment
+    preview: {
+        data: null,
+        error: '',
+        isLoading: false,
+        isDirty: true,
+        lastLoadedAt: 0,
+        horizonDays: 3,
+        autoRefreshTimer: null,
+        pendingPromise: null,
+        scheduleUntilTime: PLANNER_CONFIG.workEndTime,
+        draftAssignments: null,
+        seedSimulation: null,
+        isDraftMode: false,
+        draftChanged: false,
+        draggedAssignmentId: null,
+        quantityEditorDraftId: null,
+        insertTarget: null,
+        viewMode: 'auto'
+    },
+    published: {
+        data: null,
+        error: '',
+        isLoading: false,
+        isDirty: true,
+        lastLoadedAt: 0,
+        pendingPromise: null,
+        viewedVersionId: null,
+        isVersionEditMode: false,
+    }
 };
 
 // Color palette for products
@@ -49,6 +80,11 @@ const PRODUCT_COLORS = [
     '#14B8A6', '#F43F5E', '#A855F7', '#22C55E', '#FBBF24',
     '#E879F9', '#2DD4BF', '#FB7185', '#A3E635', '#818CF8'
 ];
+
+const PLANNER_PREVIEW_CACHE_MS = 60 * 1000;
+const PLANNER_PREVIEW_AUTO_REFRESH_DELAY_MS = 400;
+const PLANNER_PUBLISHED_CACHE_MS = 60 * 1000;
+const PLANNER_PUBLISHED_MANAGE_ROLES = new Set(['admin', '課長', '部長', '係長']);
 
 // Get random color from palette or assign next color
 function getRandomColor() {
@@ -91,6 +127,4377 @@ function getColorForProduct(product) {
     
     // Default: assign from color palette
     return getRandomColor();
+}
+
+function buildPlannerCapabilityKey(factory = '', sebanggo = '', hinban = '') {
+    return `${factory}::${sebanggo}::${hinban}`;
+}
+
+function normalizePlannerCapabilityItem(product = {}, fallbackFactory = '') {
+    return {
+        factory: String(fallbackFactory || product.factory || product['工場'] || plannerState.currentFactory || '').trim(),
+        背番号: String(product.背番号 || '').trim(),
+        品番: String(product.品番 || '').trim()
+    };
+}
+
+function mergePlannerEquipmentOptions(equipmentList = []) {
+    if (!Array.isArray(equipmentList) || equipmentList.length === 0) {
+        return;
+    }
+
+    const merged = new Set(plannerState.equipment);
+    equipmentList.forEach((equipment) => {
+        const value = String(equipment || '').trim();
+        if (value) {
+            merged.add(value);
+        }
+    });
+
+    plannerState.equipment = Array.from(merged).sort((left, right) => left.localeCompare(right));
+}
+
+async function loadProductionCapabilitiesForItems(items = [], options = {}) {
+    const fallbackFactory = String(options.factory || plannerState.currentFactory || '').trim();
+    const forceRefresh = options.forceRefresh === true;
+    const normalizedItems = [];
+    const seenKeys = new Set();
+
+    items.forEach((item) => {
+        const normalized = normalizePlannerCapabilityItem(item, fallbackFactory);
+        if (!normalized.factory || (!normalized.背番号 && !normalized.品番)) {
+            return;
+        }
+
+        const key = buildPlannerCapabilityKey(normalized.factory, normalized.背番号, normalized.品番);
+        if (seenKeys.has(key)) {
+            return;
+        }
+
+        seenKeys.add(key);
+        normalizedItems.push(normalized);
+    });
+
+    if (normalizedItems.length === 0) {
+        return plannerState.productionCapabilities;
+    }
+
+    const itemsToFetch = forceRefresh
+        ? normalizedItems
+        : normalizedItems.filter((item) => {
+            const key = buildPlannerCapabilityKey(item.factory, item.背番号, item.品番);
+            return !plannerState.productionCapabilities[key];
+        });
+
+    if (itemsToFetch.length === 0) {
+        return plannerState.productionCapabilities;
+    }
+
+    const response = await fetch(`${BASE_URL}api/production-capability/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            factory: fallbackFactory,
+            items: itemsToFetch
+        })
+    });
+
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to load production capability mappings');
+    }
+
+    Object.assign(plannerState.productionCapabilities, result.capabilities || {});
+
+    const mappedEquipment = Object.values(result.capabilities || {}).flatMap((entry) =>
+        Array.isArray(entry.eligibleMachines)
+            ? entry.eligibleMachines.map((machine) => machine.equipment)
+            : []
+    );
+    mergePlannerEquipmentOptions(mappedEquipment);
+
+    return plannerState.productionCapabilities;
+}
+
+function getCachedProductionCapability(product = {}, fallbackFactory = '') {
+    const normalized = normalizePlannerCapabilityItem(product, fallbackFactory);
+    const key = buildPlannerCapabilityKey(normalized.factory, normalized.背番号, normalized.品番);
+    return plannerState.productionCapabilities[key] || null;
+}
+
+function getEligibleEquipmentForProduct(product = {}, fallbackFactory = '') {
+    const capability = getCachedProductionCapability(product, fallbackFactory);
+    if (!capability || !Array.isArray(capability.eligibleMachines)) {
+        return [];
+    }
+
+    return capability.eligibleMachines
+        .map((machine) => String(machine?.equipment || machine?.設備 || '').trim())
+        .filter(Boolean);
+}
+
+function getPlannerEquipmentOptionsForProduct(product = {}, fallbackFactory = '') {
+    const eligibleEquipment = getEligibleEquipmentForProduct(product, fallbackFactory);
+    return eligibleEquipment.length > 0 ? eligibleEquipment : plannerState.equipment;
+}
+
+function getPlannerNumberValue(value) {
+    if (value === '' || value === null || value === undefined) {
+        return null;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getPlannerEquipmentNames(equipmentName = '') {
+    return String(equipmentName || '')
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean);
+}
+
+function getPlannerMasterProduct(product = {}) {
+    if (!product) {
+        return null;
+    }
+
+    if (
+        product.machineConfig
+        || product['秒数(1pcs何秒)'] !== undefined
+        || product.pcPerCycle !== undefined
+        || product['収容数'] !== undefined
+    ) {
+        return product;
+    }
+
+    return plannerState.products.find((candidate) => (
+        (product.品番 && candidate.品番 === product.品番)
+        || (product.背番号 && candidate.背番号 === product.背番号)
+    )) || null;
+}
+
+function getPlannerCapabilityMachine(product = {}, equipmentName = '') {
+    const selectedEquipment = String(equipmentName || product.equipment || '').trim();
+    if (!selectedEquipment) {
+        return null;
+    }
+
+    const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+    if (!capability || !Array.isArray(capability.eligibleMachines)) {
+        return null;
+    }
+
+    return capability.eligibleMachines.find((machine) => (
+        String(machine?.equipment || machine?.設備 || '').trim() === selectedEquipment
+    )) || null;
+}
+
+function resolvePlannerMasterPcPerCycle(product = {}, equipmentName = '') {
+    const masterProduct = getPlannerMasterProduct(product) || product;
+    const rootPcPerCycle = getPlannerNumberValue(masterProduct?.pcPerCycle);
+    const machineConfig = masterProduct?.machineConfig && typeof masterProduct.machineConfig === 'object'
+        ? masterProduct.machineConfig
+        : null;
+    const equipmentNames = getPlannerEquipmentNames(equipmentName);
+
+    if (!machineConfig || equipmentNames.length === 0) {
+        return rootPcPerCycle;
+    }
+
+    if (equipmentNames.length === 1) {
+        return getPlannerNumberValue(machineConfig[equipmentNames[0]]?.pcPerCycle) ?? rootPcPerCycle;
+    }
+
+    const machineValues = equipmentNames
+        .map((name) => getPlannerNumberValue(machineConfig[name]?.pcPerCycle))
+        .filter((value) => value !== null);
+
+    if (
+        machineValues.length === equipmentNames.length
+        && machineValues.length > 0
+        && machineValues.every((value) => value === machineValues[0])
+    ) {
+        return machineValues[0];
+    }
+
+    return rootPcPerCycle;
+}
+
+function resolvePlannerCycleTimeSeconds(product = {}, equipmentName = '') {
+    const capabilityMachine = getPlannerCapabilityMachine(product, equipmentName);
+    const capabilityOverride = getPlannerNumberValue(capabilityMachine?.cycleTimeSeconds);
+    if (capabilityOverride !== null && capabilityOverride > 0) {
+        return capabilityOverride;
+    }
+
+    const masterProduct = getPlannerMasterProduct(product) || product;
+    const masterCycleTime = getPlannerNumberValue(masterProduct?.['秒数(1pcs何秒)']);
+    if (masterCycleTime !== null && masterCycleTime > 0) {
+        return masterCycleTime;
+    }
+
+    return PLANNER_CONFIG.defaultCycleTime;
+}
+
+function resolvePlannerPcPerCycle(product = {}, equipmentName = '') {
+    const capabilityMachine = getPlannerCapabilityMachine(product, equipmentName);
+    const capabilityOverride = getPlannerNumberValue(capabilityMachine?.pcPerCycle);
+    if (capabilityOverride !== null && capabilityOverride > 0) {
+        return capabilityOverride;
+    }
+
+    const masterPcPerCycle = resolvePlannerMasterPcPerCycle(product, equipmentName);
+    if (masterPcPerCycle !== null && masterPcPerCycle > 0) {
+        return masterPcPerCycle;
+    }
+
+    return PLANNER_CONFIG.defaultPcPerCycle;
+}
+
+function resolvePlannerBoxQuantity(product = {}, equipmentName = '') {
+    const capabilityMachine = getPlannerCapabilityMachine(product, equipmentName);
+    const capabilityOverride = getPlannerNumberValue(capabilityMachine?.boxQuantityOverride);
+    if (capabilityOverride !== null && capabilityOverride > 0) {
+        return capabilityOverride;
+    }
+
+    const masterProduct = getPlannerMasterProduct(product) || product;
+    const masterBoxQuantity = getPlannerNumberValue(masterProduct?.['収容数']);
+    if (masterBoxQuantity !== null && masterBoxQuantity > 0) {
+        return masterBoxQuantity;
+    }
+
+    return 1;
+}
+
+function buildPlannerPreviewKey(sebanggo = '', hinban = '') {
+    return `${String(sebanggo || '').trim()}::${String(hinban || '').trim()}`;
+}
+
+function escapePlannerPreviewHtml(value = '') {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatPlannerPreviewNumber(value, fallback = '0') {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+        return fallback;
+    }
+
+    return numericValue.toLocaleString();
+}
+
+function formatPlannerPreviewDate(value = '') {
+    const text = String(value || '').trim();
+    if (!text) {
+        return '-';
+    }
+
+    const parsed = new Date(`${text}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+        return text;
+    }
+
+    return parsed.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        weekday: 'short'
+    });
+}
+
+function formatPlannerPreviewTimestamp(value = '') {
+    if (!value) {
+        return plannerTranslate('plannerPreviewStatusNever', {}, 'Not refreshed yet');
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return String(value);
+    }
+
+    return parsed.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function getPlannerLocalDateString(date = new Date()) {
+    const targetDate = date instanceof Date ? new Date(date.getTime()) : new Date(date);
+    if (Number.isNaN(targetDate.getTime())) {
+        return '';
+    }
+
+    const year = targetDate.getFullYear();
+    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const day = String(targetDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getPlannerDefaultPublishedTargetDate() {
+    const targetDate = new Date();
+    targetDate.setHours(12, 0, 0, 0);
+    targetDate.setDate(targetDate.getDate() + 1);
+    return getPlannerLocalDateString(targetDate);
+}
+
+async function syncPlannerDateSelection(targetDate = '') {
+    const normalizedDate = String(targetDate || '').trim();
+    if (!normalizedDate) {
+        return;
+    }
+
+    const dateInput = document.getElementById('plannerDate');
+    if (dateInput) {
+        dateInput.value = normalizedDate;
+    }
+
+    if (plannerState.currentDate === normalizedDate) {
+        return;
+    }
+
+    await handleDateChange({
+        target: { value: normalizedDate }
+    });
+}
+
+function plannerTranslate(key, replacements = {}, fallback = key) {
+    let text = fallback;
+
+    if (typeof window !== 'undefined' && typeof window.t === 'function') {
+        const translated = window.t(key);
+        if (translated && translated !== key) {
+            text = translated;
+        }
+    }
+
+    return Object.entries(replacements || {}).reduce((message, [token, value]) => (
+        message.split(`{${token}}`).join(String(value ?? ''))
+    ), text);
+}
+
+function getPlannerPreviewModeLabel(mode = 'auto') {
+    return plannerTranslate(
+        mode === 'draft' ? 'plannerPreviewModeDraft' : 'plannerPreviewModeAuto',
+        {},
+        mode === 'draft' ? 'Draft' : 'Auto'
+    );
+}
+
+function getPlannerPreviewActionLabel(action = 'print') {
+    return plannerTranslate(
+        action === 'calendar' ? 'plannerPreviewActionCalendar' : 'plannerPreviewActionPrint',
+        {},
+        action === 'calendar' ? 'Calendar View' : 'Print'
+    );
+}
+
+function encodePlannerAuthBase64Unicode(value = '') {
+    const bytes = new TextEncoder().encode(String(value || ''));
+    let binary = '';
+    bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+    });
+    return btoa(binary);
+}
+
+function getPlannerAuthUser() {
+    try {
+        return JSON.parse(localStorage.getItem('authUser') || '{}');
+    } catch (_) {
+        return {};
+    }
+}
+
+function getPlannerAuthHeaders(extraHeaders = {}) {
+    const authUser = getPlannerAuthUser();
+    const hasIdentity = authUser && (authUser.username || authUser.role);
+
+    return {
+        ...(hasIdentity ? {
+            Authorization: `Bearer ${encodePlannerAuthBase64Unicode(JSON.stringify({
+                username: authUser.username || 'unknown',
+                role: authUser.role || 'viewer',
+            }))}`,
+        } : {}),
+        ...extraHeaders,
+    };
+}
+
+function canPlannerManagePublishedSchedules() {
+    return PLANNER_PUBLISHED_MANAGE_ROLES.has(String(getPlannerAuthUser().role || 'viewer').trim());
+}
+
+function resolvePlannerPublishedViewedVersionId(published = null, preferredId = '') {
+    const versions = Array.isArray(published?.versions) ? published.versions : [];
+    const normalizedPreferredId = String(preferredId || '').trim();
+
+    if (normalizedPreferredId) {
+        const preferredMatch = versions.find((version) => String(version?.id || '').trim() === normalizedPreferredId);
+        if (preferredMatch) {
+            return String(preferredMatch.id || '').trim();
+        }
+    }
+
+    const activeId = String(published?.activeVersion?.id || '').trim();
+    if (activeId) {
+        return activeId;
+    }
+
+    const fallbackId = String(versions[0]?.id || '').trim();
+    return fallbackId || null;
+}
+
+function getPlannerPublishedViewedVersion(published = null) {
+    const versions = Array.isArray(published?.versions) ? published.versions : [];
+    if (versions.length === 0) {
+        return published?.activeVersion || null;
+    }
+
+    const viewedVersionId = resolvePlannerPublishedViewedVersionId(published, plannerState.published.viewedVersionId);
+    return versions.find((version) => String(version?.id || '').trim() === viewedVersionId)
+        || published?.activeVersion
+        || versions[0]
+        || null;
+}
+
+function getPlannerPublishedDisplaySourceLabel(version = {}) {
+    const sourceLabel = String(version?.sourceLabel || '').trim();
+    if (!sourceLabel) {
+        return '';
+    }
+
+    const sourceModeLabel = getPlannerPublishedSourceModeLabel(version?.sourceMode);
+    return sourceLabel === sourceModeLabel ? '' : sourceLabel;
+}
+
+function getPlannerPublishedSourceModeLabel(mode = '') {
+    return plannerTranslate(
+        mode === 'draft' ? 'plannerPublishedSourceDraft' : 'plannerPublishedSourceAuto',
+        {},
+        mode === 'draft' ? 'Published from Draft' : 'Published from Auto'
+    );
+}
+
+function getPlannerPublishedSourceTypeLabel(type = '') {
+    return plannerTranslate(
+        type === 'auto-scheduled'
+            ? 'plannerPublishedTypeAutoScheduled'
+            : type === 'restore'
+                ? 'plannerPublishedTypeRestore'
+                : 'plannerPublishedTypeManual',
+        {},
+        type === 'auto-scheduled'
+            ? 'Auto-published'
+            : type === 'restore'
+                ? 'Restored version'
+                : 'Manual publish'
+    );
+}
+
+function getPlannerPreviewBreakName(breakItem = {}) {
+    const normalizedName = String(breakItem?.name || '').trim();
+
+    if (breakItem?.id === 'default-lunch' || normalizedName === 'Lunch Break') {
+        return plannerTranslate('lunchBreak', {}, 'Lunch Break');
+    }
+
+    if (breakItem?.id === 'default-break' || normalizedName === 'Break') {
+        return plannerTranslate('shortBreak', {}, 'Short Break');
+    }
+
+    return normalizedName || plannerTranslate('plannerPreviewBreakDefault', {}, 'Break');
+}
+
+function getPlannerPreviewCapabilityStatusLabel(status = '') {
+    switch (String(status || '').trim()) {
+        case 'mapped':
+            return plannerTranslate('plannerPreviewCapabilityMapped', {}, 'Mapped');
+        case 'disabled':
+            return plannerTranslate('plannerPreviewCapabilityDisabled', {}, 'Disabled');
+        case 'empty':
+            return plannerTranslate('plannerPreviewCapabilityEmpty', {}, 'No machines');
+        case 'unmapped':
+            return plannerTranslate('plannerPreviewCapabilityUnmapped', {}, 'Unmapped');
+        default:
+            return String(status || '-');
+    }
+}
+
+function getPlannerPreviewExceptionReasonLabel(reason = '') {
+    const normalizedReason = String(reason || '').trim();
+    if (normalizedReason === 'time-limit') {
+        return plannerTranslate('plannerPreviewReasonTimeLimit', {}, 'Time limit');
+    }
+
+    return getPlannerPreviewCapabilityStatusLabel(normalizedReason || 'unmapped');
+}
+
+function getPlannerPreviewBlockLabel(item = {}, fallbackText = '') {
+    const label = String(item?.背番号 || item?.品番 || '').trim();
+    if (label) {
+        return label;
+    }
+
+    return fallbackText || plannerTranslate('plannerPreviewBlockFallback', {}, 'Block');
+}
+
+const PLANNER_PREVIEW_REQUEST_COLOR_CLASSES = [
+    'text-red-700 dark:text-red-300',
+    'text-orange-700 dark:text-orange-300',
+    'text-yellow-700 dark:text-yellow-300',
+    'text-green-700 dark:text-green-300',
+    'text-blue-700 dark:text-blue-300',
+    'text-violet-700 dark:text-violet-300',
+];
+
+function getPlannerPreviewRequestColorKey(item = {}) {
+    const groupedRequestNumbers = Array.isArray(item.groupedRequestNumbers)
+        ? item.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+
+    if (groupedRequestNumbers.length > 0) {
+        return groupedRequestNumbers[0];
+    }
+
+    const requestNumber = String(item.requestNumber || '').trim();
+    if (requestNumber) {
+        return requestNumber;
+    }
+
+    return String(item.requestNumberLabel || '').trim();
+}
+
+function buildPlannerPreviewRequestColorMap(preview = {}) {
+    const requestColorMap = {};
+    let colorIndex = 0;
+
+    const registerRequestColor = (item = {}) => {
+        const key = getPlannerPreviewRequestColorKey(item);
+        if (!key || requestColorMap[key]) {
+            return;
+        }
+
+        requestColorMap[key] = PLANNER_PREVIEW_REQUEST_COLOR_CLASSES[
+            colorIndex % PLANNER_PREVIEW_REQUEST_COLOR_CLASSES.length
+        ];
+        colorIndex += 1;
+    };
+
+    (preview.priorityRows || []).forEach(registerRequestColor);
+    (preview.simulation?.assignments || []).forEach(registerRequestColor);
+    (preview.savedDraft?.assignments || []).forEach(registerRequestColor);
+    (plannerState.preview.draftAssignments || []).forEach(registerRequestColor);
+
+    return requestColorMap;
+}
+
+function getPlannerPreviewRequestColorClass(item = {}, requestColorMap = {}) {
+    const key = getPlannerPreviewRequestColorKey(item);
+    return requestColorMap[key] || 'text-sky-700 dark:text-sky-300';
+}
+
+function formatPlannerPreviewTileRequestNumber(requestNumber = '') {
+    const normalizedRequestNumber = String(requestNumber || '').trim();
+    if (!normalizedRequestNumber) {
+        return '';
+    }
+
+    const match = normalizedRequestNumber.match(/-(\d{8})-([^\-]+)$/);
+    if (!match) {
+        return normalizedRequestNumber;
+    }
+
+    const [, yyyymmdd, binNumber] = match;
+    return `${yyyymmdd.slice(4)}-${binNumber}`;
+}
+
+function getPlannerPreviewTileRequestLabel(item = {}) {
+    const groupedRequestNumbers = Array.isArray(item.groupedRequestNumbers)
+        ? item.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+
+    if (groupedRequestNumbers.length > 1) {
+        return `${formatPlannerPreviewTileRequestNumber(groupedRequestNumbers[0])} +${groupedRequestNumbers.length - 1}`;
+    }
+
+    return formatPlannerPreviewTileRequestNumber(
+        groupedRequestNumbers[0] || item.requestNumber || item.requestNumberLabel || ''
+    );
+}
+
+function getPlannerPreviewMinimumScheduleUntilTime() {
+    return minutesToTime(timeToMinutes(PLANNER_CONFIG.workStartTime) + PLANNER_CONFIG.intervalMinutes);
+}
+
+function normalizePlannerPreviewScheduleUntilTime(value = '') {
+    const fallbackMinutes = timeToMinutes(PLANNER_CONFIG.workEndTime);
+    const minimumMinutes = timeToMinutes(getPlannerPreviewMinimumScheduleUntilTime());
+    const maximumMinutes = (24 * 60) - PLANNER_CONFIG.intervalMinutes;
+    const normalizedValue = String(value || '').trim();
+    let minutes = /^\d{2}:\d{2}$/.test(normalizedValue)
+        ? timeToMinutes(normalizedValue)
+        : fallbackMinutes;
+
+    if (!Number.isFinite(minutes)) {
+        minutes = fallbackMinutes;
+    }
+
+    minutes = Math.max(minimumMinutes, Math.min(maximumMinutes, minutes));
+    minutes = Math.floor(minutes / PLANNER_CONFIG.intervalMinutes) * PLANNER_CONFIG.intervalMinutes;
+
+    return minutesToTime(minutes);
+}
+
+function getPlannerPreviewScheduleUntilTime() {
+    return normalizePlannerPreviewScheduleUntilTime(plannerState.preview.scheduleUntilTime || PLANNER_CONFIG.workEndTime);
+}
+
+function getPlannerPreviewScheduleUntilMinutes() {
+    return timeToMinutes(getPlannerPreviewScheduleUntilTime());
+}
+
+function roundPlannerPreviewMinutesToInterval(minutes, mode = 'ceil') {
+    const interval = PLANNER_CONFIG.intervalMinutes;
+    const numericMinutes = Number.isFinite(Number(minutes)) ? Number(minutes) : 0;
+    const roundedMinutes = mode === 'floor'
+        ? Math.floor(numericMinutes / interval) * interval
+        : Math.ceil(numericMinutes / interval) * interval;
+
+    return Math.round(roundedMinutes);
+}
+
+function getPlannerPreviewPossibleEquipmentText(row = {}) {
+    const machines = Array.isArray(row.eligibleMachines) ? row.eligibleMachines : [];
+    if (machines.length === 0) {
+        return getPlannerPreviewCapabilityStatusLabel(row.capabilityStatus || '-');
+    }
+
+    return machines
+        .map((machine) => {
+            const equipment = String(machine?.equipment || machine?.設備 || '').trim();
+            if (!equipment) {
+                return '';
+            }
+
+            return machine?.preferred === true ? `${equipment}*` : equipment;
+        })
+        .filter(Boolean)
+        .join(' / ');
+}
+
+function getPlannerPreviewStatusClasses(status = '') {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'paused') {
+        return 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-200';
+    }
+    if (normalized.includes('partial')) {
+        return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200';
+    }
+    if (normalized === 'completed' || status === '完了') {
+        return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200';
+    }
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+}
+
+function getPlannerPreviewCapabilityClasses(status = '') {
+    switch (String(status || '').trim()) {
+        case 'mapped':
+            return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200';
+        case 'disabled':
+            return 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+        case 'empty':
+            return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200';
+        default:
+            return 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200';
+    }
+}
+
+function getPlannerPreviewInventoryClasses(status = '') {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'none') {
+        return 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200';
+    }
+    if (normalized === 'insufficient') {
+        return 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200';
+    }
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200';
+}
+
+function getPlannerPreviewEquipmentParts(equipment = '') {
+    return String(equipment || '')
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+}
+
+function getPlannerPreviewProductKey(productLike = {}) {
+    const sebanggo = String(productLike.背番号 || '').trim();
+    const hinban = String(productLike.品番 || '').trim();
+
+    if (!sebanggo && !hinban) {
+        return '';
+    }
+
+    return `${sebanggo}::${hinban}`;
+}
+
+function getPlannerPreviewMaterialSuffix(sebanggo = '') {
+    const normalized = String(sebanggo || '').trim().toUpperCase();
+    if (!normalized) {
+        return '';
+    }
+
+    const suffix = normalized.replace(/^\d+/, '').trim();
+    return suffix === normalized ? '' : suffix;
+}
+
+function isPlannerPreviewMaterialAwareProduct(productLike = {}) {
+    const sebanggo = String(productLike.背番号 || productLike.品番 || '').trim();
+    return getPlannerPreviewMaterialSuffix(sebanggo).length > 0;
+}
+
+function getPlannerPreviewMaterialKey(productLike = {}) {
+    if (!isPlannerPreviewMaterialAwareProduct(productLike)) {
+        return '';
+    }
+
+    return getPlannerPreviewMaterialSuffix(productLike.背番号 || productLike.品番 || '');
+}
+
+function getPlannerPreviewRequestNumbers(priorityRow = {}) {
+    const groupedRequestNumbers = Array.isArray(priorityRow.groupedRequestNumbers)
+        ? priorityRow.groupedRequestNumbers
+            .map((requestNumber) => String(requestNumber || '').trim())
+            .filter(Boolean)
+        : [];
+
+    if (groupedRequestNumbers.length > 0) {
+        return groupedRequestNumbers;
+    }
+
+    const requestNumber = String(priorityRow.requestNumber || '').trim();
+    return requestNumber ? [requestNumber] : [];
+}
+
+function getPlannerPreviewDateSortValue(value = '') {
+    const text = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+        return Number.MAX_SAFE_INTEGER;
+    }
+
+    const [year, month, day] = text.split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+}
+
+function getPlannerPreviewDeliveryOrderValue(value = null) {
+    const text = String(value ?? '').trim();
+    if (!text) {
+        return Number.MAX_SAFE_INTEGER;
+    }
+
+    const numericValue = Number(text);
+    if (Number.isFinite(numericValue)) {
+        return numericValue;
+    }
+
+    const numericMatch = text.match(/\d+/);
+    return numericMatch ? Number(numericMatch[0]) : Number.MAX_SAFE_INTEGER;
+}
+
+function comparePlannerPreviewRequestNumbers(leftValue = '', rightValue = '') {
+    const leftText = String(leftValue || '').trim();
+    const rightText = String(rightValue || '').trim();
+
+    if (!leftText && !rightText) {
+        return 0;
+    }
+    if (!leftText) {
+        return 1;
+    }
+    if (!rightText) {
+        return -1;
+    }
+
+    return leftText.localeCompare(rightText, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function comparePlannerPreviewPriorityRows(left = {}, right = {}) {
+    const leftDeadline = getPlannerPreviewDateSortValue(left.internalDeadline || left.deliveryDate || '');
+    const rightDeadline = getPlannerPreviewDateSortValue(right.internalDeadline || right.deliveryDate || '');
+    if (leftDeadline !== rightDeadline) {
+        return leftDeadline - rightDeadline;
+    }
+
+    const leftDeliveryOrder = getPlannerPreviewDeliveryOrderValue(left.deliveryOrder);
+    const rightDeliveryOrder = getPlannerPreviewDeliveryOrderValue(right.deliveryOrder);
+    if (leftDeliveryOrder !== rightDeliveryOrder) {
+        return leftDeliveryOrder - rightDeliveryOrder;
+    }
+
+    const requestNumberCompare = comparePlannerPreviewRequestNumbers(left.requestNumber, right.requestNumber);
+    if (requestNumberCompare !== 0) {
+        return requestNumberCompare;
+    }
+
+    const leftQueueOrder = Number.isFinite(Number(left.queueOrder)) ? Number(left.queueOrder) : Number.MAX_SAFE_INTEGER;
+    const rightQueueOrder = Number.isFinite(Number(right.queueOrder)) ? Number(right.queueOrder) : Number.MAX_SAFE_INTEGER;
+    if (leftQueueOrder !== rightQueueOrder) {
+        return leftQueueOrder - rightQueueOrder;
+    }
+
+    const leftTimestamp = Number(left.requestTimestamp || 0);
+    const rightTimestamp = Number(right.requestTimestamp || 0);
+    if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp;
+    }
+
+    return Number(left.lineNumber || 0) - Number(right.lineNumber || 0);
+}
+
+function getPlannerPreviewPriorityBucketKey(priorityRow = {}) {
+    const internalDeadline = String(priorityRow.internalDeadline || priorityRow.deliveryDate || '').trim();
+    const deliveryOrder = String(priorityRow.deliveryOrder ?? '').trim();
+
+    if (!internalDeadline && !deliveryOrder) {
+        return '';
+    }
+
+    return `${internalDeadline}::${deliveryOrder}`;
+}
+
+function doPlannerPreviewRowsShareBatchScope(leftRow = {}, rightRow = {}) {
+    const leftRequestNumbers = getPlannerPreviewRequestNumbers(leftRow);
+    const rightRequestNumbers = getPlannerPreviewRequestNumbers(rightRow);
+
+    if (leftRequestNumbers.length > 0 && rightRequestNumbers.length > 0) {
+        return leftRequestNumbers.some((requestNumber) => rightRequestNumbers.includes(requestNumber));
+    }
+
+    const leftBucketKey = getPlannerPreviewPriorityBucketKey(leftRow);
+    const rightBucketKey = getPlannerPreviewPriorityBucketKey(rightRow);
+    return !!leftBucketKey && leftBucketKey === rightBucketKey;
+}
+
+function doesPlannerPreviewEquipmentShareParts(leftEquipment = '', rightEquipment = '') {
+    const leftParts = getPlannerPreviewEquipmentParts(leftEquipment);
+    const rightParts = getPlannerPreviewEquipmentParts(rightEquipment);
+
+    if (leftParts.length === 0 || rightParts.length === 0) {
+        return false;
+    }
+
+    return leftParts.some((part) => rightParts.includes(part));
+}
+
+function getPlannerPreviewAssignmentEstimatedTime(assignment = {}) {
+    const existingEstimatedTime = assignment.estimatedTime
+        && Number.isFinite(Number(assignment.estimatedTime.totalSeconds))
+        && Number(assignment.estimatedTime.totalSeconds) > 0
+        ? { ...assignment.estimatedTime }
+        : null;
+
+    if (existingEstimatedTime) {
+        return existingEstimatedTime;
+    }
+
+    const quantity = Math.max(0, Number(assignment.quantity || 0));
+    const equipment = String(assignment.equipment || '').trim();
+    if (quantity <= 0 || !equipment) {
+        return null;
+    }
+
+    const productRecord = getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment,
+    });
+    const calculatedEstimatedTime = calculateProductionTime(productRecord, quantity, equipment);
+    if (
+        !calculatedEstimatedTime
+        || !Number.isFinite(Number(calculatedEstimatedTime.totalSeconds))
+        || Number(calculatedEstimatedTime.totalSeconds) <= 0
+    ) {
+        return null;
+    }
+
+    return calculatedEstimatedTime;
+}
+
+function getPlannerPreviewAssignmentEndMinutes(assignment = {}) {
+    const startMinutes = assignment.startTime
+        ? timeToMinutes(assignment.startTime)
+        : timeToMinutes(PLANNER_CONFIG.workStartTime);
+
+    if (!Number.isFinite(startMinutes)) {
+        return timeToMinutes(PLANNER_CONFIG.workStartTime);
+    }
+
+    if (assignment.previewEndTime) {
+        const previewEndMinutes = timeToMinutes(assignment.previewEndTime);
+        if (Number.isFinite(previewEndMinutes) && previewEndMinutes > startMinutes) {
+            return previewEndMinutes;
+        }
+    }
+
+    const estimatedTime = getPlannerPreviewAssignmentEstimatedTime(assignment);
+    if (!estimatedTime) {
+        return roundPlannerPreviewMinutesToInterval(startMinutes + PLANNER_CONFIG.intervalMinutes, 'ceil');
+    }
+
+    const durationMinutes = Number(estimatedTime.totalSeconds || 0) / 60;
+    const actualEndMinutes = findNextAvailableTime(startMinutes, durationMinutes, assignment.equipment).endTime;
+    if (!Number.isFinite(actualEndMinutes) || actualEndMinutes <= startMinutes) {
+        return roundPlannerPreviewMinutesToInterval(startMinutes + PLANNER_CONFIG.intervalMinutes, 'ceil');
+    }
+
+    return roundPlannerPreviewMinutesToInterval(actualEndMinutes, 'ceil');
+}
+
+function getPlannerPreviewOccupiedWindows(assignments = [], equipment = '') {
+    return assignments
+        .filter((assignment) => doesPlannerPreviewEquipmentShareParts(equipment, assignment.equipment))
+        .map((assignment) => {
+            const startMinutes = assignment.startTime
+                ? timeToMinutes(assignment.startTime)
+                : timeToMinutes(PLANNER_CONFIG.workStartTime);
+            const endMinutes = getPlannerPreviewAssignmentEndMinutes(assignment);
+
+            return { startMinutes, endMinutes };
+        })
+        .filter((window) => (
+            Number.isFinite(window.startMinutes)
+            && Number.isFinite(window.endMinutes)
+            && window.endMinutes > window.startMinutes
+        ))
+        .sort((left, right) => {
+            if (left.startMinutes !== right.startMinutes) {
+                return left.startMinutes - right.startMinutes;
+            }
+            return left.endMinutes - right.endMinutes;
+        })
+        .reduce((merged, window) => {
+            const lastWindow = merged[merged.length - 1];
+            if (lastWindow && window.startMinutes <= lastWindow.endMinutes) {
+                lastWindow.endMinutes = Math.max(lastWindow.endMinutes, window.endMinutes);
+                return merged;
+            }
+
+            merged.push({ ...window });
+            return merged;
+        }, []);
+}
+
+function findPlannerPreviewAvailableWindow(assignments = [], equipment = '', durationMinutes = 0, options = {}) {
+    const workStartMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
+    let candidateStart = Number.isFinite(Number(options.earliestStartMinutes))
+        ? Math.max(workStartMinutes, Math.round(Number(options.earliestStartMinutes)))
+        : workStartMinutes;
+    candidateStart = roundPlannerPreviewMinutesToInterval(candidateStart, 'ceil');
+    const occupiedWindows = getPlannerPreviewOccupiedWindows(assignments, equipment);
+
+    for (let index = 0; index < occupiedWindows.length; index += 1) {
+        const occupiedWindow = occupiedWindows[index];
+
+        if (candidateStart >= occupiedWindow.endMinutes) {
+            continue;
+        }
+
+        if (candidateStart < occupiedWindow.startMinutes) {
+            const timing = findNextAvailableTime(candidateStart, durationMinutes, equipment);
+            if (timing.endTime <= occupiedWindow.startMinutes) {
+                return timing;
+            }
+        }
+
+        candidateStart = roundPlannerPreviewMinutesToInterval(
+            Math.max(candidateStart, occupiedWindow.endMinutes),
+            'ceil'
+        );
+    }
+
+    return findNextAvailableTime(candidateStart, durationMinutes, equipment);
+}
+
+function getPlannerPreviewLastAssignment(assignments = [], equipment = '', cutoffMinutes = null) {
+    let latestAssignment = null;
+    let latestEndMinutes = -1;
+
+    assignments.forEach((assignment) => {
+        if (!doesPlannerPreviewEquipmentShareParts(equipment, assignment.equipment)) {
+            return;
+        }
+
+        const endMinutes = getPlannerPreviewAssignmentEndMinutes(assignment);
+        if (cutoffMinutes !== null && endMinutes > cutoffMinutes) {
+            return;
+        }
+
+        if (endMinutes > latestEndMinutes) {
+            latestAssignment = assignment;
+            latestEndMinutes = endMinutes;
+        }
+    });
+
+    return latestAssignment;
+}
+
+function getPlannerPreviewAffinityRank(assignments = [], equipment = '', priorityRow = {}, cutoffMinutes = null) {
+    const lastAssignment = getPlannerPreviewLastAssignment(assignments, equipment, cutoffMinutes);
+    if (!lastAssignment) {
+        return 2;
+    }
+
+    const productKey = getPlannerPreviewProductKey(priorityRow);
+    const lastProductKey = getPlannerPreviewProductKey(lastAssignment);
+    if (productKey && productKey === lastProductKey) {
+        return 0;
+    }
+
+    const materialKey = getPlannerPreviewMaterialKey(priorityRow);
+    const lastMaterialKey = getPlannerPreviewMaterialKey(lastAssignment);
+    if (materialKey && lastMaterialKey) {
+        return materialKey === lastMaterialKey ? 1 : 3;
+    }
+
+    return 2;
+}
+
+function getPlannerPreviewGroupingTier(affinityRank = 2) {
+    if (affinityRank === 0) {
+        return 0;
+    }
+
+    if (affinityRank === 1) {
+        return 1;
+    }
+
+    return 2;
+}
+
+function getPlannerPreviewGroupingDelayLimitMinutes() {
+    return PLANNER_CONFIG.intervalMinutes * 2;
+}
+
+function getPlannerPreviewNextStartMinutes(assignments = [], equipment = '') {
+    return assignments.reduce((latestMinutes, assignment) => {
+        if (!doesPlannerPreviewEquipmentShareParts(equipment, assignment.equipment)) {
+            return latestMinutes;
+        }
+
+        return Math.max(latestMinutes, getPlannerPreviewAssignmentEndMinutes(assignment));
+    }, timeToMinutes(PLANNER_CONFIG.workStartTime));
+}
+
+function getPlannerPreviewProductRecord(productLike = {}) {
+    const sebanggo = String(productLike.背番号 || '').trim();
+    const hinban = String(productLike.品番 || '').trim();
+    const populatedProductFields = Object.fromEntries(
+        Object.entries(productLike).filter(([, value]) => value !== null && value !== undefined && value !== '')
+    );
+    const fallbackRecord = {
+        ...populatedProductFields,
+        背番号: sebanggo,
+        品番: hinban,
+        品名: productLike.品名 || '',
+        モデル: productLike.モデル || '',
+        収容数: productLike.収容数 || productLike.boxQuantity || 1,
+    };
+
+    const masterRecord = plannerState.products.find((candidate) => (
+        (sebanggo && candidate.背番号 === sebanggo)
+        || (hinban && candidate.品番 === hinban)
+    ));
+
+    return masterRecord ? { ...fallbackRecord, ...masterRecord, ...populatedProductFields } : fallbackRecord;
+}
+
+function buildPlannerPreviewSchedulingRows(priorityRows = []) {
+    const sortedRows = Array.isArray(priorityRows)
+        ? [...priorityRows].sort(comparePlannerPreviewPriorityRows)
+        : [];
+
+    return sortedRows.reduce((groups, row) => {
+        const shortfallQuantity = Number(row.shortfallQuantity || 0);
+        if (shortfallQuantity <= 0) {
+            return groups;
+        }
+
+        const productKey = getPlannerPreviewProductKey(row);
+        const candidateSignature = Array.isArray(row.eligibleMachines)
+            ? row.eligibleMachines
+                .map((machine, index) => {
+                    const equipment = String(machine?.equipment || machine?.設備 || '').trim();
+                    if (!equipment) {
+                        return '';
+                    }
+
+                    const priority = Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : index + 1;
+                    const preferred = machine?.preferred === true ? '1' : '0';
+                    return `${equipment}:${priority}:${preferred}`;
+                })
+                .filter(Boolean)
+                .join('|')
+            : '';
+        const lastGroup = groups[groups.length - 1];
+        const canMergeIntoLastGroup = !!(
+            lastGroup
+            && productKey
+            && lastGroup.productKey === productKey
+            && lastGroup.candidateSignature === candidateSignature
+            && lastGroup.capabilityStatus === row.capabilityStatus
+            && doPlannerPreviewRowsShareBatchScope(lastGroup, row)
+        );
+        const shortageBoxes = Number.isFinite(Number(row.shortageBoxes)) ? Number(row.shortageBoxes) : null;
+        const requestNumber = String(row.requestNumber || '').trim();
+        const lineNumber = Number.isFinite(Number(row.lineNumber)) ? Number(row.lineNumber) : null;
+
+        if (!canMergeIntoLastGroup) {
+            groups.push({
+                ...row,
+                shortfallQuantity,
+                shortageBoxes,
+                productKey,
+                candidateSignature,
+                groupedRequestNumbers: requestNumber ? [requestNumber] : [],
+                groupedLineNumbers: lineNumber !== null ? [lineNumber] : [],
+                sourceRowIds: row.id ? [row.id] : [],
+            });
+            return groups;
+        }
+
+        lastGroup.shortfallQuantity += shortfallQuantity;
+        if (lastGroup.shortageBoxes !== null && shortageBoxes !== null) {
+            lastGroup.shortageBoxes += shortageBoxes;
+        } else {
+            lastGroup.shortageBoxes = null;
+        }
+        if (requestNumber && !lastGroup.groupedRequestNumbers.includes(requestNumber)) {
+            lastGroup.groupedRequestNumbers.push(requestNumber);
+        }
+        if (lineNumber !== null) {
+            lastGroup.groupedLineNumbers.push(lineNumber);
+        }
+        if (row.id) {
+            lastGroup.sourceRowIds.push(row.id);
+        }
+
+        return groups;
+    }, []).map((group) => {
+        const groupedRequestNumbers = Array.isArray(group.groupedRequestNumbers) ? group.groupedRequestNumbers : [];
+        const requestNumberLabel = groupedRequestNumbers.length > 1
+            ? `${groupedRequestNumbers[0]} +${groupedRequestNumbers.length - 1}`
+            : (groupedRequestNumbers[0] || String(group.requestNumber || '').trim());
+
+        return {
+            ...group,
+            requestNumber: requestNumberLabel,
+            requestNumberLabel,
+            lineNumber: group.groupedLineNumbers[0] ?? group.lineNumber,
+        };
+    });
+}
+
+function getPlannerPreviewCandidateMachines(priorityRow = {}) {
+    return Array.isArray(priorityRow.eligibleMachines)
+        ? priorityRow.eligibleMachines
+            .map((machine, index) => ({
+                equipment: String(machine?.equipment || machine?.設備 || '').trim(),
+                priority: Number.isFinite(Number(machine?.priority)) ? Number(machine.priority) : index + 1,
+                preferred: machine?.preferred === true,
+                order: index,
+            }))
+            .filter((machine) => machine.equipment)
+        : [];
+}
+
+function canPlannerPreviewRowUseEquipment(priorityRow = {}, equipment = '') {
+    const normalizedEquipment = String(equipment || '').trim();
+    if (!normalizedEquipment) {
+        return false;
+    }
+
+    return getPlannerPreviewCandidateMachines(priorityRow).some((machine) => machine.equipment === normalizedEquipment);
+}
+
+function getPlannerPreviewMachineBatchPotential(remainingRows = [], anchorRow = {}, equipment = '') {
+    const anchorProductKey = getPlannerPreviewProductKey(anchorRow);
+    const anchorMaterialKey = getPlannerPreviewMaterialKey(anchorRow);
+
+    return remainingRows.reduce((totals, row) => {
+        if (!doPlannerPreviewRowsShareBatchScope(anchorRow, row)) {
+            return totals;
+        }
+
+        if (!canPlannerPreviewRowUseEquipment(row, equipment)) {
+            return totals;
+        }
+
+        const rowQuantity = Number(row.shortfallQuantity || 0);
+        if (rowQuantity <= 0) {
+            return totals;
+        }
+
+        if (anchorProductKey && getPlannerPreviewProductKey(row) === anchorProductKey) {
+            totals.sameProductCount += 1;
+            totals.sameProductQuantity += rowQuantity;
+            return totals;
+        }
+
+        if (anchorMaterialKey && getPlannerPreviewMaterialKey(row) === anchorMaterialKey) {
+            totals.sameMaterialCount += 1;
+            totals.sameMaterialQuantity += rowQuantity;
+        }
+
+        return totals;
+    }, {
+        sameProductCount: 0,
+        sameProductQuantity: 0,
+        sameMaterialCount: 0,
+        sameMaterialQuantity: 0,
+    });
+}
+
+function getPlannerPreviewAvailableProductionMinutes(startMinutes = 0, endMinutes = 0, equipment = '') {
+    const normalizedStart = Math.round(Number(startMinutes));
+    const normalizedEnd = Math.round(Number(endMinutes));
+
+    if (!Number.isFinite(normalizedStart) || !Number.isFinite(normalizedEnd) || normalizedEnd <= normalizedStart) {
+        return 0;
+    }
+
+    let availableMinutes = 0;
+
+    for (let minute = normalizedStart; minute < normalizedEnd; minute += 1) {
+        const isInBreak = plannerState.breaks.some((breakItem) => {
+            const breakStart = timeToMinutes(breakItem.start);
+            const breakEnd = timeToMinutes(breakItem.end);
+            const appliesToEquipment = !breakItem.equipment || breakItem.equipment === equipment;
+            return minute >= breakStart && minute < breakEnd && appliesToEquipment;
+        });
+
+        if (!isInBreak) {
+            availableMinutes += 1;
+        }
+    }
+
+    return availableMinutes;
+}
+
+function buildPlannerPreviewMachineChoice(assignments = [], priorityRow = {}, quantity = 0, remainingRows = [], scheduleUntilMinutes = 0, machine = {}, options = {}) {
+    const normalizedQuantity = Number.isFinite(Number(quantity)) ? Math.max(0, Number(quantity)) : 0;
+    if (normalizedQuantity <= 0 || !machine.equipment) {
+        return null;
+    }
+
+    const productRecord = getPlannerPreviewProductRecord(priorityRow);
+    const productForEquipment = { ...productRecord, equipment: machine.equipment };
+    const estimatedTime = calculateProductionTime(productForEquipment, normalizedQuantity, machine.equipment);
+    const timing = findPlannerPreviewAvailableWindow(
+        assignments,
+        machine.equipment,
+        estimatedTime.totalSeconds / 60,
+        { earliestStartMinutes: options.earliestStartMinutes }
+    );
+    const endMinutes = roundPlannerPreviewMinutesToInterval(timing.endTime, 'ceil');
+    const boxes = calculateBoxesNeeded(productForEquipment, normalizedQuantity, machine.equipment);
+    const affinityRank = getPlannerPreviewAffinityRank(
+        assignments,
+        machine.equipment,
+        priorityRow,
+        timing.startTime,
+    );
+    const batchPotential = getPlannerPreviewMachineBatchPotential(remainingRows, priorityRow, machine.equipment);
+
+    return {
+        ...machine,
+        startMinutes: timing.startTime,
+        endMinutes,
+        estimatedTime,
+        boxes,
+        affinityRank,
+        slackMinutes: scheduleUntilMinutes - endMinutes,
+        scheduledQuantity: normalizedQuantity,
+        ...batchPotential,
+    };
+}
+
+function comparePlannerPreviewMachineChoices(left = {}, right = {}) {
+    if (left.groupingTier !== right.groupingTier) {
+        return left.groupingTier - right.groupingTier;
+    }
+    if (right.sameProductCount !== left.sameProductCount) {
+        return right.sameProductCount - left.sameProductCount;
+    }
+    if (right.sameProductQuantity !== left.sameProductQuantity) {
+        return right.sameProductQuantity - left.sameProductQuantity;
+    }
+    if (right.sameMaterialCount !== left.sameMaterialCount) {
+        return right.sameMaterialCount - left.sameMaterialCount;
+    }
+    if (right.sameMaterialQuantity !== left.sameMaterialQuantity) {
+        return right.sameMaterialQuantity - left.sameMaterialQuantity;
+    }
+    if (left.startMinutes !== right.startMinutes) {
+        return left.startMinutes - right.startMinutes;
+    }
+    if (left.endMinutes !== right.endMinutes) {
+        return left.endMinutes - right.endMinutes;
+    }
+    if (left.preferred !== right.preferred) {
+        return left.preferred ? -1 : 1;
+    }
+    if (left.affinityRank !== right.affinityRank) {
+        return left.affinityRank - right.affinityRank;
+    }
+    if (left.priority !== right.priority) {
+        return left.priority - right.priority;
+    }
+    if (right.slackMinutes !== left.slackMinutes) {
+        return right.slackMinutes - left.slackMinutes;
+    }
+    return left.order - right.order;
+}
+
+function getPlannerPreviewMachineChoicesForRow(assignments = [], priorityRow = {}, remainingRows = [], scheduleUntilMinutes = 0, options = {}) {
+    const quantity = Number(priorityRow.shortfallQuantity || 0);
+    if (quantity <= 0) {
+        return [];
+    }
+
+    const equipmentFilter = String(options.equipmentFilter || '').trim();
+    const candidateMachines = getPlannerPreviewCandidateMachines(priorityRow)
+        .filter((machine) => !equipmentFilter || machine.equipment === equipmentFilter);
+
+    let machineChoices = candidateMachines
+        .map((machine) => buildPlannerPreviewMachineChoice(
+            assignments,
+            priorityRow,
+            quantity,
+            remainingRows,
+            scheduleUntilMinutes,
+            machine,
+            { earliestStartMinutes: options.earliestStartMinutes }
+        ))
+        .filter((machine) => machine && machine.endMinutes <= scheduleUntilMinutes);
+
+    const earliestStartMinutes = machineChoices.reduce((earliestMinutes, machine) => (
+        Math.min(earliestMinutes, machine.startMinutes)
+    ), Number.POSITIVE_INFINITY);
+    const groupingDelayLimitMinutes = getPlannerPreviewGroupingDelayLimitMinutes();
+
+    machineChoices = machineChoices.map((machine) => {
+        const startDelayMinutes = Number.isFinite(earliestStartMinutes)
+            ? Math.max(0, machine.startMinutes - earliestStartMinutes)
+            : 0;
+        const canUseGroupingPreference = startDelayMinutes <= groupingDelayLimitMinutes;
+
+        return {
+            ...machine,
+            startDelayMinutes,
+            groupingTier: canUseGroupingPreference
+                ? getPlannerPreviewGroupingTier(machine.affinityRank)
+                : 2,
+        };
+    });
+
+    return machineChoices.sort(comparePlannerPreviewMachineChoices);
+}
+
+function getPlannerPreviewPartialMachineChoicesForRow(assignments = [], priorityRow = {}, remainingRows = [], scheduleUntilMinutes = 0, options = {}) {
+    const quantity = Number(priorityRow.shortfallQuantity || 0);
+    if (quantity <= 0) {
+        return [];
+    }
+
+    const equipmentFilter = String(options.equipmentFilter || '').trim();
+    const candidateMachines = getPlannerPreviewCandidateMachines(priorityRow)
+        .filter((machine) => !equipmentFilter || machine.equipment === equipmentFilter);
+    const productRecord = getPlannerPreviewProductRecord(priorityRow);
+
+    let machineChoices = candidateMachines
+        .map((machine) => {
+            const startTiming = findPlannerPreviewAvailableWindow(
+                assignments,
+                machine.equipment,
+                0,
+                { earliestStartMinutes: options.earliestStartMinutes }
+            );
+            const startMinutes = startTiming.startTime;
+            if (!Number.isFinite(startMinutes) || startMinutes >= scheduleUntilMinutes) {
+                return null;
+            }
+
+            const occupiedWindows = getPlannerPreviewOccupiedWindows(assignments, machine.equipment);
+            const nextOccupiedWindow = occupiedWindows.find((window) => window.startMinutes > startMinutes);
+            const availableWindowEnd = Math.min(
+                scheduleUntilMinutes,
+                nextOccupiedWindow ? nextOccupiedWindow.startMinutes : scheduleUntilMinutes
+            );
+            const availableProductionMinutes = getPlannerPreviewAvailableProductionMinutes(
+                startMinutes,
+                availableWindowEnd,
+                machine.equipment
+            );
+            if (availableProductionMinutes <= 0) {
+                return null;
+            }
+
+            const secondsPerPiece = resolvePlannerCycleTimeSeconds(productRecord, machine.equipment);
+            if (!Number.isFinite(secondsPerPiece) || secondsPerPiece <= 0) {
+                return null;
+            }
+
+            const partialQuantity = Math.min(
+                quantity,
+                Math.floor((availableProductionMinutes * 60) / secondsPerPiece)
+            );
+            if (partialQuantity <= 0) {
+                return null;
+            }
+
+            const machineChoice = buildPlannerPreviewMachineChoice(
+                assignments,
+                priorityRow,
+                partialQuantity,
+                remainingRows,
+                scheduleUntilMinutes,
+                machine,
+                { earliestStartMinutes: startMinutes }
+            );
+            if (!machineChoice || machineChoice.endMinutes > scheduleUntilMinutes) {
+                return null;
+            }
+
+            return {
+                ...machineChoice,
+                partialQuantity,
+                availableProductionMinutes,
+            };
+        })
+        .filter(Boolean);
+
+    const earliestStartMinutes = machineChoices.reduce((earliestMinutes, machine) => (
+        Math.min(earliestMinutes, machine.startMinutes)
+    ), Number.POSITIVE_INFINITY);
+    const groupingDelayLimitMinutes = getPlannerPreviewGroupingDelayLimitMinutes();
+
+    machineChoices = machineChoices.map((machine) => {
+        const startDelayMinutes = Number.isFinite(earliestStartMinutes)
+            ? Math.max(0, machine.startMinutes - earliestStartMinutes)
+            : 0;
+        const canUseGroupingPreference = startDelayMinutes <= groupingDelayLimitMinutes;
+
+        return {
+            ...machine,
+            startDelayMinutes,
+            groupingTier: canUseGroupingPreference
+                ? getPlannerPreviewGroupingTier(machine.affinityRank)
+                : 2,
+        };
+    });
+
+    return machineChoices.sort((left, right) => {
+        if (right.partialQuantity !== left.partialQuantity) {
+            return right.partialQuantity - left.partialQuantity;
+        }
+        if (left.startMinutes !== right.startMinutes) {
+            return left.startMinutes - right.startMinutes;
+        }
+        return comparePlannerPreviewMachineChoices(left, right);
+    });
+}
+
+function buildPlannerPreviewAssignment(priorityRow = {}, machineChoice = {}, quantityOverride = null) {
+    const productRecord = getPlannerPreviewProductRecord(priorityRow);
+    const quantity = Number.isFinite(Number(quantityOverride))
+        ? Math.max(0, Number(quantityOverride))
+        : Number(priorityRow.shortfallQuantity || 0);
+
+    return {
+        ...productRecord,
+        背番号: priorityRow.背番号,
+        品番: priorityRow.品番,
+        品名: priorityRow.品名,
+        モデル: priorityRow.モデル,
+        quantity,
+        equipment: machineChoice.equipment,
+        startTime: minutesToTime(machineChoice.startMinutes),
+        boxes: machineChoice.boxes,
+        estimatedTime: machineChoice.estimatedTime,
+        color: plannerState.productColors[priorityRow.背番号] || '#0F766E',
+        previewSource: 'priority',
+        requestNumber: priorityRow.requestNumber,
+        requestNumberLabel: priorityRow.requestNumberLabel,
+        lineNumber: priorityRow.lineNumber,
+        requestStatus: priorityRow.requestStatus,
+        sourceRowId: priorityRow.id,
+        sourceRowIds: priorityRow.sourceRowIds,
+        groupedRequestNumbers: priorityRow.groupedRequestNumbers,
+        previewEndTime: minutesToTime(machineChoice.endMinutes),
+        usedPreferredMachine: machineChoice.preferred === true,
+    };
+}
+
+function buildPlannerPreviewSimulation(preview = {}) {
+    const assignments = [];
+    const scheduleUntilTime = getPlannerPreviewScheduleUntilTime();
+    const scheduleUntilMinutes = getPlannerPreviewScheduleUntilMinutes();
+    const exceptions = [];
+    const pendingRows = buildPlannerPreviewSchedulingRows(preview.priorityRows || []);
+
+    let scheduledShortfallQuantity = 0;
+    let unscheduledShortfallQuantity = 0;
+    let timeLimitMissedQuantity = 0;
+    let timeLimitExceptionCount = 0;
+
+    const queueUnscheduledPreviewRow = (priorityRow, reason = 'time-limit') => {
+        const shortageQuantity = Number(priorityRow.shortfallQuantity || 0);
+        if (shortageQuantity <= 0) {
+            return;
+        }
+
+        const candidateMachines = getPlannerPreviewCandidateMachines(priorityRow);
+        const exception = {
+            id: priorityRow.id,
+            reason,
+            requestNumber: priorityRow.requestNumber,
+            lineNumber: priorityRow.lineNumber,
+            背番号: priorityRow.背番号,
+            品番: priorityRow.品番,
+            shortfallQuantity: shortageQuantity,
+        };
+
+        if (reason === 'time-limit') {
+            exception.scheduleUntilTime = scheduleUntilTime;
+            exception.candidateEquipment = candidateMachines.map((machine) => (
+                machine.preferred ? `${machine.equipment}*` : machine.equipment
+            ));
+            timeLimitMissedQuantity += shortageQuantity;
+            timeLimitExceptionCount += 1;
+        }
+
+        if (reason !== 'time-limit' && candidateMachines.length === 0) {
+            exception.reason = priorityRow.capabilityStatus || 'unmapped';
+        }
+
+        unscheduledShortfallQuantity += shortageQuantity;
+        exceptions.push(exception);
+    };
+
+    while (pendingRows.length > 0) {
+        const priorityRow = pendingRows.shift();
+        const shortageQuantity = Number(priorityRow.shortfallQuantity || 0);
+        if (shortageQuantity <= 0) {
+            continue;
+        }
+
+        const candidateMachines = getPlannerPreviewCandidateMachines(priorityRow);
+        if (candidateMachines.length === 0) {
+            queueUnscheduledPreviewRow(priorityRow, priorityRow.capabilityStatus || 'unmapped');
+            continue;
+        }
+
+        const fitChoices = getPlannerPreviewMachineChoicesForRow(
+            assignments,
+            priorityRow,
+            pendingRows,
+            scheduleUntilMinutes
+        );
+        const selectedMachine = fitChoices[0];
+        if (!selectedMachine) {
+            const partialChoices = getPlannerPreviewPartialMachineChoicesForRow(
+                assignments,
+                priorityRow,
+                pendingRows,
+                scheduleUntilMinutes
+            );
+            const partialMachine = partialChoices[0];
+            const partialQuantity = Number(partialMachine?.partialQuantity || 0);
+
+            if (!partialMachine || partialQuantity <= 0) {
+                queueUnscheduledPreviewRow(priorityRow, 'time-limit');
+                continue;
+            }
+
+            assignments.push(buildPlannerPreviewAssignment(priorityRow, partialMachine, partialQuantity));
+            scheduledShortfallQuantity += partialQuantity;
+
+            const remainingQuantity = Math.max(0, shortageQuantity - partialQuantity);
+            if (remainingQuantity > 0) {
+                pendingRows.unshift({
+                    ...priorityRow,
+                    shortfallQuantity: remainingQuantity,
+                });
+            }
+            continue;
+        }
+
+        assignments.push(buildPlannerPreviewAssignment(priorityRow, selectedMachine));
+        scheduledShortfallQuantity += shortageQuantity;
+    }
+
+    const visibleAssignments = assignments.filter((assignment) => {
+        const startMinutes = assignment.startTime
+            ? timeToMinutes(assignment.startTime)
+            : timeToMinutes(PLANNER_CONFIG.workStartTime);
+        return Number.isFinite(startMinutes) && startMinutes < scheduleUntilMinutes;
+    });
+
+    const equipmentList = Array.from(new Set(
+        visibleAssignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+
+    const otherExceptionCount = exceptions.filter((exception) => exception.reason !== 'time-limit').length;
+
+    return {
+        assignments,
+        equipmentList,
+        exceptions,
+        currentPlanOverflow: [],
+        currentPlanOverflowQuantity: 0,
+        scheduleUntilTime,
+        scheduleUntilMinutes,
+        scheduledShortfallQuantity,
+        unscheduledShortfallQuantity,
+        timeLimitMissedQuantity,
+        timeLimitExceptionCount,
+        otherExceptionCount,
+        currentPlanQuantity: 0,
+        previewInsertCount: assignments.filter((assignment) => assignment.previewSource === 'priority').length,
+    };
+}
+
+function applyLocalPlanToPlannerPreview(preview = {}) {
+    const simulation = buildPlannerPreviewSimulation(preview);
+
+    return {
+        ...preview,
+        currentPlan: { exists: false, id: null, productCount: 0 },
+        simulation,
+        summary: {
+            ...(preview.summary || {}),
+            previewInsertCount: simulation.previewInsertCount,
+            scheduledShortfallQuantity: simulation.scheduledShortfallQuantity,
+            unscheduledShortfallQuantity: simulation.unscheduledShortfallQuantity,
+            currentPlanQuantity: simulation.currentPlanQuantity,
+            previewExceptionCount: simulation.exceptions.length,
+            timeLimitExceptionCount: simulation.timeLimitExceptionCount,
+            timeLimitMissedQuantity: simulation.timeLimitMissedQuantity,
+            currentPlanOverflowCount: 0,
+            currentPlanOverflowQuantity: simulation.currentPlanOverflowQuantity,
+            otherExceptionCount: simulation.otherExceptionCount,
+            scheduleUntilTime: simulation.scheduleUntilTime,
+        },
+    };
+}
+
+function schedulePlannerPreviewRefresh() {
+    if (hasPlannerPreviewDraft()) {
+        return;
+    }
+
+    if (plannerState.preview.autoRefreshTimer) {
+        clearTimeout(plannerState.preview.autoRefreshTimer);
+    }
+
+    plannerState.preview.autoRefreshTimer = setTimeout(() => {
+        ensurePlannerPreviewLoaded({ forceRefresh: true }).catch((error) => {
+            console.error('Failed to auto-refresh planner preview:', error);
+        });
+    }, PLANNER_PREVIEW_AUTO_REFRESH_DELAY_MS);
+}
+
+function markPlannerPreviewDirty(options = {}) {
+    const clearData = options.clearData === true;
+    const scheduleIfActive = options.scheduleIfActive !== false;
+
+    plannerState.preview.isDirty = true;
+
+    if (clearData) {
+        plannerState.preview.data = null;
+        plannerState.preview.error = '';
+        plannerState.preview.lastLoadedAt = 0;
+    } else if (plannerState.preview.data) {
+        plannerState.preview.data = applyLocalPlanToPlannerPreview(plannerState.preview.data);
+    }
+
+    if (plannerState.activeMainTab === 'preview') {
+        renderPlannerPreview();
+
+        if (scheduleIfActive && plannerState.currentFactory && plannerState.currentDate) {
+            schedulePlannerPreviewRefresh();
+        }
+    }
+}
+
+function markPlannerPublishedDirty(options = {}) {
+    const clearData = options.clearData === true;
+
+    plannerState.published.isDirty = true;
+
+    if (clearData) {
+        plannerState.published.data = null;
+        plannerState.published.error = '';
+        plannerState.published.lastLoadedAt = 0;
+        plannerState.published.viewedVersionId = null;
+        plannerState.published.isVersionEditMode = false;
+    }
+
+    if (plannerState.activeMainTab === 'published') {
+        renderPlannerPublished();
+    }
+}
+
+async function ensurePlannerPreviewLoaded(options = {}) {
+    const forceRefresh = options.forceRefresh === true;
+    const showNotifications = options.showNotifications === true;
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        renderPlannerPreview();
+        return null;
+    }
+
+    if (
+        !forceRefresh
+        && plannerState.preview.data
+        && !plannerState.preview.isDirty
+        && (Date.now() - plannerState.preview.lastLoadedAt) < PLANNER_PREVIEW_CACHE_MS
+    ) {
+        renderPlannerPreview();
+        return plannerState.preview.data;
+    }
+
+    if (plannerState.preview.pendingPromise) {
+        return plannerState.preview.pendingPromise;
+    }
+
+    plannerState.preview.isLoading = true;
+    plannerState.preview.error = '';
+    renderPlannerPreview();
+
+    const requestUrl = `${BASE_URL}api/production-planner/preview?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}`;
+
+    plannerState.preview.pendingPromise = (async () => {
+        try {
+            const response = await fetch(requestUrl);
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || result.message || 'Failed to load planner preview');
+            }
+
+            const preview = result.preview || {};
+            const capabilityCacheEntries = {};
+            (preview.priorityRows || []).forEach((row) => {
+                const key = buildPlannerCapabilityKey(plannerState.currentFactory, row.背番号, row.品番);
+                capabilityCacheEntries[key] = {
+                    factory: plannerState.currentFactory,
+                    背番号: row.背番号,
+                    品番: row.品番,
+                    hasMapping: row.hasCapabilityMapping === true,
+                    capabilityEnabled: row.capabilityStatus !== 'disabled',
+                    eligibleMachines: Array.isArray(row.eligibleMachines) ? row.eligibleMachines : [],
+                    preferredMachine: row.preferredMachine || null,
+                    reason: row.capabilityStatus === 'mapped' ? null : row.capabilityStatus,
+                };
+            });
+            Object.assign(plannerState.productionCapabilities, capabilityCacheEntries);
+
+            const hadPreviousPreview = !!plannerState.preview.data;
+            plannerState.preview.data = applyLocalPlanToPlannerPreview(preview);
+            resetPlannerPreviewDraftState();
+            if (!hasPlannerPreviewSavedDraft(plannerState.preview.data)) {
+                plannerState.preview.viewMode = 'auto';
+            } else if (!hadPreviousPreview) {
+                plannerState.preview.viewMode = 'draft';
+            }
+            plannerState.preview.isDirty = false;
+            plannerState.preview.lastLoadedAt = Date.now();
+            plannerState.preview.error = '';
+
+            if (showNotifications) {
+                showPlannerNotification(plannerTranslate('plannerPreviewRefreshed', {}, 'Preview refreshed'), 'success');
+            }
+
+            return plannerState.preview.data;
+        } catch (error) {
+            plannerState.preview.error = error.message || 'Failed to load planner preview';
+            if (showNotifications) {
+                showPlannerNotification(
+                    plannerTranslate(
+                        'plannerPreviewRefreshFailed',
+                        { error: plannerState.preview.error },
+                        `Failed to refresh preview: ${plannerState.preview.error}`
+                    ),
+                    'error'
+                );
+            }
+            throw error;
+        } finally {
+            plannerState.preview.isLoading = false;
+            plannerState.preview.pendingPromise = null;
+            renderPlannerPreview();
+        }
+    })();
+
+    return plannerState.preview.pendingPromise;
+}
+
+async function ensurePlannerPublishedLoaded(options = {}) {
+    const forceRefresh = options.forceRefresh === true;
+    const showNotifications = options.showNotifications === true;
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        renderPlannerPublished();
+        return null;
+    }
+
+    if (
+        !forceRefresh
+        && plannerState.published.data
+        && !plannerState.published.isDirty
+        && (Date.now() - plannerState.published.lastLoadedAt) < PLANNER_PUBLISHED_CACHE_MS
+    ) {
+        renderPlannerPublished();
+        return plannerState.published.data;
+    }
+
+    if (plannerState.published.pendingPromise) {
+        return plannerState.published.pendingPromise;
+    }
+
+    plannerState.published.isLoading = true;
+    plannerState.published.error = '';
+    renderPlannerPublished();
+
+    const requestUrl = `${BASE_URL}api/production-planner/published?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}`;
+
+    plannerState.published.pendingPromise = (async () => {
+        try {
+            const response = await fetch(requestUrl);
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || result.message || 'Failed to load published schedule');
+            }
+
+            plannerState.published.data = result.data || null;
+            plannerState.published.viewedVersionId = resolvePlannerPublishedViewedVersionId(
+                plannerState.published.data,
+                plannerState.published.viewedVersionId
+            );
+            plannerState.published.isDirty = false;
+            plannerState.published.lastLoadedAt = Date.now();
+            plannerState.published.error = '';
+
+            if (showNotifications) {
+                showPlannerNotification(plannerTranslate('plannerPublishedRefreshed', {}, 'Published schedule refreshed'), 'success');
+            }
+
+            return plannerState.published.data;
+        } catch (error) {
+            plannerState.published.error = error.message || 'Failed to load published schedule';
+            if (showNotifications) {
+                showPlannerNotification(
+                    plannerTranslate(
+                        'plannerPublishedRefreshFailed',
+                        { error: plannerState.published.error },
+                        `Failed to refresh published schedule: ${plannerState.published.error}`
+                    ),
+                    'error'
+                );
+            }
+            throw error;
+        } finally {
+            plannerState.published.isLoading = false;
+            plannerState.published.pendingPromise = null;
+            renderPlannerPublished();
+        }
+    })();
+
+    return plannerState.published.pendingPromise;
+}
+
+function getPlannerPreviewTimeSlots(assignments = [], scheduleUntilTime = '') {
+    const slots = [];
+    const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
+    const endMinutes = scheduleUntilTime
+        ? timeToMinutes(normalizePlannerPreviewScheduleUntilTime(scheduleUntilTime))
+        : getPlannerPreviewScheduleUntilMinutes();
+
+    for (let minutes = startMinutes; minutes < endMinutes; minutes += PLANNER_CONFIG.intervalMinutes) {
+        slots.push(minutesToTime(minutes));
+    }
+
+    return slots;
+}
+
+function clonePlannerPreviewAssignment(assignment = {}, index = 0) {
+    const sourceRowIds = Array.isArray(assignment.sourceRowIds) ? [...assignment.sourceRowIds] : [];
+    const groupedRequestNumbers = Array.isArray(assignment.groupedRequestNumbers) ? [...assignment.groupedRequestNumbers] : [];
+    const sourceId = String(
+        assignment.draftId
+        || assignment.sourceRowId
+        || sourceRowIds[0]
+        || assignment.requestNumber
+        || assignment.背番号
+        || assignment.品番
+        || `preview-${index}`
+    ).trim();
+    const equipment = String(assignment.equipment || '').trim() || 'preview';
+    const startTime = String(assignment.startTime || PLANNER_CONFIG.workStartTime).trim();
+    const previewEndTime = String(assignment.previewEndTime || '').trim();
+    const productRecord = getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment,
+    });
+    const boxCapacity = resolvePlannerBoxQuantity(productRecord, equipment);
+    const parsedQuantity = Number(assignment.quantity);
+    const parsedBoxes = Number(assignment.boxes);
+    const derivedQuantityFromBoxes = Number.isFinite(parsedBoxes) && parsedBoxes > 0 && Number.isFinite(boxCapacity) && boxCapacity > 0
+        ? parsedBoxes * boxCapacity
+        : 0;
+    const quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0
+        ? parsedQuantity
+        : derivedQuantityFromBoxes;
+    const boxes = Number.isFinite(parsedBoxes) && parsedBoxes > 0
+        ? parsedBoxes
+        : (quantity > 0 && Number.isFinite(boxCapacity) && boxCapacity > 0
+            ? Math.ceil(quantity / boxCapacity)
+            : null);
+    const estimatedTime = getPlannerPreviewAssignmentEstimatedTime({
+        ...assignment,
+        ...productRecord,
+        equipment,
+        quantity,
+    });
+    const draftMaxQuantity = Number.isFinite(Number(assignment.draftMaxQuantity))
+        ? Math.max(0, Number(assignment.draftMaxQuantity))
+        : quantity;
+
+    return {
+        ...assignment,
+        ...productRecord,
+        equipment,
+        startTime,
+        previewEndTime,
+        quantity,
+        boxes,
+        draftMaxQuantity,
+        draftId: assignment.draftId || `${sourceId}::${equipment}::${startTime}::${index}`,
+        sourceRowIds,
+        groupedRequestNumbers,
+        estimatedTime,
+    };
+}
+
+function normalizePlannerPreviewDraftAssignments(assignments = []) {
+    return assignments
+        .map((assignment, index) => clonePlannerPreviewAssignment(assignment, index))
+        .sort((left, right) => {
+            const leftEquipment = String(left.equipment || '').trim();
+            const rightEquipment = String(right.equipment || '').trim();
+            if (leftEquipment !== rightEquipment) {
+                return leftEquipment.localeCompare(rightEquipment);
+            }
+
+            const leftStart = timeToMinutes(left.startTime || PLANNER_CONFIG.workStartTime);
+            const rightStart = timeToMinutes(right.startTime || PLANNER_CONFIG.workStartTime);
+            if (leftStart !== rightStart) {
+                return leftStart - rightStart;
+            }
+
+            return String(left.draftId || '').localeCompare(String(right.draftId || ''));
+        });
+}
+
+function hasPlannerPreviewDraft() {
+    return Array.isArray(plannerState.preview.draftAssignments) && plannerState.preview.draftAssignments.length > 0;
+}
+
+function normalizePlannerPreviewDraftBasisRowsClient(rows = []) {
+    return (Array.isArray(rows) ? rows : [])
+        .map((row = {}) => {
+            const id = String(row.id || '').trim();
+            const requestId = String(row.requestId || '').trim();
+            const requestNumber = String(row.requestNumber || '').trim();
+            const lineNumber = Number.isFinite(Number(row.lineNumber)) ? Number(row.lineNumber) : null;
+            const sebanggo = String(row.背番号 || '').trim();
+            const hinban = String(row.品番 || '').trim();
+            const shortfallQuantity = Number(row.shortfallQuantity || 0);
+
+            if (!id && !requestNumber && !requestId && !sebanggo && !hinban) {
+                return null;
+            }
+
+            return {
+                id: id || null,
+                requestId: requestId || null,
+                requestNumber,
+                lineNumber,
+                背番号: sebanggo,
+                品番: hinban,
+                shortfallQuantity,
+            };
+        })
+        .filter(Boolean);
+}
+
+function hasPlannerPreviewSavedDraft(preview = {}) {
+    return Array.isArray(preview?.savedDraft?.assignments) && preview.savedDraft.assignments.length > 0;
+}
+
+function getPlannerPreviewSavedDraftAssignments(preview = {}) {
+    return hasPlannerPreviewSavedDraft(preview)
+        ? normalizePlannerPreviewDraftAssignments(preview.savedDraft.assignments || [])
+        : [];
+}
+
+function resetPlannerPreviewDraftState() {
+    plannerState.preview.draftAssignments = null;
+    plannerState.preview.seedSimulation = null;
+    plannerState.preview.isDraftMode = false;
+    plannerState.preview.draftChanged = false;
+    plannerState.preview.draggedAssignmentId = null;
+    plannerState.preview.quantityEditorDraftId = null;
+    plannerState.preview.insertTarget = null;
+
+    const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+    if (modal) {
+        modal.remove();
+    }
+
+    const insertModal = document.getElementById('plannerPreviewDraftInsertModal');
+    if (insertModal) {
+        insertModal.remove();
+    }
+}
+
+function getPlannerPreviewDraftAssignmentId(assignment = {}) {
+    return String(assignment.draftId || '').trim();
+}
+
+function getPlannerPreviewAssignmentEquipmentList(assignments = []) {
+    return Array.from(new Set(
+        (Array.isArray(assignments) ? assignments : [])
+            .map((assignment) => String(assignment?.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+}
+
+function shouldUsePlannerPreviewSeedSimulation(preview = {}) {
+    return !!(
+        hasPlannerPreviewDraft()
+        && plannerState.preview.draftChanged !== true
+        && plannerState.preview.seedSimulation
+        && !hasPlannerPreviewSavedDraft(preview)
+        && String(plannerState.preview.seedSimulation.scheduleUntilTime || '') === getPlannerPreviewScheduleUntilTime()
+    );
+}
+
+function getPlannerPreviewEditableDraftAssignments(preview = {}) {
+    const sourceAssignments = shouldUsePlannerPreviewSeedSimulation(preview)
+        ? (plannerState.preview.seedSimulation?.assignments || [])
+        : (plannerState.preview.draftAssignments || []);
+
+    return normalizePlannerPreviewDraftAssignments(sourceAssignments);
+}
+
+function getPlannerPreviewTimeLimitExceptions(preview = {}) {
+    const simulation = getPlannerPreviewRenderSimulation(preview);
+    return Array.isArray(simulation.exceptions)
+        ? simulation.exceptions.filter((exception) => exception.reason === 'time-limit')
+        : [];
+}
+
+function getPlannerPreviewPriorityRowById(preview = {}, rowId = '') {
+    const normalizedRowId = String(rowId || '').trim();
+    if (!normalizedRowId) {
+        return null;
+    }
+
+    return getPlannerPreviewDraftPriorityRowMap(preview).get(normalizedRowId) || null;
+}
+
+function buildPlannerPreviewDraftInsertOption(preview = {}, assignments = [], exception = {}, targetEquipment = '', targetTime = '') {
+    const normalizedEquipment = String(targetEquipment || '').trim();
+    const normalizedTime = String(targetTime || '').trim();
+    const priorityRow = getPlannerPreviewPriorityRowById(preview, exception?.id || '');
+
+    if (!normalizedEquipment || !normalizedTime || !priorityRow) {
+        return null;
+    }
+
+    if (!canPlannerPreviewRowUseEquipment(priorityRow, normalizedEquipment)) {
+        return null;
+    }
+
+    if (getPlannerPreviewDraftAssignmentAtSlot(assignments, normalizedEquipment, normalizedTime)) {
+        return null;
+    }
+
+    const targetStartMinutes = timeToMinutes(normalizedTime);
+    if (!Number.isFinite(targetStartMinutes) || isPlannerPreviewBreakAtMinutes(normalizedEquipment, targetStartMinutes)) {
+        return null;
+    }
+
+    const quantityLimit = Math.max(0, Number(exception.shortfallQuantity || priorityRow.shortfallQuantity || 0));
+    if (quantityLimit <= 0) {
+        return null;
+    }
+
+    const productRecord = getPlannerPreviewProductRecord({
+        ...priorityRow,
+        equipment: normalizedEquipment,
+    });
+    const secondsPerPiece = resolvePlannerCycleTimeSeconds(productRecord, normalizedEquipment);
+    if (!Number.isFinite(secondsPerPiece) || secondsPerPiece <= 0) {
+        return null;
+    }
+
+    const scheduleUntilMinutes = getPlannerPreviewScheduleUntilMinutes();
+    const occupiedWindows = getPlannerPreviewOccupiedWindows(assignments, normalizedEquipment);
+    const nextOccupiedWindow = occupiedWindows.find((window) => window.startMinutes > targetStartMinutes);
+    const availableWindowEnd = Math.min(
+        scheduleUntilMinutes,
+        nextOccupiedWindow ? nextOccupiedWindow.startMinutes : scheduleUntilMinutes,
+    );
+    const availableProductionMinutes = getPlannerPreviewAvailableProductionMinutes(
+        targetStartMinutes,
+        availableWindowEnd,
+        normalizedEquipment
+    );
+    if (availableProductionMinutes <= 0) {
+        return null;
+    }
+
+    const fittedQuantity = Math.min(quantityLimit, Math.floor((availableProductionMinutes * 60) / secondsPerPiece));
+    if (fittedQuantity <= 0) {
+        return null;
+    }
+
+    const boxes = calculateBoxesNeeded(productRecord, fittedQuantity, normalizedEquipment);
+    const estimatedTime = calculateProductionTime(productRecord, fittedQuantity, normalizedEquipment);
+    if (
+        !estimatedTime
+        || !Number.isFinite(Number(estimatedTime.totalSeconds))
+        || Number(estimatedTime.totalSeconds) <= 0
+    ) {
+        return null;
+    }
+
+    const placement = getPlannerPreviewDraftPlacement(
+        {
+            ...priorityRow,
+            ...productRecord,
+            equipment: normalizedEquipment,
+            quantity: fittedQuantity,
+            boxes,
+            estimatedTime,
+        },
+        normalizedEquipment,
+        normalizedTime,
+    );
+    if (!placement.ok) {
+        return null;
+    }
+
+    return {
+        exception,
+        priorityRow,
+        productRecord,
+        equipment: normalizedEquipment,
+        startTime: normalizedTime,
+        endTime: minutesToTime(placement.endMinutes),
+        quantity: fittedQuantity,
+        boxes,
+        remainingQuantity: Math.max(0, quantityLimit - fittedQuantity),
+        isPartial: fittedQuantity < quantityLimit,
+        estimatedTime,
+    };
+}
+
+function getPlannerPreviewDraftInsertOptions(preview = {}, targetEquipment = '', targetTime = '') {
+    const assignments = getPlannerPreviewEditableDraftAssignments(preview);
+
+    return getPlannerPreviewTimeLimitExceptions(preview)
+        .map((exception) => buildPlannerPreviewDraftInsertOption(preview, assignments, exception, targetEquipment, targetTime))
+        .filter(Boolean)
+        .sort((left, right) => {
+            const leftRank = Number(left.priorityRow?.priorityRank || left.priorityRow?.queueOrder || Number.MAX_SAFE_INTEGER);
+            const rightRank = Number(right.priorityRow?.priorityRank || right.priorityRow?.queueOrder || Number.MAX_SAFE_INTEGER);
+            if (leftRank !== rightRank) {
+                return leftRank - rightRank;
+            }
+
+            const leftLine = Number(left.priorityRow?.lineNumber || Number.MAX_SAFE_INTEGER);
+            const rightLine = Number(right.priorityRow?.lineNumber || Number.MAX_SAFE_INTEGER);
+            if (leftLine !== rightLine) {
+                return leftLine - rightLine;
+            }
+
+            return String(left.priorityRow?.requestNumber || '').localeCompare(String(right.priorityRow?.requestNumber || ''));
+        });
+}
+
+function buildPlannerPreviewDraftAssignmentFromInsertOption(option = {}) {
+    const priorityRow = option.priorityRow || {};
+    const equipment = String(option.equipment || '').trim();
+    const startTime = String(option.startTime || '').trim() || PLANNER_CONFIG.workStartTime;
+    const quantity = Math.max(0, Number(option.quantity || 0));
+    const productRecord = getPlannerPreviewProductRecord({
+        ...priorityRow,
+        ...(option.productRecord || {}),
+        equipment,
+    });
+    const sourceRowId = String(priorityRow.id || option.exception?.id || '').trim();
+    const requestNumber = String(priorityRow.requestNumber || option.exception?.requestNumber || '').trim();
+    const groupedRequestNumbers = Array.isArray(priorityRow.groupedRequestNumbers) && priorityRow.groupedRequestNumbers.length > 0
+        ? priorityRow.groupedRequestNumbers.map((value) => String(value || '').trim()).filter(Boolean)
+        : (requestNumber ? [requestNumber] : []);
+
+    return {
+        ...productRecord,
+        背番号: priorityRow.背番号,
+        品番: priorityRow.品番,
+        品名: priorityRow.品名,
+        モデル: priorityRow.モデル,
+        quantity,
+        draftMaxQuantity: quantity,
+        equipment,
+        startTime,
+        boxes: Number.isFinite(Number(option.boxes)) ? Number(option.boxes) : calculateBoxesNeeded(productRecord, quantity, equipment),
+        estimatedTime: option.estimatedTime ? { ...option.estimatedTime } : calculateProductionTime(productRecord, quantity, equipment),
+        color: plannerState.productColors[priorityRow.背番号] || '#0F766E',
+        previewSource: 'priority',
+        requestNumber,
+        requestNumberLabel: String(priorityRow.requestNumberLabel || requestNumber).trim(),
+        lineNumber: Number.isFinite(Number(priorityRow.lineNumber)) ? Number(priorityRow.lineNumber) : null,
+        requestStatus: String(priorityRow.requestStatus || '').trim(),
+        sourceRowId: sourceRowId || null,
+        sourceRowIds: sourceRowId ? [sourceRowId] : [],
+        groupedRequestNumbers,
+        previewEndTime: String(option.endTime || '').trim(),
+        usedPreferredMachine: false,
+        draftId: `${sourceRowId || requestNumber || getPlannerPreviewBlockLabel(priorityRow, 'insert')}::${equipment}::${startTime}::insert`,
+    };
+}
+
+function ensurePlannerPreviewDraft(preview = {}) {
+    if (hasPlannerPreviewDraft()) {
+        return plannerState.preview.draftAssignments;
+    }
+
+    const savedDraftAssignments = getPlannerPreviewSavedDraftAssignments(preview);
+    const simulation = preview.simulation || buildPlannerPreviewSimulation(preview);
+    const draftAssignments = savedDraftAssignments.length > 0
+        ? savedDraftAssignments
+        : normalizePlannerPreviewDraftAssignments(simulation.assignments || []);
+
+    if (draftAssignments.length === 0) {
+        return [];
+    }
+
+    plannerState.preview.draftAssignments = draftAssignments;
+    plannerState.preview.seedSimulation = savedDraftAssignments.length > 0
+        ? null
+        : {
+            ...simulation,
+            assignments: draftAssignments,
+            equipmentList: getPlannerPreviewAssignmentEquipmentList(draftAssignments),
+        };
+    plannerState.preview.isDraftMode = true;
+    plannerState.preview.draftChanged = false;
+    plannerState.preview.viewMode = 'draft';
+    return plannerState.preview.draftAssignments;
+}
+
+function getPlannerPreviewDraftBasisRowsForSimulation(preview = {}) {
+    const savedBasisRows = normalizePlannerPreviewDraftBasisRowsClient(preview?.savedDraft?.basisRows || []);
+    if (savedBasisRows.length > 0) {
+        return savedBasisRows;
+    }
+
+    return buildPlannerPreviewDraftBasisRows(preview);
+}
+
+function getPlannerPreviewDraftSourceRowIds(assignment = {}) {
+    const sourceRowIds = Array.isArray(assignment.sourceRowIds)
+        ? assignment.sourceRowIds.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+
+    if (sourceRowIds.length > 0) {
+        return sourceRowIds;
+    }
+
+    const sourceRowId = String(assignment.sourceRowId || '').trim();
+    return sourceRowId ? [sourceRowId] : [];
+}
+
+function getPlannerPreviewDraftPriorityRowMap(preview = {}) {
+    return new Map(
+        (Array.isArray(preview.priorityRows) ? preview.priorityRows : [])
+            .map((row) => [String(row?.id || '').trim(), row])
+            .filter(([id]) => id)
+    );
+}
+
+function buildPlannerPreviewDraftSimulation(preview = {}, baseSimulation = null, draftAssignments = []) {
+    const simulation = baseSimulation || preview.simulation || buildPlannerPreviewSimulation(preview);
+    const assignments = normalizePlannerPreviewDraftAssignments(draftAssignments)
+        .filter((assignment) => Number(assignment.quantity || 0) > 0);
+    const equipmentList = Array.from(new Set(
+        assignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+
+    const basisRows = getPlannerPreviewDraftBasisRowsForSimulation(preview);
+    const priorityRowMap = getPlannerPreviewDraftPriorityRowMap(preview);
+    const remainingByRowId = new Map();
+
+    basisRows.forEach((row) => {
+        const id = String(row.id || '').trim();
+        if (!id) {
+            return;
+        }
+
+        remainingByRowId.set(id, Math.max(0, Number(row.shortfallQuantity || 0)));
+    });
+
+    assignments.forEach((assignment) => {
+        let quantityRemaining = Math.max(0, Number(assignment.quantity || 0));
+        const sourceRowIds = getPlannerPreviewDraftSourceRowIds(assignment);
+
+        sourceRowIds.forEach((sourceRowId) => {
+            if (quantityRemaining <= 0) {
+                return;
+            }
+
+            const currentRemaining = Math.max(0, Number(remainingByRowId.get(sourceRowId) || 0));
+            if (currentRemaining <= 0) {
+                return;
+            }
+
+            const allocatedQuantity = Math.min(quantityRemaining, currentRemaining);
+            remainingByRowId.set(sourceRowId, Math.max(0, currentRemaining - allocatedQuantity));
+            quantityRemaining -= allocatedQuantity;
+        });
+    });
+
+    const exceptions = [];
+    let unscheduledShortfallQuantity = 0;
+    let timeLimitMissedQuantity = 0;
+    let timeLimitExceptionCount = 0;
+    let otherExceptionCount = 0;
+
+    basisRows.forEach((row) => {
+        const rowId = String(row.id || '').trim();
+        const shortfallQuantity = Math.max(0, Number(remainingByRowId.get(rowId) || 0));
+        if (shortfallQuantity <= 0) {
+            return;
+        }
+
+        const priorityRow = priorityRowMap.get(rowId) || null;
+        const candidateMachines = priorityRow ? getPlannerPreviewCandidateMachines(priorityRow) : [];
+        const isCapabilityException = !!(
+            priorityRow
+            && (priorityRow.capabilityStatus !== 'mapped' || candidateMachines.length === 0)
+        );
+        const reason = isCapabilityException
+            ? (priorityRow.capabilityStatus || 'unmapped')
+            : 'time-limit';
+        const exception = {
+            id: rowId || null,
+            reason,
+            requestNumber: String(row.requestNumber || '').trim(),
+            lineNumber: Number.isFinite(Number(row.lineNumber)) ? Number(row.lineNumber) : null,
+            背番号: String(row.背番号 || '').trim(),
+            品番: String(row.品番 || '').trim(),
+            shortfallQuantity,
+        };
+
+        if (reason === 'time-limit') {
+            exception.scheduleUntilTime = simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime();
+            exception.candidateEquipment = candidateMachines.map((machine) => (
+                machine.preferred ? `${machine.equipment}*` : machine.equipment
+            ));
+            timeLimitMissedQuantity += shortfallQuantity;
+            timeLimitExceptionCount += 1;
+        } else {
+            otherExceptionCount += 1;
+        }
+
+        unscheduledShortfallQuantity += shortfallQuantity;
+        exceptions.push(exception);
+    });
+
+    return {
+        ...simulation,
+        assignments,
+        equipmentList,
+        exceptions,
+        scheduledShortfallQuantity: assignments.reduce((sum, assignment) => sum + Math.max(0, Number(assignment.quantity || 0)), 0),
+        unscheduledShortfallQuantity,
+        timeLimitMissedQuantity,
+        timeLimitExceptionCount,
+        otherExceptionCount,
+        previewInsertCount: assignments.filter((assignment) => assignment.previewSource === 'priority').length,
+    };
+}
+
+function getPlannerPreviewDraftAssignmentCapacity(assignment = {}) {
+    const productRecord = getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment: assignment.equipment,
+    });
+
+    return resolvePlannerBoxQuantity(productRecord, assignment.equipment);
+}
+
+function getPlannerPreviewDraftAssignmentBoxCount(assignment = {}) {
+    const quantity = Math.max(0, Number(assignment.quantity || 0));
+    if (quantity <= 0) {
+        return 0;
+    }
+
+    return calculateBoxesNeeded(getPlannerPreviewProductRecord({
+        ...assignment,
+        equipment: assignment.equipment,
+    }), quantity, assignment.equipment);
+}
+
+function getPlannerPreviewDraftAssignmentTotalSourceQuantity(preview = {}, assignment = {}) {
+    const basisRows = getPlannerPreviewDraftBasisRowsForSimulation(preview);
+    const basisQuantityById = new Map(
+        basisRows
+            .map((row) => [String(row.id || '').trim(), Math.max(0, Number(row.shortfallQuantity || 0))])
+            .filter(([id]) => id)
+    );
+    const sourceRowIds = getPlannerPreviewDraftSourceRowIds(assignment);
+    const totalSourceQuantity = sourceRowIds.reduce((sum, sourceRowId) => (
+        sum + Math.max(0, Number(basisQuantityById.get(sourceRowId) || 0))
+    ), 0);
+
+    return totalSourceQuantity > 0
+        ? totalSourceQuantity
+        : Math.max(0, Number(assignment.quantity || 0));
+}
+
+function getPlannerPreviewDraftAssignmentLimitQuantity(assignment = {}) {
+    return Math.max(
+        0,
+        Number.isFinite(Number(assignment.draftMaxQuantity))
+            ? Number(assignment.draftMaxQuantity)
+            : Number(assignment.quantity || 0)
+    );
+}
+
+function getPlannerPreviewDraftAssignmentMaxBoxes(preview = {}, assignment = {}) {
+    const capacity = getPlannerPreviewDraftAssignmentCapacity(assignment);
+    const limitQuantity = getPlannerPreviewDraftAssignmentLimitQuantity(assignment);
+    if (!Number.isFinite(capacity) || capacity <= 0 || limitQuantity <= 0) {
+        return 0;
+    }
+
+    return Math.ceil(limitQuantity / capacity);
+}
+
+function getPlannerPreviewDraftQuantityForBoxes(preview = {}, assignment = {}, targetBoxes = 0) {
+    const normalizedBoxes = Math.max(0, Number(targetBoxes || 0));
+    if (normalizedBoxes <= 0) {
+        return 0;
+    }
+
+    const capacity = getPlannerPreviewDraftAssignmentCapacity(assignment);
+    const limitQuantity = getPlannerPreviewDraftAssignmentLimitQuantity(assignment);
+    if (!Number.isFinite(capacity) || capacity <= 0 || limitQuantity <= 0) {
+        return Math.max(0, Number(assignment.quantity || 0));
+    }
+
+    const maxBoxes = Math.ceil(limitQuantity / capacity);
+    if (normalizedBoxes >= maxBoxes) {
+        return limitQuantity;
+    }
+
+    return Math.min(limitQuantity, normalizedBoxes * capacity);
+}
+
+function getPlannerPreviewRenderSimulation(preview = {}) {
+    const simulation = preview.simulation || buildPlannerPreviewSimulation(preview);
+    if (plannerState.preview.viewMode !== 'draft') {
+        return simulation;
+    }
+
+    const assignments = hasPlannerPreviewDraft()
+        ? normalizePlannerPreviewDraftAssignments(plannerState.preview.draftAssignments || [])
+        : getPlannerPreviewSavedDraftAssignments(preview);
+
+    if (hasPlannerPreviewDraft()) {
+        plannerState.preview.draftAssignments = assignments;
+    }
+
+    if (shouldUsePlannerPreviewSeedSimulation(preview)) {
+        return {
+            ...plannerState.preview.seedSimulation,
+            assignments,
+            equipmentList: getPlannerPreviewAssignmentEquipmentList(assignments),
+            draftSource: 'local-unsaved-draft',
+        };
+    }
+
+    return buildPlannerPreviewDraftSimulation(preview, simulation, assignments);
+}
+
+function getPlannerPreviewExportSimulation(preview = {}, mode = 'auto') {
+    const simulation = preview.simulation || buildPlannerPreviewSimulation(preview);
+
+    if (mode !== 'draft') {
+        return {
+            ...simulation,
+            assignments: normalizePlannerPreviewDraftAssignments(simulation.assignments || []),
+            draftSource: 'auto-generated',
+        };
+    }
+
+    const draftAssignments = hasPlannerPreviewDraft()
+        ? normalizePlannerPreviewDraftAssignments(plannerState.preview.draftAssignments || [])
+        : getPlannerPreviewSavedDraftAssignments(preview);
+
+    if (!Array.isArray(draftAssignments) || draftAssignments.length === 0) {
+        return null;
+    }
+
+    if (shouldUsePlannerPreviewSeedSimulation(preview)) {
+        return {
+            ...plannerState.preview.seedSimulation,
+            assignments: draftAssignments,
+            equipmentList: getPlannerPreviewAssignmentEquipmentList(draftAssignments),
+            draftSource: 'local-unsaved-draft',
+        };
+    }
+
+    return {
+        ...buildPlannerPreviewDraftSimulation(preview, simulation, draftAssignments),
+        draftSource: hasPlannerPreviewDraft() ? 'local-unsaved-draft' : 'saved-draft',
+    };
+}
+
+function getPlannerPreviewActionAssignments(preview = {}, mode = 'auto') {
+    const normalizedMode = mode === 'draft' ? 'draft' : 'auto';
+    const simulation = getPlannerPreviewExportSimulation(preview, normalizedMode);
+    if (!simulation) {
+        return [];
+    }
+
+    return normalizePlannerPreviewDraftAssignments(simulation.assignments || []).map((assignment, index) => ({
+        ...assignment,
+        _id: assignment._id || getPlannerPreviewDraftAssignmentId(assignment) || `preview-${normalizedMode}-${index}`,
+        color: assignment.color || '#6B7280',
+    }));
+}
+
+function getPlannerPreviewActionModes(preview = {}) {
+    const modes = ['auto'];
+
+    if (getPlannerPreviewActionAssignments(preview, 'draft').length > 0) {
+        modes.push('draft');
+    }
+
+    return modes;
+}
+
+function buildPlannerPreviewScheduleExport(preview = {}, mode = 'auto') {
+    const normalizedMode = mode === 'draft' ? 'draft' : 'auto';
+    const simulation = getPlannerPreviewExportSimulation(preview, normalizedMode);
+    if (!simulation) {
+        return null;
+    }
+
+    const assignments = normalizePlannerPreviewDraftAssignments(simulation.assignments || []).map((assignment, index) => ({
+        index: index + 1,
+        draftId: getPlannerPreviewDraftAssignmentId(assignment) || null,
+        equipment: String(assignment.equipment || '').trim(),
+        startTime: String(assignment.startTime || '').trim(),
+        endTime: minutesToTime(getPlannerPreviewAssignmentEndMinutes(assignment)),
+        requestNumber: String(assignment.requestNumber || '').trim(),
+        requestNumberLabel: String(assignment.requestNumberLabel || assignment.requestNumber || '').trim(),
+        背番号: String(assignment.背番号 || '').trim(),
+        品番: String(assignment.品番 || '').trim(),
+        品名: String(assignment.品名 || '').trim(),
+        モデル: String(assignment.モデル || '').trim(),
+        quantity: Number(assignment.quantity || 0),
+        boxes: assignment.boxes === null || assignment.boxes === undefined ? null : Number(assignment.boxes),
+        previewSource: String(assignment.previewSource || '').trim(),
+        usedPreferredMachine: assignment.usedPreferredMachine === true,
+        groupedRequestNumbers: Array.isArray(assignment.groupedRequestNumbers) ? assignment.groupedRequestNumbers : [],
+        sourceRowIds: Array.isArray(assignment.sourceRowIds) ? assignment.sourceRowIds : [],
+        eligibleMachines: getPlannerPreviewDraftAssignmentEligibleEquipment(assignment),
+        estimatedTime: assignment.estimatedTime ? {
+            totalSeconds: Number(assignment.estimatedTime.totalSeconds || 0),
+            totalMinutes: Number(assignment.estimatedTime.totalMinutes || 0),
+            formattedTime: String(assignment.estimatedTime.formattedTime || '').trim(),
+            secondsPerPiece: Number.isFinite(Number(assignment.estimatedTime.secondsPerPiece)) ? Number(assignment.estimatedTime.secondsPerPiece) : null,
+            cycleTimeSeconds: Number.isFinite(Number(assignment.estimatedTime.cycleTimeSeconds)) ? Number(assignment.estimatedTime.cycleTimeSeconds) : null,
+            pcPerCycle: Number.isFinite(Number(assignment.estimatedTime.pcPerCycle)) ? Number(assignment.estimatedTime.pcPerCycle) : null,
+            cyclesNeeded: Number.isFinite(Number(assignment.estimatedTime.cyclesNeeded)) ? Number(assignment.estimatedTime.cyclesNeeded) : null,
+        } : null,
+    }));
+
+    const equipmentList = Array.from(new Set(
+        assignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+
+    const scheduleByMachine = Object.fromEntries(
+        equipmentList.map((equipment) => [
+            equipment,
+            assignments.filter((assignment) => assignment.equipment === equipment)
+        ])
+    );
+
+    return {
+        exportType: 'production-planner-preview-schedule',
+        mode: normalizedMode,
+        draftSource: simulation.draftSource || null,
+        factory: String(preview.factory || plannerState.currentFactory || '').trim(),
+        targetDate: String(preview.targetDate || plannerState.currentDate || '').trim(),
+        generatedAt: preview.generatedAt || null,
+        scheduleUntilTime: getPlannerPreviewScheduleUntilTime(),
+        priorityRowCount: Number(preview.summary?.priorityRowCount || 0),
+        totalShortfallQuantity: Number(preview.summary?.totalShortfallQuantity || 0),
+        assignmentCount: assignments.length,
+        equipmentList,
+        exceptions: Array.isArray(simulation.exceptions) ? simulation.exceptions : [],
+        assignments,
+        scheduleByMachine,
+    };
+}
+
+function buildPlannerPreviewDraftBasisRows(preview = {}) {
+    return (Array.isArray(preview.priorityRows) ? preview.priorityRows : [])
+        .map((row = {}) => {
+            const id = String(row.id || '').trim();
+            const requestId = String(row.requestId || '').trim();
+            const requestNumber = String(row.requestNumber || '').trim();
+            const lineNumber = Number.isFinite(Number(row.lineNumber)) ? Number(row.lineNumber) : null;
+            const sebanggo = String(row.背番号 || '').trim();
+            const hinban = String(row.品番 || '').trim();
+            const shortfallQuantity = Number(row.shortfallQuantity || 0);
+
+            if (!id && !requestNumber && !requestId && !sebanggo && !hinban) {
+                return null;
+            }
+
+            return {
+                id: id || null,
+                requestId: requestId || null,
+                requestNumber,
+                lineNumber,
+                背番号: sebanggo,
+                品番: hinban,
+                shortfallQuantity,
+            };
+        })
+        .filter(Boolean);
+}
+
+function formatPlannerPreviewDraftBasisRowLabel(row = {}) {
+    const requestNumber = String(row.requestNumber || '').trim() || '-';
+    const itemLabel = String(row.背番号 || row.品番 || '').trim() || '-';
+    return `${requestNumber} / ${itemLabel}`;
+}
+
+async function copyPlannerPreviewTextToClipboard(text = '') {
+    if (!text) {
+        return false;
+    }
+
+    try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch (error) {
+        console.warn('Clipboard API copy failed, falling back to execCommand.', error);
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    let copied = false;
+    try {
+        copied = document.execCommand('copy');
+    } catch (error) {
+        console.warn('execCommand copy failed.', error);
+    }
+
+    document.body.removeChild(textarea);
+    return copied;
+}
+
+function isPlannerPreviewBreakAtMinutes(equipment = '', slotMinutes = 0) {
+    return plannerState.breaks.some((breakItem) => {
+        const breakStart = timeToMinutes(breakItem.start);
+        const breakEnd = timeToMinutes(breakItem.end);
+        const appliesToEquipment = !breakItem.equipment || breakItem.equipment === equipment;
+        return slotMinutes >= breakStart && slotMinutes < breakEnd && appliesToEquipment;
+    });
+}
+
+function getPlannerPreviewDraftAssignmentEligibleEquipment(assignment = {}) {
+    return getEligibleEquipmentForProduct(assignment, plannerState.currentFactory);
+}
+
+function canPlannerPreviewDraftAssignmentUseEquipment(assignment = {}, equipment = '') {
+    const normalizedEquipment = String(equipment || '').trim();
+    if (!normalizedEquipment) {
+        return false;
+    }
+
+    if (String(assignment.equipment || '').trim() === normalizedEquipment) {
+        return true;
+    }
+
+    return getPlannerPreviewDraftAssignmentEligibleEquipment(assignment).includes(normalizedEquipment);
+}
+
+function getPlannerPreviewDraftAssignmentDurationMinutes(assignment = {}) {
+    return Number(assignment?.estimatedTime?.totalSeconds || 0) / 60;
+}
+
+function getPlannerPreviewDraftLaneAssignments(assignments = [], equipment = '') {
+    const normalizedEquipment = String(equipment || '').trim();
+    return assignments
+        .filter((assignment) => String(assignment.equipment || '').trim() === normalizedEquipment)
+        .sort((left, right) => {
+            const leftStart = timeToMinutes(left.startTime || PLANNER_CONFIG.workStartTime);
+            const rightStart = timeToMinutes(right.startTime || PLANNER_CONFIG.workStartTime);
+            if (leftStart !== rightStart) {
+                return leftStart - rightStart;
+            }
+
+            return getPlannerPreviewDraftAssignmentId(left).localeCompare(getPlannerPreviewDraftAssignmentId(right));
+        });
+}
+
+function repackPlannerPreviewDraftLane(assignments = [], equipment = '', orderedLaneAssignments = [], earliestAffectedIndex = 0) {
+    const normalizedEquipment = String(equipment || '').trim();
+    if (!normalizedEquipment) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSelectValidMoveLane', {}, 'Select a valid machine lane for this draft move.')
+        };
+    }
+
+    const laneAssignments = getPlannerPreviewDraftLaneAssignments(assignments, normalizedEquipment);
+    const safeAffectedIndex = Math.max(0, Math.min(
+        Number.isFinite(Number(earliestAffectedIndex)) ? Number(earliestAffectedIndex) : 0,
+        orderedLaneAssignments.length,
+    ));
+    const fixedPrefix = orderedLaneAssignments
+        .slice(0, safeAffectedIndex)
+        .map((assignment) => ({ ...assignment, equipment: normalizedEquipment }));
+    const affectedSuffix = orderedLaneAssignments.slice(safeAffectedIndex);
+
+    const anchorAssignment = laneAssignments[safeAffectedIndex] || null;
+    const lastFixedAssignment = fixedPrefix[fixedPrefix.length - 1] || null;
+    const anchorMinutes = anchorAssignment
+        ? timeToMinutes(anchorAssignment.startTime || PLANNER_CONFIG.workStartTime)
+        : lastFixedAssignment
+            ? getPlannerPreviewAssignmentEndMinutes(lastFixedAssignment)
+            : timeToMinutes(PLANNER_CONFIG.workStartTime);
+
+    let earliestStartMinutes = Number.isFinite(anchorMinutes)
+        ? anchorMinutes
+        : timeToMinutes(PLANNER_CONFIG.workStartTime);
+    let startTimesChanged = false;
+
+    const baseAssignments = assignments.filter((assignment) => String(assignment.equipment || '').trim() !== normalizedEquipment);
+    const placedAssignments = [...fixedPrefix];
+
+    for (const laneAssignment of affectedSuffix) {
+        const nextAssignment = { ...laneAssignment, equipment: normalizedEquipment };
+        const durationMinutes = getPlannerPreviewDraftAssignmentDurationMinutes(nextAssignment);
+        const timing = findPlannerPreviewAvailableWindow(
+            [...baseAssignments, ...placedAssignments],
+            normalizedEquipment,
+            durationMinutes,
+            { earliestStartMinutes }
+        );
+        const endMinutes = roundPlannerPreviewMinutesToInterval(timing.endTime, 'ceil');
+
+        if (endMinutes > getPlannerPreviewScheduleUntilMinutes()) {
+            return {
+                ok: false,
+                message: plannerTranslate(
+                    'plannerPreviewSwapPastLimit',
+                    {
+                        block: getPlannerPreviewBlockLabel(nextAssignment, 'a block'),
+                        time: getPlannerPreviewScheduleUntilTime()
+                    },
+                    `This swap would push ${getPlannerPreviewBlockLabel(nextAssignment, 'a block')} beyond ${getPlannerPreviewScheduleUntilTime()}.`
+                )
+            };
+        }
+
+        const plannedStartTime = minutesToTime(timing.startTime);
+        if (plannedStartTime !== String(nextAssignment.startTime || '').trim()) {
+            startTimesChanged = true;
+        }
+
+        const plannedAssignment = {
+            ...nextAssignment,
+            startTime: plannedStartTime,
+            previewEndTime: minutesToTime(endMinutes),
+        };
+
+        placedAssignments.push(plannedAssignment);
+        earliestStartMinutes = endMinutes;
+    }
+
+    return {
+        ok: true,
+        assignments: placedAssignments,
+        startTimesChanged,
+    };
+}
+
+function mergePlannerPreviewDraftLaneAssignments(assignments = [], laneAssignmentsByEquipment = {}) {
+    const laneAssignmentMap = new Map();
+    Object.values(laneAssignmentsByEquipment).forEach((laneAssignments) => {
+        (laneAssignments || []).forEach((assignment) => {
+            laneAssignmentMap.set(getPlannerPreviewDraftAssignmentId(assignment), assignment);
+        });
+    });
+
+    const replacedEquipments = new Set(Object.keys(laneAssignmentsByEquipment));
+    const untouchedAssignments = assignments.filter((assignment) => {
+        const equipment = String(assignment.equipment || '').trim();
+        return !replacedEquipments.has(equipment);
+    });
+
+    return normalizePlannerPreviewDraftAssignments([
+        ...untouchedAssignments,
+        ...Array.from(laneAssignmentMap.values()),
+    ]);
+}
+
+function getPlannerPreviewDraftPlacement(movingAssignment = {}, targetEquipment = '', targetTime = '') {
+    const normalizedEquipment = String(targetEquipment || '').trim();
+    if (!normalizedEquipment) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSelectValidMoveLane', {}, 'Select a valid machine lane for this draft move.')
+        };
+    }
+
+    if (!canPlannerPreviewDraftAssignmentUseEquipment(movingAssignment, normalizedEquipment)) {
+        return {
+            ok: false,
+            message: plannerTranslate(
+                'plannerPreviewIneligibleEquipment',
+                {
+                    block: getPlannerPreviewBlockLabel(movingAssignment, 'This block'),
+                    equipment: normalizedEquipment
+                },
+                `${getPlannerPreviewBlockLabel(movingAssignment, 'This block')} is not eligible to run on ${normalizedEquipment}.`
+            )
+        };
+    }
+
+    const targetStartMinutes = timeToMinutes(targetTime || movingAssignment.startTime || PLANNER_CONFIG.workStartTime);
+    if (!Number.isFinite(targetStartMinutes)) {
+        return { ok: false, message: plannerTranslate('plannerPreviewInvalidSlot', {}, 'Choose a valid 15-minute slot.') };
+    }
+
+    if (isPlannerPreviewBreakAtMinutes(normalizedEquipment, targetStartMinutes)) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewBreakSlot', {}, 'That slot is inside a break. Drop the block on a working tile.')
+        };
+    }
+
+    const durationMinutes = Number(movingAssignment.estimatedTime?.totalSeconds || 0) / 60;
+    const timing = findNextAvailableTime(targetStartMinutes, durationMinutes, normalizedEquipment);
+    if (timing.startTime !== targetStartMinutes) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewInvalidStartTile', {}, 'That tile cannot be used as the block start.')
+        };
+    }
+
+    const endMinutes = roundPlannerPreviewMinutesToInterval(timing.endTime, 'ceil');
+    if (endMinutes > getPlannerPreviewScheduleUntilMinutes()) {
+        return {
+            ok: false,
+            message: plannerTranslate(
+                'plannerPreviewMovePastLimit',
+                { time: getPlannerPreviewScheduleUntilTime() },
+                `This move would push the block beyond ${getPlannerPreviewScheduleUntilTime()}.`
+            )
+        };
+    }
+
+    return {
+        ok: true,
+        equipment: normalizedEquipment,
+        startMinutes: targetStartMinutes,
+        endMinutes,
+    };
+}
+
+function doesPlannerPreviewDraftWindowOverlap(candidateWindow = {}, occupiedWindows = []) {
+    return occupiedWindows.some((window) => (
+        candidateWindow.startMinutes < window.endMinutes && candidateWindow.endMinutes > window.startMinutes
+    ));
+}
+
+function getPlannerPreviewDraftAssignmentAtSlot(assignments = [], targetEquipment = '', targetTime = '', excludedDraftId = '') {
+    const normalizedEquipment = String(targetEquipment || '').trim();
+    const slotMinutes = timeToMinutes(targetTime || '');
+    if (!normalizedEquipment || !Number.isFinite(slotMinutes)) {
+        return null;
+    }
+
+    return assignments.find((assignment) => {
+        if (String(assignment.equipment || '').trim() !== normalizedEquipment) {
+            return false;
+        }
+
+        if (excludedDraftId && getPlannerPreviewDraftAssignmentId(assignment) === excludedDraftId) {
+            return false;
+        }
+
+        const assignmentStartMinutes = timeToMinutes(assignment.startTime || PLANNER_CONFIG.workStartTime);
+        const assignmentEndMinutes = roundPlannerPreviewMinutesToInterval(
+            timeToMinutes(assignment.previewEndTime || assignment.startTime || PLANNER_CONFIG.workStartTime),
+            'ceil'
+        );
+
+        return slotMinutes >= assignmentStartMinutes && slotMinutes < assignmentEndMinutes;
+    }) || null;
+}
+
+function evaluatePlannerPreviewDraftMove(assignments = [], movingAssignment = {}, targetEquipment = '', targetTime = '') {
+    const placement = getPlannerPreviewDraftPlacement(movingAssignment, targetEquipment, targetTime);
+    if (!placement.ok) {
+        return placement;
+    }
+
+    const occupiedWindows = getPlannerPreviewOccupiedWindows(assignments, placement.equipment);
+    if (doesPlannerPreviewDraftWindowOverlap(placement, occupiedWindows)) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewOverlapSlot', {}, 'That slot overlaps another block on the target machine.')
+        };
+    }
+
+    return placement;
+}
+
+function evaluatePlannerPreviewDraftSwap(assignments = [], movingAssignment = {}, targetAssignment = {}) {
+    const movingEquipment = String(movingAssignment.equipment || '').trim();
+    const targetEquipment = String(targetAssignment.equipment || '').trim();
+    const movingDraftId = getPlannerPreviewDraftAssignmentId(movingAssignment);
+    const targetDraftId = getPlannerPreviewDraftAssignmentId(targetAssignment);
+
+    if (!movingDraftId || !targetDraftId || movingDraftId === targetDraftId) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewChooseAnotherBlock', {}, 'Choose another block to swap with.')
+        };
+    }
+
+    if (!movingEquipment || !targetEquipment) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSelectValidSwapLane', {}, 'Select a valid machine lane for this draft swap.')
+        };
+    }
+
+    if (!canPlannerPreviewDraftAssignmentUseEquipment(movingAssignment, targetEquipment)) {
+        return {
+            ok: false,
+            message: plannerTranslate(
+                'plannerPreviewIneligibleEquipment',
+                {
+                    block: getPlannerPreviewBlockLabel(movingAssignment, 'This block'),
+                    equipment: targetEquipment
+                },
+                `${getPlannerPreviewBlockLabel(movingAssignment, 'This block')} is not eligible to run on ${targetEquipment}.`
+            )
+        };
+    }
+
+    if (!canPlannerPreviewDraftAssignmentUseEquipment(targetAssignment, movingEquipment)) {
+        return {
+            ok: false,
+            message: plannerTranslate(
+                'plannerPreviewIneligibleEquipment',
+                {
+                    block: getPlannerPreviewBlockLabel(targetAssignment, 'This block'),
+                    equipment: movingEquipment
+                },
+                `${getPlannerPreviewBlockLabel(targetAssignment, 'This block')} is not eligible to run on ${movingEquipment}.`
+            )
+        };
+    }
+
+    const normalizedAssignments = normalizePlannerPreviewDraftAssignments(assignments);
+    const movingLaneAssignments = getPlannerPreviewDraftLaneAssignments(normalizedAssignments, movingEquipment);
+    const targetLaneAssignments = getPlannerPreviewDraftLaneAssignments(normalizedAssignments, targetEquipment);
+    const movingLaneIndex = movingLaneAssignments.findIndex((assignment) => getPlannerPreviewDraftAssignmentId(assignment) === movingDraftId);
+    const targetLaneIndex = targetLaneAssignments.findIndex((assignment) => getPlannerPreviewDraftAssignmentId(assignment) === targetDraftId);
+
+    if (movingLaneIndex === -1 || targetLaneIndex === -1) {
+        return {
+            ok: false,
+            message: plannerTranslate('plannerPreviewSwapBlockNotFound', {}, 'One of the draft blocks could not be located for swapping.')
+        };
+    }
+
+    if (movingEquipment === targetEquipment) {
+        const swappedLaneAssignments = [...movingLaneAssignments];
+        [swappedLaneAssignments[movingLaneIndex], swappedLaneAssignments[targetLaneIndex]] = [
+            { ...swappedLaneAssignments[targetLaneIndex], equipment: movingEquipment },
+            { ...swappedLaneAssignments[movingLaneIndex], equipment: movingEquipment },
+        ];
+
+        const repackedLane = repackPlannerPreviewDraftLane(
+            normalizedAssignments,
+            movingEquipment,
+            swappedLaneAssignments,
+            Math.min(movingLaneIndex, targetLaneIndex),
+        );
+        if (!repackedLane.ok) {
+            return repackedLane;
+        }
+
+        return {
+            ok: true,
+            assignments: mergePlannerPreviewDraftLaneAssignments(normalizedAssignments, {
+                [movingEquipment]: repackedLane.assignments,
+            }),
+            startTimesChanged: repackedLane.startTimesChanged,
+        };
+    }
+
+    const nextMovingLaneAssignments = [...movingLaneAssignments];
+    nextMovingLaneAssignments[movingLaneIndex] = { ...targetAssignment, equipment: movingEquipment };
+
+    const nextTargetLaneAssignments = [...targetLaneAssignments];
+    nextTargetLaneAssignments[targetLaneIndex] = { ...movingAssignment, equipment: targetEquipment };
+
+    const repackedMovingLane = repackPlannerPreviewDraftLane(
+        normalizedAssignments,
+        movingEquipment,
+        nextMovingLaneAssignments,
+        movingLaneIndex,
+    );
+    if (!repackedMovingLane.ok) {
+        return repackedMovingLane;
+    }
+
+    const sourceAdjustedAssignments = mergePlannerPreviewDraftLaneAssignments(normalizedAssignments, {
+        [movingEquipment]: repackedMovingLane.assignments,
+    });
+
+    const repackedTargetLane = repackPlannerPreviewDraftLane(
+        sourceAdjustedAssignments,
+        targetEquipment,
+        nextTargetLaneAssignments,
+        targetLaneIndex,
+    );
+    if (!repackedTargetLane.ok) {
+        return repackedTargetLane;
+    }
+
+    return {
+        ok: true,
+        assignments: mergePlannerPreviewDraftLaneAssignments(sourceAdjustedAssignments, {
+            [targetEquipment]: repackedTargetLane.assignments,
+        }),
+        startTimesChanged: repackedMovingLane.startTimesChanged || repackedTargetLane.startTimesChanged,
+    };
+}
+
+function renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth, options = {}) {
+    let html = '';
+    const isDraftMode = options.isDraftMode === true;
+    const requestColorMap = options.requestColorMap || {};
+
+    timeSlots.forEach((slot, index) => {
+        const slotMinutes = timeToMinutes(slot);
+        const breakAtSlot = plannerState.breaks.find((breakItem) => {
+            const breakStart = timeToMinutes(breakItem.start);
+            const breakEnd = timeToMinutes(breakItem.end);
+            const appliesToEquipment = !breakItem.equipment || breakItem.equipment === equipment;
+            return slotMinutes >= breakStart && slotMinutes < breakEnd && appliesToEquipment;
+        });
+
+        if (breakAtSlot) {
+            const previousSlot = index > 0 ? timeToMinutes(timeSlots[index - 1]) : null;
+            const isBreakStart = previousSlot === null || !plannerState.breaks.some((breakItem) => {
+                const breakStart = timeToMinutes(breakItem.start);
+                const breakEnd = timeToMinutes(breakItem.end);
+                const appliesToEquipment = !breakItem.equipment || breakItem.equipment === equipment;
+                return previousSlot >= breakStart && previousSlot < breakEnd && appliesToEquipment;
+            });
+
+            html += `
+                <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-slate-200 dark:bg-slate-700 relative" style="width:${slotWidth}px">
+                    ${isBreakStart ? `<div class="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-slate-600 dark:text-slate-200">${escapePlannerPreviewHtml(getPlannerPreviewBreakName(breakAtSlot))}</div>` : ''}
+                </div>
+            `;
+            return;
+        }
+
+        let assignmentForSlot = null;
+        for (let indexAssigned = 0; indexAssigned < assignedProducts.length; indexAssigned += 1) {
+            const assignment = assignedProducts[indexAssigned];
+            const assignmentStart = assignment.startTime
+                ? timeToMinutes(assignment.startTime)
+                : timeToMinutes(PLANNER_CONFIG.workStartTime);
+            const assignmentEnd = getPlannerPreviewAssignmentEndMinutes(assignment);
+            if (slotMinutes >= assignmentStart && slotMinutes < assignmentEnd) {
+                assignmentForSlot = assignment;
+                break;
+            }
+        }
+
+        if (!assignmentForSlot) {
+            const escapedEquipment = escapePlannerPreviewHtml(equipment);
+            const escapedSlot = escapePlannerPreviewHtml(slot);
+            const emptyDropAttributes = isDraftMode
+                ? `
+                    data-preview-draft-slot="true"
+                    ondragover="handlePlannerPreviewDraftDragOver(event)"
+                    ondragleave="handlePlannerPreviewDraftDragLeave(event)"
+                    ondrop='handlePlannerPreviewDraftDrop(event, ${JSON.stringify(equipment)}, ${JSON.stringify(slot)})'
+                `
+                : '';
+            const insertButtonHtml = isDraftMode
+                ? `
+                    <div class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                        <button
+                            type="button"
+                            data-preview-slot-equipment="${escapedEquipment}"
+                            data-preview-slot-time="${escapedSlot}"
+                            onclick="handlePlannerPreviewDraftInsertButtonClick(event, this)"
+                            title="${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewAddFromExceptionsAction', {}, 'Add shortage line here'))}"
+                            class="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-300 bg-white/95 text-base font-semibold text-sky-700 shadow-sm transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-400/70 dark:border-sky-700 dark:bg-slate-900/95 dark:text-sky-200"
+                        >
+                            <i class="ri-add-line"></i>
+                        </button>
+                    </div>
+                `
+                : '';
+            html += `<div class="group relative flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 ${isDraftMode ? 'transition-colors hover:bg-sky-50/40 dark:hover:bg-sky-950/10' : ''}" style="width:${slotWidth}px" ${emptyDropAttributes}>${insertButtonHtml}</div>`;
+            return;
+        }
+
+        const assignmentStartMinutes = assignmentForSlot.startTime
+            ? timeToMinutes(assignmentForSlot.startTime)
+            : timeToMinutes(PLANNER_CONFIG.workStartTime);
+        const isAssignmentHead = slotMinutes === assignmentStartMinutes;
+        const assignmentEnd = getPlannerPreviewAssignmentEndMinutes(assignmentForSlot);
+        const endTimeLabel = minutesToTime(assignmentEnd);
+        const fillColor = assignmentForSlot.previewSource === 'priority'
+            ? `${assignmentForSlot.color}2B`
+            : `${assignmentForSlot.color}16`;
+        const estimatedTime = assignmentForSlot.estimatedTime || {};
+        const secondsPerPiece = Number.isFinite(Number(estimatedTime.secondsPerPiece))
+            ? Number(estimatedTime.secondsPerPiece)
+            : Number(estimatedTime.cycleTimeSeconds);
+        const timingDetailParts = [];
+
+        if (Number.isFinite(secondsPerPiece) && Number(assignmentForSlot.quantity || 0) > 0) {
+            timingDetailParts.push(
+                plannerTranslate(
+                    'plannerPreviewTimingPieces',
+                    {
+                        quantity: formatPlannerPreviewNumber(assignmentForSlot.quantity || 0),
+                        seconds: formatPlannerPreviewNumber(secondsPerPiece)
+                    },
+                    `${formatPlannerPreviewNumber(assignmentForSlot.quantity || 0)} pcs x ${formatPlannerPreviewNumber(secondsPerPiece)}s/pc`
+                )
+            );
+        }
+
+        if (
+            Number.isFinite(Number(estimatedTime.cyclesNeeded))
+            && Number.isFinite(Number(estimatedTime.pcPerCycle))
+            && Number(estimatedTime.pcPerCycle) > 0
+        ) {
+            timingDetailParts.push(
+                plannerTranslate(
+                    'plannerPreviewTimingCycles',
+                    {
+                        cycles: formatPlannerPreviewNumber(estimatedTime.cyclesNeeded),
+                        pcPerCycle: formatPlannerPreviewNumber(estimatedTime.pcPerCycle)
+                    },
+                    `${formatPlannerPreviewNumber(estimatedTime.cyclesNeeded)} cycles @ ${formatPlannerPreviewNumber(estimatedTime.pcPerCycle)} pcs/cycle`
+                )
+            );
+        }
+
+        const timingDetail = timingDetailParts.join(' | ');
+        const draftId = getPlannerPreviewDraftAssignmentId(assignmentForSlot);
+        const escapedDraftId = escapePlannerPreviewHtml(draftId);
+        const requestNumberColorClass = getPlannerPreviewRequestColorClass(assignmentForSlot, requestColorMap);
+        const tileRequestLabel = getPlannerPreviewTileRequestLabel(assignmentForSlot)
+            || plannerTranslate('plannerPreviewInsertLabel', {}, 'Preview insert');
+        const quantityEditAttributes = isDraftMode && isAssignmentHead && draftId
+            ? `
+                type="button"
+                data-preview-draft-id="${escapedDraftId}"
+                onclick="handlePlannerPreviewDraftQuantityButtonClick(event, this)"
+                title="${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewEditQuantityAction', {}, 'Edit draft quantity'))}"
+            `
+            : '';
+        const headMarkerHtml = isAssignmentHead
+            ? `
+                ${quantityEditAttributes ? `<button class="absolute inset-y-0 left-0 z-10 w-4 rounded-l-md bg-transparent focus:outline-none focus:ring-2 focus:ring-sky-400/70" ${quantityEditAttributes}></button>` : ''}
+                <div class="absolute inset-y-0 left-0 w-1.5 bg-slate-900/80 dark:bg-slate-100/90"></div>
+                <div class="absolute left-1 top-1 h-2 w-2 rounded-full bg-white ring-1 ring-slate-900/70 dark:bg-slate-100 dark:ring-slate-200/80"></div>
+            `
+            : '';
+        const headTileClasses = isAssignmentHead
+            ? 'border-l-4 border-slate-900 dark:border-slate-100 ring-1 ring-inset ring-slate-300/80 dark:ring-slate-500/80'
+            : '';
+        const headTextClasses = isAssignmentHead ? 'font-bold' : 'font-semibold opacity-85';
+        const dropAttributes = isDraftMode
+            ? `
+                data-preview-draft-slot="true"
+                ondragover="handlePlannerPreviewDraftDragOver(event)"
+                ondragleave="handlePlannerPreviewDraftDragLeave(event)"
+                ondrop='handlePlannerPreviewDraftDrop(event, ${JSON.stringify(equipment)}, ${JSON.stringify(slot)})'
+            `
+            : '';
+        const dragAttributes = isDraftMode && isAssignmentHead && draftId
+            ? `
+                draggable="true"
+                data-preview-draft-id="${escapedDraftId}"
+                ondragstart="handlePlannerPreviewDraftDragStartFromElement(event, this)"
+                ondragend="handlePlannerPreviewDraftDragEnd(event)"
+            `
+            : '';
+        const requestTitle = assignmentForSlot.requestNumber
+            ? Array.isArray(assignmentForSlot.groupedRequestNumbers) && assignmentForSlot.groupedRequestNumbers.length > 1
+                ? plannerTranslate(
+                    'plannerPreviewTitleRequests',
+                    { requests: assignmentForSlot.groupedRequestNumbers.join(', ') },
+                    `Requests ${assignmentForSlot.groupedRequestNumbers.join(', ')}`
+                )
+                : plannerTranslate(
+                    'plannerPreviewTitleRequest',
+                    { request: assignmentForSlot.requestNumber },
+                    `Request ${assignmentForSlot.requestNumber}`
+                )
+            : plannerTranslate('plannerPreviewTitleRow', {}, 'Preview row');
+        const titleText = [
+            requestTitle,
+            assignmentForSlot.背番号 || assignmentForSlot.品番 || '-',
+            plannerTranslate(
+                'plannerPreviewTitleQuantity',
+                { quantity: formatPlannerPreviewNumber(assignmentForSlot.quantity || 0) },
+                `${formatPlannerPreviewNumber(assignmentForSlot.quantity || 0)} pcs`
+            ),
+            assignmentForSlot.estimatedTime?.formattedTime || '',
+            timingDetail,
+            `${assignmentForSlot.startTime || slot} - ${endTimeLabel}`
+        ].filter(Boolean).join(' | ');
+
+        html += `
+            <div class="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 relative ${isDraftMode ? 'transition-colors' : ''} ${headTileClasses} ${isDraftMode && isAssignmentHead ? 'cursor-grab ring-sky-300 dark:ring-sky-700' : ''}" style="width:${slotWidth}px; background-color:${fillColor}" title="${escapePlannerPreviewHtml(titleText)}" ${dropAttributes} ${dragAttributes}>
+                ${headMarkerHtml}
+                <div class="absolute inset-0 flex flex-col justify-center px-1.5 overflow-hidden">
+                    <span class="text-[10px] truncate ${headTextClasses}" style="color:${assignmentForSlot.color}">${escapePlannerPreviewHtml(assignmentForSlot.背番号 || assignmentForSlot.品番 || '-')}</span>
+                    <span class="text-[9px] truncate ${headTextClasses} ${requestNumberColorClass}">${escapePlannerPreviewHtml(tileRequestLabel)}</span>
+                </div>
+            </div>
+        `;
+    });
+
+    return html;
+}
+
+function renderPlannerPreviewTimeline(preview = {}, requestColorMap = {}) {
+    const simulation = getPlannerPreviewRenderSimulation(preview);
+    const equipmentList = Array.isArray(simulation.equipmentList) ? simulation.equipmentList : [];
+    const isDraftTimelineEditing = plannerState.preview.viewMode === 'draft' && plannerState.preview.isDraftMode === true;
+    const machineLabel = plannerTranslate('plannerPreviewMachineColumn', {}, 'Machine');
+    const machineColumnWidth = Math.max(
+        112,
+        ((Math.max(
+            machineLabel.length,
+            ...equipmentList.map((equipment) => String(equipment || '').trim().length)
+        ) * 8) + 28)
+    );
+
+    if (equipmentList.length === 0) {
+        const emptyMessage = simulation.timeLimitExceptionCount > 0
+            ? plannerTranslate(
+                'plannerPreviewNoRowsBeforeTime',
+                { time: simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime() },
+                `No preview rows fit before ${simulation.scheduleUntilTime || getPlannerPreviewScheduleUntilTime()}.`
+            )
+            : plannerTranslate('plannerPreviewNoAssignmentsYet', {}, 'No machine assignments are available for preview yet.');
+        return `
+            <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                ${escapePlannerPreviewHtml(emptyMessage)}
+            </div>
+        `;
+    }
+
+    const timeSlots = getPlannerPreviewTimeSlots(simulation.assignments || []);
+    const slotWidth = 60;
+    let headerHtml = `<div class="flex-shrink-0 whitespace-nowrap bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">${escapePlannerPreviewHtml(machineLabel)}</div>`;
+
+    timeSlots.forEach((slot) => {
+        headerHtml += `
+            <div class="flex-shrink-0 border-r dark:border-gray-600 text-center text-xs text-gray-500 dark:text-gray-400" style="width:${slotWidth}px">${slot}</div>
+        `;
+    });
+
+    const rowsHtml = equipmentList.map((equipment) => {
+        const assignedProducts = (simulation.assignments || [])
+            .filter((assignment) => assignment.equipment === equipment)
+            .sort((left, right) => timeToMinutes(left.startTime || PLANNER_CONFIG.workStartTime) - timeToMinutes(right.startTime || PLANNER_CONFIG.workStartTime));
+        return `
+            <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-preview-equipment="${escapePlannerPreviewHtml(equipment)}">
+                <div class="flex-shrink-0 whitespace-nowrap bg-gray-50 dark:bg-gray-700/40 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">
+                    ${escapePlannerPreviewHtml(equipment)}
+                </div>
+                <div class="flex-1 flex relative">
+                    ${renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth, { isDraftMode: isDraftTimelineEditing, requestColorMap })}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="border rounded-xl dark:border-gray-700 overflow-hidden">
+            <div class="overflow-auto max-h-[560px]">
+                <div class="min-w-max">
+                    <div class="flex border-b dark:border-gray-600 bg-gray-50 dark:bg-gray-700 sticky top-0 z-20">
+                        ${headerHtml}
+                    </div>
+                    <div class="bg-white dark:bg-gray-800">
+                        ${rowsHtml}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderPlannerPublishedTimeline(version = {}, requestColorMap = {}) {
+    const assignments = normalizePlannerPreviewDraftAssignments(version?.assignments || []);
+    const equipmentList = Array.from(new Set(
+        assignments
+            .map((assignment) => String(assignment.equipment || '').trim())
+            .filter(Boolean)
+    )).sort((left, right) => left.localeCompare(right));
+    const machineLabel = plannerTranslate('plannerPreviewMachineColumn', {}, 'Machine');
+    const machineColumnWidth = Math.max(
+        112,
+        ((Math.max(
+            machineLabel.length,
+            ...equipmentList.map((equipment) => String(equipment || '').trim().length)
+        ) * 8) + 28)
+    );
+
+    if (equipmentList.length === 0) {
+        return `
+            <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                ${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedNoAssignmentsYet', {}, 'No published machine assignments are available for this date yet.'))}
+            </div>
+        `;
+    }
+
+    const timeSlots = getPlannerPreviewTimeSlots(assignments, version?.scheduleUntilTime || PLANNER_CONFIG.workEndTime);
+    const slotWidth = 60;
+    let headerHtml = `<div class="flex-shrink-0 whitespace-nowrap bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">${escapePlannerPreviewHtml(machineLabel)}</div>`;
+
+    timeSlots.forEach((slot) => {
+        headerHtml += `
+            <div class="flex-shrink-0 border-r dark:border-gray-600 text-center text-xs text-gray-500 dark:text-gray-400" style="width:${slotWidth}px">${slot}</div>
+        `;
+    });
+
+    const rowsHtml = equipmentList.map((equipment) => {
+        const assignedProducts = assignments
+            .filter((assignment) => assignment.equipment === equipment)
+            .sort((left, right) => timeToMinutes(left.startTime || PLANNER_CONFIG.workStartTime) - timeToMinutes(right.startTime || PLANNER_CONFIG.workStartTime));
+        return `
+            <div class="flex border-b dark:border-gray-600 min-h-[60px]" data-published-equipment="${escapePlannerPreviewHtml(equipment)}">
+                <div class="flex-shrink-0 whitespace-nowrap bg-gray-50 dark:bg-gray-700/40 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" style="width:${machineColumnWidth}px; min-width:${machineColumnWidth}px">
+                    ${escapePlannerPreviewHtml(equipment)}
+                </div>
+                <div class="flex-1 flex relative">
+                    ${renderPlannerPreviewTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth, { requestColorMap })}
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="border rounded-xl dark:border-gray-700 overflow-hidden">
+            <div class="overflow-auto max-h-[560px]">
+                <div class="min-w-max">
+                    <div class="flex border-b dark:border-gray-600 bg-gray-50 dark:bg-gray-700 sticky top-0 z-20">
+                        ${headerHtml}
+                    </div>
+                    <div class="bg-white dark:bg-gray-800">
+                        ${rowsHtml}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderPlannerPublished() {
+    const container = document.getElementById('plannerPublishedContainer');
+    if (!container) {
+        return;
+    }
+
+    if (!plannerState.currentFactory) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedSelectFactoryTitle', {}, 'Select a factory to view the published schedule'))}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedSelectFactoryDescription', {}, 'Published schedules are frozen, read-only releases for the factory floor.'))}</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (plannerState.published.isLoading && !plannerState.published.data) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                <div class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-500 dark:border-emerald-950 dark:border-t-emerald-400"></div>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedLoadingTitle', {}, 'Loading published schedule'))}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedLoadingDescription', {}, 'Fetching the latest released schedule and version history for this factory.'))}</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (plannerState.published.error && !plannerState.published.data) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/20 p-6 text-rose-700 dark:text-rose-200">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p class="text-lg font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedLoadFailedTitle', {}, 'Published schedule failed to load'))}</p>
+                        <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerState.published.error)}</p>
+                    </div>
+                    <button onclick="refreshPlannerPublished(true)" class="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/60">
+                        <i class="ri-refresh-line"></i>
+                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedRetry', {}, 'Retry'))}</span>
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    const published = plannerState.published.data;
+    if (!published) {
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedReadyTitle', {}, 'Published schedule will appear here'))}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedReadyDescription', {}, 'Open Preview and publish a frozen schedule when the plan is ready for the factory floor.'))}</p>
+            </div>
+        `;
+        return;
+    }
+
+    const activeVersion = published.activeVersion || null;
+    const versions = Array.isArray(published.versions) ? published.versions : [];
+    const viewedVersion = getPlannerPublishedViewedVersion(published);
+    const canManagePublishedSchedules = canPlannerManagePublishedSchedules();
+    const isVersionEditMode = canManagePublishedSchedules && plannerState.published.isVersionEditMode === true;
+
+    if (!activeVersion || !viewedVersion) {
+        container.innerHTML = `
+            <div class="space-y-6">
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                    <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                    <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedEmptyTitle', {}, 'No published schedule exists yet'))}</p>
+                    <p class="mt-2 text-sm">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedEmptyDescription', {}, 'Publish from Preview to freeze the first factory schedule for this date.'))}</p>
+                    <button onclick="switchPlannerMainTab('preview')" class="mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
+                        <i class="ri-radar-line"></i>
+                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedOpenPreviewAction', {}, 'Open Preview'))}</span>
+                    </button>
+                </div>
+                ${versions.length > 0 ? `
+                    <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryTitle', {}, 'Version History'))}</h3>
+                        <div class="mt-4 space-y-3">
+                            ${versions.map((version) => `
+                                <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedVersionBadge', { version: formatPlannerPreviewNumber(version.version || 1) }, `Version ${formatPlannerPreviewNumber(version.version || 1)}`))}</span>
+                                        <span class="text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(formatPlannerPreviewTimestamp(version.publishedAt || version.createdAt))}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        return;
+    }
+
+    const isViewingHistoricalVersion = String(viewedVersion.id || '') !== String(activeVersion.id || '');
+    const assignments = normalizePlannerPreviewDraftAssignments(viewedVersion.assignments || []);
+    const requestColorMap = buildPlannerPreviewRequestColorMap({
+        simulation: { assignments },
+        priorityRows: [],
+        savedDraft: { assignments: [] },
+    });
+    const equipmentCount = Array.from(new Set(assignments.map((assignment) => String(assignment.equipment || '').trim()).filter(Boolean))).length;
+    const statusText = plannerTranslate(
+        'plannerPublishedStatus',
+        {
+            timestamp: formatPlannerPreviewTimestamp(viewedVersion.publishedAt || viewedVersion.createdAt),
+            user: viewedVersion.publishedBy || viewedVersion.createdBy || 'system'
+        },
+        `Published ${formatPlannerPreviewTimestamp(viewedVersion.publishedAt || viewedVersion.createdAt)} by ${viewedVersion.publishedBy || viewedVersion.createdBy || 'system'}`
+    );
+    const versionBadgeText = plannerTranslate(
+        'plannerPublishedVersionBadge',
+        { version: formatPlannerPreviewNumber(viewedVersion.version || 1) },
+        `Version ${formatPlannerPreviewNumber(viewedVersion.version || 1)}`
+    );
+    const viewedSourceLabel = getPlannerPublishedDisplaySourceLabel(viewedVersion);
+    const scheduleUntilText = plannerTranslate(
+        'plannerPublishedScheduleUntil',
+        { time: viewedVersion.scheduleUntilTime || PLANNER_CONFIG.workEndTime },
+        `Frozen through ${viewedVersion.scheduleUntilTime || PLANNER_CONFIG.workEndTime}`
+    );
+    const versionSummaryLabel = plannerTranslate(
+        isViewingHistoricalVersion ? 'plannerPublishedViewingVersionLabel' : 'plannerPublishedVersionLabel',
+        {},
+        isViewingHistoricalVersion ? 'Viewing Version' : 'Active Version'
+    );
+    const historicalViewNotice = isViewingHistoricalVersion
+        ? plannerTranslate(
+            'plannerPublishedHistoricalViewNotice',
+            {
+                version: formatPlannerPreviewNumber(viewedVersion.version || 1),
+                activeVersion: formatPlannerPreviewNumber(activeVersion.version || 1)
+            },
+            `Viewing Version ${formatPlannerPreviewNumber(viewedVersion.version || 1)}. Active version is ${formatPlannerPreviewNumber(activeVersion.version || 1)}.`
+        )
+        : '';
+    const lastRefreshWarning = plannerState.published.error
+        ? plannerTranslate(
+            'plannerPublishedLastRefreshWarning',
+            { message: plannerState.published.error },
+            `Last refresh warning: ${plannerState.published.error}`
+        )
+        : '';
+
+    container.innerHTML = `
+        <div class="space-y-6">
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <div class="flex flex-wrap gap-2 mb-3 text-xs font-medium uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                            <span class="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedBadge', {}, 'Published Schedule'))}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(viewedVersion.factory || plannerState.currentFactory)}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPlanDate', { date: viewedVersion.date || plannerState.currentDate }, `Plan date ${viewedVersion.date || plannerState.currentDate}`))}</span>
+                            <span class="rounded-full px-3 py-1 ${isViewingHistoricalVersion ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200' : 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'}">${escapePlannerPreviewHtml(versionBadgeText)}</span>
+                        </div>
+                        <h3 class="text-2xl font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedMainTitle', {}, 'Released schedule for the factory floor'))}</h3>
+                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedMainDescription', {}, 'This tab shows the latest frozen version that operators should follow. Preview can continue changing without affecting this released schedule.'))}</p>
+                    </div>
+                    <div class="flex flex-col items-stretch gap-3 lg:items-end">
+                        <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
+                            <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
+                            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(viewedVersion.sourceMode))} · ${escapePlannerPreviewHtml(getPlannerPublishedSourceTypeLabel(viewedVersion.sourceType))}</div>
+                            ${viewedSourceLabel ? `<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(viewedSourceLabel)}</div>` : ''}
+                        </div>
+                        <div class="flex flex-wrap gap-2 justify-end">
+                            ${isViewingHistoricalVersion ? `
+                                <button onclick="viewPlannerPublishedActiveVersion()" class="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/40 transition-colors">
+                                    <i class="ri-arrow-go-back-line"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedBackToActiveAction', {}, 'Back to Active Version'))}</span>
+                                </button>
+                            ` : ''}
+                            <button onclick="switchPlannerMainTab('preview')" class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 transition-colors">
+                                <i class="ri-radar-line"></i>
+                                <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedOpenPreviewAction', {}, 'Open Preview'))}</span>
+                            </button>
+                            <button onclick="refreshPlannerPublished(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors">
+                                <i class="ri-refresh-line"></i>
+                                <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedRefreshAction', {}, 'Refresh Published'))}</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">${escapePlannerPreviewHtml(versionSummaryLabel)}</p>
+                        <p class="mt-2 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">${formatPlannerPreviewNumber(viewedVersion.version || 1)}</p>
+                    </div>
+                    <div class="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:border-cyan-900 dark:bg-cyan-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedAssignmentCount', {}, 'Assignments'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(viewedVersion.assignmentCount || assignments.length)}</p>
+                    </div>
+                    <div class="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900 dark:bg-violet-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedEquipmentCount', {}, 'Machines'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-violet-900 dark:text-violet-100">${formatPlannerPreviewNumber(equipmentCount)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-700 dark:text-slate-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedScheduleWindow', {}, 'Schedule Window'))}</p>
+                        <p class="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-100">${escapePlannerPreviewHtml(scheduleUntilText)}</p>
+                    </div>
+                </div>
+                ${historicalViewNotice ? `
+                    <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                        ${escapePlannerPreviewHtml(historicalViewNotice)}
+                    </div>
+                ` : ''}
+                ${viewedVersion.note ? `
+                    <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                        <div class="font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedNoteLabel', {}, 'Publish note'))}</div>
+                        <div class="mt-1">${escapePlannerPreviewHtml(viewedVersion.note)}</div>
+                    </div>
+                ` : ''}
+            </div>
+
+            <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedCalendarTitle', {}, 'Published Calendar'))}</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedCalendarDescription', {}, 'Read-only 15-minute machine view for the currently active released version.'))}</p>
+                    </div>
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+                        <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-cyan-200 dark:bg-cyan-800"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendInserts', {}, 'Priority preview inserts'))}</span>
+                        <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-300 dark:bg-slate-600"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendBreak', {}, 'Break time'))}</span>
+                    </div>
+                    <div class="p-5">
+                        ${renderPlannerPublishedTimeline(viewedVersion, requestColorMap)}
+                    </div>
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryTitle', {}, 'Version History'))}</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedHistoryDescription', {}, 'Each publish creates a new version. The active version is what the factory should follow now.'))}</p>
+                        ${canManagePublishedSchedules ? `
+                            <div class="mt-4">
+                                <button onclick="togglePlannerPublishedVersionEditMode()" class="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${isVersionEditMode ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white' : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
+                                    <i class="${isVersionEditMode ? 'ri-check-line' : 'ri-pencil-line'}"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate(isVersionEditMode ? 'plannerPublishedDoneEditingVersionsAction' : 'plannerPublishedEditVersionAction', {}, isVersionEditMode ? 'Done Editing' : 'Edit Version'))}</span>
+                                </button>
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="max-h-[640px] overflow-auto p-5 space-y-3">
+                        ${versions.map((version) => `
+                            <div onclick='viewPlannerPublishedVersion(${JSON.stringify(String(version.id || ''))})' class="rounded-xl border px-4 py-3 cursor-pointer transition-colors ${version.id === viewedVersion.id ? (version.id === activeVersion.id ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/20' : 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/20') : (version.id === activeVersion.id ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/10 hover:bg-emerald-50 dark:hover:bg-emerald-950/20' : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/30 hover:bg-gray-100 dark:hover:bg-gray-900/50')}">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <span class="text-sm font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedVersionBadge', { version: formatPlannerPreviewNumber(version.version || 1) }, `Version ${formatPlannerPreviewNumber(version.version || 1)}`))}</span>
+                                            ${version.id === activeVersion.id ? `<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedActivePill', {}, 'Active'))}</span>` : ''}
+                                            ${version.id === viewedVersion.id ? `<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedViewingPill', {}, 'Viewing'))}</span>` : ''}
+                                        </div>
+                                        <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(formatPlannerPreviewTimestamp(version.publishedAt || version.createdAt))}</div>
+                                    </div>
+                                    <div class="text-right text-xs text-gray-500 dark:text-gray-400">
+                                        <div>${escapePlannerPreviewHtml(version.publishedBy || version.createdBy || 'system')}</div>
+                                        <div class="mt-1">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(version.sourceMode))}</div>
+                                        ${getPlannerPublishedDisplaySourceLabel(version) ? `<div class="mt-1">${escapePlannerPreviewHtml(getPlannerPublishedDisplaySourceLabel(version))}</div>` : ''}
+                                    </div>
+                                </div>
+                                <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-600 dark:text-gray-300">
+                                    <span class="rounded-full bg-white/80 px-2 py-1 dark:bg-gray-800/80">${escapePlannerPreviewHtml(getPlannerPublishedSourceTypeLabel(version.sourceType))}</span>
+                                    <span class="rounded-full bg-white/80 px-2 py-1 dark:bg-gray-800/80">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedAssignmentsPill', { count: formatPlannerPreviewNumber(version.assignmentCount || 0) }, `${formatPlannerPreviewNumber(version.assignmentCount || 0)} assignments`))}</span>
+                                    <span class="rounded-full bg-white/80 px-2 py-1 dark:bg-gray-800/80">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedViewVersionHint', {}, 'Click to view this calendar'))}</span>
+                                </div>
+                                ${isVersionEditMode && version.id !== activeVersion.id ? `
+                                    <div class="mt-4 flex justify-end">
+                                        <button onclick="event.stopPropagation(); restorePlannerPublishedVersion(${Number(version.version || 0)})" class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/40">
+                                            <i class="ri-history-line"></i>
+                                            <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedRestoreAction', {}, 'Restore as New Version'))}</span>
+                                        </button>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+
+            ${plannerState.published.error ? `
+                <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    ${escapePlannerPreviewHtml(lastRefreshWarning)}
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+window.togglePlannerPublishedVersionEditMode = function() {
+    if (!canPlannerManagePublishedSchedules()) {
+        return;
+    }
+
+    plannerState.published.isVersionEditMode = !plannerState.published.isVersionEditMode;
+    renderPlannerPublished();
+};
+
+window.viewPlannerPublishedVersion = function(versionId) {
+    const published = plannerState.published.data || null;
+    const resolvedVersionId = resolvePlannerPublishedViewedVersionId(published, versionId);
+    if (!resolvedVersionId) {
+        return;
+    }
+
+    plannerState.published.viewedVersionId = resolvedVersionId;
+    renderPlannerPublished();
+};
+
+window.viewPlannerPublishedActiveVersion = function() {
+    const activeVersionId = resolvePlannerPublishedViewedVersionId(plannerState.published.data, plannerState.published.data?.activeVersion?.id || '');
+    plannerState.published.viewedVersionId = activeVersionId;
+    renderPlannerPublished();
+};
+
+function renderPlannerPreview() {
+    const container = document.getElementById('plannerPreviewContainer');
+    if (!container) {
+        return;
+    }
+
+    if (!plannerState.currentFactory) {
+        const emptyTitle = plannerTranslate('plannerPreviewSelectFactoryTitle', {}, 'Select a factory to build the preview queue');
+        const emptyDescription = plannerTranslate(
+            'plannerPreviewSelectFactoryDescription',
+            {},
+            'The left table shows unfinished shortage line-items, the right table shows current inventory, and the bottom calendar shows the planned-only preview.'
+        );
+        container.innerHTML = `
+            <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-layout-grid-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(emptyTitle)}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(emptyDescription)}</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (plannerState.preview.isLoading && !plannerState.preview.data) {
+        const loadingTitle = plannerTranslate('plannerPreviewLoadingTitle', {}, 'Building priority preview');
+        const loadingDescription = plannerTranslate(
+            'plannerPreviewLoadingDescription',
+            {},
+            'Collecting unfinished shortage lines, current inventory, and machine assignments.'
+        );
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8">
+                <div class="flex items-center gap-4 text-gray-700 dark:text-gray-200">
+                    <div class="h-10 w-10 rounded-full border-4 border-sky-200 border-t-sky-600 animate-spin"></div>
+                    <div>
+                        <p class="text-lg font-semibold">${escapePlannerPreviewHtml(loadingTitle)}</p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(loadingDescription)}</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    if (!plannerState.preview.data && plannerState.preview.error) {
+        const errorTitle = plannerTranslate('plannerPreviewLoadFailedTitle', {}, 'Preview failed to load');
+        const retryLabel = plannerTranslate('plannerPreviewRetry', {}, 'Retry');
+        container.innerHTML = `
+            <div class="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
+                <i class="ri-error-warning-line text-5xl text-rose-500 mb-3 block"></i>
+                <p class="text-lg font-semibold text-rose-800">${escapePlannerPreviewHtml(errorTitle)}</p>
+                <p class="mt-2 text-sm text-rose-700">${escapePlannerPreviewHtml(plannerState.preview.error)}</p>
+                <button onclick="refreshPlannerPreview(true)" class="mt-5 inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 transition-colors">
+                    <i class="ri-refresh-line"></i>
+                    <span>${escapePlannerPreviewHtml(retryLabel)}</span>
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+    if (!preview) {
+        const readyTitle = plannerTranslate('plannerPreviewReadyTitle', {}, 'Preview is ready when you are');
+        const readyDescription = plannerTranslate(
+            'plannerPreviewReadyDescription',
+            {},
+            'Refresh to rebuild the priority table, inventory table, and preview calendar.'
+        );
+        container.innerHTML = `
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-8 text-center text-gray-500 dark:text-gray-400">
+                <i class="ri-layout-grid-line text-5xl mb-3 block"></i>
+                <p class="text-lg font-medium text-gray-800 dark:text-gray-100">${escapePlannerPreviewHtml(readyTitle)}</p>
+                <p class="mt-2 text-sm">${escapePlannerPreviewHtml(readyDescription)}</p>
+            </div>
+        `;
+        return;
+    }
+
+    plannerState.preview.data = preview;
+
+    const simulation = getPlannerPreviewRenderSimulation(preview);
+    const summary = {
+        ...(preview.summary || {}),
+        previewInsertCount: Number.isFinite(Number(simulation.previewInsertCount)) ? Number(simulation.previewInsertCount) : Number(preview.summary?.previewInsertCount || 0),
+        scheduledShortfallQuantity: Number.isFinite(Number(simulation.scheduledShortfallQuantity)) ? Number(simulation.scheduledShortfallQuantity) : Number(preview.summary?.scheduledShortfallQuantity || 0),
+        unscheduledShortfallQuantity: Number.isFinite(Number(simulation.unscheduledShortfallQuantity)) ? Number(simulation.unscheduledShortfallQuantity) : Number(preview.summary?.unscheduledShortfallQuantity || 0),
+        previewExceptionCount: Array.isArray(simulation.exceptions) ? simulation.exceptions.length : Number(preview.summary?.previewExceptionCount || 0),
+        timeLimitExceptionCount: Number.isFinite(Number(simulation.timeLimitExceptionCount)) ? Number(simulation.timeLimitExceptionCount) : Number(preview.summary?.timeLimitExceptionCount || 0),
+        timeLimitMissedQuantity: Number.isFinite(Number(simulation.timeLimitMissedQuantity)) ? Number(simulation.timeLimitMissedQuantity) : Number(preview.summary?.timeLimitMissedQuantity || 0),
+        otherExceptionCount: Number.isFinite(Number(simulation.otherExceptionCount)) ? Number(simulation.otherExceptionCount) : Number(preview.summary?.otherExceptionCount || 0),
+        scheduleUntilTime: simulation.scheduleUntilTime || preview.summary?.scheduleUntilTime || getPlannerPreviewScheduleUntilTime(),
+    };
+    const priorityRows = Array.isArray(preview.priorityRows) ? preview.priorityRows : [];
+    const inventoryRows = Array.isArray(preview.inventoryRows) ? preview.inventoryRows : [];
+    const scheduleUntilTime = getPlannerPreviewScheduleUntilTime();
+    const hasPreviewDraft = hasPlannerPreviewDraft();
+    const hasSavedPreviewDraft = hasPlannerPreviewSavedDraft(preview);
+    const savedPreviewDraft = hasSavedPreviewDraft ? preview.savedDraft : null;
+    const hasAnyPreviewDraft = hasPreviewDraft || hasSavedPreviewDraft;
+    const isViewingDraft = plannerState.preview.viewMode === 'draft' && hasAnyPreviewDraft;
+    const isPreviewDraftEditing = isViewingDraft && hasPreviewDraft && plannerState.preview.isDraftMode === true;
+    const savedDraftBasisComparison = savedPreviewDraft?.basisComparison || null;
+    const hasTrackedSavedDraftBasis = savedDraftBasisComparison?.tracked === true;
+    const isSavedDraftStale = hasTrackedSavedDraftBasis && savedDraftBasisComparison?.isStale === true;
+    const isSavedDraftBasisUntracked = hasSavedPreviewDraft && savedDraftBasisComparison?.tracked === false;
+    const savedDraftDifferenceParts = hasTrackedSavedDraftBasis
+        ? [
+            savedDraftBasisComparison.missingCount > 0
+                ? plannerTranslate(
+                    'plannerPreviewSavedDraftMissingCount',
+                    { count: formatPlannerPreviewNumber(savedDraftBasisComparison.missingCount) },
+                    `${formatPlannerPreviewNumber(savedDraftBasisComparison.missingCount)} missing`
+                )
+                : '',
+            savedDraftBasisComparison.newCount > 0
+                ? plannerTranslate(
+                    'plannerPreviewSavedDraftNewCount',
+                    { count: formatPlannerPreviewNumber(savedDraftBasisComparison.newCount) },
+                    `${formatPlannerPreviewNumber(savedDraftBasisComparison.newCount)} new`
+                )
+                : '',
+            savedDraftBasisComparison.changedQuantityCount > 0
+                ? plannerTranslate(
+                    'plannerPreviewSavedDraftChangedCount',
+                    { count: formatPlannerPreviewNumber(savedDraftBasisComparison.changedQuantityCount) },
+                    `${formatPlannerPreviewNumber(savedDraftBasisComparison.changedQuantityCount)} quantity changed`
+                )
+                : '',
+        ].filter(Boolean)
+        : [];
+    const savedDraftDifferenceSummary = savedDraftDifferenceParts.join(' | ');
+    const savedDraftDifferenceExamples = hasTrackedSavedDraftBasis && isSavedDraftStale
+        ? [
+            ...(savedDraftBasisComparison.sampleMissingRows || []).slice(0, 2).map((row) => (
+                plannerTranslate(
+                    'plannerPreviewDifferenceMissingExample',
+                    { label: formatPlannerPreviewDraftBasisRowLabel(row) },
+                    `Missing: ${formatPlannerPreviewDraftBasisRowLabel(row)}`
+                )
+            )),
+            ...(savedDraftBasisComparison.sampleNewRows || []).slice(0, 2).map((row) => (
+                plannerTranslate(
+                    'plannerPreviewDifferenceNewExample',
+                    { label: formatPlannerPreviewDraftBasisRowLabel(row) },
+                    `New: ${formatPlannerPreviewDraftBasisRowLabel(row)}`
+                )
+            )),
+            ...(savedDraftBasisComparison.sampleChangedRows || []).slice(0, 2).map((row) => (
+                plannerTranslate(
+                    'plannerPreviewDifferenceQtyExample',
+                    {
+                        label: formatPlannerPreviewDraftBasisRowLabel(row),
+                        from: formatPlannerPreviewNumber(row.savedShortfallQuantity || 0),
+                        to: formatPlannerPreviewNumber(row.currentShortfallQuantity || 0)
+                    },
+                    `Qty: ${formatPlannerPreviewDraftBasisRowLabel(row)} ${formatPlannerPreviewNumber(row.savedShortfallQuantity || 0)} -> ${formatPlannerPreviewNumber(row.currentShortfallQuantity || 0)}`
+                )
+            )),
+        ].slice(0, 3)
+        : [];
+    const requestColorMap = buildPlannerPreviewRequestColorMap(preview);
+    const timeLimitExceptions = (simulation.exceptions || []).filter((exception) => exception.reason === 'time-limit');
+    const otherExceptions = (simulation.exceptions || []).filter((exception) => exception.reason !== 'time-limit');
+    const statusText = plannerState.preview.isLoading
+        ? plannerTranslate('plannerPreviewStatusRefreshing', {}, 'Refreshing live data...')
+        : plannerState.preview.isDirty
+            ? plannerTranslate('plannerPreviewStatusDirty', {}, 'Planner draft changed. Refresh pending.')
+            : plannerTranslate(
+                'plannerPreviewStatusLastRefresh',
+                { timestamp: formatPlannerPreviewTimestamp(preview.generatedAt) },
+                `Last refresh ${formatPlannerPreviewTimestamp(preview.generatedAt)}`
+            );
+    const savedDraftStatusText = savedPreviewDraft
+        ? plannerTranslate(
+            'plannerPreviewSavedDraftStatus',
+            {
+                timestamp: formatPlannerPreviewTimestamp(savedPreviewDraft.updatedAt || savedPreviewDraft.createdAt),
+                user: savedPreviewDraft.updatedBy || savedPreviewDraft.createdBy || 'system'
+            },
+            `Saved draft ${formatPlannerPreviewTimestamp(savedPreviewDraft.updatedAt || savedPreviewDraft.createdAt)} by ${savedPreviewDraft.updatedBy || savedPreviewDraft.createdBy || 'system'}`
+        )
+        : '';
+    const previewCalendarDescription = isPreviewDraftEditing
+        ? plannerTranslate(
+            'plannerPreviewCalendarDescriptionEditing',
+            {},
+            'Draft editing is on. Drag the first tile of a block to move it, or drop it onto another block to swap and auto-arrange timing when both machines are eligible.'
+        )
+        : isViewingDraft
+            ? hasPreviewDraft
+                ? plannerTranslate(
+                    'plannerPreviewCalendarDescriptionLocalDraft',
+                    {},
+                    'Showing the Draft calendar with local changes. Save it to keep this edited order, or switch back to Auto to compare.'
+                )
+                : plannerTranslate(
+                    'plannerPreviewCalendarDescriptionSavedDraft',
+                    {},
+                    'Showing the saved Draft calendar. Switch back to Auto any time without overwriting the generated preview.'
+                )
+            : hasSavedPreviewDraft
+                ? plannerTranslate(
+                    'plannerPreviewCalendarDescriptionAutoWithSavedDraft',
+                    {},
+                    'Showing the auto-generated calendar. Switch to Draft to compare it with the saved edited version.'
+                )
+                : plannerTranslate(
+                    'plannerPreviewCalendarDescriptionAutoReadOnly',
+                    {},
+                    'Read-only 15-minute machine view. Create a Preview Draft to drag block heads and make local adjustments.'
+                );
+    const previewQueueLabel = plannerTranslate('plannerPreviewQueue', {}, 'Preview Queue');
+    const planDateLabel = plannerTranslate(
+        'plannerPreviewPlanDate',
+        { date: preview.targetDate || plannerState.currentDate },
+        `Plan date ${preview.targetDate || plannerState.currentDate}`
+    );
+    const mainTitle = plannerTranslate(
+        'plannerPreviewMainTitle',
+        {},
+        'Priority shortages, current inventory, and planned-only machine preview'
+    );
+    const mainDescription = plannerTranslate(
+        'plannerPreviewMainDescription',
+        {},
+        'Left is the unfinished shortage queue. Right is the current inventory snapshot. Bottom is the 15-minute machine calendar built from that queue, with separate Auto and Draft views when a saved draft exists.'
+    );
+    const shortageSummaryText = plannerTranslate(
+        'plannerPreviewShortageSummary',
+        {
+            lineCount: formatPlannerPreviewNumber(summary.priorityRowCount || 0),
+            quantity: formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)
+        },
+        `${formatPlannerPreviewNumber(summary.priorityRowCount || 0)} shortage line-items | ${formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)} pcs waiting`
+    );
+    const refreshButtonText = plannerState.preview.isLoading
+        ? plannerTranslate('plannerPreviewRefreshingAction', {}, 'Refreshing...')
+        : plannerTranslate('plannerPreviewRefreshAction', {}, 'Refresh Preview');
+    const publishButtonText = isViewingDraft
+        ? plannerTranslate('plannerPreviewPublishDraftAction', {}, 'Publish Draft')
+        : plannerTranslate('plannerPreviewPublishAutoAction', {}, 'Publish Auto');
+    const openPublishedText = plannerTranslate('plannerPreviewOpenPublishedAction', {}, 'Open Published');
+    const canManagePublishedSchedules = canPlannerManagePublishedSchedules();
+    const linesSuffix = plannerTranslate('plannerPreviewLinesSuffix', {}, 'lines');
+    const productsSuffix = plannerTranslate('plannerPreviewProductsSuffix', {}, 'products');
+    const draftToggleLabel = hasPreviewDraft
+        ? (isPreviewDraftEditing
+            ? plannerTranslate('plannerPreviewStopEditingDraft', {}, 'Stop Editing Draft')
+            : plannerTranslate('plannerPreviewEditDraft', {}, 'Edit Draft'))
+        : plannerTranslate('plannerPreviewCreateDraft', {}, 'Create Preview Draft');
+    const scheduledBeforeText = plannerTranslate(
+        'plannerPreviewScheduledBefore',
+        {
+            time: scheduleUntilTime,
+            quantity: formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)
+        },
+        `Scheduled before ${scheduleUntilTime}: ${formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)} pcs`
+    );
+    const outsideLimitText = plannerTranslate(
+        'plannerPreviewOutsideLimit',
+        { quantity: formatPlannerPreviewNumber(summary.timeLimitMissedQuantity || 0) },
+        `Outside limit ${formatPlannerPreviewNumber(summary.timeLimitMissedQuantity || 0)} pcs`
+    );
+    const staleDraftDescription = savedDraftDifferenceSummary
+        ? plannerTranslate(
+            'plannerPreviewSavedDraftStaleDescriptionWithSummary',
+            { summary: savedDraftDifferenceSummary },
+            `The latest auto preview no longer matches the draft basis: ${savedDraftDifferenceSummary}. Review View Auto before relying on the saved Draft.`
+        )
+        : plannerTranslate(
+            'plannerPreviewSavedDraftStaleDescription',
+            {},
+            'The latest auto preview no longer matches the draft basis. Review View Auto before relying on the saved Draft.'
+        );
+    const lastRefreshWarning = plannerTranslate(
+        'plannerPreviewLastRefreshWarning',
+        { message: plannerState.preview.error },
+        `Last refresh warning: ${plannerState.preview.error}`
+    );
+
+    container.innerHTML = `
+        <div class="space-y-6">
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <div class="flex flex-wrap gap-2 mb-3 text-xs font-medium uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                            <span class="rounded-full bg-sky-100 px-3 py-1 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${escapePlannerPreviewHtml(previewQueueLabel)}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(preview.factory || plannerState.currentFactory)}</span>
+                            <span class="rounded-full bg-slate-100 px-3 py-1 text-slate-700 dark:bg-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(planDateLabel)}</span>
+                        </div>
+                        <h3 class="text-2xl font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(mainTitle)}</h3>
+                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(mainDescription)}</p>
+                    </div>
+                    <div class="flex flex-col items-stretch gap-3 lg:items-end">
+                        <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-4 py-3 text-sm text-gray-700 dark:text-gray-200">
+                            <div class="font-medium">${escapePlannerPreviewHtml(statusText)}</div>
+                            <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(shortageSummaryText)}</div>
+                        </div>
+                        <div class="flex flex-wrap gap-2 justify-end">
+                            <button onclick="switchPlannerMainTab('published')" class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 transition-colors">
+                                <i class="ri-broadcast-line"></i>
+                                <span>${escapePlannerPreviewHtml(openPublishedText)}</span>
+                            </button>
+                            <button onclick="refreshPlannerPreview(true)" class="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500 transition-colors">
+                                <i class="ri-refresh-line"></i>
+                                <span>${escapePlannerPreviewHtml(refreshButtonText)}</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-5 grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityLines', {}, 'Priority Lines'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-amber-900 dark:text-amber-100">${formatPlannerPreviewNumber(summary.priorityRowCount || 0)}</p>
+                    </div>
+                    <div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 dark:border-rose-900 dark:bg-rose-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-rose-700 dark:text-rose-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewWaitingQty', {}, 'Waiting Qty'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-rose-900 dark:text-rose-100">${formatPlannerPreviewNumber(summary.totalShortfallQuantity || 0)}</p>
+                    </div>
+                    <div class="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:border-cyan-900 dark:bg-cyan-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInserts', {}, 'Preview Inserts'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-cyan-900 dark:text-cyan-100">${formatPlannerPreviewNumber(summary.previewInsertCount || 0)}</p>
+                    </div>
+                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+                        <p class="text-xs uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewScheduledQty', {}, 'Scheduled Qty'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-emerald-900 dark:text-emerald-100">${formatPlannerPreviewNumber(summary.scheduledShortfallQuantity || 0)}</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-700 dark:text-slate-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptions', {}, 'Exceptions'))}</p>
+                        <p class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">${formatPlannerPreviewNumber(summary.previewExceptionCount || 0)}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityTableTitle', {}, 'Priority Table'))}</h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityTableDescription', {}, 'Basic shortage queue for the current preview.'))}</p>
+                            </div>
+                            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">${formatPlannerPreviewNumber(priorityRows.length)} ${escapePlannerPreviewHtml(linesSuffix)}</span>
+                        </div>
+                    </div>
+                    <div class="overflow-auto max-h-[520px]">
+                        <table class="min-w-full text-sm text-left">
+                            <thead class="sticky top-0 z-10 bg-gray-50 text-gray-600 dark:bg-gray-900/40 dark:text-gray-300">
+                                <tr>
+                                    <th class="px-4 py-2 font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPriorityHeader', {}, 'Priority'))}</th>
+                                    <th class="px-4 py-2 font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewRequestNumberHeader', {}, 'Request #'))}</th>
+                                    <th class="px-4 py-2 font-medium">背番号</th>
+                                    <th class="px-4 py-2 text-right font-medium">不足枚数</th>
+                                    <th class="px-4 py-2 text-right font-medium">不足箱数</th>
+                                    <th class="px-4 py-2 font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPossibleEquipmentHeader', {}, 'Possible Equipment'))}</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                                ${priorityRows.length > 0 ? priorityRows.map((row) => `
+                                    <tr class="${row.capabilityStatus !== 'mapped' ? 'bg-rose-50/40 dark:bg-rose-950/10' : 'bg-white dark:bg-gray-800'}">
+                                        <td class="px-4 py-3 text-gray-700 dark:text-gray-200">
+                                            ${formatPlannerPreviewNumber(row.priorityRank || row.queueOrder || 0)}
+                                        </td>
+                                        <td class="px-4 py-3 font-medium ${getPlannerPreviewRequestColorClass(row, requestColorMap)}" title="${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLineTitle', { line: formatPlannerPreviewNumber(row.lineNumber || 0) }, `Line ${formatPlannerPreviewNumber(row.lineNumber || 0)}`))}">
+                                            ${escapePlannerPreviewHtml(row.requestNumber || '-')}
+                                        </td>
+                                        <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                                            ${escapePlannerPreviewHtml(row.背番号 || row.品番 || '-')}
+                                        </td>
+                                        <td class="px-4 py-3 text-right font-semibold text-rose-700 dark:text-rose-300">
+                                            ${formatPlannerPreviewNumber(row.shortfallQuantity || 0)}
+                                        </td>
+                                        <td class="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
+                                            ${row.shortageBoxes !== null ? formatPlannerPreviewNumber(row.shortageBoxes) : '-'}
+                                        </td>
+                                        <td class="px-4 py-3 text-gray-600 dark:text-gray-300 ${row.capabilityStatus !== 'mapped' ? 'font-medium text-rose-700 dark:text-rose-300' : ''}">
+                                            ${escapePlannerPreviewHtml(getPlannerPreviewPossibleEquipmentText(row))}
+                                        </td>
+                                    </tr>
+                                `).join('') : `
+                                    <tr>
+                                        <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                                            ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewNoPriorityRows', {}, 'No unfinished shortage line-items are waiting right now.'))}
+                                        </td>
+                                    </tr>
+                                `}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="px-4 py-2 border-t border-gray-200 bg-gray-50 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-900/30 dark:text-gray-400">
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPreferredEquipmentNote', {}, '* means preferred equipment.'))}
+                    </div>
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInventoryTableTitle', {}, 'Current Inventory Table'))}</h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInventoryTableDescription', {}, 'Latest inventory snapshot for the active products relevant to this preview.'))}</p>
+                            </div>
+                            <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${formatPlannerPreviewNumber(inventoryRows.length)} ${escapePlannerPreviewHtml(productsSuffix)}</span>
+                        </div>
+                    </div>
+                    <div class="overflow-auto max-h-[520px]">
+                        <table class="min-w-full text-sm text-left">
+                            <thead class="sticky top-0 z-10 bg-gray-50 text-gray-600 dark:bg-gray-900/40 dark:text-gray-300">
+                                <tr>
+                                    <th class="px-4 py-2 font-medium">背番号</th>
+                                    <th class="px-4 py-2 font-medium">品番</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewPhysical', {}, 'Physical'))}</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewReserved', {}, 'Reserved'))}</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewAvailable', {}, 'Available'))}</th>
+                                    <th class="px-4 py-2 text-right font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewWaiting', {}, 'Waiting'))}</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                                ${inventoryRows.length > 0 ? inventoryRows.map((row) => `
+                                    <tr class="${Number(row.pendingShortfallQuantity || 0) > 0 ? 'bg-amber-50/40 dark:bg-amber-950/10' : 'bg-white dark:bg-gray-800'}">
+                                        <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">${escapePlannerPreviewHtml(row.背番号 || '-')}</td>
+                                        <td class="px-4 py-3 text-gray-700 dark:text-gray-300">${escapePlannerPreviewHtml(row.品番 || '-')}</td>
+                                        <td class="px-4 py-3 text-right font-semibold text-emerald-700 dark:text-emerald-300">${formatPlannerPreviewNumber(row.physicalQuantity || 0)}</td>
+                                        <td class="px-4 py-3 text-right text-gray-700 dark:text-gray-300">${formatPlannerPreviewNumber(row.reservedQuantity || 0)}</td>
+                                        <td class="px-4 py-3 text-right text-gray-700 dark:text-gray-300">${formatPlannerPreviewNumber(row.availableQuantity || 0)}</td>
+                                        <td class="px-4 py-3 text-right font-semibold ${Number(row.pendingShortfallQuantity || 0) > 0 ? 'text-rose-700 dark:text-rose-300' : 'text-gray-500 dark:text-gray-400'}">${formatPlannerPreviewNumber(row.pendingShortfallQuantity || 0)}</td>
+                                    </tr>
+                                `).join('') : `
+                                    <tr>
+                                        <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+                                            ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewNoInventoryRows', {}, 'No inventory rows are available for the current preview scope.'))}
+                                        </td>
+                                    </tr>
+                                `}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <h4 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewCalendarTitle', {}, 'Planned Preview Calendar'))}</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(previewCalendarDescription)}</p>
+                    </div>
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <label class="flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-300">
+                            <span class="font-medium">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewScheduleUntil', {}, 'Schedule Until'))}</span>
+                            <input
+                                type="time"
+                                step="${PLANNER_CONFIG.intervalMinutes * 60}"
+                                min="${getPlannerPreviewMinimumScheduleUntilTime()}"
+                                max="23:45"
+                                value="${escapePlannerPreviewHtml(scheduleUntilTime)}"
+                                onchange="setPlannerPreviewScheduleUntilTime(this.value)"
+                                class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-sky-900/40"
+                            >
+                        </label>
+                        <div class="flex flex-col gap-2">
+                            <div class="flex flex-wrap gap-2 text-xs">
+                                ${hasAnyPreviewDraft ? `
+                                    <button onclick="setPlannerPreviewViewMode('auto')" class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-medium transition-colors ${!isViewingDraft ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800 dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
+                                        <i class="ri-calendar-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewViewAuto', {}, 'View Auto'))}</span>
+                                    </button>
+                                    <button onclick="setPlannerPreviewViewMode('draft')" class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-medium transition-colors ${isViewingDraft ? 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/60' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
+                                        <i class="ri-draft-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewViewDraft', {}, 'View Draft'))}</span>
+                                    </button>
+                                ` : ''}
+                                <button onclick="togglePlannerPreviewDraftMode()" class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 font-medium transition-colors ${isPreviewDraftEditing ? 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-200 dark:hover:bg-sky-950/60' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800'}">
+                                    <i class="ri-drag-move-line"></i>
+                                    <span>${escapePlannerPreviewHtml(draftToggleLabel)}</span>
+                                </button>
+                                ${hasPreviewDraft ? `
+                                    <button onclick="savePlannerPreviewDraft()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 font-medium text-emerald-700 hover:bg-emerald-100 transition-colors dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/40">
+                                        <i class="ri-save-3-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSaveDraft', {}, 'Save Draft'))}</span>
+                                    </button>
+                                    <button onclick="resetPlannerPreviewDraft()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 font-medium text-rose-700 hover:bg-rose-100 transition-colors dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-950/40">
+                                        <i class="ri-arrow-go-back-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewDiscardUnsaved', {}, 'Discard Unsaved'))}</span>
+                                    </button>
+                                ` : ''}
+                                ${hasSavedPreviewDraft ? `
+                                    <button onclick="deletePlannerPreviewSavedDraft()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 font-medium text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-950/40">
+                                        <i class="ri-delete-bin-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewDeleteSavedDraft', {}, 'Delete Saved Draft'))}</span>
+                                    </button>
+                                ` : ''}
+                                ${hasPreviewDraft && plannerState.preview.draftChanged ? `
+                                    <span class="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-2 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                                        <i class="ri-edit-2-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUnsavedChanges', {}, 'Unsaved changes'))}</span>
+                                    </span>
+                                ` : ''}
+                            </div>
+                            <div class="flex flex-wrap gap-2 text-xs">
+                                <button onclick="exportPlannerPreviewScheduleJson('auto')" class="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 font-medium text-cyan-700 hover:bg-cyan-100 transition-colors dark:border-cyan-900 dark:bg-cyan-950/30 dark:text-cyan-200 dark:hover:bg-cyan-950/40">
+                                    <i class="ri-file-copy-line"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewCopyAutoJson', {}, 'Copy Auto JSON'))}</span>
+                                </button>
+                                ${hasAnyPreviewDraft ? `
+                                    <button onclick="exportPlannerPreviewScheduleJson('draft')" class="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 font-medium text-sky-700 hover:bg-sky-100 transition-colors dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-950/40">
+                                        <i class="ri-file-copy-2-line"></i>
+                                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewCopyDraftJson', {}, 'Copy Draft JSON'))}</span>
+                                    </button>
+                                ` : ''}
+                                <button onclick="showPlannerPreviewPrintModal()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-700 hover:bg-indigo-100 transition-colors dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-950/40">
+                                    <i class="ri-printer-line"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewActionPrint', {}, 'Print'))}</span>
+                                </button>
+                                <button onclick="showPlannerPreviewCalendarView()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50 transition-colors dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
+                                    <i class="ri-calendar-event-line"></i>
+                                    <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewActionCalendar', {}, 'Calendar View'))}</span>
+                                </button>
+                            </div>
+                            <div class="flex flex-wrap gap-2 text-xs">
+                                ${hasSavedPreviewDraft ? `
+                                    <span class="rounded-full bg-sky-100 px-3 py-1 font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200">${escapePlannerPreviewHtml(savedDraftStatusText)}</span>
+                                ` : ''}
+                                <span class="rounded-full bg-cyan-100 px-3 py-1 font-medium text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-200">${escapePlannerPreviewHtml(scheduledBeforeText)}</span>
+                                <span class="rounded-full bg-amber-100 px-3 py-1 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">${escapePlannerPreviewHtml(outsideLimitText)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                ${hasPreviewDraft ? `
+                    <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-amber-50/80 text-xs text-amber-700 dark:bg-amber-950/20 dark:text-amber-200">
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUnsavedNotice', {}, 'Unsaved Preview Draft changes are local until you click Save Draft. Refreshing the preview or changing factory/date will discard only the unsaved layer.'))}
+                    </div>
+                ` : hasSavedPreviewDraft ? `
+                    <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-sky-50/70 text-xs text-sky-700 dark:bg-sky-950/20 dark:text-sky-200">
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSavedDraftNotice', {}, 'Saved Preview Draft is stored separately from the auto-generated preview. Use View Auto and View Draft to compare both calendars without overwriting either one.'))}
+                    </div>
+                ` : ''}
+                ${isSavedDraftStale ? `
+                    <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-rose-50/80 text-xs text-rose-700 dark:bg-rose-950/20 dark:text-rose-200">
+                        <div class="font-semibold">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSavedDraftStaleTitle', {}, 'Saved Preview Draft is based on older priority-table data.'))}</div>
+                        <div class="mt-1">${escapePlannerPreviewHtml(staleDraftDescription)}</div>
+                        ${savedDraftDifferenceExamples.length > 0 ? `
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                ${savedDraftDifferenceExamples.map((example) => `
+                                    <span class="rounded-full bg-white/80 px-2 py-1 text-[11px] font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-200">${escapePlannerPreviewHtml(example)}</span>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : isSavedDraftBasisUntracked ? `
+                    <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-amber-50/80 text-xs text-amber-700 dark:bg-amber-950/20 dark:text-amber-200">
+                        ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewSavedDraftLegacyNotice', {}, 'Saved Preview Draft was created before stale-data tracking was enabled. Save the draft again once to compare it against future priority-table changes automatically.'))}
+                    </div>
+                ` : ''}
+                <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-cyan-200 dark:bg-cyan-800"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendInserts', {}, 'Priority preview inserts'))}</span>
+                    <span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-300 dark:bg-slate-600"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendBreak', {}, 'Break time'))}</span>
+                    ${isPreviewDraftEditing ? `<span class="inline-flex items-center gap-2"><span class="w-3 h-3 rounded border border-sky-400 bg-white dark:bg-gray-900"></span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendDragHead', {}, 'Drag the first tile of a block to move the whole block'))}</span>` : ''}
+                    ${isPreviewDraftEditing ? `<span class="inline-flex items-center gap-2"><span class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-sky-400 bg-white text-[11px] font-semibold text-sky-600 dark:bg-gray-900 dark:text-sky-300">+</span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewLegendAddBlank', {}, 'Hover a blank tile to add a shortage line'))}</span>` : ''}
+                </div>
+                <div class="p-5">
+                    ${renderPlannerPreviewTimeline(preview, requestColorMap)}
+                    ${canManagePublishedSchedules ? `
+                        <div class="mt-5 flex justify-end">
+                            <button onclick="publishPlannerPreviewSchedule()" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors shadow-sm">
+                                <i class="ri-send-plane-line"></i>
+                                <span>${escapePlannerPreviewHtml(publishButtonText)}</span>
+                            </button>
+                        </div>
+                    ` : ''}
+                    ${timeLimitExceptions.length > 0 ? `
+                        <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 dark:border-amber-900 dark:bg-amber-950/20">
+                            <p class="text-sm font-semibold text-amber-800 dark:text-amber-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewTimeLimitHeading', { time: scheduleUntilTime }, `Some shortage lines are not included because they do not fit before ${scheduleUntilTime}.`))}</p>
+                            ${isPreviewDraftEditing ? `<p class="mt-1 text-xs text-amber-700 dark:text-amber-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewTimeLimitDraftHint', {}, 'Hover a blank tile and click + to place one of these shortage lines.'))}</p>` : ''}
+                            <div class="mt-3 space-y-2">
+                                ${timeLimitExceptions.slice(0, 8).map((exception) => `
+                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
+                                        <div class="text-amber-900 dark:text-amber-100">${escapePlannerPreviewHtml(exception.requestNumber || '-')} - ${escapePlannerPreviewHtml(exception.背番号 || exception.品番 || '-')}</div>
+                                        <div class="text-amber-700 dark:text-amber-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptionRow', { quantity: formatPlannerPreviewNumber(exception.shortfallQuantity || 0), detail: (exception.candidateEquipment || []).join(' / ') || '-' }, formatPlannerPreviewNumber(exception.shortfallQuantity || 0) + ' pcs · ' + ((exception.candidateEquipment || []).join(' / ') || '-')))}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    ${otherExceptions.length > 0 ? `
+                        <div class="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-4 dark:border-rose-900 dark:bg-rose-950/20">
+                            <p class="text-sm font-semibold text-rose-800 dark:text-rose-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewOtherExceptionsHeading', {}, 'Capability or mapping issues still need review.'))}</p>
+                            <div class="mt-3 space-y-2">
+                                ${otherExceptions.slice(0, 8).map((exception) => `
+                                    <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
+                                        <div class="text-rose-800 dark:text-rose-200">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptionIdentity', { request: exception.requestNumber || '-', line: formatPlannerPreviewNumber(exception.lineNumber || 0), item: exception.背番号 || exception.品番 || '-' }, `${exception.requestNumber || '-'}, line ${formatPlannerPreviewNumber(exception.lineNumber || 0)} - ${exception.背番号 || exception.品番 || '-'}`))}</div>
+                                        <div class="text-rose-700 dark:text-rose-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewExceptionRow', { quantity: formatPlannerPreviewNumber(exception.shortfallQuantity || 0), detail: getPlannerPreviewExceptionReasonLabel(exception.reason || 'unmapped') }, formatPlannerPreviewNumber(exception.shortfallQuantity || 0) + ' pcs · ' + getPlannerPreviewExceptionReasonLabel(exception.reason || 'unmapped')))}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+            ${plannerState.preview.error ? `
+                <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    ${escapePlannerPreviewHtml(lastRefreshWarning)}
+                </div>
+            ` : ''}
+        </div>
+    `;
 }
 
 // ============================================
@@ -181,6 +4588,7 @@ function setupPlannerEventListeners() {
 // Switch between main tabs (Production Goals vs Planning)
 function switchPlannerMainTab(tab) {
     console.log('📋 Switching to main tab:', tab, 'Current factory:', plannerState.currentFactory);
+    plannerState.activeMainTab = tab;
     
     // Update tab buttons
     document.querySelectorAll('.planner-main-tab-btn').forEach(btn => {
@@ -237,6 +4645,24 @@ function switchPlannerMainTab(tab) {
             } else {
                 renderGoalList();
             }
+        }
+    } else if (tab === 'preview') {
+        document.getElementById('planner-preview-tab')?.classList.remove('hidden');
+        renderPlannerPreview();
+
+        if (plannerState.currentFactory) {
+            ensurePlannerPreviewLoaded({ forceRefresh: plannerState.preview.isDirty }).catch((error) => {
+                console.error('Failed to load planner preview:', error);
+            });
+        }
+    } else if (tab === 'published') {
+        document.getElementById('planner-published-tab')?.classList.remove('hidden');
+        renderPlannerPublished();
+
+        if (plannerState.currentFactory) {
+            ensurePlannerPublishedLoaded({ forceRefresh: plannerState.published.isDirty }).catch((error) => {
+                console.error('Failed to load published schedule:', error);
+            });
         }
     } else if (tab === 'planning') {
         document.getElementById('planner-planning-tab')?.classList.remove('hidden');
@@ -300,6 +4726,31 @@ function switchPlannerMainTab(tab) {
                     renderAllViews();
                 })();
             }
+        }
+    }
+}
+
+async function refreshPlannerCurrentMainTabData() {
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        return;
+    }
+
+    if (plannerState.activeMainTab === 'preview') {
+        renderPlannerPreview();
+        try {
+            await ensurePlannerPreviewLoaded({ forceRefresh: true });
+        } catch (error) {
+            console.error('Failed to refresh planner preview after selection change:', error);
+        }
+        return;
+    }
+
+    if (plannerState.activeMainTab === 'published') {
+        renderPlannerPublished();
+        try {
+            await ensurePlannerPublishedLoaded({ forceRefresh: true });
+        } catch (error) {
+            console.error('Failed to refresh published schedule after selection change:', error);
         }
     }
 }
@@ -474,6 +4925,7 @@ async function loadExistingPlans(factory, date) {
             
             console.log(`✅ Restored ${plannerState.selectedProducts.length} products from plan`);
         } else {
+            plannerState.currentPlan = null;
             plannerState.selectedProducts = [];
             console.log('ℹ️ No existing plan found for this date');
         }
@@ -738,6 +5190,8 @@ function processActualProductionData(records) {
 async function handleFactoryChange(e) {
     const factory = e.target.value;
     plannerState.currentFactory = factory;
+    markPlannerPreviewDirty({ clearData: true, scheduleIfActive: false });
+    markPlannerPublishedDirty({ clearData: true });
     
     // Save selected factory to localStorage
     if (factory) {
@@ -770,6 +5224,7 @@ async function handleFactoryChange(e) {
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        await refreshPlannerCurrentMainTabData();
         
     } catch (error) {
         console.error('❌ Error loading factory data:', error);
@@ -781,6 +5236,8 @@ async function handleFactoryChange(e) {
 
 async function handleDateChange(e) {
     plannerState.currentDate = e.target.value;
+    markPlannerPreviewDirty({ clearData: true, scheduleIfActive: false });
+    markPlannerPublishedDirty({ clearData: true });
     
     if (plannerState.currentFactory) {
         // Ensure products are loaded for capacity lookups
@@ -798,6 +5255,7 @@ async function handleDateChange(e) {
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        await refreshPlannerCurrentMainTabData();
         return; // Early return to avoid double rendering
     }
     
@@ -815,6 +5273,7 @@ async function handleDateChange(e) {
         renderGoalList();
         updateSelectedProductsSummary();
         renderAllViews();
+        await refreshPlannerCurrentMainTabData();
     }
 }
 
@@ -868,25 +5327,30 @@ function switchPlannerTab(tab) {
 // ============================================
 // TIME CALCULATIONS
 // ============================================
-function calculateProductionTime(product, quantity) {
-    // Get cycle time in seconds (default 120 seconds = 2 minutes)
-    const cycleTimeSeconds = parseFloat(product['秒数(1pcs何秒)']) || PLANNER_CONFIG.defaultCycleTime;
-    
-    // Get pieces per cycle (default 1)
-    const pcPerCycle = parseInt(product.pcPerCycle) || PLANNER_CONFIG.defaultPcPerCycle;
+function calculateProductionTime(product, quantity, equipmentName = '') {
+    const selectedEquipment = String(equipmentName || product.equipment || '').trim();
+    const secondsPerPiece = resolvePlannerCycleTimeSeconds(product, selectedEquipment);
+    const pcPerCycle = resolvePlannerPcPerCycle(product, selectedEquipment);
+    const normalizedQuantity = Number.isFinite(Number(quantity)) ? Math.max(0, Number(quantity)) : 0;
     
     // Calculate number of cycles needed
-    const cyclesNeeded = Math.ceil(quantity / pcPerCycle);
+    const cyclesNeeded = Math.ceil(normalizedQuantity / pcPerCycle);
     
-    // Total time in seconds
-    const totalSeconds = cyclesNeeded * cycleTimeSeconds;
+    // 秒数(1pcs何秒) is seconds per piece, not seconds per cycle.
+    const totalSeconds = normalizedQuantity * secondsPerPiece;
+    const totalMinutes = totalSeconds / 60;
+    const displayTotalMinutes = totalSeconds > 0 ? Math.ceil(totalMinutes) : 0;
     
     // Convert to hours and minutes
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const hours = Math.floor(displayTotalMinutes / 60);
+    const minutes = displayTotalMinutes % 60;
     
     return {
         totalSeconds,
+        totalMinutes,
+        cycleTimeSeconds: secondsPerPiece,
+        secondsPerPiece,
+        pcPerCycle,
         hours,
         minutes,
         cyclesNeeded,
@@ -894,25 +5358,10 @@ function calculateProductionTime(product, quantity) {
     };
 }
 
-function calculateBoxesNeeded(product, quantity) {
-    let capacity = parseInt(product['収容数']) || 0;
-    
-    // If capacity not in product, look it up from plannerState.products (masterDB)
-    if (!capacity && (product.品番 || product.背番号)) {
-        const fullProduct = plannerState.products.find(p => 
-            (product.品番 && p.品番 === product.品番) || 
-            (product.背番号 && p.背番号 === product.背番号)
-        );
-        if (fullProduct && fullProduct['収容数']) {
-            capacity = parseInt(fullProduct['収容数']);
-        }
-    }
-    
-    // Default to 1 if still no capacity found
-    if (!capacity || capacity <= 0) {
-        capacity = 1;
-    }
-    
+function calculateBoxesNeeded(product, quantity, equipmentName = '') {
+    const selectedEquipment = String(equipmentName || product.equipment || '').trim();
+    const capacity = resolvePlannerBoxQuantity(product, selectedEquipment);
+
     return Math.ceil(quantity / capacity);
 }
 
@@ -2360,9 +6809,67 @@ function toggleProductSelection(productId) {
     }
 }
 
-function showAddProductModal(product) {
+async function showAddProductModal(product) {
     const color = plannerState.productColors[product.背番号] || '#6B7280';
     const capacity = parseInt(product['収容数']) || 1;
+    const plannerFactory = plannerState.currentFactory;
+    let equipmentOptions = plannerState.equipment;
+    let capabilityNotice = '';
+    let disableEquipmentSelection = false;
+
+    try {
+        await loadProductionCapabilitiesForItems([product], { factory: plannerFactory });
+
+        const capability = getCachedProductionCapability(product, plannerFactory);
+        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerFactory);
+
+        if (capability?.hasMapping) {
+            if (eligibleEquipment.length > 0) {
+                equipmentOptions = eligibleEquipment;
+                capabilityNotice = `
+                    <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        Capability mapping active for ${plannerFactory || 'this factory'}: ${eligibleEquipment.join(', ')}
+                    </div>
+                `;
+            } else {
+                equipmentOptions = [];
+                disableEquipmentSelection = true;
+                capabilityNotice = `
+                    <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        This product has a capability record, but no enabled equipment is available for ${plannerFactory || 'this factory'}.
+                    </div>
+                `;
+            }
+        } else {
+            capabilityNotice = `
+                <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    No capability mapping found for ${plannerFactory || 'this factory'} yet. Using legacy equipment list.
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('❌ Failed to load capability mapping for add-product modal:', error);
+        capabilityNotice = `
+            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                Capability lookup failed. Using current equipment list.
+            </div>
+        `;
+    }
+
+    if (equipmentOptions.length === 0) {
+        disableEquipmentSelection = true;
+        if (!capabilityNotice) {
+            capabilityNotice = `
+                <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    No equipment is available for manual assignment.
+                </div>
+            `;
+        }
+    }
+
+    const confirmButtonClasses = disableEquipmentSelection
+        ? 'px-4 py-2 bg-blue-300 text-white rounded-lg cursor-not-allowed'
+        : 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors';
     
     const modalHTML = `
         <div id="addProductModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -2377,6 +6884,8 @@ function showAddProductModal(product) {
                     </div>
                     
                     <div class="space-y-4">
+                        ${capabilityNotice}
+
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="targetQuantity">Target Quantity</label>
                             <input type="number" id="productQuantity" min="1" value="${capacity}" 
@@ -2399,16 +6908,16 @@ function showAddProductModal(product) {
                         
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="assignToEquipment">Assign to Equipment</label>
-                            <select id="equipmentSelect" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white">
+                            <select id="equipmentSelect" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" onchange="updateQuantityPreview('${product._id}')" ${disableEquipmentSelection ? 'disabled' : ''}>
                                 <option value="" data-i18n="selectEquipment">-- Select Equipment --</option>
-                                ${plannerState.equipment.map(eq => `<option value="${eq}">${eq}</option>`).join('')}
+                                ${equipmentOptions.map(eq => `<option value="${eq}">${eq}</option>`).join('')}
                             </select>
                         </div>
                     </div>
                     
                     <div class="flex justify-end gap-3 mt-6">
                         <button onclick="closeAddProductModal()" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" data-i18n="cancel">Cancel</button>
-                        <button onclick="confirmAddProduct('${product._id}')" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors" data-i18n="addToPlan">Add to Plan</button>
+                        <button onclick="confirmAddProduct('${product._id}')" class="${confirmButtonClasses}" data-i18n="addToPlan" ${disableEquipmentSelection ? 'disabled' : ''}>Add to Plan</button>
                     </div>
                 </div>
             </div>
@@ -2432,8 +6941,10 @@ function updateQuantityPreview(productId) {
     if (!product) return;
     
     const quantity = parseInt(document.getElementById('productQuantity')?.value) || 1;
-    const boxes = calculateBoxesNeeded(product, quantity);
-    const time = calculateProductionTime(product, quantity);
+    const selectedEquipment = document.getElementById('equipmentSelect')?.value || '';
+    const previewProduct = selectedEquipment ? { ...product, equipment: selectedEquipment } : product;
+    const boxes = calculateBoxesNeeded(previewProduct, quantity, selectedEquipment);
+    const time = calculateProductionTime(previewProduct, quantity, selectedEquipment);
     
     document.getElementById('boxesPreview').textContent = boxes;
     document.getElementById('timePreview').textContent = time.formattedTime;
@@ -2445,7 +6956,7 @@ function closeAddProductModal() {
     window.currentAddProduct = null;
 }
 
-function confirmAddProduct(productId) {
+async function confirmAddProduct(productId) {
     const product = window.currentAddProduct;
     if (!product) return;
     
@@ -2456,9 +6967,29 @@ function confirmAddProduct(productId) {
         showPlannerNotification('Please select equipment', 'warning');
         return;
     }
+
+    try {
+        await loadProductionCapabilitiesForItems([product], { factory: plannerState.currentFactory });
+    } catch (error) {
+        console.error('❌ Failed to refresh capability mapping before manual add:', error);
+    }
+
+    const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+    const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
+
+    if (capability?.hasMapping && eligibleEquipment.length === 0) {
+        showPlannerNotification('This product has no enabled capability equipment in the current factory', 'error');
+        return;
+    }
+
+    if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(equipment)) {
+        showPlannerNotification(`${product.背番号} is not mapped to ${equipment}`, 'warning');
+        return;
+    }
     
-    const timeInfo = calculateProductionTime(product, quantity);
-    const boxes = calculateBoxesNeeded(product, quantity);
+    const productForEquipment = { ...product, equipment };
+    const timeInfo = calculateProductionTime(productForEquipment, quantity, equipment);
+    const boxes = calculateBoxesNeeded(productForEquipment, quantity, equipment);
     
     plannerState.selectedProducts.push({
         ...product,
@@ -2818,6 +7349,37 @@ window.filterSelectedProducts = function(searchTerm) {
     updateSelectedProductsSummary(searchTerm);
 };
 
+window.refreshPlannerPreview = async function(forceRefresh = true) {
+    try {
+        if (forceRefresh === true && hasPlannerPreviewDraft()) {
+            resetPlannerPreviewDraftState();
+        }
+
+        await ensurePlannerPreviewLoaded({
+            forceRefresh: forceRefresh === true,
+            showNotifications: true
+        });
+    } catch (error) {
+        console.error('Failed to refresh planner preview:', error);
+    }
+};
+
+window.refreshPlannerPublished = async function(forceRefresh = true) {
+    try {
+        await ensurePlannerPublishedLoaded({
+            forceRefresh: forceRefresh === true,
+            showNotifications: true
+        });
+    } catch (error) {
+        console.error('Failed to refresh published schedule:', error);
+    }
+};
+
+window.setPlannerPreviewScheduleUntilTime = function(value) {
+    plannerState.preview.scheduleUntilTime = normalizePlannerPreviewScheduleUntilTime(value);
+    renderPlannerPreview();
+};
+
 // ============================================
 // VIEW RENDERING
 // ============================================
@@ -2825,6 +7387,7 @@ function renderAllViews() {
     renderTimelineView();
     renderKanbanView();
     renderTableView();
+    markPlannerPreviewDirty();
 }
 
 function renderActiveView() {
@@ -2845,12 +7408,33 @@ function clearPlannerViews() {
     plannerState.equipment = [];
     plannerState.products = [];
     plannerState.selectedProducts = [];
+    plannerState.currentPlan = null;
+    if (plannerState.preview.autoRefreshTimer) {
+        clearTimeout(plannerState.preview.autoRefreshTimer);
+    }
+    plannerState.preview.data = null;
+    plannerState.preview.error = '';
+    plannerState.preview.isDirty = true;
+    plannerState.preview.lastLoadedAt = 0;
+    plannerState.preview.pendingPromise = null;
+    plannerState.preview.autoRefreshTimer = null;
+    resetPlannerPreviewDraftState();
+    plannerState.preview.viewMode = 'auto';
+    plannerState.published.data = null;
+    plannerState.published.error = '';
+    plannerState.published.isDirty = true;
+    plannerState.published.lastLoadedAt = 0;
+    plannerState.published.pendingPromise = null;
+    plannerState.published.viewedVersionId = null;
+    plannerState.published.isVersionEditMode = false;
     
     document.getElementById('productListContainer').innerHTML = '';
     document.getElementById('selectedProductsSummary').innerHTML = '';
     document.getElementById('timelineContainer').innerHTML = '';
     document.getElementById('kanbanContainer').innerHTML = '';
     document.getElementById('tableContainer').innerHTML = '';
+    renderPlannerPreview();
+    renderPlannerPublished();
 }
 
 // ============================================
@@ -3608,6 +8192,27 @@ async function handleKanbanDrop(event, newEquipment) {
     
     const product = plannerState.selectedProducts.find(p => p._id === productId);
     if (product && product.equipment !== newEquipment) {
+        try {
+            await loadProductionCapabilitiesForItems([product], { factory: plannerState.currentFactory });
+        } catch (error) {
+            console.error('❌ Failed to validate capability mapping during drag/drop:', error);
+            showPlannerNotification('Failed to validate capability mapping for this move', 'error');
+            return;
+        }
+
+        const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
+
+        if (capability?.hasMapping && eligibleEquipment.length === 0) {
+            showPlannerNotification(`${product.背番号} has no enabled capability equipment in this factory`, 'warning');
+            return;
+        }
+
+        if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(newEquipment)) {
+            showPlannerNotification(`${product.背番号} is not mapped to ${newEquipment}`, 'warning');
+            return;
+        }
+
         product.equipment = newEquipment;
         renderAllViews();
         updateSelectedProductsSummary();
@@ -3997,24 +8602,18 @@ function renderMultiPickerSelected() {
     
     container.innerHTML = multiPickerState.selectedProducts.map((product, index) => {
         const color = plannerState.productColors[product.背番号] || '#6B7280';
-        const timeInfo = calculateProductionTime(product, product.quantity);
-        const boxes = calculateBoxesNeeded(product, product.quantity);
+        const selectedEquipment = multiPickerState.equipment || '';
+        const productForEquipment = selectedEquipment ? { ...product, equipment: selectedEquipment } : product;
+        const timeInfo = calculateProductionTime(productForEquipment, product.quantity, selectedEquipment);
+        const boxes = calculateBoxesNeeded(productForEquipment, product.quantity, selectedEquipment);
         
         // Get goal info
         const goalQty = product.remainingQuantity || 0;
         const inputQty = product.quantity || 0;
         const remaining = Math.max(0, goalQty - inputQty);
         
-        // Get capacity for box calculation
-        let capacity = parseInt(product['収容数']) || 1;
-        if (!product['収容数'] && product.品番) {
-            const fullProduct = plannerState.products.find(p => p.品番 === product.品番 || p.背番号 === product.背番号);
-            if (fullProduct && fullProduct['収容数']) {
-                capacity = parseInt(fullProduct['収容数']);
-            }
-        }
-        const goalBoxes = Math.ceil(goalQty / capacity);
-        const remainingBoxes = Math.ceil(remaining / capacity);
+        const goalBoxes = calculateBoxesNeeded(productForEquipment, goalQty, selectedEquipment);
+        const remainingBoxes = calculateBoxesNeeded(productForEquipment, remaining, selectedEquipment);
         
         return `
             <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800">
@@ -4103,8 +8702,10 @@ function renderMultiPickerOrdered() {
     
     container.innerHTML = multiPickerState.orderedProducts.map((product, index) => {
         const color = plannerState.productColors[product.背番号] || '#6B7280';
-        const timeInfo = calculateProductionTime(product, product.quantity);
-        const boxes = calculateBoxesNeeded(product, product.quantity);
+        const selectedEquipment = multiPickerState.equipment || '';
+        const productForEquipment = selectedEquipment ? { ...product, equipment: selectedEquipment } : product;
+        const timeInfo = calculateProductionTime(productForEquipment, product.quantity, selectedEquipment);
+        const boxes = calculateBoxesNeeded(productForEquipment, product.quantity, selectedEquipment);
         
         return `
             <div class="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 relative">
@@ -4174,6 +8775,16 @@ async function confirmMultiPickerSelection() {
         showPlannerNotification('Please move products to the order column', 'warning');
         return;
     }
+
+    try {
+        await loadProductionCapabilitiesForItems(multiPickerState.orderedProducts, {
+            factory: plannerState.currentFactory
+        });
+    } catch (error) {
+        console.error('❌ Failed to load capability mappings for multi-picker:', error);
+        showPlannerNotification('Failed to validate capability mappings for the selected equipment', 'error');
+        return;
+    }
     
     // Calculate actual start times, skipping breaks
     // Use the clicked time slot, not the work start time
@@ -4187,6 +8798,7 @@ async function confirmMultiPickerSelection() {
     // STEP 1: Validate all products first
     // ========================================
     const productsToAdd = [];
+    const capabilitySkippedProducts = [];
     for (const product of multiPickerState.orderedProducts) {
         // Find the current goal to check remaining quantity
         const currentGoal = plannerState.goals.find(g => g._id === product._id);
@@ -4197,9 +8809,25 @@ async function confirmMultiPickerSelection() {
             showPlannerNotification(`Cannot schedule ${product.quantity} pcs for ${product.背番号} - only ${currentGoal.remainingQuantity} pcs remaining`, 'error');
             continue; // Skip this product
         }
+
+        const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
+
+        if (capability?.hasMapping && eligibleEquipment.length === 0) {
+            capabilitySkippedProducts.push(product.背番号 || product.品番 || 'Unknown');
+            console.warn(`⚠️ ${product.背番号} has no enabled capability equipment`);
+            continue;
+        }
+
+        if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(equipment)) {
+            capabilitySkippedProducts.push(product.背番号 || product.品番 || 'Unknown');
+            console.warn(`⚠️ ${product.背番号} is not mapped to ${equipment}`);
+            continue;
+        }
         
-        const timeInfo = calculateProductionTime(product, product.quantity);
-        const boxes = calculateBoxesNeeded(product, product.quantity);
+        const productForEquipment = { ...product, equipment };
+        const timeInfo = calculateProductionTime(productForEquipment, product.quantity, equipment);
+        const boxes = calculateBoxesNeeded(productForEquipment, product.quantity, equipment);
         const productDurationMinutes = timeInfo.totalSeconds / 60;
         
         // Find actual start time and end time, accounting for breaks
@@ -4220,6 +8848,10 @@ async function confirmMultiPickerSelection() {
     }
     
     if (productsToAdd.length === 0) {
+        if (capabilitySkippedProducts.length > 0) {
+            showPlannerNotification(`No valid products to add. ${capabilitySkippedProducts.join(', ')} are not mapped to ${equipment}.`, 'error');
+            return;
+        }
         showPlannerNotification('No valid products to add to timeline', 'error');
         return;
     }
@@ -4319,7 +8951,10 @@ async function confirmMultiPickerSelection() {
         updateSelectedProductsSummary();
         renderAllViews();
         
-        showPlannerNotification(`✅ Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline`, 'success');
+        const notificationText = capabilitySkippedProducts.length > 0
+            ? `Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline. ${capabilitySkippedProducts.length} skipped by capability mapping.`
+            : `✅ Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline`;
+        showPlannerNotification(notificationText, capabilitySkippedProducts.length > 0 ? 'warning' : 'success');
         
     } catch (error) {
         // ========================================
@@ -4621,9 +9256,9 @@ window.showSmartSchedulingModal = async function() {
     }
     
     // Show loading modal
-    showLoadingModal('Analyzing production trends...');
+    showLoadingModal('Analyzing production trends and capability mappings...');
     
-    showPlannerNotification('Analyzing production trends...', 'info');
+    showPlannerNotification('Analyzing production trends and capability mappings...', 'info');
     
     try {
         // Get goals for current date with remaining quantity
@@ -4635,6 +9270,7 @@ window.showSmartSchedulingModal = async function() {
         console.log('Goals count:', goalsToSchedule.length);
         
         if (goalsToSchedule.length === 0) {
+            hideLoadingModal();
             showPlannerNotification('No goals with remaining quantity for today', 'warning');
             return;
         }
@@ -4667,6 +9303,11 @@ window.showSmartSchedulingModal = async function() {
         const trends = result.trends;
         console.log('Trends received:', trends);
         console.log('Number of trends:', Object.keys(trends).length);
+
+        await loadProductionCapabilitiesForItems(goalsToSchedule, {
+            factory: plannerState.currentFactory,
+            forceRefresh: true
+        });
         
         // Helper function to get material suffix from 背番号
         function getMaterialSuffix(背番号) {
@@ -4734,14 +9375,46 @@ window.showSmartSchedulingModal = async function() {
             console.log('  Full goal object:', goal);
             
             const trend = trends[identifier];
+            const capability = getCachedProductionCapability(goal, plannerState.currentFactory);
+            const capabilityMachines = Array.isArray(capability?.eligibleMachines) ? capability.eligibleMachines : [];
             console.log(`  Trend for ${identifier}:`, trend);
+            console.log(`  Capability for ${identifier}:`, capability);
             
             // Apply 992W(310D) smart rules
             const is992W = is992WProduct(goal);
             let bestEquipment = null;
             let bestScore = -1;
             
-            if (is992W && goal.背番号) {
+            if (capability?.hasMapping && capabilityMachines.length > 0) {
+                const trendDistribution = trend?.equipmentDistribution || {};
+                const rankedCapabilityOptions = capabilityMachines
+                    .map((machine, index) => ({
+                        equipment: machine.equipment || machine.設備,
+                        priority: Number.isFinite(Number(machine.priority)) ? Number(machine.priority) : index + 1,
+                        preferred: machine.preferred === true,
+                        trendFrequency: trendDistribution[machine.equipment || machine.設備] || 0
+                    }))
+                    .sort((left, right) => {
+                        if (left.priority !== right.priority) {
+                            return left.priority - right.priority;
+                        }
+                        if (left.preferred !== right.preferred) {
+                            return left.preferred ? -1 : 1;
+                        }
+                        if (left.trendFrequency !== right.trendFrequency) {
+                            return right.trendFrequency - left.trendFrequency;
+                        }
+                        return String(left.equipment).localeCompare(String(right.equipment));
+                    });
+
+                if (rankedCapabilityOptions.length > 0) {
+                    bestEquipment = rankedCapabilityOptions[0].equipment;
+                    bestScore = rankedCapabilityOptions[0].priority;
+                    console.log(`  ✓ Capability Assignment to ${bestEquipment} (priority=${bestScore}, history=${rankedCapabilityOptions[0].trendFrequency})`);
+                }
+            } else if (capability?.hasMapping && capabilityMachines.length === 0) {
+                console.log('  ✗ Capability mapping exists but no enabled equipment is available');
+            } else if (is992W && goal.背番号) {
                 const firstDigit = parseInt(goal.背番号.charAt(0));
                 const material = getMaterialSuffix(goal.背番号);
                 
@@ -4810,11 +9483,14 @@ window.showSmartSchedulingModal = async function() {
                 assignments[bestEquipment].push({
                     ...goal,
                     quantity: goal.remainingQuantity,
-                    confidence: trend ? (trend.frequency / trend.totalRecords) : 0
+                    confidence: trend && trend.totalRecords ? (trend.frequency / trend.totalRecords) : 0,
+                    assignmentSource: capability?.hasMapping && capabilityMachines.length > 0 ? 'capability' : 'history',
+                    assignmentRank: capability?.hasMapping && capabilityMachines.length > 0 ? bestScore : null,
+                    historyConfidence: trend && trend.totalRecords ? (trend.frequency / trend.totalRecords) : 0
                 });
                 totalAssigned++;
             } else {
-                console.log(`  ✗ NOT ASSIGNED - No trend data found`);
+                console.log(`  ✗ NOT ASSIGNED - No valid capability mapping or history data found`);
                 totalUnassigned++;
             }
         });
@@ -4847,7 +9523,10 @@ function showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassi
                 <div class="p-6 border-b border-gray-200 dark:border-gray-700">
                     <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="smartScheduling">Smart Scheduling</h3>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                        ${totalAssigned} products assigned, ${totalUnassigned} without history
+                        ${totalAssigned} products assigned, ${totalUnassigned} unassigned
+                    </p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                        Capability priority is used first when a mapping exists. Press history is only a tie-breaker or legacy fallback.
                     </p>
                     <div class="mt-4">
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -4874,7 +9553,9 @@ function showSmartSchedulingConfirmation(assignments, totalAssigned, totalUnassi
                                         </div>
                                         <div class="text-right">
                                             <p class="text-sm text-gray-600 dark:text-gray-400">
-                                                ${Math.round(p.confidence * 100)}% confidence
+                                                ${p.assignmentSource === 'capability'
+                                                    ? `Capability priority ${p.assignmentRank || 1}${p.historyConfidence ? ` · history ${Math.round(p.historyConfidence * 100)}%` : ''}`
+                                                    : `${Math.round((p.historyConfidence || p.confidence || 0) * 100)}% history confidence`}
                                             </p>
                                         </div>
                                     </div>
@@ -4963,24 +9644,60 @@ window.confirmSmartScheduling = async function() {
             for (const product of products) {
                 console.log(`\n--- Processing: ${product.背番号} (${product.remainingQuantity} pcs remaining) ---`);
                 
-                // Build ranked equipment list from trend data
                 const trend = window._smartSchedulingTrends[product.背番号 || product.品番];
-                if (!trend || !trend.equipmentDistribution) {
-                    console.log('❌ No equipment distribution data - SKIPPING');
+                const capability = getCachedProductionCapability(product, plannerState.currentFactory);
+                const capabilityMachines = Array.isArray(capability?.eligibleMachines) ? capability.eligibleMachines : [];
+
+                let rankedEquipment = [];
+
+                if (capability?.hasMapping && capabilityMachines.length > 0) {
+                    const trendDistribution = trend?.equipmentDistribution || {};
+                    rankedEquipment = capabilityMachines
+                        .map((machine, index) => {
+                            const equipment = machine.equipment || machine.設備;
+                            const frequency = trendDistribution[equipment] || 0;
+
+                            return {
+                                equipment,
+                                priority: Number.isFinite(Number(machine.priority)) ? Number(machine.priority) : index + 1,
+                                preferred: machine.preferred === true,
+                                frequency,
+                                confidence: trend?.totalRecords ? (frequency / trend.totalRecords * 100).toFixed(0) + '%' : 'capability'
+                            };
+                        })
+                        .sort((left, right) => {
+                            if (left.priority !== right.priority) {
+                                return left.priority - right.priority;
+                            }
+                            if (left.preferred !== right.preferred) {
+                                return left.preferred ? -1 : 1;
+                            }
+                            if (left.frequency !== right.frequency) {
+                                return right.frequency - left.frequency;
+                            }
+                            return String(left.equipment).localeCompare(String(right.equipment));
+                        });
+
+                    console.log('Ranked equipment from capability:', rankedEquipment.map(e => `${e.equipment} (p${e.priority}, ${e.confidence})`).join(' → '));
+                } else if (capability?.hasMapping && capabilityMachines.length === 0) {
+                    console.log('❌ Capability mapping exists but no enabled equipment - SKIPPING');
+                    skippedCount++;
+                    continue;
+                } else if (trend && trend.equipmentDistribution) {
+                    rankedEquipment = Object.entries(trend.equipmentDistribution)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([eq, freq]) => ({
+                            equipment: eq,
+                            frequency: freq,
+                            confidence: (freq / trend.totalRecords * 100).toFixed(0) + '%'
+                        }));
+
+                    console.log('Ranked equipment from history:', rankedEquipment.map(e => `${e.equipment} (${e.confidence})`).join(' → '));
+                } else {
+                    console.log('❌ No capability mapping or equipment distribution data - SKIPPING');
                     skippedCount++;
                     continue;
                 }
-                
-                // Sort equipment by frequency (confidence)
-                const rankedEquipment = Object.entries(trend.equipmentDistribution)
-                    .sort((a, b) => b[1] - a[1]) // Sort by frequency descending
-                    .map(([eq, freq]) => ({
-                        equipment: eq,
-                        frequency: freq,
-                        confidence: (freq / trend.totalRecords * 100).toFixed(0) + '%'
-                    }));
-                
-                console.log('Ranked equipment:', rankedEquipment.map(e => `${e.equipment} (${e.confidence})`).join(' → '));
                 
                 // Filter out equipment that conflicts with existing groups or is in use as part of a group
                 const availableEquipment = rankedEquipment.filter(({ equipment }) => {
@@ -5013,23 +9730,13 @@ window.confirmSmartScheduling = async function() {
                 
                 console.log('Available equipment after filtering:', availableEquipment.map(e => e.equipment).join(' → '));
                 
-                // Get product capacity per box
-                let capacity = parseInt(product['収容数']) || 0;
-                if (!capacity) {
-                    const fullProduct = plannerState.products.find(p => 
-                        (product.品番 && p.品番 === product.品番) || 
-                        (product.背番号 && p.背番号 === product.背番号)
-                    );
-                    if (fullProduct) capacity = parseInt(fullProduct['収容数']) || 1;
-                }
-                if (!capacity || capacity <= 0) capacity = 1;
-                
-                console.log(`Box capacity: ${capacity} pcs/box`);
-                
                 // Try each equipment in order of confidence (using filtered list)
                 let scheduled = false;
                 for (const { equipment } of availableEquipment) {
                     console.log(`\n  Trying: ${equipment}...`);
+                    const productForEquipment = { ...product, equipment };
+                    const capacity = resolvePlannerBoxQuantity(productForEquipment, equipment);
+                    console.log(`Box capacity: ${capacity} pcs/box`);
                     
                     // Calculate current end time for this equipment
                     const existingProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
@@ -5073,7 +9780,7 @@ window.confirmSmartScheduling = async function() {
                     
                     for (let box = 1; box <= totalBoxesNeeded; box++) {
                         const boxQuantity = Math.min(capacity, remainingQuantity - ((box - 1) * capacity));
-                        const boxTimeInfo = calculateProductionTime(product, boxQuantity);
+                        const boxTimeInfo = calculateProductionTime(productForEquipment, boxQuantity, equipment);
                         const boxDurationMinutes = boxTimeInfo.totalSeconds / 60;
                         
                         // Calculate where this box would end, accounting for breaks
@@ -5101,7 +9808,7 @@ window.confirmSmartScheduling = async function() {
                     const quantityToSchedule = boxesThatFit * capacity;
                     const actualQuantity = Math.min(quantityToSchedule, remainingQuantity);
                     
-                    const timeInfo = calculateProductionTime(product, actualQuantity);
+                    const timeInfo = calculateProductionTime(productForEquipment, actualQuantity, equipment);
                     const timing = findNextAvailableTime(currentTime, timeInfo.totalSeconds / 60, equipment);
                     
                     // Check for conflicts with MongoDB before scheduling
@@ -5178,7 +9885,7 @@ window.confirmSmartScheduling = async function() {
         hideLoadingModal();
         
         if (scheduledCount > 0) {
-            showPlannerNotification(`✅ Scheduled ${scheduledCount} product(s) in complete boxes. ${skippedCount > 0 ? skippedCount + ' skipped (no space or no history).' : ''}`, 'success');
+            showPlannerNotification(`✅ Scheduled ${scheduledCount} product(s) in complete boxes. ${skippedCount > 0 ? skippedCount + ' skipped (no space, no capability, or no history).' : ''}`, 'success');
         } else {
             showPlannerNotification('No products could be scheduled. Try increasing time limit or check equipment availability.', 'warning');
         }
@@ -5763,6 +10470,1139 @@ async function handleTimelineDrop(event, targetEquipment, targetTime) {
     draggedProduct = null;
     draggedProductEquipment = null;
 }
+
+window.setPlannerPreviewViewMode = function(mode) {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadSwitchMode', {}, 'Load the preview first before switching preview modes.'), 'warning');
+        return;
+    }
+
+    const nextMode = mode === 'draft' ? 'draft' : 'auto';
+    if (nextMode === 'draft' && !hasPlannerPreviewDraft() && !hasPlannerPreviewSavedDraft(preview)) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedDraftForView', {}, 'Create or save a Preview Draft first before switching to Draft view.'), 'warning');
+        return;
+    }
+
+    plannerState.preview.viewMode = nextMode;
+    if (nextMode !== 'draft') {
+        plannerState.preview.isDraftMode = false;
+        plannerState.preview.quantityEditorDraftId = null;
+        plannerState.preview.insertTarget = null;
+
+        const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+        if (modal) {
+            modal.remove();
+        }
+
+        const insertModal = document.getElementById('plannerPreviewDraftInsertModal');
+        if (insertModal) {
+            insertModal.remove();
+        }
+    }
+
+    renderPlannerPreview();
+};
+
+window.exportPlannerPreviewScheduleJson = async function(mode = 'auto') {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadExport', {}, 'Load the preview first before exporting schedule JSON.'), 'warning');
+        return;
+    }
+
+    const exportData = buildPlannerPreviewScheduleExport(preview, mode);
+    if (!exportData) {
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewNoScheduleExport',
+                { mode: getPlannerPreviewModeLabel(mode) },
+                `No ${getPlannerPreviewModeLabel(mode)} schedule is available to export yet.`
+            ),
+            'warning'
+        );
+        return;
+    }
+
+    const exportText = JSON.stringify(exportData, null, 2);
+    const copied = await copyPlannerPreviewTextToClipboard(exportText);
+    const exportLabel = getPlannerPreviewModeLabel(mode);
+
+    if (!copied) {
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewCopyFailed',
+                { mode: exportLabel },
+                `Unable to copy ${exportLabel} JSON to the clipboard.`
+            ),
+            'error'
+        );
+        return;
+    }
+
+    showPlannerNotification(
+        plannerTranslate(
+            'plannerPreviewCopySuccess',
+            { mode: exportLabel },
+            `${exportLabel} schedule JSON copied to clipboard. Paste it here when you want me to inspect it.`
+        ),
+        'success'
+    );
+};
+
+function getPlannerPreviewPublishContext() {
+    if (!canPlannerManagePublishedSchedules()) {
+        showPlannerNotification(plannerTranslate('plannerPublishedPermissionDenied', {}, 'You do not have permission to publish or restore schedules.'), 'warning');
+        return null;
+    }
+
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNeedPreviewFirst', {}, 'Load the preview first before publishing a schedule.'), 'warning');
+        return null;
+    }
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNeedFactoryDate', {}, 'Select a factory and date before publishing a schedule.'), 'warning');
+        return null;
+    }
+
+    let sourceMode = plannerState.preview.viewMode === 'draft' ? 'draft' : 'auto';
+    let simulation = getPlannerPreviewExportSimulation(preview, sourceMode);
+    if (!simulation && sourceMode === 'draft') {
+        sourceMode = 'auto';
+        simulation = getPlannerPreviewExportSimulation(preview, sourceMode);
+    }
+
+    const assignments = normalizePlannerPreviewDraftAssignments(simulation?.assignments || []);
+    if (assignments.length === 0) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNoAssignmentsToPublish', {}, 'There are no schedule blocks to publish yet.'), 'warning');
+        return null;
+    }
+
+    return {
+        preview,
+        sourceMode,
+        assignments,
+    };
+}
+
+async function fetchPlannerPublishedScheduleSnapshot(factory = '', date = '') {
+    const targetFactory = String(factory || '').trim();
+    const targetDate = String(date || '').trim();
+    if (!targetFactory || !targetDate) {
+        return null;
+    }
+
+    const requestUrl = `${BASE_URL}api/production-planner/published?factory=${encodeURIComponent(targetFactory)}&date=${encodeURIComponent(targetDate)}`;
+    const response = await fetch(requestUrl);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+        throw new Error(result.error || result.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'));
+    }
+
+    return result.data || null;
+}
+
+function closePlannerPublishedDateModal() {
+    const modal = document.getElementById('plannerPublishedDateModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function setPlannerPublishedDateModalBusy(isBusy = false) {
+    const confirmButton = document.getElementById('plannerPublishedDateConfirmButton');
+    const topCancelButton = document.getElementById('plannerPublishedDateCancelButton');
+    const bottomCancelButton = document.getElementById('plannerPublishedDateSecondaryCancelButton');
+    const targetDateInput = document.getElementById('plannerPublishedTargetDateInput');
+
+    [confirmButton, topCancelButton, bottomCancelButton].forEach((element) => {
+        if (!element) {
+            return;
+        }
+
+        element.disabled = isBusy;
+        element.classList.toggle('opacity-60', isBusy);
+        element.classList.toggle('cursor-not-allowed', isBusy);
+    });
+
+    if (targetDateInput) {
+        targetDateInput.disabled = isBusy;
+    }
+}
+
+function showPlannerPublishedDateModal(sourceMode = 'auto') {
+    closePlannerPublishedDateModal();
+
+    const publishActionLabel = sourceMode === 'draft'
+        ? plannerTranslate('plannerPreviewPublishDraftAction', {}, 'Publish Draft')
+        : plannerTranslate('plannerPreviewPublishAutoAction', {}, 'Publish Auto');
+    const defaultTargetDate = getPlannerDefaultPublishedTargetDate();
+
+    const modalHTML = `
+        <div id="plannerPublishedDateModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full overflow-hidden">
+                <div class="flex items-start justify-between gap-4 p-4 border-b border-gray-200 dark:border-gray-700">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedChooseDateTitle', {}, 'Choose Published Date'))}</h3>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedChooseDateDescription', {}, 'Choose which calendar date this schedule should be published to.'))}</p>
+                    </div>
+                    <button id="plannerPublishedDateCancelButton" onclick="closePlannerPublishedDateModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+                <div class="p-4 space-y-4">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/40">
+                        <div class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">${escapePlannerPreviewHtml(getPlannerPublishedSourceModeLabel(sourceMode))}</div>
+                        <div class="mt-2 text-sm text-slate-700 dark:text-slate-200">${escapePlannerPreviewHtml(plannerState.currentFactory || '-')}</div>
+                        <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedPreviewDateHint', { date: formatPlannerPreviewDate(plannerState.currentDate) }, `Current preview plan date: ${formatPlannerPreviewDate(plannerState.currentDate)}`))}</div>
+                    </div>
+                    <div>
+                        <label for="plannerPublishedTargetDateInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedTargetDateLabel', {}, 'Published Date'))}</label>
+                        <input type="date" id="plannerPublishedTargetDateInput" value="${escapePlannerPreviewHtml(defaultTargetDate)}" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-emerald-500 dark:bg-gray-700 dark:text-white">
+                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPublishedTargetDateHint', {}, 'Default is tomorrow. You can choose any date.'))}</p>
+                    </div>
+                </div>
+                <div class="flex items-center justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
+                    <button id="plannerPublishedDateSecondaryCancelButton" onclick="closePlannerPublishedDateModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700">
+                        ${escapePlannerPreviewHtml(plannerTranslate('cancel', {}, 'Cancel'))}
+                    </button>
+                    <button id="plannerPublishedDateConfirmButton" onclick="confirmPlannerPublishedDate()" class="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors">
+                        <i class="ri-send-plane-line"></i>
+                        <span>${escapePlannerPreviewHtml(publishActionLabel)}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    const targetDateInput = document.getElementById('plannerPublishedTargetDateInput');
+    if (targetDateInput) {
+        requestAnimationFrame(() => {
+            targetDateInput.focus();
+
+            if (typeof targetDateInput.showPicker === 'function') {
+                try {
+                    targetDateInput.showPicker();
+                } catch (error) {
+                    console.debug('Planner publish date picker could not be opened automatically:', error);
+                }
+            }
+        });
+    }
+}
+
+window.closePlannerPublishedDateModal = closePlannerPublishedDateModal;
+
+window.publishPlannerPreviewSchedule = function() {
+    const publishContext = getPlannerPreviewPublishContext();
+    if (!publishContext) {
+        return;
+    }
+
+    showPlannerPublishedDateModal(publishContext.sourceMode);
+};
+
+window.confirmPlannerPublishedDate = async function() {
+    const publishContext = getPlannerPreviewPublishContext();
+    if (!publishContext) {
+        closePlannerPublishedDateModal();
+        return;
+    }
+
+    const targetDateInput = document.getElementById('plannerPublishedTargetDateInput');
+    const targetDate = String(targetDateInput?.value || '').trim();
+
+    if (!targetDate) {
+        showPlannerNotification(plannerTranslate('plannerPublishedNeedTargetDate', {}, 'Choose a published date before continuing.'), 'warning');
+        targetDateInput?.focus();
+        return;
+    }
+
+    setPlannerPublishedDateModalBusy(true);
+
+    try {
+        const existingPublished = await fetchPlannerPublishedScheduleSnapshot(plannerState.currentFactory, targetDate);
+        const existingVersionCount = Array.isArray(existingPublished?.versions) ? existingPublished.versions.length : 0;
+        if (existingVersionCount > 0) {
+            const shouldContinue = window.confirm(
+                plannerTranslate(
+                    'plannerPublishedOverwriteConfirm',
+                    {
+                        date: formatPlannerPreviewDate(targetDate),
+                        count: formatPlannerPreviewNumber(existingVersionCount),
+                    },
+                    `There is already a published schedule on ${formatPlannerPreviewDate(targetDate)}. Continue publishing anyway?`
+                )
+            );
+
+            if (!shouldContinue) {
+                setPlannerPublishedDateModalBusy(false);
+                return;
+            }
+        }
+
+        const currentUser = getPlannerAuthUser() || {};
+        const currentUsername = currentUser?.username || 'system';
+        const publishedBy = await getUserFullName(currentUsername);
+        const response = await fetch(`${BASE_URL}api/production-planner/published/publish`, {
+            method: 'POST',
+            headers: getPlannerAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: targetDate,
+                scheduleUntilTime: getPlannerPreviewScheduleUntilTime(),
+                sourceMode: publishContext.sourceMode,
+                sourceType: 'manual',
+                sourceLabel: getPlannerPublishedSourceModeLabel(publishContext.sourceMode),
+                assignments: publishContext.assignments,
+                basisRows: buildPlannerPreviewDraftBasisRows(publishContext.preview),
+                publishedBy,
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || result.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'));
+        }
+
+        closePlannerPublishedDateModal();
+
+        if (targetDate !== plannerState.currentDate) {
+            await syncPlannerDateSelection(targetDate);
+        }
+
+        markPlannerPublishedDirty({ clearData: true });
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPublishedPublishSuccess',
+                {
+                    version: formatPlannerPreviewNumber(result.data?.version || 1),
+                    date: formatPlannerPreviewDate(targetDate),
+                },
+                `Published schedule version ${formatPlannerPreviewNumber(result.data?.version || 1)} is now active for ${formatPlannerPreviewDate(targetDate)}.`
+            ),
+            'success'
+        );
+        switchPlannerMainTab('published');
+    } catch (error) {
+        console.error('Failed to publish planner schedule:', error);
+        showPlannerNotification(error.message || plannerTranslate('plannerPublishedPublishFailed', {}, 'Failed to publish schedule.'), 'error');
+        setPlannerPublishedDateModalBusy(false);
+    }
+};
+
+window.restorePlannerPublishedVersion = async function(versionNumber) {
+    if (!canPlannerManagePublishedSchedules()) {
+        showPlannerNotification(plannerTranslate('plannerPublishedPermissionDenied', {}, 'You do not have permission to publish or restore schedules.'), 'warning');
+        return;
+    }
+
+    const published = plannerState.published.data || null;
+    const versions = Array.isArray(published?.versions) ? published.versions : [];
+    const selectedVersion = versions.find((version) => Number(version.version || 0) === Number(versionNumber || 0));
+
+    if (!selectedVersion || selectedVersion.isActive) {
+        showPlannerNotification(plannerTranslate('plannerPublishedRestoreUnavailable', {}, 'That published version cannot be restored right now.'), 'warning');
+        return;
+    }
+
+    const confirmMessage = plannerTranslate(
+        'plannerPublishedRestoreConfirm',
+        { version: formatPlannerPreviewNumber(selectedVersion.version || 0) },
+        `Restore Version ${formatPlannerPreviewNumber(selectedVersion.version || 0)} as a new active version?`
+    );
+    if (!window.confirm(confirmMessage)) {
+        return;
+    }
+
+    try {
+        const currentUser = getPlannerAuthUser();
+        const currentUsername = currentUser?.username || 'system';
+        const publishedBy = await getUserFullName(currentUsername);
+        const response = await fetch(`${BASE_URL}api/production-planner/published/restore`, {
+            method: 'POST',
+            headers: getPlannerAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: plannerState.currentDate,
+                sourceVersion: Number(selectedVersion.version || 0),
+                publishedBy,
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || result.message || plannerTranslate('plannerPublishedRestoreFailed', {}, 'Failed to restore published version.'));
+        }
+
+        markPlannerPublishedDirty({ clearData: true });
+        await ensurePlannerPublishedLoaded({ forceRefresh: true });
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPublishedRestoreSuccess',
+                {
+                    sourceVersion: formatPlannerPreviewNumber(selectedVersion.version || 0),
+                    version: formatPlannerPreviewNumber(result.data?.version || 0),
+                },
+                `Version ${formatPlannerPreviewNumber(selectedVersion.version || 0)} was restored as Version ${formatPlannerPreviewNumber(result.data?.version || 0)}.`
+            ),
+            'success'
+        );
+    } catch (error) {
+        console.error('Failed to restore published schedule version:', error);
+        showPlannerNotification(error.message || plannerTranslate('plannerPublishedRestoreFailed', {}, 'Failed to restore published version.'), 'error');
+    }
+};
+
+window.togglePlannerPreviewDraftMode = function() {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadDraft', {}, 'Load the preview first before creating a draft.'), 'warning');
+        return;
+    }
+
+    if (!hasPlannerPreviewDraft()) {
+        const draftAssignments = ensurePlannerPreviewDraft(preview);
+        if (!Array.isArray(draftAssignments) || draftAssignments.length === 0) {
+            showPlannerNotification(plannerTranslate('plannerPreviewNoRowsDraft', {}, 'No preview rows are available to draft yet.'), 'warning');
+            return;
+        }
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftCreated', {}, 'Preview Draft created. Drag a block head to move it, or drop it onto another eligible block to swap and auto-arrange timing.'), 'success');
+    } else {
+        plannerState.preview.isDraftMode = !plannerState.preview.isDraftMode;
+        if (!plannerState.preview.isDraftMode) {
+            plannerState.preview.quantityEditorDraftId = null;
+            plannerState.preview.insertTarget = null;
+
+            const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+            if (modal) {
+                modal.remove();
+            }
+
+            const insertModal = document.getElementById('plannerPreviewDraftInsertModal');
+            if (insertModal) {
+                insertModal.remove();
+            }
+        }
+    }
+
+    plannerState.preview.viewMode = 'draft';
+
+    renderPlannerPreview();
+};
+
+window.resetPlannerPreviewDraft = function() {
+    if (!hasPlannerPreviewDraft()) {
+        return;
+    }
+
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+    const hasSavedDraft = hasPlannerPreviewSavedDraft(preview);
+
+    resetPlannerPreviewDraftState();
+    plannerState.preview.viewMode = hasSavedDraft ? 'draft' : 'auto';
+    renderPlannerPreview();
+    showPlannerNotification(
+        hasSavedDraft
+            ? plannerTranslate('plannerPreviewDraftDiscardedSaved', {}, 'Unsaved Preview Draft changes discarded. Showing the saved draft again.')
+            : plannerTranslate('plannerPreviewDraftResetAuto', {}, 'Preview Draft reset to the auto-generated calendar.'),
+        'success'
+    );
+};
+
+function renderPlannerPreviewDraftInsertModal(preview = null) {
+    const activePreview = preview
+        ? applyLocalPlanToPlannerPreview(preview)
+        : (plannerState.preview.data ? applyLocalPlanToPlannerPreview(plannerState.preview.data) : null);
+    const modal = document.getElementById('plannerPreviewDraftInsertModal');
+    if (modal) {
+        modal.remove();
+    }
+
+    const insertTarget = plannerState.preview.insertTarget || null;
+    const targetEquipment = String(insertTarget?.equipment || '').trim();
+    const targetTime = String(insertTarget?.time || '').trim();
+    if (
+        !activePreview
+        || !targetEquipment
+        || !targetTime
+        || plannerState.preview.viewMode !== 'draft'
+        || plannerState.preview.isDraftMode !== true
+        || !hasPlannerPreviewDraft()
+    ) {
+        plannerState.preview.insertTarget = null;
+        return;
+    }
+
+    const insertOptions = getPlannerPreviewDraftInsertOptions(activePreview, targetEquipment, targetTime);
+    const emptyMessage = plannerTranslate(
+        'plannerPreviewInsertNoOptions',
+        { equipment: targetEquipment, time: targetTime },
+        `No time-limit shortage lines can fit on ${targetEquipment} from ${targetTime}.`
+    );
+
+    document.body.insertAdjacentHTML('beforeend', `
+        <div id="plannerPreviewDraftInsertModal" class="fixed inset-0 bg-black bg-opacity-50 z-[70] flex items-center justify-center p-4">
+            <div class="w-full max-w-xl rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-600 dark:text-sky-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInsertModalTitle', {}, 'Add draft block'))}</div>
+                        <h4 class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(`${targetEquipment} · ${targetTime}`)}</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInsertModalDescription', { equipment: targetEquipment, time: targetTime }, `Choose a shortage line from the time-limit list to place on ${targetEquipment} from ${targetTime}.`))}</p>
+                    </div>
+                    <button type="button" onclick="closePlannerPreviewDraftInsertModal()" class="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-lg"></i>
+                    </button>
+                </div>
+                ${insertOptions.length > 0 ? `
+                    <div class="mt-5 max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                        ${insertOptions.map((option) => {
+                            const requestLabel = String(option.priorityRow?.requestNumberLabel || option.priorityRow?.requestNumber || option.exception?.requestNumber || '-').trim() || '-';
+                            const blockLabel = getPlannerPreviewBlockLabel(option.priorityRow, plannerTranslate('plannerPreviewBlockFallback', {}, 'Block'));
+                            const quantityLabel = plannerTranslate(
+                                'plannerPreviewInsertOptionQuantity',
+                                {
+                                    quantity: formatPlannerPreviewNumber(option.quantity || 0),
+                                    boxes: formatPlannerPreviewNumber(option.boxes || 0)
+                                },
+                                `Adds ${formatPlannerPreviewNumber(option.quantity || 0)} pcs · ${formatPlannerPreviewNumber(option.boxes || 0)} boxes`
+                            );
+                            const remainderLabel = option.remainingQuantity > 0
+                                ? plannerTranslate(
+                                    'plannerPreviewInsertOptionPartial',
+                                    { remaining: formatPlannerPreviewNumber(option.remainingQuantity || 0) },
+                                    `${formatPlannerPreviewNumber(option.remainingQuantity || 0)} pcs will remain outside the draft window after this insert.`
+                                )
+                                : plannerTranslate(
+                                    'plannerPreviewInsertOptionFull',
+                                    {},
+                                    'This insert fits the full remaining shortage for this line.'
+                                );
+
+                            return `
+                                <button
+                                    type="button"
+                                    data-preview-exception-id="${escapePlannerPreviewHtml(String(option.exception?.id || ''))}"
+                                    onclick="handlePlannerPreviewDraftInsertOptionClick(event, this)"
+                                    class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition-colors hover:border-sky-300 hover:bg-sky-50 dark:border-gray-700 dark:bg-gray-900/30 dark:hover:border-sky-700 dark:hover:bg-sky-950/20"
+                                >
+                                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <div class="text-sm font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(requestLabel)} - ${escapePlannerPreviewHtml(blockLabel)}</div>
+                                            <div class="mt-1 text-xs font-medium uppercase tracking-[0.12em] text-sky-700 dark:text-sky-300">${escapePlannerPreviewHtml(quantityLabel)}</div>
+                                            <div class="mt-2 text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(remainderLabel)}</div>
+                                        </div>
+                                        <span class="inline-flex items-center justify-center rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white dark:bg-slate-100 dark:text-slate-900">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewInsertAction', {}, 'Add Here'))}</span>
+                                    </div>
+                                </button>
+                            `;
+                        }).join('')}
+                    </div>
+                ` : `
+                    <div class="mt-5 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-5 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+                        ${escapePlannerPreviewHtml(emptyMessage)}
+                    </div>
+                `}
+            </div>
+        </div>
+    `);
+}
+
+function renderPlannerPreviewDraftQuantityModal(preview = null) {
+    const activePreview = preview
+        ? applyLocalPlanToPlannerPreview(preview)
+        : (plannerState.preview.data ? applyLocalPlanToPlannerPreview(plannerState.preview.data) : null);
+    const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+    if (modal) {
+        modal.remove();
+    }
+
+    const draftId = String(plannerState.preview.quantityEditorDraftId || '').trim();
+    if (!activePreview || !draftId || plannerState.preview.viewMode !== 'draft' || plannerState.preview.isDraftMode !== true || !hasPlannerPreviewDraft()) {
+        plannerState.preview.quantityEditorDraftId = null;
+        return;
+    }
+
+    const assignments = getPlannerPreviewEditableDraftAssignments(activePreview);
+    const assignment = assignments.find((item) => getPlannerPreviewDraftAssignmentId(item) === draftId) || null;
+    if (!assignment) {
+        plannerState.preview.quantityEditorDraftId = null;
+        return;
+    }
+
+    const currentBoxes = getPlannerPreviewDraftAssignmentBoxCount(assignment);
+    const maxBoxes = getPlannerPreviewDraftAssignmentMaxBoxes(activePreview, assignment);
+    const capacity = getPlannerPreviewDraftAssignmentCapacity(assignment);
+    const requestLabel = getPlannerPreviewTileRequestLabel(assignment)
+        || String(assignment.requestNumberLabel || assignment.requestNumber || '').trim()
+        || plannerTranslate('plannerPreviewInsertLabel', {}, 'Preview insert');
+    const blockLabel = `${getPlannerPreviewBlockLabel(assignment, plannerTranslate('plannerPreviewBlockFallback', {}, 'Block'))} (${requestLabel})`;
+    const removedQuantity = Math.max(0, getPlannerPreviewDraftAssignmentLimitQuantity(assignment) - Math.max(0, Number(assignment.quantity || 0)));
+
+    document.body.insertAdjacentHTML('beforeend', `
+        <div id="plannerPreviewDraftQuantityModal" class="fixed inset-0 bg-black bg-opacity-50 z-[70] flex items-center justify-center p-4">
+            <div class="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-800">
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-[0.14em] text-sky-600 dark:text-sky-300">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewEditQuantityAction', {}, 'Edit draft quantity'))}</div>
+                        <h4 class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(blockLabel)}</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewEditQuantityDescription', {}, 'Adjust this draft block in box units. Removed boxes return to the draft time-limit list.'))}</p>
+                    </div>
+                    <button type="button" onclick="closePlannerPreviewDraftQuantityModal()" class="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-lg"></i>
+                    </button>
+                </div>
+                <div class="mt-5 grid grid-cols-3 gap-3 text-center">
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-900/30">
+                        <div class="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewBoxesLabel', {}, 'Boxes'))}</div>
+                        <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">${formatPlannerPreviewNumber(currentBoxes)}</div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-900/30">
+                        <div class="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewQuantityLabel', {}, 'Quantity'))}</div>
+                        <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">${formatPlannerPreviewNumber(assignment.quantity || 0)}</div>
+                    </div>
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-900/30">
+                        <div class="text-[11px] font-medium uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewBoxCapacityLabel', {}, 'Per Box'))}</div>
+                        <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">${formatPlannerPreviewNumber(capacity || 0)}</div>
+                    </div>
+                </div>
+                <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                    ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewRemovedToExceptionNotice', { quantity: formatPlannerPreviewNumber(removedQuantity) }, `${formatPlannerPreviewNumber(removedQuantity)} pcs are currently outside the draft schedule window for this block.`))}
+                </div>
+                <div class="mt-5 flex items-center justify-center gap-3">
+                    <button type="button" onclick="adjustPlannerPreviewDraftAssignmentBoxes(-1)" class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-xl font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200 dark:hover:bg-rose-950/40" ${currentBoxes <= 0 ? 'disabled' : ''}>
+                        <i class="ri-subtract-line"></i>
+                    </button>
+                    <div class="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-slate-100 dark:text-slate-900">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewBoxRangeLabel', { current: formatPlannerPreviewNumber(currentBoxes), max: formatPlannerPreviewNumber(maxBoxes) }, `${formatPlannerPreviewNumber(currentBoxes)} / ${formatPlannerPreviewNumber(maxBoxes)} boxes`))}</div>
+                    <button type="button" onclick="adjustPlannerPreviewDraftAssignmentBoxes(1)" class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xl font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/40" ${currentBoxes >= maxBoxes ? 'disabled' : ''}>
+                        <i class="ri-add-line"></i>
+                    </button>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button type="button" onclick="closePlannerPreviewDraftQuantityModal()" class="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800">
+                        <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewDoneAction', {}, 'Done'))}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `);
+}
+
+window.closePlannerPreviewDraftQuantityModal = function() {
+    plannerState.preview.quantityEditorDraftId = null;
+    const modal = document.getElementById('plannerPreviewDraftQuantityModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+window.closePlannerPreviewDraftInsertModal = function() {
+    plannerState.preview.insertTarget = null;
+    const modal = document.getElementById('plannerPreviewDraftInsertModal');
+    if (modal) {
+        modal.remove();
+    }
+};
+
+window.showPlannerPreviewDraftInsertModal = function(equipment, targetTime) {
+    if (plannerState.preview.viewMode !== 'draft' || plannerState.preview.isDraftMode !== true || !hasPlannerPreviewDraft()) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedEditDraftInsert', {}, 'Turn on Draft editing before adding a shortage line.'), 'warning');
+        return;
+    }
+
+    plannerState.preview.insertTarget = {
+        equipment: String(equipment || '').trim(),
+        time: String(targetTime || '').trim(),
+    };
+    renderPlannerPreviewDraftInsertModal();
+};
+
+window.handlePlannerPreviewDraftInsertButtonClick = function(event, element) {
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+
+    const equipment = String(element?.dataset?.previewSlotEquipment || '').trim();
+    const targetTime = String(element?.dataset?.previewSlotTime || '').trim();
+    if (!equipment || !targetTime) {
+        return;
+    }
+
+    window.showPlannerPreviewDraftInsertModal(equipment, targetTime);
+};
+
+window.handlePlannerPreviewDraftInsertOptionClick = function(event, element) {
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+
+    const exceptionId = String(element?.dataset?.previewExceptionId || '').trim();
+    if (!exceptionId) {
+        return;
+    }
+
+    window.insertPlannerPreviewDraftException(exceptionId);
+};
+
+window.insertPlannerPreviewDraftException = function(exceptionId) {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+    const insertTarget = plannerState.preview.insertTarget || null;
+
+    if (
+        !preview
+        || !insertTarget
+        || plannerState.preview.viewMode !== 'draft'
+        || plannerState.preview.isDraftMode !== true
+        || !hasPlannerPreviewDraft()
+    ) {
+        return;
+    }
+
+    const assignments = getPlannerPreviewEditableDraftAssignments(preview);
+    const exception = getPlannerPreviewTimeLimitExceptions(preview).find((item) => String(item?.id || '').trim() === String(exceptionId || '').trim()) || null;
+    if (!exception) {
+        showPlannerNotification(plannerTranslate('plannerPreviewInsertFailed', {}, 'Unable to add that shortage line to this slot.'), 'warning');
+        return;
+    }
+
+    const insertOption = buildPlannerPreviewDraftInsertOption(
+        preview,
+        assignments,
+        exception,
+        insertTarget.equipment,
+        insertTarget.time,
+    );
+    if (!insertOption) {
+        showPlannerNotification(plannerTranslate('plannerPreviewInsertFailed', {}, 'Unable to add that shortage line to this slot.'), 'warning');
+        renderPlannerPreviewDraftInsertModal(preview);
+        return;
+    }
+
+    const nextAssignment = buildPlannerPreviewDraftAssignmentFromInsertOption(insertOption);
+    const moveEvaluation = evaluatePlannerPreviewDraftMove(assignments, nextAssignment, insertOption.equipment, insertOption.startTime);
+    if (!moveEvaluation.ok) {
+        showPlannerNotification(moveEvaluation.message || plannerTranslate('plannerPreviewInsertFailed', {}, 'Unable to add that shortage line to this slot.'), 'warning');
+        renderPlannerPreviewDraftInsertModal(preview);
+        return;
+    }
+
+    nextAssignment.startTime = minutesToTime(moveEvaluation.startMinutes);
+    nextAssignment.previewEndTime = minutesToTime(moveEvaluation.endMinutes);
+
+    plannerState.preview.draftAssignments = normalizePlannerPreviewDraftAssignments([...assignments, nextAssignment]);
+    plannerState.preview.seedSimulation = null;
+    plannerState.preview.draftChanged = true;
+    plannerState.preview.draggedAssignmentId = null;
+    plannerState.preview.viewMode = 'draft';
+
+    window.closePlannerPreviewDraftInsertModal();
+    renderPlannerPreview();
+    showPlannerNotification(
+        plannerTranslate(
+            'plannerPreviewInsertSuccess',
+            {
+                block: getPlannerPreviewBlockLabel(nextAssignment, plannerTranslate('plannerPreviewBlockFallback', {}, 'Block')),
+                time: nextAssignment.startTime,
+                equipment: nextAssignment.equipment,
+            },
+            `${getPlannerPreviewBlockLabel(nextAssignment, plannerTranslate('plannerPreviewBlockFallback', {}, 'Block'))} added at ${nextAssignment.startTime} on ${nextAssignment.equipment}.`
+        ),
+        'success'
+    );
+};
+
+window.showPlannerPreviewDraftQuantityModal = function(draftId) {
+    if (plannerState.preview.viewMode !== 'draft' || plannerState.preview.isDraftMode !== true || !hasPlannerPreviewDraft()) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedEditDraftQuantity', {}, 'Turn on Draft editing before adjusting block quantity.'), 'warning');
+        return;
+    }
+
+    plannerState.preview.quantityEditorDraftId = String(draftId || '').trim();
+    renderPlannerPreviewDraftQuantityModal();
+};
+
+window.handlePlannerPreviewDraftQuantityButtonClick = function(event, element) {
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+
+    const draftId = String(element?.dataset?.previewDraftId || '').trim();
+    if (!draftId) {
+        return;
+    }
+
+    window.showPlannerPreviewDraftQuantityModal(draftId);
+};
+
+window.adjustPlannerPreviewDraftAssignmentBoxes = function(delta = 0) {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+    if (!preview || !hasPlannerPreviewDraft() || plannerState.preview.viewMode !== 'draft' || plannerState.preview.isDraftMode !== true) {
+        return;
+    }
+
+    const draftId = String(plannerState.preview.quantityEditorDraftId || '').trim();
+    if (!draftId) {
+        return;
+    }
+
+    const assignments = getPlannerPreviewEditableDraftAssignments(preview);
+    const targetAssignment = assignments.find((assignment) => getPlannerPreviewDraftAssignmentId(assignment) === draftId) || null;
+    if (!targetAssignment) {
+        window.closePlannerPreviewDraftQuantityModal();
+        return;
+    }
+
+    const currentBoxes = getPlannerPreviewDraftAssignmentBoxCount(targetAssignment);
+    const maxBoxes = getPlannerPreviewDraftAssignmentMaxBoxes(preview, targetAssignment);
+    const nextBoxes = Math.max(0, Math.min(maxBoxes, currentBoxes + Number(delta || 0)));
+    if (nextBoxes === currentBoxes) {
+        return;
+    }
+
+    const nextQuantity = getPlannerPreviewDraftQuantityForBoxes(preview, targetAssignment, nextBoxes);
+    const laneAssignments = getPlannerPreviewDraftLaneAssignments(assignments, targetAssignment.equipment);
+    const laneIndex = laneAssignments.findIndex((assignment) => getPlannerPreviewDraftAssignmentId(assignment) === draftId);
+    if (laneIndex === -1) {
+        window.closePlannerPreviewDraftQuantityModal();
+        return;
+    }
+
+    const productRecord = getPlannerPreviewProductRecord({
+        ...targetAssignment,
+        equipment: targetAssignment.equipment,
+    });
+    const nextAssignment = nextQuantity > 0
+        ? {
+            ...targetAssignment,
+            quantity: nextQuantity,
+            boxes: calculateBoxesNeeded(productRecord, nextQuantity, targetAssignment.equipment),
+            estimatedTime: calculateProductionTime(productRecord, nextQuantity, targetAssignment.equipment),
+        }
+        : null;
+    const nextLaneAssignments = nextQuantity > 0
+        ? laneAssignments.map((assignment, index) => (index === laneIndex ? nextAssignment : assignment))
+        : laneAssignments.filter((assignment) => getPlannerPreviewDraftAssignmentId(assignment) !== draftId);
+    const repackedLane = repackPlannerPreviewDraftLane(
+        assignments,
+        targetAssignment.equipment,
+        nextLaneAssignments,
+        laneIndex,
+    );
+
+    if (!repackedLane.ok) {
+        showPlannerNotification(repackedLane.message || plannerTranslate('plannerPreviewDraftQuantityAdjustFailed', {}, 'Unable to adjust the draft quantity for this block.'), 'warning');
+        return;
+    }
+
+    plannerState.preview.draftAssignments = mergePlannerPreviewDraftLaneAssignments(assignments, {
+        [targetAssignment.equipment]: repackedLane.assignments,
+    });
+    plannerState.preview.seedSimulation = null;
+    plannerState.preview.draftChanged = true;
+    plannerState.preview.draggedAssignmentId = null;
+    plannerState.preview.viewMode = 'draft';
+
+    renderPlannerPreview();
+
+    if (nextQuantity > 0) {
+        plannerState.preview.quantityEditorDraftId = draftId;
+        renderPlannerPreviewDraftQuantityModal(preview);
+    } else {
+        window.closePlannerPreviewDraftQuantityModal();
+    }
+};
+
+window.deletePlannerPreviewSavedDraft = async function() {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview || !hasPlannerPreviewSavedDraft(preview)) {
+        showPlannerNotification(plannerTranslate('plannerPreviewDeleteSavedDraftMissing', {}, 'There is no saved Preview Draft to delete.'), 'warning');
+        return;
+    }
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNeedFactoryDate', {}, 'Select factory and date before saving the Preview Draft.'), 'warning');
+        return;
+    }
+
+    const confirmed = window.confirm(
+        plannerTranslate(
+            'plannerPreviewDeleteSavedDraftConfirm',
+            {},
+            'Delete the saved Preview Draft and return to Auto view? Any unsaved local draft changes will also be discarded.'
+        )
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(
+            `${BASE_URL}api/production-planner/preview-draft?factory=${encodeURIComponent(plannerState.currentFactory)}&date=${encodeURIComponent(plannerState.currentDate)}`,
+            { method: 'DELETE' }
+        );
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || result.message || plannerTranslate('plannerPreviewDeleteSavedDraftFailed', {}, 'Failed to delete the saved Preview Draft.'));
+        }
+
+        plannerState.preview.data = applyLocalPlanToPlannerPreview({
+            ...preview,
+            savedDraft: null,
+        });
+        resetPlannerPreviewDraftState();
+        plannerState.preview.viewMode = 'auto';
+        plannerState.preview.lastLoadedAt = Date.now();
+        plannerState.preview.error = '';
+
+        renderPlannerPreview();
+        showPlannerNotification(
+            plannerTranslate('plannerPreviewDeleteSavedDraftSuccess', {}, 'Saved Preview Draft deleted. Showing Auto preview.'),
+            'success'
+        );
+    } catch (error) {
+        console.error('Failed to delete saved planner preview draft:', error);
+        showPlannerNotification(error.message || plannerTranslate('plannerPreviewDeleteSavedDraftFailed', {}, 'Failed to delete the saved Preview Draft.'), 'error');
+    }
+};
+
+window.savePlannerPreviewDraft = async function() {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview || !hasPlannerPreviewDraft()) {
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNeedBeforeSaving', {}, 'Create or edit a Preview Draft before saving it.'), 'warning');
+        return;
+    }
+
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNeedFactoryDate', {}, 'Select factory and date before saving the Preview Draft.'), 'warning');
+        return;
+    }
+
+    const assignments = normalizePlannerPreviewDraftAssignments(plannerState.preview.draftAssignments || []);
+    if (assignments.length === 0) {
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftNoBlocksToSave', {}, 'There are no Preview Draft blocks to save.'), 'warning');
+        return;
+    }
+
+    try {
+        const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+        const currentUsername = currentUser?.username || 'system';
+        const updatedBy = await getUserFullName(currentUsername);
+        const response = await fetch(`${BASE_URL}api/production-planner/preview-draft/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                factory: plannerState.currentFactory,
+                date: plannerState.currentDate,
+                scheduleUntilTime: getPlannerPreviewScheduleUntilTime(),
+                assignments,
+                basisRows: buildPlannerPreviewDraftBasisRows(preview),
+                updatedBy,
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || result.message || plannerTranslate('plannerPreviewDraftSaveFailed', {}, 'Failed to save Preview Draft.'));
+        }
+
+        plannerState.preview.data = applyLocalPlanToPlannerPreview({
+            ...preview,
+            savedDraft: result.data || null,
+        });
+        resetPlannerPreviewDraftState();
+        plannerState.preview.viewMode = 'draft';
+        plannerState.preview.lastLoadedAt = Date.now();
+        plannerState.preview.error = '';
+
+        renderPlannerPreview();
+        showPlannerNotification(plannerTranslate('plannerPreviewDraftSaved', {}, 'Preview Draft saved. Use View Auto and View Draft to compare both calendars.'), 'success');
+    } catch (error) {
+        console.error('Failed to save planner preview draft:', error);
+        showPlannerNotification(error.message || plannerTranslate('plannerPreviewDraftSaveFailed', {}, 'Failed to save Preview Draft.'), 'error');
+    }
+};
+
+window.handlePlannerPreviewDraftDragStart = function(event, draftId) {
+    if (!plannerState.preview.isDraftMode || !draftId) {
+        return;
+    }
+
+    plannerState.preview.draggedAssignmentId = String(draftId);
+    event.currentTarget.style.opacity = '0.55';
+    event.dataTransfer.effectAllowed = 'move';
+};
+
+window.handlePlannerPreviewDraftDragStartFromElement = function(event, element) {
+    const draftId = String(element?.dataset?.previewDraftId || '').trim();
+    if (!draftId) {
+        if (event?.preventDefault) {
+            event.preventDefault();
+        }
+        return;
+    }
+
+    window.handlePlannerPreviewDraftDragStart(event, draftId);
+};
+
+window.handlePlannerPreviewDraftDragEnd = function(event) {
+    event.currentTarget.style.opacity = '1';
+    plannerState.preview.draggedAssignmentId = null;
+};
+
+window.handlePlannerPreviewDraftDragOver = function(event) {
+    if (!plannerState.preview.isDraftMode || !plannerState.preview.draggedAssignmentId) {
+        return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    event.currentTarget.classList.add('bg-sky-100', 'dark:bg-sky-900/30');
+};
+
+window.handlePlannerPreviewDraftDragLeave = function(event) {
+    event.currentTarget.classList.remove('bg-sky-100', 'dark:bg-sky-900/30');
+};
+
+window.handlePlannerPreviewDraftDrop = function(event, targetEquipment, targetTime) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('bg-sky-100', 'dark:bg-sky-900/30');
+
+    if (!plannerState.preview.isDraftMode || !plannerState.preview.draggedAssignmentId || !hasPlannerPreviewDraft()) {
+        return;
+    }
+
+    const draftAssignments = normalizePlannerPreviewDraftAssignments(plannerState.preview.draftAssignments || []);
+    const movingAssignmentIndex = draftAssignments.findIndex((assignment) => (
+        getPlannerPreviewDraftAssignmentId(assignment) === plannerState.preview.draggedAssignmentId
+    ));
+
+    if (movingAssignmentIndex === -1) {
+        plannerState.preview.draggedAssignmentId = null;
+        return;
+    }
+
+    const movingAssignment = { ...draftAssignments[movingAssignmentIndex] };
+    const otherAssignments = draftAssignments.filter((_, index) => index !== movingAssignmentIndex);
+    const occupiedTargetAssignment = getPlannerPreviewDraftAssignmentAtSlot(
+        otherAssignments,
+        targetEquipment,
+        targetTime,
+        plannerState.preview.draggedAssignmentId,
+    );
+
+    if (occupiedTargetAssignment) {
+        const swapEvaluation = evaluatePlannerPreviewDraftSwap(
+            draftAssignments,
+            movingAssignment,
+            occupiedTargetAssignment,
+        );
+
+        if (!swapEvaluation.ok) {
+            showPlannerNotification(swapEvaluation.message || plannerTranslate('plannerPreviewSwapUnavailable', {}, 'That draft swap is not available.'), 'warning');
+            plannerState.preview.draggedAssignmentId = null;
+            renderPlannerPreview();
+            return;
+        }
+
+        plannerState.preview.draftAssignments = normalizePlannerPreviewDraftAssignments(swapEvaluation.assignments || []);
+        plannerState.preview.seedSimulation = null;
+        plannerState.preview.draftChanged = true;
+        plannerState.preview.draggedAssignmentId = null;
+        plannerState.preview.viewMode = 'draft';
+
+        renderPlannerPreview();
+        showPlannerNotification(
+            swapEvaluation.startTimesChanged
+                ? plannerTranslate(
+                    'plannerPreviewSwapSuccessRepacked',
+                    {
+                        source: getPlannerPreviewBlockLabel(movingAssignment, 'Block'),
+                        target: getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')
+                    },
+                    `${getPlannerPreviewBlockLabel(movingAssignment, 'Block')} swapped with ${getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')} and the lane timing was auto-arranged.`
+                )
+                : plannerTranslate(
+                    'plannerPreviewSwapSuccess',
+                    {
+                        source: getPlannerPreviewBlockLabel(movingAssignment, 'Block'),
+                        target: getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')
+                    },
+                    `${getPlannerPreviewBlockLabel(movingAssignment, 'Block')} swapped with ${getPlannerPreviewBlockLabel(occupiedTargetAssignment, 'block')}.`
+                ),
+            'success'
+        );
+        return;
+    }
+
+    const moveEvaluation = evaluatePlannerPreviewDraftMove(
+        otherAssignments,
+        movingAssignment,
+        targetEquipment,
+        targetTime,
+    );
+
+    if (!moveEvaluation.ok) {
+        showPlannerNotification(moveEvaluation.message || plannerTranslate('plannerPreviewMoveUnavailable', {}, 'That draft move is not available.'), 'warning');
+        plannerState.preview.draggedAssignmentId = null;
+        renderPlannerPreview();
+        return;
+    }
+
+    movingAssignment.startTime = minutesToTime(moveEvaluation.startMinutes);
+    movingAssignment.previewEndTime = minutesToTime(moveEvaluation.endMinutes);
+
+    otherAssignments.push(movingAssignment);
+    plannerState.preview.draftAssignments = normalizePlannerPreviewDraftAssignments(otherAssignments);
+    plannerState.preview.seedSimulation = null;
+    plannerState.preview.draftChanged = true;
+    plannerState.preview.draggedAssignmentId = null;
+    plannerState.preview.viewMode = 'draft';
+
+    renderPlannerPreview();
+    showPlannerNotification(
+        plannerTranslate(
+            'plannerPreviewMoveSuccess',
+            {
+                block: getPlannerPreviewBlockLabel(movingAssignment, 'Block'),
+                time: movingAssignment.startTime,
+                equipment: movingAssignment.equipment
+            },
+            `${getPlannerPreviewBlockLabel(movingAssignment, 'Block')} moved to ${movingAssignment.startTime} on ${movingAssignment.equipment}.`
+        ),
+        'success'
+    );
+};
 
 // ============================================
 // BULK EDIT GOALS MODAL
@@ -7587,27 +13427,33 @@ window.toggleEquipmentCard = toggleEquipmentCard;
 // PRINT FUNCTIONALITY
 // ============================================
 
-// Show print modal with equipment selection
-window.showPrintModal = function() {
-    if (plannerState.selectedProducts.length === 0) {
-        showPlannerNotification('No products selected to print', 'error');
+let plannerPrintModalContext = null;
+
+function showSchedulePrintModal(products = [], options = {}) {
+    if (!Array.isArray(products) || products.length === 0) {
+        showPlannerNotification(options.emptyMessage || 'No products selected to print', 'error');
         return;
     }
-    
-    // Get unique equipment list from selected products, sorted
-    const equipmentSet = new Set(plannerState.selectedProducts.map(p => p.equipment));
+
+    plannerPrintModalContext = {
+        products,
+        options,
+    };
+
+    const equipmentSet = new Set(products.map((product) => String(product.equipment || '').trim()).filter(Boolean));
     const equipmentList = Array.from(equipmentSet).sort();
-    
+    const modalTitle = String(options.modalTitle || 'Select Equipment to Print').trim();
+
     const modalHTML = `
         <div id="printModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
                 <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Select Equipment to Print</h3>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(modalTitle)}</h3>
                     <button onclick="closePrintModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                         <i class="ri-close-line text-xl"></i>
                     </button>
                 </div>
-                
+
                 <div class="p-4">
                     <div class="mb-4">
                         <label class="flex items-center gap-2 mb-3 cursor-pointer">
@@ -7615,24 +13461,22 @@ window.showPrintModal = function() {
                             <span class="font-medium text-gray-900 dark:text-white">Select All</span>
                         </label>
                     </div>
-                    
+
                     <div class="space-y-2 max-h-96 overflow-y-auto">
-                        ${equipmentList.map(equipment => `
+                        ${equipmentList.map((equipment) => `
                             <label class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-2 rounded">
-                                <input type="checkbox" class="equipment-checkbox rounded" value="${equipment}" checked>
-                                <span class="text-gray-900 dark:text-white">${equipment}</span>
+                                <input type="checkbox" class="equipment-checkbox rounded" value="${escapePlannerPreviewHtml(equipment)}" checked>
+                                <span class="text-gray-900 dark:text-white">${escapePlannerPreviewHtml(equipment)}</span>
                             </label>
                         `).join('')}
                     </div>
                 </div>
-                
+
                 <div class="flex items-center justify-end gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
-                    <button onclick="closePrintModal()" 
-                            class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600">
+                    <button onclick="closePrintModal()" class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600">
                         Cancel
                     </button>
-                    <button onclick="printSelectedEquipment()" 
-                            class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2">
+                    <button onclick="printSelectedEquipment()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2">
                         <i class="ri-printer-line"></i>
                         <span>Print</span>
                     </button>
@@ -7640,13 +13484,24 @@ window.showPrintModal = function() {
             </div>
         </div>
     `;
-    
+
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+// Show print modal with equipment selection
+window.showPrintModal = function() {
+    showSchedulePrintModal(plannerState.selectedProducts, {
+        modalTitle: 'Select Equipment to Print',
+        emptyMessage: 'No products selected to print',
+        scheduleTitle: 'Production Schedule',
+        headerTitle: '生産スケジュール (Production Schedule)',
+    });
 };
 
 window.closePrintModal = function() {
     const modal = document.getElementById('printModal');
     if (modal) modal.remove();
+    plannerPrintModalContext = null;
 };
 
 window.toggleAllEquipment = function(checked) {
@@ -7656,6 +13511,16 @@ window.toggleAllEquipment = function(checked) {
 };
 
 window.printSelectedEquipment = async function() {
+    const printContext = plannerPrintModalContext || {
+        products: plannerState.selectedProducts,
+        options: {
+            loadingMessage: 'Generating print preview...',
+            errorMessage: 'Failed to generate print table',
+            scheduleTitle: 'Production Schedule',
+            headerTitle: '生産スケジュール (Production Schedule)',
+        },
+    };
+
     // Get selected equipment
     const selectedEquipment = Array.from(document.querySelectorAll('.equipment-checkbox:checked'))
         .map(checkbox => checkbox.value);
@@ -7668,19 +13533,19 @@ window.printSelectedEquipment = async function() {
     closePrintModal();
     
     // Show loading
-    showPlannerNotification('Generating print preview...', 'info');
+    showPlannerNotification(printContext.options.loadingMessage || 'Generating print preview...', 'info');
     
     try {
-        await generatePrintTable(selectedEquipment);
+        await generatePrintTable(selectedEquipment, printContext.products, printContext.options);
     } catch (error) {
         console.error('Print error:', error);
-        showPlannerNotification('Failed to generate print table', 'error');
+        showPlannerNotification(printContext.options.errorMessage || 'Failed to generate print table', 'error');
     }
 };
 
-async function generatePrintTable(selectedEquipment) {
+async function generatePrintTable(selectedEquipment, products = plannerState.selectedProducts, options = {}) {
     // Filter products by selected equipment
-    const productsToPrint = plannerState.selectedProducts
+    const productsToPrint = (Array.isArray(products) ? products : [])
         .filter(p => selectedEquipment.includes(p.equipment))
         .sort((a, b) => {
             // Sort by equipment name first
@@ -7791,7 +13656,7 @@ async function generatePrintTable(selectedEquipment) {
     }
     
     // Generate HTML for print
-    const printHTML = generatePrintHTML(printRows);
+    const printHTML = generatePrintHTML(printRows, options);
     
     // Open print window
     const printWindow = window.open('', '_blank');
@@ -7899,8 +13764,10 @@ function calculateActualWorkingTime(product) {
     return simplifyTimeRanges(fullTimeString);
 }
 
-function generatePrintHTML(rows) {
-    const date = plannerState.currentDate;
+function generatePrintHTML(rows, options = {}) {
+    const date = options.date || plannerState.currentDate;
+    const title = String(options.scheduleTitle || 'Production Schedule').trim();
+    const headerTitle = String(options.headerTitle || '生産スケジュール (Production Schedule)').trim();
     
     // Group rows by equipment and assign alternating colors
     let currentEquipment = null;
@@ -7922,7 +13789,7 @@ function generatePrintHTML(rows) {
         <html>
         <head>
             <meta charset="UTF-8">
-            <title>Production Schedule - ${date}</title>
+            <title>${escapePlannerPreviewHtml(title)} - ${escapePlannerPreviewHtml(date)}</title>
             <style>
                 @page {
                     size: A4;
@@ -8013,8 +13880,8 @@ function generatePrintHTML(rows) {
         </head>
         <body>
             <div class="header">
-                <h1>生産スケジュール (Production Schedule)</h1>
-                <div class="date">日付: ${date}</div>
+                <h1>${escapePlannerPreviewHtml(headerTitle)}</h1>
+                <div class="date">日付: ${escapePlannerPreviewHtml(date)}</div>
             </div>
             
             <table>
@@ -8059,6 +13926,45 @@ window.closePrintModal = closePrintModal;
 window.toggleAllEquipment = toggleAllEquipment;
 window.printSelectedEquipment = printSelectedEquipment;
 
+function getScheduleCalendarProducts(products = []) {
+    const byEquipment = {};
+
+    (Array.isArray(products) ? products : []).forEach((item) => {
+        const equipment = String(item.equipment || '').trim();
+        if (!equipment) {
+            return;
+        }
+
+        if (!byEquipment[equipment]) {
+            byEquipment[equipment] = [];
+        }
+
+        byEquipment[equipment].push(item);
+    });
+
+    return {
+        byEquipment,
+        sortedEquipment: Object.keys(byEquipment).sort(),
+    };
+}
+
+async function openScheduleCalendarWindow(products = [], options = {}) {
+    if (!Array.isArray(products) || products.length === 0) {
+        showPlannerNotification(options.emptyMessage || 'No products scheduled for this date', 'warning');
+        return;
+    }
+
+    const { byEquipment, sortedEquipment } = getScheduleCalendarProducts(products);
+    const calendarHTML = await generateCalendarHTML(sortedEquipment, byEquipment, {
+        ...options,
+        products,
+    });
+
+    const calendarWindow = window.open('', '_blank');
+    calendarWindow.document.write(calendarHTML);
+    calendarWindow.document.close();
+}
+
 // ============================================
 // CALENDAR VIEW (GANTT CHART)
 // ============================================
@@ -8082,33 +13988,24 @@ window.openCalendarView = async function() {
         }
     }
     
-    // Group products by equipment and sort
-    const byEquipment = {};
-    plannerState.selectedProducts.forEach(item => {
-        if (!byEquipment[item.equipment]) {
-            byEquipment[item.equipment] = [];
-        }
-        byEquipment[item.equipment].push(item);
+    await openScheduleCalendarWindow(plannerState.selectedProducts, {
+        emptyMessage: 'No products scheduled for this date',
+        title: 'Production Schedule',
+        headerTitle: '生産スケジュール (Production Schedule)',
+        includeProductionStats: true,
     });
-    
-    // Sort equipment names
-    const sortedEquipment = Object.keys(byEquipment).sort();
-    
-    // Generate calendar HTML
-    const calendarHTML = await generateCalendarHTML(sortedEquipment, byEquipment);
-    
-    // Open in new window
-    const calendarWindow = window.open('', '_blank');
-    calendarWindow.document.write(calendarHTML);
-    calendarWindow.document.close();
 };
 
 /**
  * Generate HTML for calendar view
  */
-async function generateCalendarHTML(equipment, productsByEquipment) {
-    const date = plannerState.currentDate;
-    const factory = plannerState.currentFactory;
+async function generateCalendarHTML(equipment, productsByEquipment, options = {}) {
+    const date = options.date || plannerState.currentDate;
+    const factory = options.factory || plannerState.currentFactory;
+    const products = Array.isArray(options.products) ? options.products : [];
+    const pageTitle = String(options.title || 'Production Schedule').trim();
+    const headerTitle = String(options.headerTitle || '生産スケジュール (Production Schedule)').trim();
+    const includeProductionStats = options.includeProductionStats !== false;
     
     // Calculate time range
     const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
@@ -8121,6 +14018,12 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
     let progressPercent = 0;
     
     try {
+        totalScheduledQty = products.reduce((sum, product) => sum + Number(product.quantity || 0), 0);
+
+        if (!includeProductionStats) {
+            throw new Error('skip-production-stats');
+        }
+
         // Fetch goals for target quantity
         const goalsResponse = await fetch(`${BASE_URL}api/production-goals?date=${date}&factory=${encodeURIComponent(factory)}`);
         if (goalsResponse.ok) {
@@ -8159,7 +14062,7 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
         if (productionResponse.ok) {
             const productionData = await productionResponse.json();
             if (productionData && productionData.length > 0) {
-                totalScheduledQty = productionData[0].totalQuantity || 0;
+                totalScheduledQty = productionData[0].totalQuantity || totalScheduledQty;
             }
         }
         
@@ -8167,12 +14070,14 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
             progressPercent = Math.round((totalScheduledQty / totalGoalQty) * 100);
         }
     } catch (error) {
-        console.warn('Could not fetch production data:', error);
+        if (error.message !== 'skip-production-stats') {
+            console.warn('Could not fetch production data:', error);
+        }
     }
     
     // Collect all unique products with their colors for legend
     const productLegend = new Map();
-    plannerState.selectedProducts.forEach(item => {
+    products.forEach(item => {
         if (!productLegend.has(item.背番号)) {
             productLegend.set(item.背番号, {
                 背番号: item.背番号,
@@ -8273,7 +14178,7 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
         <html>
         <head>
             <meta charset="UTF-8">
-            <title>Production Schedule - ${date}</title>
+            <title>${escapePlannerPreviewHtml(pageTitle)} - ${escapePlannerPreviewHtml(date)}</title>
             <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
             <style>
                 * {
@@ -8640,10 +14545,10 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
         </head>
         <body>
             <div class="header">
-                <h1>生産スケジュール (Production Schedule)</h1>
+                <h1>${escapePlannerPreviewHtml(headerTitle)}</h1>
                 <div class="info">
-                    <strong>日付:</strong> ${date} | 
-                    <strong>工場:</strong> ${factory}
+                    <strong>日付:</strong> ${escapePlannerPreviewHtml(date)} | 
+                    <strong>工場:</strong> ${escapePlannerPreviewHtml(factory)}
                 </div>
                 <div class="stats">
                     <div class="stat-item">
@@ -8991,4 +14896,160 @@ async function generateCalendarHTML(equipment, productsByEquipment) {
 }
 
 window.openCalendarView = openCalendarView;
+
+function closePlannerPreviewSourceModal() {
+    const modal = document.getElementById('plannerPreviewSourceModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function showPlannerPreviewSourceModal(action = 'print') {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadAction', {}, 'Load the preview first before using this action.'), 'warning');
+        return;
+    }
+
+    const modes = getPlannerPreviewActionModes(preview);
+    if (modes.length <= 1) {
+        if (action === 'calendar') {
+            window.openPlannerPreviewCalendarView('auto');
+        } else {
+            window.showPlannerPreviewPrintModal('auto');
+        }
+        return;
+    }
+
+    const actionLabel = getPlannerPreviewActionLabel(action);
+    const iconClass = action === 'calendar' ? 'ri-calendar-line' : 'ri-printer-line';
+
+    const modalHTML = `
+        <div id="plannerPreviewSourceModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full">
+                <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewChooseSource', {}, 'Choose Preview Source'))}</h3>
+                    <button onclick="closePlannerPreviewSourceModal()" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+                <div class="p-4 space-y-3">
+                    <button onclick="runPlannerPreviewSourceAction('${action}', 'auto')" class="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-300 px-4 py-3 text-left hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700">
+                        <span class="flex items-center gap-3 text-gray-900 dark:text-white">
+                            <i class="${iconClass}"></i>
+                            <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUseAutoSchedule', {}, 'Use Auto Schedule'))}</span>
+                        </span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">${escapePlannerPreviewHtml(getPlannerPreviewModeLabel('auto'))}</span>
+                    </button>
+                    <button onclick="runPlannerPreviewSourceAction('${action}', 'draft')" class="w-full flex items-center justify-between gap-3 rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-left hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/30 dark:hover:bg-sky-950/40">
+                        <span class="flex items-center gap-3 text-sky-800 dark:text-sky-100">
+                            <i class="${iconClass}"></i>
+                            <span>${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewUseDraftSchedule', {}, 'Use Draft Schedule'))}</span>
+                        </span>
+                        <span class="text-xs text-sky-600 dark:text-sky-300">${escapePlannerPreviewHtml(getPlannerPreviewModeLabel('draft'))}</span>
+                    </button>
+                </div>
+                <div class="px-4 pb-4 text-xs text-gray-500 dark:text-gray-400">
+                    ${escapePlannerPreviewHtml(plannerTranslate('plannerPreviewActionExplain', { action: actionLabel }, `${actionLabel} can use either the current Auto preview or the current Draft preview.`))}
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+window.closePlannerPreviewSourceModal = closePlannerPreviewSourceModal;
+
+window.runPlannerPreviewSourceAction = function(action = 'print', mode = 'auto') {
+    closePlannerPreviewSourceModal();
+
+    if (action === 'calendar') {
+        window.openPlannerPreviewCalendarView(mode);
+        return;
+    }
+
+    window.showPlannerPreviewPrintModal(mode);
+};
+
+window.showPlannerPreviewPrintModal = function(mode = null) {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadPrint', {}, 'Load the preview first before printing it.'), 'warning');
+        return;
+    }
+
+    if (!mode) {
+        showPlannerPreviewSourceModal('print');
+        return;
+    }
+
+    const previewAssignments = getPlannerPreviewActionAssignments(preview, mode);
+    if (previewAssignments.length === 0) {
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewNoBlocksPrint',
+                { mode: getPlannerPreviewModeLabel(mode) },
+                `No ${getPlannerPreviewModeLabel(mode)} preview blocks are available to print.`
+            ),
+            'warning'
+        );
+        return;
+    }
+
+    const modeLabel = getPlannerPreviewModeLabel(mode);
+    showSchedulePrintModal(previewAssignments, {
+        modalTitle: plannerTranslate('plannerPreviewPrintSelectEquipment', { mode: modeLabel }, `Select Preview ${modeLabel} Equipment to Print`),
+        emptyMessage: plannerTranslate('plannerPreviewPrintEmpty', { mode: modeLabel }, `No Preview ${modeLabel} blocks are available to print.`),
+        loadingMessage: plannerTranslate('plannerPreviewPrintLoading', { mode: modeLabel }, `Generating Preview ${modeLabel} print preview...`),
+        errorMessage: plannerTranslate('plannerPreviewPrintError', { mode: modeLabel }, `Failed to generate Preview ${modeLabel} print table.`),
+        scheduleTitle: plannerTranslate('plannerPreviewScheduleTitle', { mode: modeLabel }, `Preview ${modeLabel} Schedule`),
+        headerTitle: plannerTranslate('plannerPreviewScheduleHeaderTitle', { mode: modeLabel }, `Preview Production Schedule (${modeLabel})`),
+        date: preview.targetDate || plannerState.currentDate,
+    });
+};
+
+window.showPlannerPreviewCalendarView = function() {
+    showPlannerPreviewSourceModal('calendar');
+};
+
+window.openPlannerPreviewCalendarView = async function(mode = 'auto') {
+    const preview = plannerState.preview.data
+        ? applyLocalPlanToPlannerPreview(plannerState.preview.data)
+        : null;
+
+    if (!preview) {
+        showPlannerNotification(plannerTranslate('plannerPreviewNeedLoadCalendar', {}, 'Load the preview first before opening calendar view.'), 'warning');
+        return;
+    }
+
+    const previewAssignments = getPlannerPreviewActionAssignments(preview, mode);
+    if (previewAssignments.length === 0) {
+        showPlannerNotification(
+            plannerTranslate(
+                'plannerPreviewNoBlocksCalendar',
+                { mode: getPlannerPreviewModeLabel(mode) },
+                `No ${getPlannerPreviewModeLabel(mode)} preview blocks are available for calendar view.`
+            ),
+            'warning'
+        );
+        return;
+    }
+
+    const modeLabel = getPlannerPreviewModeLabel(mode);
+    await openScheduleCalendarWindow(previewAssignments, {
+        emptyMessage: plannerTranslate('plannerPreviewCalendarEmpty', { mode: modeLabel }, `No Preview ${modeLabel} blocks are available for calendar view.`),
+        title: plannerTranslate('plannerPreviewScheduleTitle', { mode: modeLabel }, `Preview ${modeLabel} Schedule`),
+        headerTitle: plannerTranslate('plannerPreviewScheduleHeaderTitle', { mode: modeLabel }, `Preview Production Schedule (${modeLabel})`),
+        includeProductionStats: false,
+        date: preview.targetDate || plannerState.currentDate,
+        factory: preview.factory || plannerState.currentFactory,
+    });
+};
 

@@ -2750,6 +2750,12 @@ function loadPage(page) {
                     <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-blue-500 text-blue-600" data-main-tab="goals">
                       <i class="ri-target-line mr-2"></i><span>Production Goals</span>
                     </button>
+                    <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-main-tab="preview">
+                      <i class="ri-radar-line mr-2"></i><span>Preview</span>
+                    </button>
+                    <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-main-tab="published">
+                      <i class="ri-broadcast-line mr-2"></i><span>Published</span>
+                    </button>
                     <button class="planner-main-tab-btn px-6 py-4 text-base font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300" data-main-tab="planning">
                       <i class="ri-calendar-schedule-line mr-2"></i><span>Planning</span>
                     </button>
@@ -2786,6 +2792,28 @@ function loadPage(page) {
                       <div class="text-center py-12 text-gray-500">
                         <i class="ri-target-line text-5xl mb-3"></i>
                         <p class="text-lg" data-i18n="setGoalsFirst">Please set production goals first</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Preview Tab Content -->
+                  <div id="planner-preview-tab" class="planner-main-tab-content hidden">
+                    <div id="plannerPreviewContainer" class="space-y-6">
+                      <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
+                        <i class="ri-radar-line text-5xl mb-3 block"></i>
+                        <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Live preview will appear here</p>
+                        <p class="mt-2 text-sm">Select a factory to compare current inventory, 3-day request demand, and the planner draft.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Published Tab Content -->
+                  <div id="planner-published-tab" class="planner-main-tab-content hidden">
+                    <div id="plannerPublishedContainer" class="space-y-6">
+                      <div class="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-8 text-center text-gray-500 dark:text-gray-400">
+                        <i class="ri-broadcast-line text-5xl mb-3 block"></i>
+                        <p class="text-lg font-medium text-gray-800 dark:text-gray-100">Published schedule will appear here</p>
+                        <p class="mt-2 text-sm">This tab is reserved for the latest frozen version released to the factory floor.</p>
                       </div>
                     </div>
                   </div>
@@ -2936,6 +2964,9 @@ function loadPage(page) {
                   </button>
                   <button id="materialDBTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('materialDB')">
                     材料 DB
+                  </button>
+                  <button id="productionCapabilityTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('productionCapability')">
+                    設備能力
                   </button>
                   <button id="productPDFsTab" class="master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap" onclick="switchMasterTab('productPDFs')">
                     梱包 / 検査基準 / 3点照合
@@ -3272,6 +3303,7 @@ function loadPage(page) {
             </div><!-- end masterNormalContentWrapper -->
 
             <!-- Defect Management Container -->
+            <div id="productionCapabilityContainer" class="hidden"></div>
             <div id="furyoKanriContainer" class="hidden"></div>
 
             <!-- Add New Record Modal -->
@@ -3454,14 +3486,26 @@ function loadPage(page) {
             function showNormalSections() {
               const wrapper = document.getElementById('masterNormalContentWrapper');
               const fc = document.getElementById('furyoKanriContainer');
+              const capability = document.getElementById('productionCapabilityContainer');
               if (wrapper) wrapper.style.display = '';
               if (fc) fc.classList.add('hidden');
+              if (capability) capability.classList.add('hidden');
             }
             function showFuryoKanriSection() {
               const wrapper = document.getElementById('masterNormalContentWrapper');
               const fc = document.getElementById('furyoKanriContainer');
+              const capability = document.getElementById('productionCapabilityContainer');
               if (wrapper) wrapper.style.display = 'none';
               if (fc) fc.classList.remove('hidden');
+              if (capability) capability.classList.add('hidden');
+            }
+            function showProductionCapabilitySection() {
+              const wrapper = document.getElementById('masterNormalContentWrapper');
+              const fc = document.getElementById('furyoKanriContainer');
+              const capability = document.getElementById('productionCapabilityContainer');
+              if (wrapper) wrapper.style.display = 'none';
+              if (fc) fc.classList.add('hidden');
+              if (capability) capability.classList.remove('hidden');
             }
 
             // If switching to 不良管理 tab
@@ -3469,8 +3513,23 @@ function loadPage(page) {
               currentMasterTab = 'furyoKanri';
               window.currentMasterTab = currentMasterTab;
               updateMasterTabStyles();
+              setMasterHeaderControlsForTab(currentMasterTab);
               showFuryoKanriSection();
               loadFuryoKanri();
+              return;
+            }
+
+            if (tabName === 'productionCapability') {
+              currentMasterTab = 'productionCapability';
+              window.currentMasterTab = currentMasterTab;
+              updateMasterTabStyles();
+              setMasterHeaderControlsForTab(currentMasterTab);
+              showProductionCapabilitySection();
+              if (typeof loadProductionCapabilityManager === 'function') {
+                loadProductionCapabilityManager();
+              } else {
+                console.error('❌ loadProductionCapabilityManager function not found');
+              }
               return;
             }
 
@@ -3479,6 +3538,9 @@ function loadPage(page) {
 
             // If switching to Product PDFs tab, load that page instead
             if (tabName === 'productPDFs') {
+              currentMasterTab = 'productPDFs';
+              window.currentMasterTab = currentMasterTab;
+              setMasterHeaderControlsForTab(currentMasterTab);
               if (typeof initProductPDFsPage === 'function') {
                 initProductPDFsPage();
               } else {
@@ -3491,6 +3553,7 @@ function loadPage(page) {
             currentMasterTab = tabName;
             window.currentMasterTab = currentMasterTab; // Update global variable
             updateMasterTabStyles();
+            setMasterHeaderControlsForTab(currentMasterTab);
             currentMasterPage = 1; // Reset to first page
             masterAdvancedFilterQuery = {}; // Clear advanced filters for new tab
             masterSortState = { column: null, direction: 1 }; // Reset sort for new tab
@@ -3523,6 +3586,14 @@ function loadPage(page) {
                 btn.className = 'master-tab-btn py-4 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium text-sm whitespace-nowrap';
               }
             });
+          }
+
+          function setMasterHeaderControlsForTab(tabName) {
+            const addBtn = document.getElementById('addNewRecordBtn');
+            if (!addBtn) return;
+
+            const shouldShowAddButton = tabName === 'masterDB' || tabName === 'materialDB';
+            addBtn.classList.toggle('hidden', !shouldShowAddButton);
           }
 
           // ==================== 不良管理 DEFECT MANAGEMENT ====================
@@ -4912,6 +4983,18 @@ function loadPage(page) {
 
           // Event listeners
           document.getElementById('refreshMasterBtn').addEventListener('click', () => {
+            if (currentMasterTab === 'productionCapability') {
+              if (typeof loadProductionCapabilityManager === 'function') {
+                loadProductionCapabilityManager();
+              }
+              return;
+            }
+
+            if (currentMasterTab === 'furyoKanri') {
+              loadFuryoKanri();
+              return;
+            }
+
             loadMasterDB();
             loadMasterFilters();
           });
@@ -4923,6 +5006,7 @@ function loadPage(page) {
           });
           document.getElementById('masterPrevPageBtn').addEventListener('click', () => changeMasterPage(-1));
           document.getElementById('masterNextPageBtn').addEventListener('click', () => changeMasterPage(1));
+          setMasterHeaderControlsForTab(currentMasterTab);
 
           // Add Record Modal Event Listeners
           document.getElementById('newRecordImageInput').addEventListener('change', function(e) {
