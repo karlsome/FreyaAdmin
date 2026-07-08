@@ -34,6 +34,10 @@ const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 const sensorDataCache = new Map();
 const SENSOR_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes for sensor data
 
+// Cache for sensor display names (ioTNames collection) - changes rarely, so cache longer
+const sensorNamesCache = new Map();
+const SENSOR_NAMES_CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+
 // Rate limiting for API calls
 const apiCallTimestamps = new Map();
 const API_RATE_LIMIT = 60 * 1000; // 1 minute between calls per factory
@@ -155,6 +159,52 @@ let filterDropdownCache = new Map(); // Cache for dropdown options
 // ==================== END DYNAMIC FILTER SYSTEM ====================
 
 /**
+ * Escape a string for safe embedding inside a single-quoted inline onclick JS string.
+ */
+function escapeForInlineJs(str) {
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/**
+ * Fetch sensor display names for a factory from the ioTNames collection.
+ * Returns a Map keyed by deviceId -> { name, imageURLs, ... }.
+ */
+async function getSensorNames(factoryName) {
+    const cacheKey = `names_${factoryName}`;
+    const cached = sensorNamesCache.get(cacheKey);
+
+    if (cached && (Date.now() - cached.timestamp) < SENSOR_NAMES_CACHE_DURATION) {
+        return cached.data;
+    }
+
+    try {
+        const res = await fetch(BASE_URL + "queries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                dbName: "Sasaki_Coating_MasterDB",
+                collectionName: "ioTNames",
+                query: { factoryName }
+            })
+        });
+
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
+
+        const entries = await res.json();
+        const namesMap = new Map();
+        (entries || []).forEach(entry => namesMap.set(entry.deviceId, entry));
+
+        sensorNamesCache.set(cacheKey, { data: namesMap, timestamp: Date.now() });
+        return namesMap;
+    } catch (error) {
+        console.error(`Error getting sensor names for ${factoryName}:`, error);
+        return new Map();
+    }
+}
+
+/**
  * Fetch physical sensor data from tempHumidityDB
  */
 async function getSensorData(factoryName) {
@@ -172,26 +222,29 @@ async function getSensorData(factoryName) {
     try {
         // Get today's date
         const today = new Date().toISOString().split("T")[0];
-        
-        const res = await fetch(BASE_URL + "queries", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                dbName: "submittedDB",
-                collectionName: "tempHumidityDB",
-                query: { 
-                    工場: factoryName,
-                    Date: today
-                },
-                sort: { Time: -1 }, // Get latest data first
-                limit: 50 // Get recent readings for multiple sensors
-            })
-        });
-        
+
+        const [res, sensorNames] = await Promise.all([
+            fetch(BASE_URL + "queries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    dbName: "submittedDB",
+                    collectionName: "tempHumidityDB",
+                    query: {
+                        工場: factoryName,
+                        Date: today
+                    },
+                    sort: { Time: -1 }, // Get latest data first
+                    limit: 50 // Get recent readings for multiple sensors
+                })
+            }),
+            getSensorNames(factoryName)
+        ]);
+
         if (!res.ok) {
             throw new Error(`HTTP error! status: ${res.status}`);
         }
-        
+
         const sensorReadings = await res.json();
         
         if (!sensorReadings || sensorReadings.length === 0) {
@@ -221,6 +274,7 @@ async function getSensorData(factoryName) {
         
         const sensors = Array.from(sensorMap.values()).map(reading => ({
             deviceId: reading.device,
+            name: sensorNames.get(reading.device)?.name || reading.device,
             temperature: parseFloat(reading.Temperature.replace('°C', '').trim()),
             humidity: parseFloat(reading.Humidity.replace('%', '').trim()),
             status: reading.sensorStatus || 'OK',
@@ -1002,7 +1056,8 @@ async function getSensorHistory(deviceId, page = 1, limit = 15, factoryName = nu
 /**
  * Show sensor history modal
  */
-function showSensorHistoryModal(deviceId, factoryName) {
+function showSensorHistoryModal(deviceId, factoryName, sensorName) {
+    sensorName = sensorName || deviceId;
     const modal = document.createElement('div');
     modal.id = 'sensorHistoryModal';
     modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
@@ -1367,7 +1422,8 @@ function showSensorHistoryModal(deviceId, factoryName) {
                 <div class="flex justify-between items-center">
                     <div>
                         <h3 class="text-lg font-semibold" data-i18n="sensorHistory">センサー履歴</h3>
-                        <p class="text-sm text-gray-600">${factoryName} - ${deviceId}</p>
+                        <p class="text-sm text-gray-600">${factoryName} - ${sensorName}</p>
+                        <p class="text-xs text-gray-400 font-mono">${deviceId}</p>
                     </div>
                     <button onclick="closeSensorHistoryModal()" class="text-gray-400 hover:text-gray-600">
                         <i class="ri-close-line text-xl"></i>
@@ -1519,7 +1575,8 @@ async function showFactorySensorHistoryModal(factoryName) {
         });
         
         const sensors = await res.json();
-        
+        const sensorNames = await getSensorNames(factoryName);
+
         if (!sensors || sensors.length === 0) {
             modal.querySelector('.p-4, .p-6, .sm\\:p-6').innerHTML = `
                 <div class="text-center py-8">
@@ -1537,12 +1594,14 @@ async function showFactorySensorHistoryModal(factoryName) {
 
         modal.querySelector('.p-4, .p-6, .sm\\:p-6').innerHTML = `
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                ${sensors.map(sensor => `
+                ${sensors.map(sensor => {
+                    const sensorName = sensorNames.get(sensor._id)?.name || sensor._id;
+                    return `
                     <div class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
-                         onclick="event.stopPropagation(); closeFactorySensorHistoryModal(); showSensorHistoryModal('${sensor._id}', '${factoryName}')">
+                         onclick="event.stopPropagation(); closeFactorySensorHistoryModal(); showSensorHistoryModal('${sensor._id}', '${factoryName}', '${escapeForInlineJs(sensorName)}')">
                         <div class="flex justify-between items-start mb-3 gap-2">
                             <div class="min-w-0">
-                                <h4 class="font-semibold text-gray-900 text-sm sm:text-base" data-i18n="sensor">センサー</h4>
+                                <h4 class="font-semibold text-gray-900 text-sm sm:text-base truncate">${sensorName}</h4>
                                 <p class="text-xs text-gray-500 font-mono truncate">${sensor._id}</p>
                             </div>
                             <span class="px-2 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-medium flex-shrink-0">
@@ -1562,7 +1621,8 @@ async function showFactorySensorHistoryModal(factoryName) {
                             <span data-i18n="clickForHistory">クリックして詳細履歴表示</span>
                         </div>
                     </div>
-                `).join('')}
+                `;
+                }).join('')}
             </div>
 
             <div class="mt-4 sm:mt-6 text-xs text-gray-500 text-center" data-i18n="last30Days">
@@ -2255,10 +2315,10 @@ function showSensorModal(factoryName, sensorData) {
                     <div class="grid grid-cols-1 gap-3 sm:gap-4">
                         ${sensorData.sensors.map(sensor => `
                             <div class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300"
-                                 onclick="showSensorHistoryModal('${sensor.deviceId}', '${factoryName}')">
+                                 onclick="showSensorHistoryModal('${sensor.deviceId}', '${factoryName}', '${escapeForInlineJs(sensor.name)}')">
                                 <div class="flex justify-between items-start mb-3 gap-2">
                                     <div class="min-w-0">
-                                        <h4 class="font-semibold text-gray-900 text-sm sm:text-base" data-i18n="sensor">センサー</h4>
+                                        <h4 class="font-semibold text-gray-900 text-sm sm:text-base truncate">${sensor.name}</h4>
                                         <p class="text-xs text-gray-500 font-mono truncate">${sensor.deviceId}</p>
                                     </div>
                                     <span class="px-2 py-1 rounded-full text-xs font-medium ${getSensorStatusColor(sensor.status)} flex-shrink-0">
