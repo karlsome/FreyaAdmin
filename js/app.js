@@ -14,10 +14,10 @@ const role = currentUser.role || "guest"; // Default to guest if no role is foun
 
 const roleAccess = {
   admin: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "recovery", "userManagement", "approvals", "masterDB", "customerManagement", "equipment", "scna", "noda", "videoManual"],
-  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda", "videoManual"], // Same as admin but no customerManagement
-  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda", "videoManual"], // Same as 部長
-  係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"], // Same as 班長 but factory-limited
-  班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "scna", "noda"],
+  部長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "recovery", "userManagement", "approvals", "masterDB", "equipment", "customerManagement", "scna", "noda", "videoManual"],
+  課長: ["dashboard", "factories", "factoryStatus", "planner", "inventory", "notifications", "analytics", "financials", "recovery", "userManagement", "approvals", "masterDB", "equipment", "scna", "noda", "videoManual"],
+  係長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "recovery", "scna", "noda"],
+  班長: ["dashboard", "factories", "factoryStatus", "planner", "approvals", "masterDB", "equipment", "financials", "recovery", "scna", "noda"],
   member: ["dashboard", "noda"]
 };
 
