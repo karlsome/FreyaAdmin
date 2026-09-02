@@ -1479,9 +1479,13 @@ function renderRecoveryCreateProductRows() {
   const container = document.getElementById("recoveryCreateRowsContainer");
   if (!container) return;
 
-  container.innerHTML = recoveryState.createRows.map(row => {
+  const totalRows = recoveryState.createRows.length;
+
+  container.innerHTML = recoveryState.createRows.map((row, index) => {
     const isResolved = !!row.resolvedProduct;
     const isInvalid = !!row.rawInput && !row.resolvedProduct;
+    // Only display column titles/labels on the last row (currently being added)
+    const isAdding = (index === totalRows - 1);
 
     const inputBorderClass = isInvalid
       ? "border-2 border-red-500 bg-red-50/50 dark:bg-red-950/30 text-red-900 dark:text-red-200 focus:ring-red-500"
@@ -1494,17 +1498,17 @@ function renderRecoveryCreateProductRows() {
       : "opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-800/80 text-gray-400";
 
     return `
-      <div class="p-3 bg-white dark:bg-gray-700/60 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm" id="recoveryCreateRow_${row.id}">
-        <div class="flex items-center gap-3">
+      <div class="${isAdding ? "p-3 bg-white dark:bg-gray-700/60 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm" : "p-2.5 bg-white dark:bg-gray-700/60 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm"}" id="recoveryCreateRow_${row.id}">
+        <div class="flex ${isAdding ? "items-end" : "items-center"} gap-3">
           <!-- Product Input -->
           <div class="flex-1 min-w-0 recovery-suggestion-container relative">
-            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Product (背番号 or 品番)</label>
+            ${isAdding ? `<label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Product (背番号 or 品番)</label>` : ""}
             <div class="relative">
               <input type="text"
                      id="recoveryCreateProductInput_${row.id}"
                      autocomplete="off"
                      value="${escapeRecoveryAttribute(row.rawInput)}"
-                     placeholder="Type 背番号 (e.g. 3TD) or 品番..."
+                     placeholder="${isAdding ? "Type 背番号 (e.g. 3TD) or 品番..." : "背番号 or 品番"}"
                      class="w-full p-2.5 rounded-lg text-sm dark:bg-gray-800 dark:text-white focus:ring-2 ${inputBorderClass}"
                      oninput="handleRecoveryCreateProductInput(${row.id}, this.value)"
                      onfocus="handleRecoveryCreateProductFocus(${row.id})"
@@ -1515,13 +1519,13 @@ function renderRecoveryCreateProductRows() {
 
           <!-- Quantity Input -->
           <div class="w-36 flex-shrink-0">
-            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Recovered Qty</label>
+            ${isAdding ? `<label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Recovered Qty</label>` : ""}
             <input type="number"
                    id="recoveryCreateQuantityInput_${row.id}"
                    min="1"
                    step="1"
                    value="${row.quantity}"
-                   placeholder="${isResolved ? "e.g. 268" : "Enter product"}"
+                   placeholder="${isResolved ? "e.g. 268" : (isAdding ? "Enter product" : "Qty")}"
                    ${isResolved ? "" : "disabled"}
                    class="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 ${qtyClass}"
                    oninput="handleRecoveryCreateQuantityInput(${row.id}, this.value)"
@@ -1529,8 +1533,8 @@ function renderRecoveryCreateProductRows() {
           </div>
 
           <!-- Remove Row Button -->
-          <div class="flex-shrink-0 pt-5">
-            ${recoveryState.createRows.length > 1 ? `
+          <div class="flex-shrink-0 ${isAdding ? "mb-0.5" : ""}">
+            ${totalRows > 1 ? `
               <button type="button" onclick="removeRecoveryCreateProductRow(${row.id})" class="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors" title="Remove product">
                 <i class="ri-delete-bin-line text-lg"></i>
               </button>
