@@ -1512,6 +1512,7 @@ function renderRecoveryCreateProductRows() {
                      class="w-full p-2.5 rounded-lg text-sm dark:bg-gray-800 dark:text-white focus:ring-2 ${inputBorderClass}"
                      oninput="handleRecoveryCreateProductInput(${row.id}, this.value)"
                      onfocus="handleRecoveryCreateProductFocus(${row.id})"
+                     onkeydown="handleRecoveryCreateProductKeydown(${row.id}, event)"
               >
               <div id="recoveryCreateSuggestions_${row.id}" class="hidden absolute z-30 mt-1 w-full max-h-60 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-xl"></div>
             </div>
@@ -1529,6 +1530,7 @@ function renderRecoveryCreateProductRows() {
                    ${isResolved ? "" : "disabled"}
                    class="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 ${qtyClass}"
                    oninput="handleRecoveryCreateQuantityInput(${row.id}, this.value)"
+                   onkeydown="handleRecoveryCreateQuantityKeydown(${row.id}, event)"
             >
           </div>
 
@@ -1625,10 +1627,12 @@ function handleRecoveryCreateProductInput(rowId, val) {
 
   if (matches.length === 0) {
     suggestionsEl.innerHTML = `<div class="p-3 text-xs text-red-600 dark:text-red-400 font-medium">背番号 / 品番 does not exist in masterDB</div>`;
+    suggestionsEl._matches = [];
+    suggestionsEl._selectedIndex = -1;
     suggestionsEl.classList.remove("hidden");
   } else {
     suggestionsEl.innerHTML = matches.map((p, idx) => `
-      <div class="p-2.5 hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-0 flex items-center justify-between text-xs"
+      <div class="recovery-suggestion-item p-2.5 hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-0 flex items-center justify-between text-xs transition-colors"
            onclick="selectRecoveryCreateProductSuggestion(${rowId}, ${idx})">
         <div class="flex items-center gap-2">
           <span class="font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800">${escapeRecoveryHtml(p.背番号 || "-")}</span>
@@ -1640,8 +1644,25 @@ function handleRecoveryCreateProductInput(rowId, val) {
       </div>
     `).join("");
     suggestionsEl._matches = matches;
+    suggestionsEl._selectedIndex = -1;
     suggestionsEl.classList.remove("hidden");
   }
+}
+
+function highlightRecoveryCreateSuggestion(rowId, index) {
+  const suggestionsEl = document.getElementById(`recoveryCreateSuggestions_${rowId}`);
+  if (!suggestionsEl || !suggestionsEl._matches || !suggestionsEl._matches[index]) return;
+
+  suggestionsEl._selectedIndex = index;
+  const items = suggestionsEl.querySelectorAll(".recovery-suggestion-item");
+  items.forEach((item, idx) => {
+    if (idx === index) {
+      item.classList.add("bg-blue-100", "dark:bg-blue-900/60", "ring-2", "ring-blue-500", "font-semibold");
+      item.scrollIntoView({ block: "nearest" });
+    } else {
+      item.classList.remove("bg-blue-100", "dark:bg-blue-900/60", "ring-2", "ring-blue-500", "font-semibold");
+    }
+  });
 }
 
 function selectRecoveryCreateProductSuggestion(rowId, index) {
@@ -1669,6 +1690,7 @@ function selectRecoveryCreateProductSuggestion(rowId, index) {
     qtyInput.focus();
   }
 
+  suggestionsEl._selectedIndex = -1;
   suggestionsEl.classList.add("hidden");
 }
 
@@ -1676,6 +1698,91 @@ function handleRecoveryCreateQuantityInput(rowId, val) {
   const row = recoveryState.createRows.find(r => r.id === rowId);
   if (row) {
     row.quantity = val;
+  }
+}
+
+function handleRecoveryCreateProductKeydown(rowId, event) {
+  const suggestionsEl = document.getElementById(`recoveryCreateSuggestions_${rowId}`);
+  const hasSuggestions = suggestionsEl && !suggestionsEl.classList.contains("hidden") && suggestionsEl._matches && suggestionsEl._matches.length > 0;
+
+  if (event.key === "Tab") {
+    if (hasSuggestions) {
+      const count = suggestionsEl._matches.length;
+      if (count === 1) {
+        // If only 1 choice: auto select on Tab and advance to quantity
+        event.preventDefault();
+        selectRecoveryCreateProductSuggestion(rowId, 0);
+        return;
+      }
+
+      // If 2 or more choices: iterate through choices
+      event.preventDefault();
+      let nextIdx;
+      if (event.shiftKey) {
+        nextIdx = (typeof suggestionsEl._selectedIndex === "number" && suggestionsEl._selectedIndex > 0)
+          ? suggestionsEl._selectedIndex - 1
+          : count - 1;
+      } else {
+        nextIdx = (typeof suggestionsEl._selectedIndex === "number" && suggestionsEl._selectedIndex >= 0 && suggestionsEl._selectedIndex < count - 1)
+          ? suggestionsEl._selectedIndex + 1
+          : 0;
+      }
+      highlightRecoveryCreateSuggestion(rowId, nextIdx);
+      return;
+    }
+  } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (hasSuggestions) {
+      event.preventDefault();
+      const count = suggestionsEl._matches.length;
+      let nextIdx;
+      if (event.key === "ArrowUp") {
+        nextIdx = (typeof suggestionsEl._selectedIndex === "number" && suggestionsEl._selectedIndex > 0)
+          ? suggestionsEl._selectedIndex - 1
+          : count - 1;
+      } else {
+        nextIdx = (typeof suggestionsEl._selectedIndex === "number" && suggestionsEl._selectedIndex >= 0 && suggestionsEl._selectedIndex < count - 1)
+          ? suggestionsEl._selectedIndex + 1
+          : 0;
+      }
+      highlightRecoveryCreateSuggestion(rowId, nextIdx);
+      return;
+    }
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    if (hasSuggestions) {
+      const selectedIdx = (typeof suggestionsEl._selectedIndex === "number" && suggestionsEl._selectedIndex >= 0)
+        ? suggestionsEl._selectedIndex
+        : 0;
+      selectRecoveryCreateProductSuggestion(rowId, selectedIdx);
+    } else {
+      const row = recoveryState.createRows.find(r => r.id === rowId);
+      if (row?.resolvedProduct) {
+        document.getElementById(`recoveryCreateQuantityInput_${rowId}`)?.focus();
+      }
+    }
+  }
+}
+
+function handleRecoveryCreateQuantityKeydown(rowId, event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const row = recoveryState.createRows.find(r => r.id === rowId);
+    const qty = parseInt(row?.quantity, 10);
+    if (!row || !row.resolvedProduct || !qty || qty <= 0) {
+      return;
+    }
+
+    const currentIndex = recoveryState.createRows.findIndex(r => r.id === rowId);
+    if (currentIndex === recoveryState.createRows.length - 1) {
+      // Last row: add new product row
+      addRecoveryCreateProductRow();
+    } else {
+      // Earlier row: jump focus to next row's product input
+      const nextRow = recoveryState.createRows[currentIndex + 1];
+      if (nextRow) {
+        document.getElementById(`recoveryCreateProductInput_${nextRow.id}`)?.focus();
+      }
+    }
   }
 }
 
@@ -1786,7 +1893,10 @@ window.renderRecoveryCreateProductRows = renderRecoveryCreateProductRows;
 window.handleRecoveryCreateProductInput = handleRecoveryCreateProductInput;
 window.handleRecoveryCreateProductFocus = handleRecoveryCreateProductFocus;
 window.selectRecoveryCreateProductSuggestion = selectRecoveryCreateProductSuggestion;
+window.highlightRecoveryCreateSuggestion = highlightRecoveryCreateSuggestion;
 window.handleRecoveryCreateQuantityInput = handleRecoveryCreateQuantityInput;
+window.handleRecoveryCreateProductKeydown = handleRecoveryCreateProductKeydown;
+window.handleRecoveryCreateQuantityKeydown = handleRecoveryCreateQuantityKeydown;
 window.submitRecoveryCreateForm = submitRecoveryCreateForm;
 window.openRecoverySebanggoSelector = openRecoverySebanggoSelector;
 window.closeRecoverySebanggoSelector = closeRecoverySebanggoSelector;
