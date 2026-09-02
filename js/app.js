@@ -1179,17 +1179,12 @@ function loadPage(page) {
                           <th class="px-4 py-2 w-12">
                             <input type="checkbox" id="recoverySelectAllRows" onchange="toggleSelectAllRecoveryRows(this.checked)" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" title="Select all rows on this page">
                           </th>
-                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('lotDate')"><span data-i18n="lotDate">Lot Date</span> <span id="recoverySortIcon-lotDate"></span></button></th>
-                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('manufacturingLot')"><span data-i18n="manufacturingLot">Manufacturing Lot</span> <span id="recoverySortIcon-manufacturingLot"></span></button></th>
-                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('hinban')"><span data-i18n="hinban">品番</span> <span id="recoverySortIcon-hinban"></span></button></th>
                           <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('ban')"><span data-i18n="sebanggo">背番号</span> <span id="recoverySortIcon-ban"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('hinban')"><span data-i18n="hinban">品番</span> <span id="recoverySortIcon-hinban"></span></button></th>
                           <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('model')"><span data-i18n="model">Model</span> <span id="recoverySortIcon-model"></span></button></th>
                           <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('factory')"><span data-i18n="factory">Factory</span> <span id="recoverySortIcon-factory"></span></button></th>
-                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('totalRecoveredQty')"><span data-i18n="totalRecoveredQty">Total Recovered Qty</span> <span id="recoverySortIcon-totalRecoveredQty"></span></button></th>
-                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('recoveryCount')"><span data-i18n="recoveryCount">Recovery Count</span> <span id="recoverySortIcon-recoveryCount"></span></button></th>
-                          <th class="px-4 py-2"><span data-i18n="defectBreakdown">Defect Breakdown</span></th>
-                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('inspectionTable')"><span data-i18n="inspectionTable">Inspection Table</span> <span id="recoverySortIcon-inspectionTable"></span></button></th>
-                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('matchedPressQty')"><span data-i18n="matchedPressQty">Matched Press Qty</span> <span id="recoverySortIcon-matchedPressQty"></span></button></th>
+                          <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('totalRecoveredQty')"><span data-i18n="recoveredQty">Recovered Qty</span> <span id="recoverySortIcon-totalRecoveredQty"></span></button></th>
+                          <th class="px-4 py-2"><span data-i18n="defectBreakdown">Details / Defect</span></th>
                           <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('recordedBy')"><span data-i18n="recordedBy">Recorded By</span> <span id="recoverySortIcon-recordedBy"></span></button></th>
                           <th class="px-4 py-2"><button class="flex items-center gap-1" onclick="toggleRecoverySort('recordedAt')"><span data-i18n="recordedAt">Recorded At</span> <span id="recoverySortIcon-recordedAt"></span></button></th>
                         </tr>
@@ -1275,88 +1270,63 @@ function loadPage(page) {
               </div>
 
               <div id="recoveryCreateModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
-                  <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
+                  <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                     <div>
-                      <h3 class="text-lg font-semibold text-gray-900" data-i18n="createRecoveryRecord">Create Recovery Record</h3>
-                      <p class="text-sm text-gray-500" data-i18n="createRecoverySubtitle">Admin input form for recoveryDB using the existing recovery API</p>
+                      <h3 class="text-lg font-semibold text-gray-900 dark:text-white" data-i18n="createRecoveryRecord">Record Recovered Quantity</h3>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Quick shop-floor entry: Date, Product & Quantity</p>
                     </div>
-                    <button onclick="closeRecoveryCreateModal()" class="text-gray-500 hover:text-gray-700">
+                    <button onclick="closeRecoveryCreateModal()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
                       <i class="ri-close-line text-2xl"></i>
                     </button>
                   </div>
 
-                  <div class="flex-1 overflow-y-auto p-6 bg-gray-50 space-y-6">
-                    <div class="bg-white rounded-xl border border-gray-200 p-5">
-                      <h4 class="text-sm font-semibold text-gray-700 mb-4" data-i18n="recoveryInputBasics">Basic Information</h4>
-                      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                        <label class="block">
-                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="sebanggoOrHinban">背番号 or 品番</span>
-                          <div class="relative">
-                            <input id="recoveryCreateProductInput" autocomplete="off" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="Enter 背番号 or 品番">
-                            <div id="recoveryCreateProductSuggestions" class="hidden absolute z-20 mt-2 w-full max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"></div>
-                          </div>
-                        </label>
-                        <label class="block">
-                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="manufacturingLot">Manufacturing Lot</span>
-                          <input id="recoveryCreateLotInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="e.g. 260310 or 2026-03-10">
-                        </label>
-                        <label class="block">
-                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="factoryFilter">Factory</span>
-                          <select id="recoveryCreateFactoryInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm">
-                            <option value="" data-i18n="selectFactory">Select Factory...</option>
-                          </select>
-                        </label>
-                        <label class="block">
-                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="recordedBy">Recorded By</span>
-                          <input id="recoveryCreateUserInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="Worker / user name">
-                        </label>
-                        <label class="block">
-                          <span class="block text-sm font-medium text-gray-700 mb-2" data-i18n="inspectionTable">Inspection Table</span>
-                          <input id="recoveryCreateInspectionTableInput" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="e.g. 検査テーブル 2">
-                        </label>
+                  <div class="flex-1 overflow-y-auto p-6 space-y-5">
+                    <!-- Top Controls: Date, User, Factory -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-gray-50 dark:bg-gray-700/40 p-4 rounded-xl border border-gray-200 dark:border-gray-600">
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1" data-i18n="recoveryDate">Recovery / Defect Date</label>
+                        <input type="date" id="recoveryCreateDateInput" class="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500">
                       </div>
-
-                      <div class="mt-4 p-4 rounded-lg border border-blue-200 bg-blue-50">
-                        <div class="flex items-center justify-between gap-3">
-                          <div>
-                            <div class="text-sm font-medium text-blue-900" data-i18n="resolvedProduct">Resolved Product</div>
-                            <div id="recoveryCreateResolvedProduct" class="mt-1 text-sm text-blue-700">-</div>
-                          </div>
-                          <div id="recoveryCreateExistingNotice" class="text-xs text-amber-700 hidden"></div>
-                        </div>
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1" data-i18n="recordedBy">Recorded By</label>
+                        <input type="text" id="recoveryCreateUserInput" class="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500" placeholder="Operator name">
+                      </div>
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1" data-i18n="factoryFilter">Factory</label>
+                        <select id="recoveryCreateFactoryInput" class="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500">
+                          <option value="">Auto (From Product)</option>
+                        </select>
                       </div>
                     </div>
 
-                    <div class="bg-white rounded-xl border border-gray-200 p-5">
-                      <div class="flex items-center justify-between gap-3 mb-4">
-                        <h4 class="text-sm font-semibold text-gray-700" data-i18n="recoveryItems">Recovery Items</h4>
-                        <button onclick="addRecoveryCreateItemRow()" class="px-3 py-2 text-sm border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">
-                          <i class="ri-add-line mr-1"></i><span data-i18n="addItem">Add Item</span>
-                        </button>
+                    <!-- Product Rows Container -->
+                    <div class="space-y-3">
+                      <div>
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Recovered Products</h4>
                       </div>
-                      <div id="recoveryCreateItemsContainer" class="space-y-3"></div>
-                    </div>
 
-                    <div class="bg-white rounded-xl border border-gray-200 p-5">
-                      <div class="flex items-center justify-between gap-3 mb-4">
-                        <h4 class="text-sm font-semibold text-gray-700" data-i18n="matchedPressRecord">Matched Press Record</h4>
-                        <button onclick="runRecoveryCreatePressLookup()" class="px-3 py-2 text-sm bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors">
-                          <i class="ri-search-line mr-1"></i><span data-i18n="lookupPressRecord">Lookup Press Record</span>
+                      <div id="recoveryCreateRowsContainer" class="space-y-2.5">
+                        <!-- Product rows rendered dynamically -->
+                      </div>
+
+                      <!-- Add button directly below the last product row -->
+                      <div class="pt-1">
+                        <button type="button" onclick="addRecoveryCreateProductRow()" class="w-full py-2.5 px-4 text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-dashed border-blue-300 dark:border-blue-700 transition-all flex items-center justify-center gap-1.5 shadow-sm">
+                          <i class="ri-add-circle-line text-base"></i>
+                          <span data-i18n="addProductRow">Add Another Product</span>
                         </button>
                       </div>
-                      <div id="recoveryCreatePressLookupStatus" class="text-sm text-gray-500 mb-4">No lookup run yet.</div>
-                      <div id="recoveryCreatePressMatchCard" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
-                      <div id="recoveryCreatePressCandidates" class="mt-4 space-y-2"></div>
                     </div>
                   </div>
 
-                  <div class="px-6 py-4 border-t border-gray-200 bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center justify-between gap-3">
                     <div id="recoveryCreateStatus" class="text-xs text-gray-500"></div>
-                    <div class="flex items-center gap-2 justify-end">
-                      <button id="recoveryCreateCancelBtn" onclick="closeRecoveryCreateModal()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors" data-i18n="cancel">Cancel</button>
-                      <button id="recoveryCreateSubmitBtn" onclick="submitRecoveryCreateForm()" class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
-                        <i class="ri-save-line mr-1"></i><span data-i18n="createRecoveryRecord">Create Recovery Record</span>
+                    <div class="flex items-center gap-2">
+                      <button type="button" onclick="closeRecoveryCreateModal()" class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-sm transition-colors" data-i18n="cancel">Cancel</button>
+                      <button id="recoveryCreateSubmitBtn" type="button" onclick="submitRecoveryCreateForm()" class="px-5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-sm font-semibold transition-colors flex items-center gap-1.5">
+                        <i class="ri-save-line"></i>
+                        <span>Save Recovery</span>
                       </button>
                     </div>
                   </div>
@@ -2779,6 +2749,9 @@ function loadPage(page) {
                       <button onclick="openBulkEditGoalsModal()" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center">
                         <i class="ri-edit-line mr-2"></i><span>Edit Goals</span>
                       </button>
+                      <button onclick="reconcileGoalsWithTimeline()" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors flex items-center justify-center" title="Reconcile goal quantities with actual items scheduled on the timeline">
+                        <i class="ri-refresh-line mr-2"></i><span data-i18n="syncWithTimeline">Sync with Timeline</span>
+                      </button>
                       <div class="flex-1 flex gap-2">
                         <input type="text" id="goalSearch" 
                                class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" 
@@ -2820,11 +2793,19 @@ function loadPage(page) {
 
                   <!-- Planning Tab Content -->
                   <div id="planner-planning-tab" class="planner-main-tab-content hidden">
-                    <!-- Selected Products Summary -->
-                    <div class="mb-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600 p-3">
-                      <div class="flex items-center justify-between gap-2 mb-2">
-                        <h3 class="font-medium text-sm text-gray-900 dark:text-white" data-i18n="selectedProducts">Selected Products</h3>
-                        <div class="flex items-center gap-2 flex-1 justify-end">
+                    <!-- Selected Products Summary Card (Collapsible) -->
+                    <div id="selectedProductsCard" class="mb-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden transition-all">
+                      <div class="p-3 flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-100/70 dark:hover:bg-gray-700/50 transition-colors select-none" onclick="toggleSelectedProductsCard()">
+                        <div class="flex items-center gap-2">
+                          <button type="button" class="text-gray-500 dark:text-gray-400 p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors" aria-label="Toggle Selected Products Card">
+                            <i id="selectedProductsCardChevron" class="ri-arrow-right-s-line text-lg transition-transform duration-200"></i>
+                          </button>
+                          <h3 class="font-medium text-sm text-gray-900 dark:text-white flex items-center gap-2" data-i18n="selectedProducts">
+                            <span>Selected Products</span>
+                            <span id="selectedProductsHeaderBadge" class="text-xs font-normal px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">0 items</span>
+                          </h3>
+                        </div>
+                        <div class="flex items-center gap-2 flex-1 justify-end" onclick="event.stopPropagation()">
                           <button onclick="showPrintModal()" 
                                   class="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1.5">
                             <i class="ri-printer-line"></i>
@@ -2838,11 +2819,19 @@ function loadPage(page) {
                                    oninput="filterSelectedProducts(this.value)">
                             <i class="ri-search-line absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                           </div>
+                          <button type="button" onclick="toggleSelectedProductsCard()" 
+                                  class="text-xs px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition-colors flex items-center gap-1">
+                            <span id="selectedProductsToggleText">Expand</span>
+                          </button>
                         </div>
                       </div>
-                      <div id="selectedProductsSummary">
-                        <div class="text-center py-2 text-gray-500 text-sm">
-                          <p data-i18n="noProductsSelected">No products selected</p>
+                      
+                      <!-- Collapsible Body (Default: Hidden) -->
+                      <div id="selectedProductsCardBody" class="hidden px-3 pb-3 border-t border-gray-200 dark:border-gray-600 pt-3">
+                        <div id="selectedProductsSummary">
+                          <div class="text-center py-2 text-gray-500 text-sm">
+                            <p data-i18n="noProductsSelected">No products selected</p>
+                          </div>
                         </div>
                       </div>
                     </div>

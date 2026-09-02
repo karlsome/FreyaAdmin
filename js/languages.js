@@ -352,6 +352,22 @@ const translations = {
       plannerPreviewSelectValidSwapLane: "Select a valid machine lane for this draft swap.",
       plannerPreviewSwapBlockNotFound: "One of the draft blocks could not be located for swapping.",
       
+      // Machine Availability & Status
+      machineStatus: "Machine Status",
+      machineAvailable: "Available",
+      machineBrokenDown: "Broken Down",
+      machineUnavailable: "Unavailable",
+      cannotScheduleBrokenMachine: "Cannot schedule on {equipment}: Machine is broken down / unavailable.",
+      machineStatusManagement: "Machine Availability & Status",
+      machineStatusManagementDesc: "Set machine operational status. Broken or unavailable machines cannot be scheduled.",
+      reportBreakdown: "Report Breakdown",
+      markOperational: "Mark as Repaired & Available",
+      breakdownReason: "Breakdown / Maintenance Reason",
+      reasonPlaceholder: "e.g., Spindle malfunction, Scheduled maintenance, Tool replacement...",
+      statusUpdatedSuccess: "Machine status updated successfully.",
+      brokenDownCountBadge: "{count} Broken Down",
+      syncWithTimeline: "Sync with Timeline",
+      
       // Export Options
       exportOptions: "Export Options",
       exportOptionsDesc: "Select columns to export and set their order",
@@ -1621,6 +1637,9 @@ const translations = {
       deleteSelected: "Delete Selected",
       deleteRecovery: "Delete",
       saveChanges: "Save Changes",
+      recoveryDate: "Recovery Date",
+      recoveredQty: "Recovered Qty",
+      addProductRow: "Add Another Product",
 
       // Factory Detail Modal
       productionRecordDetails: "Production Record Details",
@@ -2123,6 +2142,22 @@ const translations = {
       plannerPreviewChooseAnotherBlock: "入れ替える別のブロックを選択してください。",
       plannerPreviewSelectValidSwapLane: "この下書き入れ替えには有効な設備レーンを選択してください。",
       plannerPreviewSwapBlockNotFound: "入れ替え対象の下書きブロックの一方が見つかりませんでした。",
+      
+      // Machine Availability & Status
+      machineStatus: "設備ステータス",
+      machineAvailable: "稼働可能",
+      machineBrokenDown: "故障中",
+      machineUnavailable: "利用不可",
+      cannotScheduleBrokenMachine: "{equipment} は故障・利用不可のためスケジュールできません。",
+      machineStatusManagement: "設備稼働状態管理",
+      machineStatusManagementDesc: "設備の稼働状態を設定します。故障・停止中の設備にはスケジュールできません。",
+      reportBreakdown: "故障を報告",
+      markOperational: "稼働再開（復旧完了）",
+      breakdownReason: "故障・メンテナンス理由",
+      reasonPlaceholder: "例：主軸の故障、定期メンテナンス、金型交換...",
+      statusUpdatedSuccess: "設備ステータスを更新しました。",
+      brokenDownCountBadge: "{count}台 故障中",
+      syncWithTimeline: "タイムラインと同期",
       
       // Export Options
       exportOptions: "エクスポートオプション",
@@ -3393,6 +3428,9 @@ const translations = {
       deleteSelected: "選択を削除",
       deleteRecovery: "削除",
       saveChanges: "変更を保存",
+      recoveryDate: "回収日",
+      recoveredQty: "回収数",
+      addProductRow: "製品を追加",
 
       // Factory Detail Modal
       productionRecordDetails: "生産記録詳細",
