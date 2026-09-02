@@ -1637,6 +1637,9 @@ const translations = {
       deleteSelected: "Delete Selected",
       deleteRecovery: "Delete",
       saveChanges: "Save Changes",
+      recoveryDate: "Recovery Date",
+      recoveredQty: "Recovered Qty",
+      addProductRow: "Add Another Product",
 
       // Factory Detail Modal
       productionRecordDetails: "Production Record Details",
@@ -3425,6 +3428,9 @@ const translations = {
       deleteSelected: "選択を削除",
       deleteRecovery: "削除",
       saveChanges: "変更を保存",
+      recoveryDate: "回収日",
+      recoveredQty: "回収数",
+      addProductRow: "製品を追加",
 
       // Factory Detail Modal
       productionRecordDetails: "生産記録詳細",

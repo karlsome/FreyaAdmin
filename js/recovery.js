@@ -19,7 +19,9 @@ const recoveryState = {
   createPressMatch: null,
   createExistingRecord: null,
   createProductCandidates: [],
-  createPressCandidates: []
+  createPressCandidates: [],
+  createRows: [],
+  nextRowId: 0
 };
 
 const RECOVERY_EDIT_ROLES = ["係長", "課長", "部長", "admin"];
@@ -562,44 +564,112 @@ function renderRecoveryTable(rows) {
 
   if (!rows.length) {
     const noDataText = (typeof t === "function") ? t("noRecoveryData") : "No recovery data loaded.";
-    body.innerHTML = `<tr><td class="px-4 py-3 text-gray-500" colspan="14">${escapeRecoveryHtml(noDataText)}</td></tr>`;
+    body.innerHTML = `<tr><td class="px-4 py-3 text-gray-500" colspan="9">${escapeRecoveryHtml(noDataText)}</td></tr>`;
     updateRecoverySelectionUi();
     return;
   }
 
-  body.innerHTML = rows.map(row => {
-    const isSelected = recoveryState.selectedRowIds.includes(row.id);
-    const recoveriesHtml = (row.recoveries || []).length
-      ? row.recoveries.map(item => `
-          <div class="inline-flex items-center gap-1 px-2 py-1 mr-1 mb-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs">
-            <span>${escapeRecoveryHtml(item.defectType || "-")}</span>
-            <span class="font-semibold">${formatRecoveryNumber(item.quantity || 0)}</span>
-          </div>
-        `).join("")
-      : '<span class="text-gray-400 text-xs">-</span>';
+  // Group rows by Date (lotDate or date or recordedAt date)
+  const groupedByDate = new Map();
+  rows.forEach(row => {
+    const rawDate = row.lotDate || row.date || (row.recordedAt ? String(row.recordedAt).slice(0, 10) : "") || "No Date";
+    if (!groupedByDate.has(rawDate)) {
+      groupedByDate.set(rawDate, []);
+    }
+    groupedByDate.get(rawDate).push(row);
+  });
 
-    return `
-      <tr class="cursor-pointer hover:bg-gray-50 ${isSelected ? "bg-blue-50" : ""}" onclick="openRecoveryDetailModal('${escapeRecoveryAttribute(row.id)}')">
-        <td class="px-4 py-3 whitespace-nowrap" onclick="event.stopPropagation()">
-          <input type="checkbox" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" ${isSelected ? "checked" : ""} onchange="toggleRecoveryRowSelection('${escapeRecoveryAttribute(row.id)}', this.checked)">
+  // Sort dates descending (most recent first)
+  const sortedDates = Array.from(groupedByDate.keys()).sort((a, b) => b.localeCompare(a));
+
+  let html = "";
+
+  sortedDates.forEach(dateStr => {
+    const dateRows = groupedByDate.get(dateStr) || [];
+    const dateTotalQty = dateRows.reduce((sum, r) => sum + (Number(r.totalRecoveredQty) || 0), 0);
+    
+    // Format friendly date display: e.g. 2026-08-20 (木)
+    let formattedDateLabel = dateStr;
+    if (dateStr !== "No Date") {
+      try {
+        const d = new Date(dateStr + "T00:00:00");
+        const dayNames = ["日", "月", "火", "水", "木", "金", "土"];
+        const dayName = dayNames[d.getDay()] || "";
+        formattedDateLabel = `${dateStr} (${dayName})`;
+      } catch (e) {
+        formattedDateLabel = dateStr;
+      }
+    }
+
+    // Date header banner row spanning all 9 columns
+    html += `
+      <tr class="bg-slate-100 dark:bg-slate-800/80 border-t-2 border-b border-slate-300 dark:border-slate-700">
+        <td colspan="9" class="px-4 py-2.5">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center justify-center w-6 h-6 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-sm">
+                <i class="ri-calendar-event-line"></i>
+              </span>
+              <span class="text-sm font-bold text-gray-900 dark:text-white">${escapeRecoveryHtml(formattedDateLabel)}</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 font-medium">
+              <span>${dateRows.length} item(s)</span>
+              <span>•</span>
+              <span class="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-2 py-0.5 rounded-full">
+                Total: ${formatRecoveryNumber(dateTotalQty)} pcs recovered
+              </span>
+            </div>
+          </div>
         </td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(row.lotDate || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(row.manufacturingLot || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(row.hinban || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap font-medium">${escapeRecoveryHtml(row.ban || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(row.model || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(row.factory || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap font-semibold text-green-700">${formatRecoveryNumber(row.totalRecoveredQty || 0)}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${formatRecoveryNumber(row.recoveryCount || 0)}</td>
-        <td class="px-4 py-3 min-w-[280px]">${recoveriesHtml}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(row.inspectionTable || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${formatRecoveryNumber(row.matchedPressQty || 0)}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(row.recordedBy || "-")}</td>
-        <td class="px-4 py-3 whitespace-nowrap">${escapeRecoveryHtml(formatRecoveryDateTime(row.recordedAt))}</td>
       </tr>
     `;
-  }).join("");
 
+    // Render individual item rows under this date
+    dateRows.forEach(row => {
+      const isSelected = recoveryState.selectedRowIds.includes(row.id);
+      
+      // Defect / detail notes
+      let detailsHtml = "";
+      if ((row.recoveries || []).length > 0) {
+        const nonDefaultRecoveries = row.recoveries.filter(item => item.defectType && item.defectType !== "Recovered");
+        if (nonDefaultRecoveries.length > 0) {
+          detailsHtml = nonDefaultRecoveries.map(item => `
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 mr-1 mb-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs">
+              ${escapeRecoveryHtml(item.defectType)}: <strong>${formatRecoveryNumber(item.quantity || 0)}</strong>
+            </span>
+          `).join("");
+        } else {
+          detailsHtml = `<span class="text-xs text-gray-400">Recovered</span>`;
+        }
+      } else {
+        detailsHtml = `<span class="text-xs text-gray-400">-</span>`;
+      }
+
+      html += `
+        <tr class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 ${isSelected ? "bg-blue-50 dark:bg-blue-950/30" : ""}" onclick="openRecoveryDetailModal('${escapeRecoveryAttribute(row.id)}')">
+          <td class="px-4 py-3 whitespace-nowrap" onclick="event.stopPropagation()">
+            <input type="checkbox" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" ${isSelected ? "checked" : ""} onchange="toggleRecoveryRowSelection('${escapeRecoveryAttribute(row.id)}', this.checked)">
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap font-bold text-gray-900 dark:text-white">
+            <span class="inline-block px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-700 text-xs">
+              ${escapeRecoveryHtml(row.ban || "-")}
+            </span>
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-gray-700 dark:text-gray-300">${escapeRecoveryHtml(row.hinban || "-")}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">${escapeRecoveryHtml(row.model || "-")}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">${escapeRecoveryHtml(row.factory || "-")}</td>
+          <td class="px-4 py-3 whitespace-nowrap font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+            ${formatRecoveryNumber(row.totalRecoveredQty || 0)} <span class="text-xs font-normal text-gray-400">pcs</span>
+          </td>
+          <td class="px-4 py-3">${detailsHtml}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">${escapeRecoveryHtml(row.recordedBy || "-")}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">${escapeRecoveryHtml(formatRecoveryDateTime(row.recordedAt))}</td>
+        </tr>
+      `;
+    });
+  });
+
+  body.innerHTML = html;
   updateRecoverySelectionUi();
 }
 
@@ -1287,9 +1357,35 @@ function openRecoveryCreateModal() {
     return;
   }
 
-  resetRecoveryCreateForm();
-  setupRecoveryCreateModalEvents();
-  populateRecoveryCreateOptions();
+  const dateInput = document.getElementById("recoveryCreateDateInput");
+  const userInput = document.getElementById("recoveryCreateUserInput");
+  const factorySelect = document.getElementById("recoveryCreateFactoryInput");
+  const pageFactorySelect = document.getElementById("recoveryFactoryFilter");
+
+  if (dateInput) {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    dateInput.value = `${yyyy}-${mm}-${dd}`;
+  }
+
+  if (userInput) {
+    userInput.value = recoveryState.currentUser?.username || recoveryState.currentUser?.name || recoveryState.currentUser?.firstName || "";
+  }
+
+  if (factorySelect) {
+    factorySelect.innerHTML = `<option value="">Auto (From Product)</option>` + (pageFactorySelect ? pageFactorySelect.innerHTML.replace(/<option value="">.*?<\/option>/i, "") : "");
+    factorySelect.value = pageFactorySelect?.value || "";
+  }
+
+  const statusEl = document.getElementById("recoveryCreateStatus");
+  if (statusEl) statusEl.textContent = "";
+
+  recoveryState.createRows = [];
+  recoveryState.nextRowId = 0;
+  addRecoveryCreateProductRow();
+
   modal.classList.remove("hidden");
 }
 
@@ -1359,786 +1455,334 @@ function setRecoveryCreateSubmitButtonsDisabled(disabled) {
   }
 }
 
-function resetRecoveryCreateForm() {
-  closeRecoveryCreateSubmitModal();
-  recoveryState.createResolvedProduct = null;
-  recoveryState.createPressMatch = null;
-  recoveryState.createExistingRecord = null;
-  recoveryState.createProductCandidates = [];
-  recoveryState.createPressCandidates = [];
-
-  const fieldIds = [
-    "recoveryCreateProductInput",
-    "recoveryCreateLotInput",
-    "recoveryCreateUserInput",
-    "recoveryCreateInspectionTableInput"
-  ];
-  fieldIds.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.value = "";
-    }
+function addRecoveryCreateProductRow() {
+  const rowId = ++recoveryState.nextRowId;
+  recoveryState.createRows.push({
+    id: rowId,
+    rawInput: "",
+    resolvedProduct: null,
+    quantity: ""
   });
-
-  const factorySelect = document.getElementById("recoveryCreateFactoryInput");
-  const pageFactorySelect = document.getElementById("recoveryFactoryFilter");
-  if (factorySelect) {
-    factorySelect.innerHTML = pageFactorySelect ? pageFactorySelect.innerHTML : "";
-    factorySelect.value = pageFactorySelect?.value || "";
-  }
-
-  const userInput = document.getElementById("recoveryCreateUserInput");
-  const inspectionTableInput = document.getElementById("recoveryCreateInspectionTableInput");
-  if (userInput) {
-    userInput.value = recoveryState.currentUser?.username || recoveryState.currentUser?.name || "";
-  }
-  if (inspectionTableInput) {
-    inspectionTableInput.value = "小瀬再検査テーブル";
-  }
-
-  const resolvedEl = document.getElementById("recoveryCreateResolvedProduct");
-  const noticeEl = document.getElementById("recoveryCreateExistingNotice");
-  const statusEl = document.getElementById("recoveryCreateStatus");
-  const lookupStatusEl = document.getElementById("recoveryCreatePressLookupStatus");
-  const matchCardEl = document.getElementById("recoveryCreatePressMatchCard");
-  const candidatesEl = document.getElementById("recoveryCreatePressCandidates");
-  const suggestionEl = document.getElementById("recoveryCreateProductSuggestions");
-  const itemsContainer = document.getElementById("recoveryCreateItemsContainer");
-
-  if (resolvedEl) resolvedEl.textContent = "-";
-  if (noticeEl) {
-    noticeEl.classList.add("hidden");
-    noticeEl.textContent = "";
-  }
-  if (statusEl) statusEl.textContent = "";
-  if (lookupStatusEl) lookupStatusEl.textContent = "No lookup run yet.";
-  if (matchCardEl) matchCardEl.innerHTML = "<div class=\"text-sm text-gray-400\">No press match selected.</div>";
-  if (candidatesEl) candidatesEl.innerHTML = "";
-  if (suggestionEl) {
-    suggestionEl.innerHTML = "";
-    suggestionEl.classList.add("hidden");
-  }
-  if (itemsContainer) {
-    itemsContainer.innerHTML = "";
-    addRecoveryCreateItemRow();
-  }
+  renderRecoveryCreateProductRows();
+  setTimeout(() => {
+    document.getElementById(`recoveryCreateProductInput_${rowId}`)?.focus();
+  }, 50);
 }
 
-function setupRecoveryCreateModalEvents() {
-  const modal = document.getElementById("recoveryCreateModal");
-  if (!modal || modal.dataset.initialized === "true") {
-    return;
-  }
-
-  const productInput = document.getElementById("recoveryCreateProductInput");
-  const lotInput = document.getElementById("recoveryCreateLotInput");
-  const suggestionEl = document.getElementById("recoveryCreateProductSuggestions");
-
-  if (productInput) {
-    productInput.addEventListener("input", () => {
-      handleRecoveryCreateProductChange();
-      renderRecoveryCreateProductSuggestions(productInput.value);
-    });
-    productInput.addEventListener("change", handleRecoveryCreateProductChange);
-    productInput.addEventListener("focus", () => renderRecoveryCreateProductSuggestions(productInput.value));
-    productInput.addEventListener("blur", () => {
-      window.setTimeout(() => {
-        suggestionEl?.classList.add("hidden");
-        handleRecoveryCreateProductChange();
-      }, 120);
-    });
-  }
-  if (lotInput) {
-    lotInput.addEventListener("change", handleRecoveryCreateLotChange);
-    lotInput.addEventListener("blur", handleRecoveryCreateLotChange);
-  }
-
-  if (!window.__recoveryCreateDocClickBound) {
-    document.addEventListener("click", handleRecoveryCreateDocumentClick);
-    window.__recoveryCreateDocClickBound = true;
-  }
-
-  modal.dataset.initialized = "true";
+function removeRecoveryCreateProductRow(rowId) {
+  if (recoveryState.createRows.length <= 1) return;
+  recoveryState.createRows = recoveryState.createRows.filter(r => r.id !== rowId);
+  renderRecoveryCreateProductRows();
 }
 
-function populateRecoveryCreateOptions() {
-  const factorySelect = document.getElementById("recoveryCreateFactoryInput");
-  const pageFactorySelect = document.getElementById("recoveryFactoryFilter");
+function renderRecoveryCreateProductRows() {
+  const container = document.getElementById("recoveryCreateRowsContainer");
+  if (!container) return;
 
-  if (factorySelect && pageFactorySelect) {
-    factorySelect.innerHTML = pageFactorySelect.innerHTML;
-    factorySelect.value = pageFactorySelect.value || "";
-  }
+  container.innerHTML = recoveryState.createRows.map(row => {
+    const isResolved = !!row.resolvedProduct;
+    const isInvalid = !!row.rawInput && !row.resolvedProduct;
 
-  renderRecoveryCreateProductSuggestions("");
-  document.getElementById("recoveryCreateProductSuggestions")?.classList.add("hidden");
-}
+    const inputBorderClass = isInvalid
+      ? "border-2 border-red-500 bg-red-50/50 dark:bg-red-950/30 text-red-900 dark:text-red-200 focus:ring-red-500"
+      : isResolved
+      ? "border border-emerald-500 text-emerald-900 dark:text-emerald-300 font-medium focus:ring-emerald-500"
+      : "border border-gray-300 dark:border-gray-600 focus:ring-blue-500";
 
-function handleRecoveryCreateDocumentClick(event) {
-  const suggestionEl = document.getElementById("recoveryCreateProductSuggestions");
-  const productInput = document.getElementById("recoveryCreateProductInput");
-  if (!suggestionEl || !productInput) {
-    return;
-  }
-  if (event.target === productInput || suggestionEl.contains(event.target)) {
-    return;
-  }
-  suggestionEl.classList.add("hidden");
-}
+    const qtyClass = isResolved
+      ? "font-bold text-emerald-600 dark:text-emerald-400 bg-white dark:bg-gray-800"
+      : "opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-800/80 text-gray-400";
 
-function getRecoveryCreateSuggestionGroups(searchTerm = "") {
-  const normalizedSearch = String(searchTerm || "").trim().toLowerCase();
-  const buildGroup = (fieldName, label) => {
-    const values = Array.from(new Set(
-      recoveryState.allProducts
-        .map(product => String(product[fieldName] || "").trim())
-        .filter(Boolean)
-    ))
-      .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
-      .filter(value => !normalizedSearch || value.toLowerCase().includes(normalizedSearch));
+    return `
+      <div class="p-3 bg-white dark:bg-gray-700/60 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm" id="recoveryCreateRow_${row.id}">
+        <div class="flex items-center gap-3">
+          <!-- Product Input -->
+          <div class="flex-1 min-w-0 recovery-suggestion-container relative">
+            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Product (背番号 or 品番)</label>
+            <div class="relative">
+              <input type="text"
+                     id="recoveryCreateProductInput_${row.id}"
+                     autocomplete="off"
+                     value="${escapeRecoveryAttribute(row.rawInput)}"
+                     placeholder="Type 背番号 (e.g. 3TD) or 品番..."
+                     class="w-full p-2.5 rounded-lg text-sm dark:bg-gray-800 dark:text-white focus:ring-2 ${inputBorderClass}"
+                     oninput="handleRecoveryCreateProductInput(${row.id}, this.value)"
+                     onfocus="handleRecoveryCreateProductFocus(${row.id})"
+              >
+              <div id="recoveryCreateSuggestions_${row.id}" class="hidden absolute z-30 mt-1 w-full max-h-60 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-xl"></div>
+            </div>
+          </div>
 
-    return { key: fieldName, label, values };
-  };
+          <!-- Quantity Input -->
+          <div class="w-36 flex-shrink-0">
+            <label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Recovered Qty</label>
+            <input type="number"
+                   id="recoveryCreateQuantityInput_${row.id}"
+                   min="1"
+                   step="1"
+                   value="${row.quantity}"
+                   placeholder="${isResolved ? "e.g. 268" : "Enter product"}"
+                   ${isResolved ? "" : "disabled"}
+                   class="w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 ${qtyClass}"
+                   oninput="handleRecoveryCreateQuantityInput(${row.id}, this.value)"
+            >
+          </div>
 
-  return [
-    buildGroup("背番号", "背番号"),
-    buildGroup("品番", "品番")
-  ].filter(group => group.values.length > 0);
-}
-
-function renderRecoveryCreateProductSuggestions(searchTerm = "") {
-  const suggestionEl = document.getElementById("recoveryCreateProductSuggestions");
-  if (!suggestionEl) {
-    return;
-  }
-
-  const groups = getRecoveryCreateSuggestionGroups(searchTerm);
-  if (!groups.length) {
-    suggestionEl.innerHTML = '<div class="px-4 py-3 text-sm text-gray-500">No matches found.</div>';
-    suggestionEl.classList.remove("hidden");
-    return;
-  }
-
-  suggestionEl.innerHTML = groups.map((group, groupIndex) => `
-    <div class="${groupIndex > 0 ? "border-t border-gray-200" : ""}">
-      <div class="sticky top-0 px-4 py-2 text-xs font-semibold tracking-wide text-gray-500 bg-gray-50">${escapeRecoveryHtml(group.label)}</div>
-      ${group.values.map(value => `
-        <button type="button" onclick="selectRecoveryCreateSuggestion('${escapeRecoveryAttribute(group.key)}', '${escapeRecoveryAttribute(value)}')" class="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-blue-50 transition-colors">
-          ${escapeRecoveryHtml(value)}
-        </button>
-      `).join("")}
-    </div>
-  `).join("");
-  suggestionEl.classList.remove("hidden");
-}
-
-function selectRecoveryCreateSuggestion(groupKey, value) {
-  const productInput = document.getElementById("recoveryCreateProductInput");
-  const suggestionEl = document.getElementById("recoveryCreateProductSuggestions");
-  if (productInput) {
-    productInput.value = value;
-  }
-  if (suggestionEl) {
-    suggestionEl.classList.add("hidden");
-  }
-  handleRecoveryCreateProductChange(groupKey);
-}
-
-function handleRecoveryCreateProductChange(preferredField) {
-  const input = document.getElementById("recoveryCreateProductInput");
-  const value = String(input?.value || "").trim();
-  const resolvedEl = document.getElementById("recoveryCreateResolvedProduct");
-  const candidatesEl = document.getElementById("recoveryCreatePressCandidates");
-
-  recoveryState.createResolvedProduct = null;
-  recoveryState.createProductCandidates = [];
-  if (candidatesEl) {
-    candidatesEl.innerHTML = "";
-  }
-
-  if (!value) {
-    if (resolvedEl) resolvedEl.textContent = "-";
-    updateRecoveryCreateExistingNotice(null);
-    updateRecoveryCreatePressMatch(null, "No lookup run yet.");
-    return;
-  }
-
-  const lowerValue = value.toLowerCase();
-  const banMatches = recoveryState.allProducts.filter(product => String(product.背番号 || "").trim().toLowerCase() === lowerValue);
-  const hinbanMatches = recoveryState.allProducts.filter(product => String(product.品番 || "").trim().toLowerCase() === lowerValue);
-
-  if (preferredField === "背番号" && banMatches.length >= 1) {
-    if (banMatches.length === 1) {
-      applyRecoveryCreateResolvedProduct(banMatches[0], false);
-      return;
-    }
-  }
-  if (preferredField === "品番" && hinbanMatches.length >= 1) {
-    if (hinbanMatches.length === 1) {
-      applyRecoveryCreateResolvedProduct(hinbanMatches[0], false);
-      return;
-    }
-  }
-
-  if (banMatches.length === 1) {
-    applyRecoveryCreateResolvedProduct(banMatches[0], false);
-    return;
-  }
-  if (hinbanMatches.length === 1) {
-    applyRecoveryCreateResolvedProduct(hinbanMatches[0], false);
-    return;
-  }
-
-  const candidates = banMatches.length > 1 ? banMatches : hinbanMatches;
-  if (candidates.length > 1) {
-    recoveryState.createProductCandidates = candidates;
-    if (resolvedEl) {
-      resolvedEl.innerHTML = '<span class="text-amber-700">Multiple matches found. Choose one below.</span>';
-    }
-    renderRecoveryCreateProductCandidates(candidates);
-    updateRecoveryCreateExistingNotice(null);
-    updateRecoveryCreatePressMatch(null, "Resolve the product before lookup.", true);
-    return;
-  }
-
-  if (resolvedEl) {
-    resolvedEl.innerHTML = '<span class="text-red-600">No exact product match found in masterDB.</span>';
-  }
-  updateRecoveryCreateExistingNotice(null);
-  updateRecoveryCreatePressMatch(null, "No lookup run yet.");
-}
-
-function renderRecoveryCreateProductCandidates(candidates) {
-  const candidatesEl = document.getElementById("recoveryCreatePressCandidates");
-  if (!candidatesEl) {
-    return;
-  }
-
-  candidatesEl.innerHTML = `
-    <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
-      <div class="text-sm font-medium text-amber-800 mb-3">Choose the correct product</div>
-      <div class="flex flex-wrap gap-2">
-        ${candidates.map((product, index) => `
-          <button onclick="selectRecoveryCreateProductCandidate(${index})" class="px-3 py-2 text-sm border border-amber-300 rounded-lg bg-white hover:bg-amber-100 transition-colors">
-            ${escapeRecoveryHtml(product.背番号 || "-")} / ${escapeRecoveryHtml(product.品番 || "-")} / ${escapeRecoveryHtml(product.モデル || "-")}
-          </button>
-        `).join("")}
+          <!-- Remove Row Button -->
+          <div class="flex-shrink-0 pt-5">
+            ${recoveryState.createRows.length > 1 ? `
+              <button type="button" onclick="removeRecoveryCreateProductRow(${row.id})" class="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors" title="Remove product">
+                <i class="ri-delete-bin-line text-lg"></i>
+              </button>
+            ` : `
+              <div class="w-9"></div>
+            `}
+          </div>
+        </div>
       </div>
-    </div>
-  `;
+    `;
+  }).join("");
 }
 
-function selectRecoveryCreateProductCandidate(index) {
-  const product = recoveryState.createProductCandidates[index];
-  if (!product) {
-    return;
+function handleRecoveryCreateProductFocus(rowId) {
+  const row = recoveryState.createRows.find(r => r.id === rowId);
+  if (row && row.rawInput) {
+    handleRecoveryCreateProductInput(rowId, row.rawInput);
   }
-  applyRecoveryCreateResolvedProduct(product, true);
 }
 
-function applyRecoveryCreateResolvedProduct(product, setInputValue) {
-  const input = document.getElementById("recoveryCreateProductInput");
-  const resolvedEl = document.getElementById("recoveryCreateResolvedProduct");
-  const candidatesEl = document.getElementById("recoveryCreatePressCandidates");
-  recoveryState.createResolvedProduct = product;
-  recoveryState.createProductCandidates = [];
+function handleRecoveryCreateProductInput(rowId, val) {
+  const row = recoveryState.createRows.find(r => r.id === rowId);
+  if (!row) return;
 
-  if (setInputValue && input) {
-    input.value = String(product.背番号 || product.品番 || "");
-  }
-  if (resolvedEl) {
-    resolvedEl.textContent = `${product.背番号 || "-"} / ${product.品番 || "-"} / ${product.モデル || "-"}`;
-  }
-  if (candidatesEl) {
-    candidatesEl.innerHTML = "";
-  }
+  row.rawInput = val;
+  const q = String(val || "").trim().toLowerCase();
+  const inputEl = document.getElementById(`recoveryCreateProductInput_${rowId}`);
+  const qtyInput = document.getElementById(`recoveryCreateQuantityInput_${rowId}`);
+  const suggestionsEl = document.getElementById(`recoveryCreateSuggestions_${rowId}`);
 
-  checkRecoveryCreateExistingRecord();
-  runRecoveryCreatePressLookup();
-}
-
-function handleRecoveryCreateLotChange() {
-  checkRecoveryCreateExistingRecord();
-  runRecoveryCreatePressLookup();
-}
-
-async function checkRecoveryCreateExistingRecord() {
-  const product = recoveryState.createResolvedProduct;
-  const lot = String(document.getElementById("recoveryCreateLotInput")?.value || "").trim();
-  if (!product?.背番号 || !lot) {
-    recoveryState.createExistingRecord = null;
-    updateRecoveryCreateExistingNotice(null);
+  if (!q) {
+    row.resolvedProduct = null;
+    row.quantity = "";
+    if (inputEl) {
+      inputEl.className = "w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500";
+    }
+    if (qtyInput) {
+      qtyInput.value = "";
+      qtyInput.disabled = true;
+      qtyInput.placeholder = "Enter product";
+      qtyInput.className = "w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-800/80 text-gray-400";
+    }
+    if (suggestionsEl) {
+      suggestionsEl.innerHTML = "";
+      suggestionsEl.classList.add("hidden");
+    }
     return;
   }
 
-  try {
-    const response = await fetch(`${getRecoveryBaseUrl()}api/get-recovery/${encodeURIComponent(product.背番号)}/${encodeURIComponent(lot)}`);
-    if (!response.ok) {
-      recoveryState.createExistingRecord = null;
-      updateRecoveryCreateExistingNotice(null);
-      return;
+  // Exact match check first
+  const exactMatch = recoveryState.allProducts.find(p =>
+    String(p.背番号 || "").trim().toLowerCase() === q ||
+    String(p.品番 || "").trim().toLowerCase() === q
+  );
+
+  if (exactMatch) {
+    row.resolvedProduct = exactMatch;
+    if (inputEl) {
+      inputEl.className = "w-full p-2.5 border border-emerald-500 dark:border-emerald-500 text-emerald-900 dark:text-emerald-300 font-medium rounded-lg text-sm bg-white dark:bg-gray-800 focus:ring-2 focus:ring-emerald-500";
     }
-    const data = await response.json();
-    recoveryState.createExistingRecord = data?.recovery || null;
-    updateRecoveryCreateExistingNotice(recoveryState.createExistingRecord);
-  } catch (error) {
-    console.error("Failed to check existing recovery record:", error);
-    recoveryState.createExistingRecord = null;
-    updateRecoveryCreateExistingNotice(null);
-  }
-}
-
-function updateRecoveryCreateExistingNotice(record) {
-  const noticeEl = document.getElementById("recoveryCreateExistingNotice");
-  if (!noticeEl) {
-    return;
-  }
-  if (!record) {
-    noticeEl.classList.add("hidden");
-    noticeEl.textContent = "";
-    return;
-  }
-  noticeEl.classList.remove("hidden");
-  noticeEl.textContent = "Existing recovery record found. New submission will merge into it.";
-}
-
-async function runRecoveryCreatePressLookup() {
-  const product = recoveryState.createResolvedProduct;
-  const lot = String(document.getElementById("recoveryCreateLotInput")?.value || "").trim();
-  if (!product?.背番号 || !lot) {
-    updateRecoveryCreatePressMatch(null, "Enter a resolved 背番号 and lot before lookup.");
-    return;
-  }
-
-  updateRecoveryCreatePressMatch(null, "Searching pressDB...");
-
-  try {
-    const exactMatches = await searchRecoveryCreatePressDbExact(product.背番号, lot);
-    if (exactMatches.length === 1) {
-      handleRecoveryCreatePressSelection(exactMatches[0], "exact");
-      return;
+    if (qtyInput) {
+      qtyInput.disabled = false;
+      qtyInput.placeholder = "e.g. 268";
+      qtyInput.className = "w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500";
     }
-    if (exactMatches.length > 1) {
-      recoveryState.createPressCandidates = exactMatches;
-      renderRecoveryCreatePressCandidates(exactMatches, "exact", "Multiple exact matches found. Choose one.");
-      return;
+  } else {
+    row.resolvedProduct = null;
+    row.quantity = "";
+    if (inputEl) {
+      inputEl.className = "w-full p-2.5 border-2 border-red-500 dark:border-red-500 bg-red-50/50 dark:bg-red-950/30 text-red-900 dark:text-red-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500";
     }
-
-    const isoDate = normalizeRecoveryCreateLotToIsoDate(lot);
-    if (!isoDate) {
-      updateRecoveryCreatePressMatch(null, "No exact press match. Lot date could not be normalized for nearby search.");
-      return;
+    if (qtyInput) {
+      qtyInput.value = "";
+      qtyInput.disabled = true;
+      qtyInput.placeholder = "Enter product";
+      qtyInput.className = "w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 opacity-40 cursor-not-allowed bg-gray-100 dark:bg-gray-800/80 text-gray-400";
     }
-
-    const nearbyMatches = await searchRecoveryCreatePressDbNearby(product.背番号, isoDate);
-    if (nearbyMatches.length === 1) {
-      handleRecoveryCreatePressSelection(nearbyMatches[0], "nearby");
-      return;
-    }
-    if (nearbyMatches.length > 1) {
-      recoveryState.createPressCandidates = nearbyMatches;
-      renderRecoveryCreatePressCandidates(nearbyMatches, "nearby", "No exact match. Nearby candidates found.");
-      return;
-    }
-
-    updateRecoveryCreatePressMatch(null, "No matching press record found.");
-  } catch (error) {
-    console.error("Failed to lookup press record:", error);
-    updateRecoveryCreatePressMatch(null, error.message || "Failed to lookup press record.");
-  }
-}
-
-async function searchRecoveryCreatePressDbExact(sebanggo, lot) {
-  const response = await fetch(`${getRecoveryBaseUrl()}api/search-pressdb-exact`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ 背番号: sebanggo, 製造ロット: lot })
-  });
-  if (!response.ok) {
-    return [];
-  }
-  const data = await response.json();
-  return Array.isArray(data) ? data : [];
-}
-
-async function searchRecoveryCreatePressDbNearby(sebanggo, isoDate) {
-  const response = await fetch(`${getRecoveryBaseUrl()}api/search-pressdb-nearby`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ 背番号: sebanggo, date: isoDate })
-  });
-  if (!response.ok) {
-    return [];
-  }
-  const data = await response.json();
-  return Array.isArray(data) ? data : [];
-}
-
-function renderRecoveryCreatePressCandidates(candidates, source, message) {
-  const candidatesEl = document.getElementById("recoveryCreatePressCandidates");
-  if (!candidatesEl) {
-    return;
   }
 
-  candidatesEl.innerHTML = `
-    <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
-      <div class="text-sm font-medium text-amber-800 mb-3">${escapeRecoveryHtml(message)}</div>
-      <div class="space-y-2">
-        ${candidates.map((candidate, index) => `
-          <button onclick="selectRecoveryCreatePressCandidate(${index})" class="w-full text-left px-4 py-3 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 transition-colors text-sm">
-            <div class="font-medium text-gray-900">${escapeRecoveryHtml(candidate.Date || candidate.製造ロット || "-")} / ${escapeRecoveryHtml(candidate.設備 || "-")}</div>
-            <div class="mt-1 text-xs text-gray-600">品番 ${escapeRecoveryHtml(candidate.品番 || "-")} • Worker ${escapeRecoveryHtml(candidate.Worker_Name || "-")} • Qty ${escapeRecoveryHtml(candidate.Process_Quantity || "-")}</div>
-            <div class="mt-1 text-xs text-amber-700">疵引不良 ${escapeRecoveryHtml(candidate["疵引不良"] || 0)} • 加工不良 ${escapeRecoveryHtml(candidate["加工不良"] || 0)} • その他 ${escapeRecoveryHtml(candidate["その他"] || 0)}</div>
-          </button>
-        `).join("")}
+  // Filter suggestions
+  const matches = recoveryState.allProducts.filter(p => {
+    const ban = String(p.背番号 || "").toLowerCase();
+    const hinban = String(p.品番 || "").toLowerCase();
+    return ban.includes(q) || hinban.includes(q);
+  }).slice(0, 10);
+
+  if (!suggestionsEl) return;
+
+  if (matches.length === 0) {
+    suggestionsEl.innerHTML = `<div class="p-3 text-xs text-red-600 dark:text-red-400 font-medium">背番号 / 品番 does not exist in masterDB</div>`;
+    suggestionsEl.classList.remove("hidden");
+  } else {
+    suggestionsEl.innerHTML = matches.map((p, idx) => `
+      <div class="p-2.5 hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-0 flex items-center justify-between text-xs"
+           onclick="selectRecoveryCreateProductSuggestion(${rowId}, ${idx})">
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800">${escapeRecoveryHtml(p.背番号 || "-")}</span>
+          <span class="font-mono text-gray-700 dark:text-gray-300">${escapeRecoveryHtml(p.品番 || "-")}</span>
+        </div>
+        <div class="text-gray-400">
+          ${escapeRecoveryHtml(p.モデル || "")} ${p.工場 ? `• ${escapeRecoveryHtml(p.工場)}` : ""}
+        </div>
       </div>
-    </div>
-  `;
-  updateRecoveryCreatePressMatch(null, message, true);
-  recoveryState.createPressCandidatesSource = source;
+    `).join("");
+    suggestionsEl._matches = matches;
+    suggestionsEl.classList.remove("hidden");
+  }
 }
 
-function selectRecoveryCreatePressCandidate(index) {
-  const item = recoveryState.createPressCandidates[index];
-  if (!item) {
-    return;
+function selectRecoveryCreateProductSuggestion(rowId, index) {
+  const row = recoveryState.createRows.find(r => r.id === rowId);
+  const suggestionsEl = document.getElementById(`recoveryCreateSuggestions_${rowId}`);
+  if (!row || !suggestionsEl || !suggestionsEl._matches) return;
+
+  const product = suggestionsEl._matches[index];
+  if (!product) return;
+
+  row.resolvedProduct = product;
+  row.rawInput = product.背番号 || product.品番;
+
+  const inputEl = document.getElementById(`recoveryCreateProductInput_${rowId}`);
+  if (inputEl) {
+    inputEl.value = row.rawInput;
+    inputEl.className = "w-full p-2.5 border border-emerald-500 dark:border-emerald-500 text-emerald-900 dark:text-emerald-300 font-medium rounded-lg text-sm bg-white dark:bg-gray-800 focus:ring-2 focus:ring-emerald-500";
   }
-  handleRecoveryCreatePressSelection(item, recoveryState.createPressCandidatesSource || "exact");
+
+  const qtyInput = document.getElementById(`recoveryCreateQuantityInput_${rowId}`);
+  if (qtyInput) {
+    qtyInput.disabled = false;
+    qtyInput.placeholder = "e.g. 268";
+    qtyInput.className = "w-full p-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500";
+    qtyInput.focus();
+  }
+
+  suggestionsEl.classList.add("hidden");
 }
 
-function handleRecoveryCreatePressSelection(item, source) {
-  const mapped = mapRecoveryCreatePressMatch(item, source);
-  updateRecoveryCreatePressMatch(mapped, source === "exact" ? "Exact press record matched." : "Nearby press record selected.");
-}
-
-function updateRecoveryCreatePressMatch(match, statusText, keepCandidates) {
-  recoveryState.createPressMatch = match;
-  const statusEl = document.getElementById("recoveryCreatePressLookupStatus");
-  const cardEl = document.getElementById("recoveryCreatePressMatchCard");
-  const candidatesEl = document.getElementById("recoveryCreatePressCandidates");
-
-  if (match) {
-    syncRecoveryCreateFactoryFromPressMatch(match);
+function handleRecoveryCreateQuantityInput(rowId, val) {
+  const row = recoveryState.createRows.find(r => r.id === rowId);
+  if (row) {
+    row.quantity = val;
   }
-
-  if (statusEl) {
-    statusEl.textContent = statusText || "No lookup run yet.";
-  }
-  if (!keepCandidates && candidatesEl) {
-    candidatesEl.innerHTML = "";
-  }
-  if (!cardEl) {
-    validateRecoveryCreateItemRows();
-    return;
-  }
-  if (!match) {
-    cardEl.innerHTML = "<div class=\"text-sm text-gray-400\">No press match selected.</div>";
-    validateRecoveryCreateItemRows();
-    return;
-  }
-
-  const fields = [
-    ["source", match.source],
-    ["背番号", match.背番号],
-    ["製造ロット", match.製造ロット],
-    ["Date", match.Date],
-    ["品番", match.品番],
-    ["工場", match.工場],
-    ["設備", match.設備],
-    ["Worker_Name", match.Worker_Name],
-    ["Process_Quantity", match.Process_Quantity],
-    ["疵引不良", match["疵引不良"]],
-    ["加工不良", match["加工不良"]],
-    ["その他", match["その他"]]
-  ];
-  cardEl.innerHTML = fields.map(([label, value]) => `
-    <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
-      <div class="text-xs font-medium text-gray-500 mb-1">${escapeRecoveryHtml(label)}</div>
-      <div class="text-sm text-gray-900 break-all">${escapeRecoveryHtml(value == null ? "-" : String(value))}</div>
-    </div>
-  `).join("");
-
-  validateRecoveryCreateItemRows();
-}
-
-function mapRecoveryCreatePressMatch(item, source) {
-  const parseNumber = value => (value === "" || value == null || Number.isNaN(Number(value))) ? null : Number(value);
-  return {
-    source,
-    id: item?._id?.$oid || item?._id?.toString?.() || item?._id || null,
-    背番号: String(item?.背番号 || ""),
-    製造ロット: String(item?.製造ロット || item?.Date || ""),
-    Date: String(item?.Date || ""),
-    品番: String(item?.品番 || ""),
-    工場: String(item?.工場 || item?.factory || item?.Factory || ""),
-    設備: String(item?.設備 || ""),
-    Worker_Name: String(item?.Worker_Name || ""),
-    Process_Quantity: parseNumber(item?.Process_Quantity),
-    疵引不良: parseNumber(item?.["疵引不良"]),
-    加工不良: parseNumber(item?.["加工不良"]),
-    その他: parseNumber(item?.["その他"])
-  };
-}
-
-function syncRecoveryCreateFactoryFromPressMatch(match) {
-  const factorySelect = document.getElementById("recoveryCreateFactoryInput");
-  const factoryValue = String(match?.工場 || "").trim();
-  if (!factorySelect || !factoryValue) {
-    return;
-  }
-
-  const existingOption = Array.from(factorySelect.options).find(option => option.value === factoryValue);
-  if (!existingOption) {
-    const option = document.createElement("option");
-    option.value = factoryValue;
-    option.textContent = factoryValue;
-    factorySelect.appendChild(option);
-  }
-
-  factorySelect.value = factoryValue;
-}
-
-function normalizeRecoveryCreateLotToIsoDate(value) {
-  if (!value) {
-    return null;
-  }
-
-  const trimmed = String(value).trim();
-  if (!trimmed) {
-    return null;
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed;
-  }
-
-  const compact = trimmed.replace(/[\s\-\/\.]/g, "");
-  if (/^\d{6}$/.test(compact)) {
-    const yy = Number(compact.slice(0, 2));
-    return `${2000 + yy}-${compact.slice(2, 4)}-${compact.slice(4, 6)}`;
-  }
-  if (/^\d{8}$/.test(compact)) {
-    return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
-  }
-
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed.toISOString().split("T")[0];
-}
-
-function addRecoveryCreateItemRow() {
-  const container = document.getElementById("recoveryCreateItemsContainer");
-  if (!container) {
-    return;
-  }
-
-  const row = document.createElement("div");
-  row.className = "grid grid-cols-1 md:grid-cols-[1fr_180px_48px] gap-3 items-start recovery-create-item-row";
-  row.innerHTML = `
-    <select class="recovery-create-defect w-full p-3 border border-gray-300 rounded-lg text-sm bg-white">
-      <option value="">Select defect type...</option>
-      <option value="疵引不良">疵引不良</option>
-      <option value="加工不良">加工不良</option>
-      <option value="その他">その他</option>
-    </select>
-    <div>
-      <input type="number" min="1" step="1" class="recovery-create-qty w-full p-3 border border-gray-300 rounded-lg text-sm transition-colors" placeholder="Quantity">
-      <div class="recovery-create-qty-hint mt-1 text-xs text-red-600 hidden"></div>
-    </div>
-    <button onclick="removeRecoveryCreateItemRow(this)" class="h-11 w-11 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
-      <i class="ri-delete-bin-line"></i>
-    </button>
-  `;
-
-  const defectSelect = row.querySelector(".recovery-create-defect");
-  const qtyInput = row.querySelector(".recovery-create-qty");
-  defectSelect?.addEventListener("change", validateRecoveryCreateItemRows);
-  qtyInput?.addEventListener("input", validateRecoveryCreateItemRows);
-  qtyInput?.addEventListener("change", validateRecoveryCreateItemRows);
-
-  container.appendChild(row);
-  validateRecoveryCreateItemRows();
-}
-
-function removeRecoveryCreateItemRow(button) {
-  const container = document.getElementById("recoveryCreateItemsContainer");
-  if (!container) {
-    return;
-  }
-
-  if (container.children.length <= 1) {
-    const defectInput = container.querySelector(".recovery-create-defect");
-    const qtyInput = container.querySelector(".recovery-create-qty");
-    if (defectInput) defectInput.value = "";
-    if (qtyInput) qtyInput.value = "";
-    validateRecoveryCreateItemRows();
-    return;
-  }
-
-  button.closest(".recovery-create-item-row")?.remove();
-  validateRecoveryCreateItemRows();
-}
-
-function validateRecoveryCreateItemRows() {
-  const rows = Array.from(document.querySelectorAll("#recoveryCreateItemsContainer .recovery-create-item-row"));
-  const totalsByDefect = rows.reduce((acc, row) => {
-    const defectType = String(row.querySelector(".recovery-create-defect")?.value || "").trim();
-    const quantity = Number(row.querySelector(".recovery-create-qty")?.value || 0);
-    if (defectType && quantity > 0) {
-      acc[defectType] = (acc[defectType] || 0) + quantity;
-    }
-    return acc;
-  }, {});
-
-  rows.forEach(row => {
-    const defectType = String(row.querySelector(".recovery-create-defect")?.value || "").trim();
-    const qtyInput = row.querySelector(".recovery-create-qty");
-    const hintEl = row.querySelector(".recovery-create-qty-hint");
-    const matchedLimit = defectType ? recoveryState.createPressMatch?.[defectType] : null;
-    const totalForDefect = defectType ? (totalsByDefect[defectType] || 0) : 0;
-    const isExceeded = defectType && matchedLimit != null && totalForDefect > matchedLimit;
-
-    if (!qtyInput || !hintEl) {
-      return;
-    }
-
-    qtyInput.classList.toggle("border-red-400", !!isExceeded);
-    qtyInput.classList.toggle("bg-red-50", !!isExceeded);
-    qtyInput.classList.toggle("text-red-700", !!isExceeded);
-    qtyInput.classList.toggle("focus:ring-red-200", !!isExceeded);
-
-    if (isExceeded) {
-      hintEl.textContent = `Total ${totalForDefect} exceeds ${defectType} limit ${matchedLimit}.`;
-      hintEl.classList.remove("hidden");
-    } else {
-      hintEl.textContent = "";
-      hintEl.classList.add("hidden");
-    }
-  });
-}
-
-function collectRecoveryCreateItems() {
-  return Array.from(document.querySelectorAll("#recoveryCreateItemsContainer .recovery-create-item-row"))
-    .map(row => ({
-      defectType: String(row.querySelector(".recovery-create-defect")?.value || "").trim(),
-      quantity: Number(row.querySelector(".recovery-create-qty")?.value || 0)
-    }))
-    .filter(item => item.defectType && item.quantity > 0);
 }
 
 async function submitRecoveryCreateForm() {
-  const product = recoveryState.createResolvedProduct;
-  const lot = String(document.getElementById("recoveryCreateLotInput")?.value || "").trim();
-  const factory = String(document.getElementById("recoveryCreateFactoryInput")?.value || "").trim();
-  const userId = String(document.getElementById("recoveryCreateUserInput")?.value || "").trim();
-  const inspectionTable = String(document.getElementById("recoveryCreateInspectionTableInput")?.value || "").trim();
-  const lotDate = normalizeRecoveryCreateLotToIsoDate(lot) || "";
-  const statusEl = document.getElementById("recoveryCreateStatus");
-  const items = collectRecoveryCreateItems();
+  const dateInput = document.getElementById("recoveryCreateDateInput");
+  const userInput = document.getElementById("recoveryCreateUserInput");
+  const factorySelect = document.getElementById("recoveryCreateFactoryInput");
 
-  validateRecoveryCreateItemRows();
-
-  if (!product?.背番号) {
-    alert("Please resolve a valid 背番号 or 品番 first.");
-    return;
-  }
-  if (!lot) {
-    alert("Manufacturing lot is required.");
-    return;
-  }
-  if (!factory) {
-    alert("Factory is required.");
-    return;
-  }
-  if (!userId) {
-    alert("Recorded By is required.");
-    return;
-  }
-  if (!inspectionTable) {
-    alert("Inspection Table is required.");
-    return;
-  }
-  if (!items.length) {
-    alert("Add at least one recovery item.");
+  const selectedDate = dateInput ? dateInput.value.trim() : "";
+  if (!selectedDate) {
+    alert("Please select a recovery/defect date.");
+    dateInput?.focus();
     return;
   }
 
-  if (recoveryState.createPressMatch) {
-    const totals = items.reduce((acc, item) => {
-      acc[item.defectType] = (acc[item.defectType] || 0) + item.quantity;
-      return acc;
-    }, {});
-    const limits = {
-      疵引不良: recoveryState.createPressMatch["疵引不良"],
-      加工不良: recoveryState.createPressMatch["加工不良"],
-      その他: recoveryState.createPressMatch["その他"]
-    };
-    const overLimit = Object.entries(totals).find(([defectType, total]) => limits[defectType] != null && total > limits[defectType]);
-    if (overLimit) {
-      alert(`Recovery quantity for ${overLimit[0]} exceeds matched press limit (${overLimit[1]} > ${limits[overLimit[0]]}).`);
+  const recordedBy = (userInput ? userInput.value.trim() : "") || "Operator";
+  const selectedFactory = factorySelect ? factorySelect.value.trim() : "";
+
+  // Validate each product row
+  for (let i = 0; i < recoveryState.createRows.length; i++) {
+    const row = recoveryState.createRows[i];
+    
+    // Auto-resolve product if user typed exact code without clicking suggestion
+    if (!row.resolvedProduct && row.rawInput) {
+      const q = String(row.rawInput).trim().toLowerCase();
+      const match = recoveryState.allProducts.find(p =>
+        String(p.背番号 || "").trim().toLowerCase() === q ||
+        String(p.品番 || "").trim().toLowerCase() === q
+      );
+      if (match) {
+        row.resolvedProduct = match;
+      }
+    }
+
+    if (!row.resolvedProduct) {
+      alert(`Row #${i + 1}: Please enter a valid product (背番号 or 品番) recognized in masterDB.`);
+      document.getElementById(`recoveryCreateProductInput_${row.id}`)?.focus();
+      return;
+    }
+
+    const qty = parseInt(row.quantity, 10);
+    if (!qty || qty <= 0) {
+      alert(`Row #${i + 1} (${row.resolvedProduct.背番号 || row.resolvedProduct.品番}): Please enter a valid quantity greater than 0.`);
       return;
     }
   }
 
-  if (statusEl) {
-    statusEl.textContent = recoveryState.createExistingRecord ? "Updating existing recovery record..." : "Creating recovery record...";
-  }
   setRecoveryCreateSubmitButtonsDisabled(true);
-  openRecoveryCreateSubmitModal("loading", recoveryState.createExistingRecord ? "Please wait while the existing recovery record is updated." : "Please wait while the recovery record is being submitted.");
+  openRecoveryCreateSubmitModal("loading", "Saving recovery records...");
 
   try {
+    const recoveries = recoveryState.createRows.map(row => {
+      const p = row.resolvedProduct;
+      const qty = parseInt(row.quantity, 10);
+      return {
+        背番号: p.背番号 || "",
+        品番: p.品番 || "",
+        date: selectedDate,
+        lotDate: selectedDate,
+        製造ロット: selectedDate.replace(/-/g, ""),
+        quantity: qty,
+        recoveries: [{ defectType: "Recovered", quantity: qty }],
+        userId: recordedBy,
+        factory: selectedFactory || p.工場 || p.factory || "",
+        timestamp: new Date().toISOString()
+      };
+    });
+
     const response = await fetch(`${getRecoveryBaseUrl()}api/save-recovery`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recoveries: [{
-          背番号: product.背番号,
-          品番: recoveryState.createPressMatch?.品番 || product.品番 || "",
-          製造ロット: lot,
-          lotDate,
-          recoveries: items,
-          userId,
-          検査テーブル名: inspectionTable,
-          factory,
-          timestamp: new Date().toISOString(),
-          pressMatch: recoveryState.createPressMatch || null,
-          pressDB_id: recoveryState.createPressMatch?.id || null
-        }]
-      })
+      body: JSON.stringify({ recoveries })
     });
+
     const data = await response.json();
     if (!response.ok || !data.success) {
       throw new Error(data.error || "Failed to save recovery record.");
     }
 
-    if (statusEl) {
-      statusEl.textContent = "Data has been submitted.";
-    }
-    openRecoveryCreateSubmitModal("success", "Data has been submitted.");
+    openRecoveryCreateSubmitModal("success", `Successfully recorded recovery for ${recoveries.length} product(s).`);
     closeRecoveryCreateModal();
     await loadRecoveryData();
   } catch (error) {
-    console.error("Failed to create recovery record:", error);
-    if (statusEl) {
-      statusEl.textContent = error.message || "Failed to save recovery record.";
-    }
-    openRecoveryCreateSubmitModal("error", error.message || "Failed to save recovery record.");
+    console.error("Failed to save recovery records:", error);
+    openRecoveryCreateSubmitModal("error", error.message || "Failed to save recovery records.");
   } finally {
     setRecoveryCreateSubmitButtonsDisabled(false);
   }
+}
+
+// Global click listener to close suggestions dropdowns when clicking outside
+if (!window.__recoverySuggestionsGlobalListenerBound) {
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".recovery-suggestion-container")) {
+      document.querySelectorAll("[id^='recoveryCreateSuggestions_']").forEach(el => el.classList.add("hidden"));
+    }
+  });
+  window.__recoverySuggestionsGlobalListenerBound = true;
 }
 
 window.initRecoveryPage = initRecoveryPage;
 window.openRecoveryCreateModal = openRecoveryCreateModal;
 window.closeRecoveryCreateModal = closeRecoveryCreateModal;
 window.closeRecoveryCreateSubmitModal = closeRecoveryCreateSubmitModal;
-window.selectRecoveryCreateSuggestion = selectRecoveryCreateSuggestion;
-window.selectRecoveryCreateProductCandidate = selectRecoveryCreateProductCandidate;
-window.runRecoveryCreatePressLookup = runRecoveryCreatePressLookup;
-window.selectRecoveryCreatePressCandidate = selectRecoveryCreatePressCandidate;
-window.addRecoveryCreateItemRow = addRecoveryCreateItemRow;
-window.removeRecoveryCreateItemRow = removeRecoveryCreateItemRow;
+window.addRecoveryCreateProductRow = addRecoveryCreateProductRow;
+window.removeRecoveryCreateProductRow = removeRecoveryCreateProductRow;
+window.renderRecoveryCreateProductRows = renderRecoveryCreateProductRows;
+window.handleRecoveryCreateProductInput = handleRecoveryCreateProductInput;
+window.handleRecoveryCreateProductFocus = handleRecoveryCreateProductFocus;
+window.selectRecoveryCreateProductSuggestion = selectRecoveryCreateProductSuggestion;
+window.handleRecoveryCreateQuantityInput = handleRecoveryCreateQuantityInput;
 window.submitRecoveryCreateForm = submitRecoveryCreateForm;
 window.openRecoverySebanggoSelector = openRecoverySebanggoSelector;
 window.closeRecoverySebanggoSelector = closeRecoverySebanggoSelector;
