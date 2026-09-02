@@ -2823,11 +2823,19 @@ function loadPage(page) {
 
                   <!-- Planning Tab Content -->
                   <div id="planner-planning-tab" class="planner-main-tab-content hidden">
-                    <!-- Selected Products Summary -->
-                    <div class="mb-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600 p-3">
-                      <div class="flex items-center justify-between gap-2 mb-2">
-                        <h3 class="font-medium text-sm text-gray-900 dark:text-white" data-i18n="selectedProducts">Selected Products</h3>
-                        <div class="flex items-center gap-2 flex-1 justify-end">
+                    <!-- Selected Products Summary Card (Collapsible) -->
+                    <div id="selectedProductsCard" class="mb-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden transition-all">
+                      <div class="p-3 flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-100/70 dark:hover:bg-gray-700/50 transition-colors select-none" onclick="toggleSelectedProductsCard()">
+                        <div class="flex items-center gap-2">
+                          <button type="button" class="text-gray-500 dark:text-gray-400 p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors" aria-label="Toggle Selected Products Card">
+                            <i id="selectedProductsCardChevron" class="ri-arrow-right-s-line text-lg transition-transform duration-200"></i>
+                          </button>
+                          <h3 class="font-medium text-sm text-gray-900 dark:text-white flex items-center gap-2" data-i18n="selectedProducts">
+                            <span>Selected Products</span>
+                            <span id="selectedProductsHeaderBadge" class="text-xs font-normal px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">0 items</span>
+                          </h3>
+                        </div>
+                        <div class="flex items-center gap-2 flex-1 justify-end" onclick="event.stopPropagation()">
                           <button onclick="showPrintModal()" 
                                   class="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1.5">
                             <i class="ri-printer-line"></i>
@@ -2841,11 +2849,19 @@ function loadPage(page) {
                                    oninput="filterSelectedProducts(this.value)">
                             <i class="ri-search-line absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                           </div>
+                          <button type="button" onclick="toggleSelectedProductsCard()" 
+                                  class="text-xs px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition-colors flex items-center gap-1">
+                            <span id="selectedProductsToggleText">Expand</span>
+                          </button>
                         </div>
                       </div>
-                      <div id="selectedProductsSummary">
-                        <div class="text-center py-2 text-gray-500 text-sm">
-                          <p data-i18n="noProductsSelected">No products selected</p>
+                      
+                      <!-- Collapsible Body (Default: Hidden) -->
+                      <div id="selectedProductsCardBody" class="hidden px-3 pb-3 border-t border-gray-200 dark:border-gray-600 pt-3">
+                        <div id="selectedProductsSummary">
+                          <div class="text-center py-2 text-gray-500 text-sm">
+                            <p data-i18n="noProductsSelected">No products selected</p>
+                          </div>
                         </div>
                       </div>
                     </div>

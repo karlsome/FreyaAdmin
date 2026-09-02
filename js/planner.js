@@ -7183,9 +7183,54 @@ async function confirmAddProduct(productId) {
     renderAllViews();
 }
 
+// ============================================
+// SELECTED PRODUCTS CARD COLLAPSE / EXPAND
+// ============================================
+function toggleSelectedProductsCard(forceState) {
+    const body = document.getElementById('selectedProductsCardBody');
+    const chevron = document.getElementById('selectedProductsCardChevron');
+    const toggleText = document.getElementById('selectedProductsToggleText');
+    if (!body) return;
+
+    const isCurrentlyCollapsed = body.classList.contains('hidden');
+    const shouldExpand = typeof forceState === 'boolean' ? forceState : isCurrentlyCollapsed;
+
+    if (shouldExpand) {
+        body.classList.remove('hidden');
+        if (chevron) {
+            chevron.classList.remove('ri-arrow-right-s-line');
+            chevron.classList.add('ri-arrow-down-s-line');
+        }
+        if (toggleText) toggleText.textContent = 'Collapse';
+    } else {
+        body.classList.add('hidden');
+        if (chevron) {
+            chevron.classList.remove('ri-arrow-down-s-line');
+            chevron.classList.add('ri-arrow-right-s-line');
+        }
+        if (toggleText) toggleText.textContent = 'Expand';
+    }
+}
+window.toggleSelectedProductsCard = toggleSelectedProductsCard;
+
 function updateSelectedProductsSummary(searchTerm = '') {
     const container = document.getElementById('selectedProductsSummary');
     if (!container) return;
+    
+    // Update summary badge in header
+    const totalItems = plannerState.selectedProducts.length;
+    const totalPcs = plannerState.selectedProducts.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+    const headerBadge = document.getElementById('selectedProductsHeaderBadge');
+    if (headerBadge) {
+        const uniqueMachines = new Set(plannerState.selectedProducts.map(p => p.equipment).filter(Boolean)).size;
+        if (totalItems > 0) {
+            headerBadge.textContent = `${totalItems} items (${totalPcs} pcs • ${uniqueMachines} machine${uniqueMachines > 1 ? 's' : ''})`;
+            headerBadge.className = 'text-xs font-normal px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+        } else {
+            headerBadge.textContent = '0 items';
+            headerBadge.className = 'text-xs font-normal px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400';
+        }
+    }
     
     if (plannerState.selectedProducts.length === 0) {
         container.innerHTML = `
@@ -7523,6 +7568,9 @@ async function clearAllSelectedProducts() {
 
 // Filter selected products by search term
 window.filterSelectedProducts = function(searchTerm) {
+    if (searchTerm && String(searchTerm).trim().length > 0) {
+        toggleSelectedProductsCard(true);
+    }
     updateSelectedProductsSummary(searchTerm);
 };
 
