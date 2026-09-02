@@ -25,6 +25,7 @@ let plannerState = {
     currentDate: new Date().toISOString().split('T')[0],
     endDate: null, // For date range plans
     equipment: [],
+    unavailableEquipment: {}, // Equipment availability / breakdown map: { [equipment]: { isUnavailable: true, reason: '', updatedAt: '', reportedBy: '' } }
     productionCapabilities: {},
     products: [], // All available products from masterDB
     goals: [], // Production quantity goals
@@ -236,9 +237,112 @@ function getEligibleEquipmentForProduct(product = {}, fallbackFactory = '') {
         .filter(Boolean);
 }
 
+function getUnavailableStorageKey(factory = plannerState.currentFactory) {
+    return `planner_unavailable_equipment_${factory || 'default'}`;
+}
+
+function loadUnavailableEquipmentForFactory(factory = plannerState.currentFactory) {
+    if (!factory) {
+        plannerState.unavailableEquipment = {};
+        return plannerState.unavailableEquipment;
+    }
+    try {
+        const saved = localStorage.getItem(getUnavailableStorageKey(factory));
+        plannerState.unavailableEquipment = saved ? JSON.parse(saved) : {};
+    } catch (e) {
+        console.warn('Failed to load unavailable equipment from localStorage:', e);
+        plannerState.unavailableEquipment = {};
+    }
+    return plannerState.unavailableEquipment;
+}
+
+function saveUnavailableEquipmentForFactory(factory = plannerState.currentFactory) {
+    if (!factory) return;
+    try {
+        localStorage.setItem(
+            getUnavailableStorageKey(factory),
+            JSON.stringify(plannerState.unavailableEquipment || {})
+        );
+    } catch (e) {
+        console.warn('Failed to save unavailable equipment to localStorage:', e);
+    }
+}
+
+function isEquipmentUnavailable(equipmentName = '') {
+    const normalized = String(equipmentName || '').trim();
+    if (!normalized || !plannerState.unavailableEquipment) {
+        return false;
+    }
+
+    if (plannerState.unavailableEquipment[normalized]?.isUnavailable) {
+        return true;
+    }
+
+    if (normalized.includes(',')) {
+        const parts = normalized.split(',').map((p) => p.trim());
+        return parts.some((part) => plannerState.unavailableEquipment[part]?.isUnavailable);
+    }
+
+    return false;
+}
+
+function getEquipmentUnavailableInfo(equipmentName = '') {
+    const normalized = String(equipmentName || '').trim();
+    if (!normalized || !plannerState.unavailableEquipment) {
+        return null;
+    }
+    if (plannerState.unavailableEquipment[normalized]?.isUnavailable) {
+        return plannerState.unavailableEquipment[normalized];
+    }
+    if (normalized.includes(',')) {
+        const parts = normalized.split(',').map((p) => p.trim());
+        for (const part of parts) {
+            if (plannerState.unavailableEquipment[part]?.isUnavailable) {
+                return plannerState.unavailableEquipment[part];
+            }
+        }
+    }
+    return null;
+}
+
+function getBrokenDownEquipmentCount() {
+    if (!plannerState.equipment || plannerState.equipment.length === 0) {
+        return 0;
+    }
+    return plannerState.equipment.filter((eq) => isEquipmentUnavailable(eq)).length;
+}
+
+function setEquipmentUnavailable(equipmentName = '', isUnavailable = true, reason = '') {
+    const normalized = String(equipmentName || '').trim();
+    if (!normalized) return;
+
+    if (!plannerState.unavailableEquipment) {
+        plannerState.unavailableEquipment = {};
+    }
+
+    const currentUser = JSON.parse(localStorage.getItem('authUser') || '{}');
+    const reportedBy = currentUser.firstName && currentUser.lastName
+        ? `${currentUser.firstName} ${currentUser.lastName}`
+        : (currentUser.username || 'Admin');
+
+    if (isUnavailable) {
+        plannerState.unavailableEquipment[normalized] = {
+            isUnavailable: true,
+            reason: String(reason || '').trim() || 'Breakdown / Under repair',
+            updatedAt: new Date().toISOString(),
+            reportedBy
+        };
+    } else {
+        delete plannerState.unavailableEquipment[normalized];
+    }
+
+    saveUnavailableEquipmentForFactory();
+    renderAllViews();
+}
+
 function getPlannerEquipmentOptionsForProduct(product = {}, fallbackFactory = '') {
-    const eligibleEquipment = getEligibleEquipmentForProduct(product, fallbackFactory);
-    return eligibleEquipment.length > 0 ? eligibleEquipment : plannerState.equipment;
+    // Admin has free will to schedule any product on any machine
+    return plannerState.equipment;
 }
 
 function getPlannerNumberValue(value) {
@@ -1313,7 +1417,7 @@ function getPlannerPreviewCandidateMachines(priorityRow = {}) {
                 preferred: machine?.preferred === true,
                 order: index,
             }))
-            .filter((machine) => machine.equipment)
+            .filter((machine) => machine.equipment && !isEquipmentUnavailable(machine.equipment))
         : [];
 }
 
@@ -2872,11 +2976,13 @@ function canPlannerPreviewDraftAssignmentUseEquipment(assignment = {}, equipment
         return false;
     }
 
-    if (String(assignment.equipment || '').trim() === normalizedEquipment) {
-        return true;
+    // Machine cannot be used if it is broken down / unavailable
+    if (isEquipmentUnavailable(normalizedEquipment)) {
+        return false;
     }
 
-    return getPlannerPreviewDraftAssignmentEligibleEquipment(assignment).includes(normalizedEquipment);
+    // Admin has free will to schedule/move to any available machine
+    return true;
 }
 
 function getPlannerPreviewDraftAssignmentDurationMinutes(assignment = {}) {
@@ -4815,6 +4921,7 @@ async function loadEquipmentForFactory(factory) {
         });
         
         plannerState.equipment = Array.from(equipmentSet).sort();
+        loadUnavailableEquipmentForFactory(factory);
         console.log(`📦 Loaded ${plannerState.equipment.length} equipment for ${factory}`);
         
         return plannerState.equipment;
@@ -4898,6 +5005,13 @@ async function loadExistingPlans(factory, date) {
             const plan = plans[0];
             plannerState.currentPlan = plan;
             plannerState.breaks = plan.breaks || [];
+            if (plan.unavailableEquipment && typeof plan.unavailableEquipment === 'object') {
+                plannerState.unavailableEquipment = {
+                    ...plannerState.unavailableEquipment,
+                    ...plan.unavailableEquipment
+                };
+                saveUnavailableEquipmentForFactory(factory);
+            }
             
             // Restore selected products from plan and recalculate boxes
             plannerState.selectedProducts = plan.products.map(item => {
@@ -5201,10 +5315,12 @@ async function handleFactoryChange(e) {
     }
     
     if (!factory) {
+        plannerState.unavailableEquipment = {};
         clearPlannerViews();
         return;
     }
     
+    loadUnavailableEquipmentForFactory(factory);
     showPlannerLoading(true);
     
     try {
@@ -6576,6 +6692,78 @@ function renderProductList() {
     }).join('');
 }
 
+// ============================================
+// RECONCILE GOALS WITH TIMELINE
+// ============================================
+async function reconcileGoalsWithTimeline() {
+    if (!plannerState.currentFactory || !plannerState.currentDate) {
+        showPlannerNotification('Please select factory and date first', 'warning');
+        return;
+    }
+
+    showPlannerLoading(true);
+    let updatedCount = 0;
+
+    try {
+        // Ensure latest goals and plan are in memory
+        await loadExistingPlans(plannerState.currentFactory, plannerState.currentDate);
+        await loadGoals();
+
+        const goals = plannerState.goals.filter(g => 
+            g.date === plannerState.currentDate && g.factory === plannerState.currentFactory
+        );
+
+        console.log(`🔍 Reconciling ${goals.length} goals with timeline (${plannerState.selectedProducts.length} items scheduled)...`);
+
+        for (const goal of goals) {
+            // Calculate actual quantity scheduled on the timeline for this goal
+            const actualScheduled = plannerState.selectedProducts
+                .filter(p => (p.goalId && p.goalId === goal._id) || (p.背番号 && p.背番号 === goal.背番号))
+                .reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+
+            const target = Number(goal.targetQuantity) || 0;
+            const currentScheduled = Number(goal.scheduledQuantity) || 0;
+
+            if (actualScheduled !== currentScheduled) {
+                const newRemaining = Math.max(0, target - actualScheduled);
+                const newStatus = actualScheduled >= target ? 'completed' : (actualScheduled > 0 ? 'in-progress' : 'pending');
+
+                console.log(`🔄 Reconciling goal ${goal.背番号}: scheduled ${currentScheduled} -> ${actualScheduled}, remaining ${goal.remainingQuantity} -> ${newRemaining}`);
+
+                const response = await fetch(BASE_URL + `api/production-goals/${goal._id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scheduledQuantity: actualScheduled,
+                        remainingQuantity: newRemaining,
+                        status: newStatus
+                    })
+                });
+
+                if (response.ok) {
+                    updatedCount++;
+                }
+            }
+        }
+
+        await loadGoals();
+        renderGoalList();
+        updateSelectedProductsSummary();
+        renderAllViews();
+
+        if (updatedCount > 0) {
+            showPlannerNotification(`✅ Successfully reconciled ${updatedCount} goal${updatedCount > 1 ? 's' : ''} with the timeline.`, 'success');
+        } else {
+            showPlannerNotification('✅ Goals are already in sync with the timeline.', 'info');
+        }
+    } catch (error) {
+        console.error('❌ Failed to reconcile goals with timeline:', error);
+        showPlannerNotification(`Failed to reconcile goals: ${error.message}`, 'error');
+    } finally {
+        showPlannerLoading(false);
+    }
+}
+
 // Render goal list (replaces product list)
 function renderGoalList() {
     const container = document.getElementById('goalListContainer');
@@ -6729,7 +6917,9 @@ function renderGoalCard(goal) {
     
     const equipmentDisplay = assignedEquipment.length > 0 
         ? assignedEquipment.join(', ')
-        : '-';
+        : (goal.scheduledQuantity > 0 
+            ? '<button onclick="event.stopPropagation(); reconcileGoalsWithTimeline()" class="text-amber-500 dark:text-amber-400 hover:underline font-semibold flex items-center gap-1" title="Scheduled quantity not found on timeline. Click to re-sync."><i class="ri-refresh-line"></i><span>Out of sync (sync)</span></button>' 
+            : '-');
     
     // List row format
     return `
@@ -6823,48 +7013,35 @@ async function showAddProductModal(product) {
         const capability = getCachedProductionCapability(product, plannerFactory);
         const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerFactory);
 
-        if (capability?.hasMapping) {
-            if (eligibleEquipment.length > 0) {
-                equipmentOptions = eligibleEquipment;
-                capabilityNotice = `
-                    <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                        Capability mapping active for ${plannerFactory || 'this factory'}: ${eligibleEquipment.join(', ')}
-                    </div>
-                `;
-            } else {
-                equipmentOptions = [];
-                disableEquipmentSelection = true;
-                capabilityNotice = `
-                    <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                        This product has a capability record, but no enabled equipment is available for ${plannerFactory || 'this factory'}.
-                    </div>
-                `;
-            }
+        if (capability?.hasMapping && eligibleEquipment.length > 0) {
+            capabilityNotice = `
+                <div class="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/40 dark:border-emerald-800 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+                    Recommended equipment: ${eligibleEquipment.join(', ')} <span class="text-xs opacity-75">(All available machines can be scheduled freely)</span>
+                </div>
+            `;
         } else {
             capabilityNotice = `
-                <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                    No capability mapping found for ${plannerFactory || 'this factory'} yet. Using legacy equipment list.
+                <div class="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/40 dark:border-blue-800 px-4 py-3 text-sm text-blue-700 dark:text-blue-300">
+                    All available machines can be scheduled freely.
                 </div>
             `;
         }
     } catch (error) {
         console.error('❌ Failed to load capability mapping for add-product modal:', error);
         capabilityNotice = `
-            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                Capability lookup failed. Using current equipment list.
+            <div class="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/40 dark:border-blue-800 px-4 py-3 text-sm text-blue-700 dark:text-blue-300">
+                All available machines can be scheduled freely.
             </div>
         `;
     }
 
     if (equipmentOptions.length === 0) {
         disableEquipmentSelection = true;
-        if (!capabilityNotice) {
-            capabilityNotice = `
-                <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                    No equipment is available for manual assignment.
-                </div>
-            `;
-        }
+        capabilityNotice = `
+            <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                No equipment is available for manual assignment.
+            </div>
+        `;
     }
 
     const confirmButtonClasses = disableEquipmentSelection
@@ -6910,7 +7087,11 @@ async function showAddProductModal(product) {
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" data-i18n="assignToEquipment">Assign to Equipment</label>
                             <select id="equipmentSelect" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" onchange="updateQuantityPreview('${product._id}')" ${disableEquipmentSelection ? 'disabled' : ''}>
                                 <option value="" data-i18n="selectEquipment">-- Select Equipment --</option>
-                                ${equipmentOptions.map(eq => `<option value="${eq}">${eq}</option>`).join('')}
+                                ${equipmentOptions.map(eq => {
+                                    const isBroken = isEquipmentUnavailable(eq);
+                                    const label = isBroken ? `${eq} (⚠️ Broken Down / Unavailable)` : eq;
+                                    return `<option value="${eq}" ${isBroken ? 'disabled class="text-red-500 bg-red-50 dark:bg-red-950/30"' : ''}>${label}</option>`;
+                                }).join('')}
                             </select>
                         </div>
                     </div>
@@ -6977,13 +7158,9 @@ async function confirmAddProduct(productId) {
     const capability = getCachedProductionCapability(product, plannerState.currentFactory);
     const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
 
-    if (capability?.hasMapping && eligibleEquipment.length === 0) {
-        showPlannerNotification('This product has no enabled capability equipment in the current factory', 'error');
-        return;
-    }
-
-    if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(equipment)) {
-        showPlannerNotification(`${product.背番号} is not mapped to ${equipment}`, 'warning');
+    if (isEquipmentUnavailable(equipment)) {
+        const info = getEquipmentUnavailableInfo(equipment);
+        showPlannerNotification(`Cannot schedule on ${equipment}: Machine is broken down / unavailable (${info?.reason || 'Out of service'})`, 'error');
         return;
     }
     
@@ -7462,10 +7639,10 @@ function renderTimelineView() {
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const startMinutes = timeToMinutes(PLANNER_CONFIG.workStartTime);
     const minutesFromStart = currentMinutes - startMinutes;
-    const currentTimePosition = (minutesFromStart / PLANNER_CONFIG.intervalMinutes) * slotWidth + 96; // 96px = equipment column width (24 * 4)
+    const currentTimePosition = (minutesFromStart / PLANNER_CONFIG.intervalMinutes) * slotWidth + 192; // 192px = equipment column width (w-48)
     
     // Build timeline header
-    let headerHTML = '<div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10" data-i18n="equipment">Equipment</div>';
+    let headerHTML = '<div class="flex-shrink-0 w-48 bg-gray-100 dark:bg-gray-700 border-r dark:border-gray-600 p-2 font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10 text-xs flex items-center justify-between" data-i18n="equipment"><span class="font-semibold text-xs sm:text-sm">Equipment</span><button onclick="openMachineManagementModal()" class="text-gray-500 hover:text-gray-900 dark:hover:text-white p-0.5" title="Machine Status"><i class="ri-tools-line text-sm"></i></button></div>';
     
     timeSlots.forEach((slot, index) => {
         // Show all time labels
@@ -7508,18 +7685,43 @@ function renderTimelineView() {
         // Check if rows should be greyed out independently
         const greyOutPlanned = shouldGreyOutEquipment(equipment, plannerState.selectedProducts);
         const greyOutActual = shouldGreyOutEquipment(equipment, plannerState.actualProduction);
+        const isBroken = isEquipmentUnavailable(equipment);
+        const unavailInfo = isBroken ? getEquipmentUnavailableInfo(equipment) : null;
         
-        console.log(`🔧 ${equipment}: ${assignedProducts.length} planned (grey: ${greyOutPlanned}), ${actualProduction.length} actual (grey: ${greyOutActual})`);
+        console.log(`🔧 ${equipment}: ${assignedProducts.length} planned (grey: ${greyOutPlanned}, broken: ${isBroken}), ${actualProduction.length} actual (grey: ${greyOutActual})`);
         
         // Planned row
-        const plannedRowClasses = greyOutPlanned ? 'opacity-40 pointer-events-none' : '';
+        const plannedRowClasses = (greyOutPlanned ? 'opacity-40 pointer-events-none' : '') + (isBroken ? ' bg-red-50/15 dark:bg-red-950/10 border-l-4 border-l-red-500' : '');
         const hidePlannedRow = plannerState.hideUnavailableEquipment && greyOutPlanned;
         
         if (!hidePlannedRow) {
             rowsHTML += `
                 <div class="flex border-b dark:border-gray-600 min-h-[60px] ${plannedRowClasses}" data-equipment="${equipment}">
-                    <div class="flex-shrink-0 w-24 bg-gray-50 dark:bg-gray-700/50 border-r dark:border-gray-600 p-2 text-sm font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10">
-                        ${equipment}${greyOutPlanned ? ' <span class="text-[10px] text-gray-500">(unavailable)</span>' : ''}
+                    <div class="flex-shrink-0 w-48 bg-gray-50 dark:bg-gray-700/50 border-r dark:border-gray-600 p-2 text-xs font-medium text-gray-700 dark:text-gray-300 sticky left-0 z-10 flex flex-col justify-between">
+                        <div class="flex items-start justify-between gap-1.5">
+                            <span class="font-bold text-xs sm:text-sm leading-snug break-words" title="${equipment}">${equipment}</span>
+                            <button onclick="openMachineStatusModal('${equipment}')" class="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 flex-shrink-0 p-0.5" title="Machine Status">
+                                <i class="ri-tools-line text-xs"></i>
+                            </button>
+                        </div>
+                        <div class="mt-1">
+                            ${isBroken ? `
+                                <button onclick="openMachineStatusModal('${equipment}')" 
+                                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300 border border-red-300 dark:border-red-700 hover:bg-red-200 transition-colors w-full justify-center animate-pulse"
+                                        title="${unavailInfo?.reason ? escapePlannerPreviewHtml(unavailInfo.reason) : 'Machine is broken down'}">
+                                    <i class="ri-alarm-warning-fill text-red-500 text-[10px]"></i>
+                                    <span class="truncate">Broken Down</span>
+                                </button>
+                            ` : `
+                                <button onclick="openMachineStatusModal('${equipment}')" 
+                                        class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
+                                        title="Machine operational. Click to report breakdown.">
+                                    <span class="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                                    <span>Active</span>
+                                </button>
+                            `}
+                        </div>
+                        ${greyOutPlanned ? '<span class="text-[9px] text-gray-400 mt-0.5">(no data)</span>' : ''}
                     </div>
                     <div class="flex-1 flex relative">
                         ${renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth)}
@@ -7535,9 +7737,9 @@ function renderTimelineView() {
         if (!hideActualRow) {
             rowsHTML += `
                 <div class="flex border-b dark:border-gray-600 min-h-[60px] bg-gray-50/30 dark:bg-gray-900/30 ${actualRowClasses}" data-equipment="${equipment}-actual">
-                    <div class="flex-shrink-0 w-24 bg-gray-100 dark:bg-gray-800 border-r dark:border-gray-600 p-2 text-xs font-medium text-gray-600 dark:text-gray-400 sticky left-0 z-10 flex flex-col justify-center">
-                        <div>${equipment}${greyOutActual ? ' <span class="text-[9px] text-gray-500">(unavailable)</span>' : ''}</div>
-                        <div class="text-[10px] text-gray-500 dark:text-gray-500">Actual</div>
+                    <div class="flex-shrink-0 w-48 bg-gray-100 dark:bg-gray-800 border-r dark:border-gray-600 p-2 text-xs font-medium text-gray-600 dark:text-gray-400 sticky left-0 z-10 flex flex-col justify-center">
+                        <div class="break-words font-semibold text-xs sm:text-sm leading-snug">${equipment}</div>
+                        <div class="text-[10px] text-gray-500 dark:text-gray-500 mt-0.5">Actual</div>
                     </div>
                     <div class="flex-1 flex relative">
                         ${renderActualProductionSlots(timeSlots, equipment, actualProduction, slotWidth)}
@@ -7548,22 +7750,36 @@ function renderTimelineView() {
     });
     
     container.innerHTML = `
-        <!-- Toggle Buttons -->
-        <div class="mb-3 flex items-center justify-end gap-2">
-            <button onclick="openCalendarView()" 
-                    class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-                <i class="ri-calendar-line"></i>
-                <span>Calendar View</span>
-            </button>
-            <button onclick="toggleHideUnavailableEquipment()" 
-                    class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                        plannerState.hideUnavailableEquipment 
-                        ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-700 dark:text-blue-400' 
-                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-                    }">
-                <i class="ri-${ plannerState.hideUnavailableEquipment ? 'eye-off-line' : 'eye-line' }"></i>
-                <span>${ plannerState.hideUnavailableEquipment ? 'Show' : 'Hide' } Unavailable Equipment</span>
-            </button>
+        <!-- Toolbar Buttons -->
+        <div class="mb-3 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+                <button onclick="openMachineManagementModal()" 
+                        class="flex items-center gap-2 px-3.5 py-2 text-sm font-medium border rounded-lg transition-all ${
+                            getBrokenDownEquipmentCount() > 0 
+                                ? 'bg-red-50 border-red-300 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:border-red-700 dark:text-red-300' 
+                                : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                        }">
+                    <i class="${getBrokenDownEquipmentCount() > 0 ? 'ri-alarm-warning-fill text-red-500' : 'ri-tools-line'}"></i>
+                    <span>Machine Status</span>
+                    ${getBrokenDownEquipmentCount() > 0 ? `<span class="ml-1 px-1.5 py-0.2 rounded-full text-xs font-bold bg-red-500 text-white animate-pulse">${getBrokenDownEquipmentCount()}</span>` : ''}
+                </button>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="openCalendarView()" 
+                        class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                    <i class="ri-calendar-line"></i>
+                    <span>Calendar View</span>
+                </button>
+                <button onclick="toggleHideUnavailableEquipment()" 
+                        class="flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                            plannerState.hideUnavailableEquipment 
+                            ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 text-blue-700 dark:text-blue-400' 
+                            : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                        }">
+                    <i class="ri-${ plannerState.hideUnavailableEquipment ? 'eye-off-line' : 'eye-line' }"></i>
+                    <span>${ plannerState.hideUnavailableEquipment ? 'Show' : 'Hide' } Unavailable Equipment</span>
+                </button>
+            </div>
         </div>
         
         <div class="border rounded-lg dark:border-gray-600 overflow-hidden">
@@ -7730,21 +7946,39 @@ function renderTimelineSlots(timeSlots, equipment, assignedProducts, slotWidth) 
                     </div>
                 `;
             } else {
-                html += `
-                    <div class="flex-shrink-0 border-r dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer group relative drop-zone" 
-                         style="width: ${slotWidth}px"
-                         data-equipment="${equipment}"
-                         data-time="${slot}"
-                         ondragover="handleTimelineDragOver(event)"
-                         ondragleave="handleTimelineDragLeave(event)"
-                         ondrop="handleTimelineDrop(event, '${equipment}', '${slot}')"
-                         onclick="handleTimelineSlotClick('${equipment}', '${slot}')" 
-                         title="Click to add products or drop here to reschedule">
-                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <i class="ri-add-circle-line text-blue-500 text-lg"></i>
+                const isBroken = isEquipmentUnavailable(equipment);
+                if (isBroken) {
+                    const unavailInfo = getEquipmentUnavailableInfo(equipment);
+                    const reasonText = unavailInfo?.reason ? ` (${unavailInfo.reason})` : '';
+                    html += `
+                        <div class="flex-shrink-0 border-r dark:border-gray-700 bg-red-50/20 dark:bg-red-950/20 cursor-not-allowed group relative" 
+                             style="width: ${slotWidth}px"
+                             data-equipment="${equipment}"
+                             data-time="${slot}"
+                             onclick="showBrokenMachineSlotAlert('${equipment}')" 
+                             title="${equipment} is broken down${reasonText}. Scheduling disabled.">
+                            <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <i class="ri-prohibited-line text-red-500 text-lg"></i>
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
+                } else {
+                    html += `
+                        <div class="flex-shrink-0 border-r dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer group relative drop-zone" 
+                             style="width: ${slotWidth}px"
+                             data-equipment="${equipment}"
+                             data-time="${slot}"
+                             ondragover="handleTimelineDragOver(event)"
+                             ondragleave="handleTimelineDragLeave(event)"
+                             ondrop="handleTimelineDrop(event, '${equipment}', '${slot}')"
+                             onclick="handleTimelineSlotClick('${equipment}', '${slot}')" 
+                             title="Click to add products or drop here to reschedule">
+                            <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <i class="ri-add-circle-line text-blue-500 text-lg"></i>
+                            </div>
+                        </div>
+                    `;
+                }
             }
         }
     });
@@ -7851,6 +8085,11 @@ function renderActualProductionSlots(timeSlots, equipment, actualProduction, slo
 }
 
 function handleTimelineSlotClick(equipment, timeSlot) {
+    if (isEquipmentUnavailable(equipment)) {
+        showBrokenMachineSlotAlert(equipment);
+        return;
+    }
+
     // Show context menu to choose: Add Products or Add Break
     const modalHTML = `
         <div id="timelineClickModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -7894,6 +8133,253 @@ function closeTimelineClickModal() {
     const modal = document.getElementById('timelineClickModal');
     if (modal) modal.remove();
 }
+
+// ============================================
+// MACHINE STATUS & BREAKDOWN MANAGEMENT
+// ============================================
+function showBrokenMachineSlotAlert(equipment) {
+    const info = getEquipmentUnavailableInfo(equipment);
+    const reasonText = info?.reason ? ` (${info.reason})` : '';
+    showPlannerNotification(`⚠️ ${equipment} is broken down and unavailable${reasonText}. Scheduling is disabled on this machine.`, 'error');
+    openMachineStatusModal(equipment);
+}
+
+function openMachineStatusModal(equipmentName = '') {
+    const equipment = String(equipmentName || '').trim();
+    if (!equipment) return;
+
+    closeMachineStatusModal();
+
+    const isBroken = isEquipmentUnavailable(equipment);
+    const unavailInfo = isBroken ? getEquipmentUnavailableInfo(equipment) : null;
+    const currentReason = unavailInfo?.reason || '';
+
+    const modalHTML = `
+        <div id="machineStatusModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full border border-gray-200 dark:border-gray-700 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between ${isBroken ? 'bg-red-50/70 dark:bg-red-950/30' : 'bg-gray-50 dark:bg-gray-800'}">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg flex items-center justify-center ${isBroken ? 'bg-red-100 dark:bg-red-900/60 text-red-600 dark:text-red-300' : 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-300'}">
+                            <i class="${isBroken ? 'ri-alarm-warning-fill' : 'ri-checkbox-circle-fill'} text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                <span>${escapePlannerPreviewHtml(equipment)}</span>
+                                <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${isBroken ? 'bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200 border border-red-300 dark:border-red-700' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700'}">
+                                    ${isBroken ? 'Broken Down / 故障中' : 'Operational / 稼働可能'}
+                                </span>
+                            </h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                Factory: <strong>${escapePlannerPreviewHtml(plannerState.currentFactory || '-')}</strong>
+                            </p>
+                        </div>
+                    </div>
+                    <button onclick="closeMachineStatusModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    ${isBroken ? `
+                        <div class="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-4">
+                            <div class="flex items-start gap-2.5">
+                                <i class="ri-error-warning-fill text-red-500 text-lg mt-0.5"></i>
+                                <div class="text-sm">
+                                    <p class="font-semibold text-red-800 dark:text-red-200">Current Status: Broken Down (Unavailable)</p>
+                                    <p class="mt-1 text-red-700 dark:text-red-300"><strong>Reason:</strong> ${escapePlannerPreviewHtml(currentReason || 'Unspecified breakdown')}</p>
+                                    ${unavailInfo?.updatedAt ? `<p class="mt-1 text-xs text-red-600/80 dark:text-red-400/80">Reported at: ${new Date(unavailInfo.updatedAt).toLocaleString()}${unavailInfo.reportedBy ? ` by ${escapePlannerPreviewHtml(unavailInfo.reportedBy)}` : ''}</p>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-4">
+                            <div class="flex items-start gap-2.5">
+                                <i class="ri-check-line text-emerald-600 text-lg mt-0.5"></i>
+                                <div class="text-sm text-emerald-800 dark:text-emerald-200">
+                                    <p class="font-semibold">Machine is currently operational and available for scheduling.</p>
+                                    <p class="mt-0.5 text-xs text-emerald-700 dark:text-emerald-300">If this machine has broken down or needs maintenance, report it below to prevent scheduling.</p>
+                                </div>
+                            </div>
+                        </div>
+                    `}
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5" data-i18n="breakdownReason">
+                            Breakdown / Maintenance Reason
+                        </label>
+                        <input type="text" id="machineBreakdownReasonInput" 
+                               value="${escapePlannerPreviewHtml(currentReason)}" 
+                               placeholder="e.g. Spindle malfunction, Motor replacement, Emergency stop..."
+                               class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 dark:bg-gray-700 dark:text-white transition-all">
+                        <div class="mt-2 flex flex-wrap gap-1.5">
+                            <button type="button" onclick="document.getElementById('machineBreakdownReasonInput').value='Mechanical Failure (機械故障)'" class="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors">Mechanical Failure</button>
+                            <button type="button" onclick="document.getElementById('machineBreakdownReasonInput').value='Electrical / Sensor Issue (電気系統トラブル)'" class="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors">Electrical Issue</button>
+                            <button type="button" onclick="document.getElementById('machineBreakdownReasonInput').value='Scheduled Maintenance (定期点検・整備)'" class="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors">Maintenance</button>
+                            <button type="button" onclick="document.getElementById('machineBreakdownReasonInput').value='Tooling / Mold Defect (金型・治具不良)'" class="text-[11px] px-2 py-0.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded border border-gray-200 dark:border-gray-600 transition-colors">Tooling Issue</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <button onclick="closeMachineStatusModal()" class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors" data-i18n="cancel">
+                        Cancel
+                    </button>
+                    <div class="flex items-center gap-2">
+                        ${isBroken ? `
+                            <button onclick="submitMachineStatus('${equipment}', false)" 
+                                    class="px-4 py-2 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm transition-colors flex items-center gap-1.5">
+                                <i class="ri-checkbox-circle-line text-base"></i>
+                                <span data-i18n="markOperational">Mark Repaired & Operational</span>
+                            </button>
+                            <button onclick="submitMachineStatus('${equipment}', true)" 
+                                    class="px-3 py-2 text-sm font-medium bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-800 dark:text-gray-200 rounded-lg transition-colors">
+                                Update Reason
+                            </button>
+                        ` : `
+                            <button onclick="submitMachineStatus('${equipment}', true)" 
+                                    class="px-4 py-2 text-sm font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-sm transition-colors flex items-center gap-1.5">
+                                <i class="ri-alarm-warning-line text-base"></i>
+                                <span data-i18n="reportBreakdown">Mark as Broken Down</span>
+                            </button>
+                        `}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+function closeMachineStatusModal() {
+    const modal = document.getElementById('machineStatusModal');
+    if (modal) modal.remove();
+}
+
+async function submitMachineStatus(equipment, isUnavailable) {
+    const reasonInput = document.getElementById('machineBreakdownReasonInput');
+    const reason = reasonInput ? reasonInput.value : '';
+
+    setEquipmentUnavailable(equipment, isUnavailable, reason);
+    closeMachineStatusModal();
+
+    // Auto-save plan to database to persist machine availability
+    try {
+        await savePlanToDatabaseWithValidation();
+    } catch (e) {
+        console.warn('Could not auto-save plan after machine status update:', e);
+    }
+
+    showPlannerNotification(
+        isUnavailable 
+            ? `⚠️ ${equipment} marked as broken down (${reason || 'Unavailable'}). Scheduling disabled.` 
+            : `✅ ${equipment} is now operational and available for scheduling.`,
+        isUnavailable ? 'warning' : 'success'
+    );
+}
+
+function openMachineManagementModal() {
+    closeMachineManagementModal();
+
+    const factory = plannerState.currentFactory;
+    const machines = plannerState.equipment || [];
+    const brokenCount = getBrokenDownEquipmentCount();
+
+    const rowsHTML = machines.length === 0 ? `
+        <tr>
+            <td colspan="4" class="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
+                No equipment loaded for this factory.
+            </td>
+        </tr>
+    ` : machines.map(eq => {
+        const isBroken = isEquipmentUnavailable(eq);
+        const unavailInfo = isBroken ? getEquipmentUnavailableInfo(eq) : null;
+
+        return `
+            <tr class="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors">
+                <td class="px-4 py-3 font-semibold text-gray-900 dark:text-white">
+                    ${escapePlannerPreviewHtml(eq)}
+                </td>
+                <td class="px-4 py-3">
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${isBroken ? 'bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-200 border border-red-300 dark:border-red-700' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700'}">
+                        <span class="w-1.5 h-1.5 rounded-full ${isBroken ? 'bg-red-500' : 'bg-emerald-500'}"></span>
+                        <span>${isBroken ? 'Broken Down' : 'Operational'}</span>
+                    </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-400">
+                    ${isBroken && unavailInfo?.reason ? escapePlannerPreviewHtml(unavailInfo.reason) : '-'}
+                </td>
+                <td class="px-4 py-3 text-right">
+                    <button onclick="closeMachineManagementModal(); openMachineStatusModal('${eq}')" 
+                            class="px-2.5 py-1 text-xs font-medium rounded border ${isBroken ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-red-50 hover:bg-red-100 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-300'} transition-colors">
+                        ${isBroken ? 'Mark Repaired' : 'Report Breakdown'}
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    const modalHTML = `
+        <div id="machineManagementModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full border border-gray-200 dark:border-gray-700 flex flex-col max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                <div class="p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-300 flex items-center justify-center">
+                            <i class="ri-tools-line text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900 dark:text-white" data-i18n="machineStatusManagement">Machine Availability & Status</h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Factory: <strong>${escapePlannerPreviewHtml(factory || 'None')}</strong> · Total: ${machines.length} machines · <span class="${brokenCount > 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}">${brokenCount} broken down</span>
+                            </p>
+                        </div>
+                    </div>
+                    <button onclick="closeMachineManagementModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        <i class="ri-close-line text-xl"></i>
+                    </button>
+                </div>
+
+                <div class="p-4 overflow-y-auto flex-1">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-gray-50 dark:bg-gray-700 text-xs uppercase text-gray-600 dark:text-gray-300">
+                            <tr>
+                                <th class="px-4 py-2.5 rounded-l-lg" data-i18n="equipment">Equipment</th>
+                                <th class="px-4 py-2.5" data-i18n="machineStatus">Status</th>
+                                <th class="px-4 py-2.5" data-i18n="breakdownReason">Reason</th>
+                                <th class="px-4 py-2.5 text-right rounded-r-lg" data-i18n="actions">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHTML}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+                    <button onclick="closeMachineManagementModal()" class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition-colors" data-i18n="close">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    if (typeof applyLanguageEnhanced === 'function') {
+        applyLanguageEnhanced();
+    }
+}
+
+function closeMachineManagementModal() {
+    const modal = document.getElementById('machineManagementModal');
+    if (modal) modal.remove();
+}
+
 
 function showAddBreakModal(equipment, timeSlot) {
     const modalHTML = `
@@ -8088,6 +8574,8 @@ function renderKanbanView() {
     container.innerHTML = `
         <div class="flex gap-4 overflow-x-auto pb-4">
             ${plannerState.equipment.map(equipment => {
+                const isBroken = isEquipmentUnavailable(equipment);
+                const unavailInfo = isBroken ? getEquipmentUnavailableInfo(equipment) : null;
                 const assignedProducts = plannerState.selectedProducts.filter(p => p.equipment === equipment);
                 const totalMinutes = assignedProducts.reduce((sum, p) => sum + p.estimatedTime.totalSeconds / 60, 0);
                 const hours = Math.floor(totalMinutes / 60);
@@ -8097,14 +8585,30 @@ function renderKanbanView() {
                 const utilization = Math.round((totalMinutes / effectiveWork) * 100);
                 const isOverCapacity = utilization > 100;
                 
+                const cardBorder = isBroken 
+                    ? 'border-red-300 dark:border-red-800 bg-red-50/20 dark:bg-red-950/10' 
+                    : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50';
+
                 return `
-                    <div class="flex-shrink-0 w-72 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
-                        <div class="p-3 border-b dark:border-gray-600 bg-white dark:bg-gray-800 rounded-t-lg">
+                    <div class="flex-shrink-0 w-72 rounded-lg border ${cardBorder}">
+                        <div class="p-3 border-b dark:border-gray-600 ${isBroken ? 'bg-red-50 dark:bg-red-900/30' : 'bg-white dark:bg-gray-800'} rounded-t-lg">
                             <div class="flex items-center justify-between">
-                                <h3 class="font-semibold text-gray-900 dark:text-white">${equipment}</h3>
-                                <span class="text-xs px-2 py-1 rounded-full ${isOverCapacity ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}">
-                                    ${timeStr}
-                                </span>
+                                <h3 class="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
+                                    <span>${equipment}</span>
+                                    ${isBroken ? `
+                                        <button onclick="openMachineStatusModal('${equipment}')" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300 border border-red-300 dark:border-red-700 hover:bg-red-200 transition-colors animate-pulse" title="${unavailInfo?.reason ? escapePlannerPreviewHtml(unavailInfo.reason) : 'Machine is broken down'}">
+                                            <i class="ri-alarm-warning-fill text-red-500 mr-0.5"></i>Broken Down
+                                        </button>
+                                    ` : ''}
+                                </h3>
+                                <div class="flex items-center gap-1">
+                                    <button onclick="openMachineStatusModal('${equipment}')" class="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-0.5" title="Manage machine status">
+                                        <i class="ri-tools-line"></i>
+                                    </button>
+                                    <span class="text-xs px-2 py-1 rounded-full ${isOverCapacity ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}">
+                                        ${timeStr}
+                                    </span>
+                                </div>
                             </div>
                             <div class="mt-2">
                                 <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
@@ -8115,9 +8619,16 @@ function renderKanbanView() {
                             </div>
                         </div>
                         <div class="p-3 space-y-2 min-h-[200px] max-h-[400px] overflow-y-auto"
-                             ondrop="handleKanbanDrop(event, '${equipment}')"
-                             ondragover="handleKanbanDragOver(event)">
-                            ${assignedProducts.length === 0 ? `
+                             ${isBroken ? '' : `ondrop="handleKanbanDrop(event, '${equipment}')" ondragover="handleKanbanDragOver(event)"`}>
+                            ${isBroken ? `
+                                <div class="text-center py-3 px-2 bg-red-100/60 dark:bg-red-900/30 border border-dashed border-red-300 dark:border-red-700 rounded-lg text-red-600 dark:text-red-400 text-xs mb-2">
+                                    <i class="ri-prohibited-line text-xl mb-0.5 block"></i>
+                                    <p class="font-bold">Machine Broken Down</p>
+                                    <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">${unavailInfo?.reason ? escapePlannerPreviewHtml(unavailInfo.reason) : 'Scheduling is disabled'}</p>
+                                    <button onclick="openMachineStatusModal('${equipment}')" class="mt-2 px-2 py-0.5 bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded text-[10px] font-medium hover:bg-red-50">Manage Status</button>
+                                </div>
+                            ` : ''}
+                            ${assignedProducts.length === 0 && !isBroken ? `
                                 <div class="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
                                     <i class="ri-drag-drop-line text-2xl mb-2"></i>
                                     <p data-i18n="dropProductsHere">Drop products here</p>
@@ -8190,29 +8701,14 @@ async function handleKanbanDrop(event, newEquipment) {
     event.preventDefault();
     const productId = event.dataTransfer.getData('productId');
     
+    if (isEquipmentUnavailable(newEquipment)) {
+        const info = getEquipmentUnavailableInfo(newEquipment);
+        showPlannerNotification(`Cannot move to ${newEquipment}: Machine is broken down / unavailable (${info?.reason || 'Out of service'})`, 'error');
+        return;
+    }
+
     const product = plannerState.selectedProducts.find(p => p._id === productId);
     if (product && product.equipment !== newEquipment) {
-        try {
-            await loadProductionCapabilitiesForItems([product], { factory: plannerState.currentFactory });
-        } catch (error) {
-            console.error('❌ Failed to validate capability mapping during drag/drop:', error);
-            showPlannerNotification('Failed to validate capability mapping for this move', 'error');
-            return;
-        }
-
-        const capability = getCachedProductionCapability(product, plannerState.currentFactory);
-        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
-
-        if (capability?.hasMapping && eligibleEquipment.length === 0) {
-            showPlannerNotification(`${product.背番号} has no enabled capability equipment in this factory`, 'warning');
-            return;
-        }
-
-        if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(newEquipment)) {
-            showPlannerNotification(`${product.背番号} is not mapped to ${newEquipment}`, 'warning');
-            return;
-        }
-
         product.equipment = newEquipment;
         renderAllViews();
         updateSelectedProductsSummary();
@@ -8368,6 +8864,12 @@ let multiPickerState = {
 };
 
 function showMultiColumnProductPicker(equipment, startTime) {
+    if (isEquipmentUnavailable(equipment)) {
+        const info = getEquipmentUnavailableInfo(equipment);
+        showPlannerNotification(`Cannot schedule on ${equipment}: Machine is broken down / unavailable (${info?.reason || 'Out of service'})`, 'error');
+        return;
+    }
+
     // Filter goals that have remaining quantity > 0 for the current date
     const availableGoals = plannerState.goals.filter(g => 
         g.remainingQuantity > 0 && g.date === plannerState.currentDate
@@ -8790,6 +9292,12 @@ async function confirmMultiPickerSelection() {
     // Use the clicked time slot, not the work start time
     let currentTime = timeToMinutes(multiPickerState.startTime);
     const equipment = multiPickerState.equipment;
+
+    if (isEquipmentUnavailable(equipment)) {
+        const info = getEquipmentUnavailableInfo(equipment);
+        showPlannerNotification(`Cannot schedule on ${equipment}: Machine is broken down / unavailable (${info?.reason || 'Out of service'})`, 'error');
+        return;
+    }
     
     console.log(`🕒 Starting products at clicked time: ${multiPickerState.startTime} (${currentTime} minutes)`);
     console.log(`📦 Products to add: ${multiPickerState.orderedProducts.length}`);
@@ -8798,7 +9306,6 @@ async function confirmMultiPickerSelection() {
     // STEP 1: Validate all products first
     // ========================================
     const productsToAdd = [];
-    const capabilitySkippedProducts = [];
     for (const product of multiPickerState.orderedProducts) {
         // Find the current goal to check remaining quantity
         const currentGoal = plannerState.goals.find(g => g._id === product._id);
@@ -8808,21 +9315,6 @@ async function confirmMultiPickerSelection() {
             console.error(`⚠️ Cannot schedule ${product.quantity} pcs - only ${currentGoal.remainingQuantity} pcs remaining!`);
             showPlannerNotification(`Cannot schedule ${product.quantity} pcs for ${product.背番号} - only ${currentGoal.remainingQuantity} pcs remaining`, 'error');
             continue; // Skip this product
-        }
-
-        const capability = getCachedProductionCapability(product, plannerState.currentFactory);
-        const eligibleEquipment = getEligibleEquipmentForProduct(product, plannerState.currentFactory);
-
-        if (capability?.hasMapping && eligibleEquipment.length === 0) {
-            capabilitySkippedProducts.push(product.背番号 || product.品番 || 'Unknown');
-            console.warn(`⚠️ ${product.背番号} has no enabled capability equipment`);
-            continue;
-        }
-
-        if (eligibleEquipment.length > 0 && !eligibleEquipment.includes(equipment)) {
-            capabilitySkippedProducts.push(product.背番号 || product.品番 || 'Unknown');
-            console.warn(`⚠️ ${product.背番号} is not mapped to ${equipment}`);
-            continue;
         }
         
         const productForEquipment = { ...product, equipment };
@@ -8848,10 +9340,6 @@ async function confirmMultiPickerSelection() {
     }
     
     if (productsToAdd.length === 0) {
-        if (capabilitySkippedProducts.length > 0) {
-            showPlannerNotification(`No valid products to add. ${capabilitySkippedProducts.join(', ')} are not mapped to ${equipment}.`, 'error');
-            return;
-        }
         showPlannerNotification('No valid products to add to timeline', 'error');
         return;
     }
@@ -8891,6 +9379,7 @@ async function confirmMultiPickerSelection() {
     // STEP 3: Add to plannerState and save to database FIRST
     // ========================================
     const previousSelectedProducts = [...plannerState.selectedProducts]; // Backup for rollback
+    const updatedGoals = [];
     
     try {
         // Add to local state
@@ -8908,7 +9397,7 @@ async function confirmMultiPickerSelection() {
         console.log('✅ Plan saved to database successfully');
         
         // ========================================
-        // STEP 3: Update goal quantities ONLY after database save succeeds
+        // STEP 4: Update goal quantities ONLY after database save succeeds
         // ========================================
         console.log('📦 Updating goal quantities...');
         const updatePromises = [];
@@ -8929,6 +9418,7 @@ async function confirmMultiPickerSelection() {
                             throw new Error(`Goal update failed: ${error.error || 'Unknown error'}`);
                         } else {
                             const result = await response.json();
+                            updatedGoals.push({ goalId: product._id, quantity: product.quantity });
                             console.log(`✅ Goal ${product._id} updated - remaining: ${result.remainingQuantity}`);
                             return result;
                         }
@@ -8951,10 +9441,8 @@ async function confirmMultiPickerSelection() {
         updateSelectedProductsSummary();
         renderAllViews();
         
-        const notificationText = capabilitySkippedProducts.length > 0
-            ? `Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline. ${capabilitySkippedProducts.length} skipped by capability mapping.`
-            : `✅ Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline`;
-        showPlannerNotification(notificationText, capabilitySkippedProducts.length > 0 ? 'warning' : 'success');
+        const notificationText = `✅ Added ${productsToAdd.length} product${productsToAdd.length > 1 ? 's' : ''} to timeline`;
+        showPlannerNotification(notificationText, 'success');
         
     } catch (error) {
         // ========================================
@@ -8972,6 +9460,32 @@ async function confirmMultiPickerSelection() {
             console.log('✅ Rollback complete - previous state restored');
         } catch (rollbackError) {
             console.error('❌ Rollback save failed:', rollbackError);
+        }
+
+        // Also rollback any goal quantities that were modified during this attempt
+        if (updatedGoals.length > 0) {
+            console.log('🔄 Rolling back goal quantities...');
+            for (const item of updatedGoals) {
+                try {
+                    const goal = plannerState.goals.find(g => g._id === item.goalId);
+                    if (goal) {
+                        const restoredScheduled = Math.max(0, (goal.scheduledQuantity || 0) - item.quantity);
+                        const restoredRemaining = (goal.remainingQuantity || 0) + item.quantity;
+                        await fetch(BASE_URL + `api/production-goals/${item.goalId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                remainingQuantity: restoredRemaining,
+                                scheduledQuantity: restoredScheduled,
+                                status: restoredScheduled <= 0 ? 'pending' : 'in-progress'
+                            })
+                        });
+                    }
+                } catch (goalRollbackErr) {
+                    console.error('❌ Failed to rollback goal quantity:', goalRollbackErr);
+                }
+            }
+            await loadGoals();
         }
         
         // Update UI to show rollback
@@ -9017,6 +9531,7 @@ async function savePlanToDatabaseWithValidation() {
         createdAt: new Date(),
         updatedAt: new Date(),
         breaks: plannerState.breaks,
+        unavailableEquipment: plannerState.unavailableEquipment || {},
         products: plannerState.selectedProducts.map(item => ({
             goalId: item.goalId || item._id,
             背番号: item.背番号,
@@ -10432,6 +10947,14 @@ async function handleTimelineDrop(event, targetEquipment, targetTime) {
     event.currentTarget.classList.remove('bg-green-100', 'dark:bg-green-900/30');
     
     if (!draggedProduct) return;
+
+    if (isEquipmentUnavailable(targetEquipment)) {
+        const info = getEquipmentUnavailableInfo(targetEquipment);
+        showPlannerNotification(`Cannot move to ${targetEquipment}: Machine is broken down / unavailable (${info?.reason || 'Out of service'})`, 'error');
+        draggedProduct = null;
+        draggedProductEquipment = null;
+        return;
+    }
     
     console.log(`📍 Dropped product ${draggedProduct} at ${targetEquipment} - ${targetTime}`);
     
@@ -13379,6 +13902,14 @@ window.toggleHideUnavailableEquipment = function() {
     plannerState.hideUnavailableEquipment = !plannerState.hideUnavailableEquipment;
     renderTimelineView();
 };
+
+window.openMachineStatusModal = openMachineStatusModal;
+window.closeMachineStatusModal = closeMachineStatusModal;
+window.submitMachineStatus = submitMachineStatus;
+window.openMachineManagementModal = openMachineManagementModal;
+window.closeMachineManagementModal = closeMachineManagementModal;
+window.showBrokenMachineSlotAlert = showBrokenMachineSlotAlert;
+window.reconcileGoalsWithTimeline = reconcileGoalsWithTimeline;
 
 window.handleProductDragStart = handleProductDragStart;
 window.handleProductDragEnd = handleProductDragEnd;

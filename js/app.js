@@ -2779,6 +2779,9 @@ function loadPage(page) {
                       <button onclick="openBulkEditGoalsModal()" class="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center justify-center">
                         <i class="ri-edit-line mr-2"></i><span>Edit Goals</span>
                       </button>
+                      <button onclick="reconcileGoalsWithTimeline()" class="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors flex items-center justify-center" title="Reconcile goal quantities with actual items scheduled on the timeline">
+                        <i class="ri-refresh-line mr-2"></i><span data-i18n="syncWithTimeline">Sync with Timeline</span>
+                      </button>
                       <div class="flex-1 flex gap-2">
                         <input type="text" id="goalSearch" 
                                class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white" 
