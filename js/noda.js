@@ -3363,8 +3363,21 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                     <div class="border-t pt-6">
                 `}
                         <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <h4 class="text-lg font-medium text-gray-900">${t('lineItems')}</h4>
-                            <div class="flex flex-col gap-2 self-start sm:flex-row sm:items-center">
+                            <div class="flex items-center gap-3">
+                                <h4 class="text-lg font-medium text-gray-900">${t('lineItems')}</h4>
+                                <span id="nodaSelectionBadge" class="hidden text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800"></span>
+                            </div>
+                            <div class="flex flex-wrap gap-2 items-center">
+                                ${isEditMode ? `
+                                    <button type="button" id="btnMarkSelectedComplete" onclick="markSelectedNodaLinesCompleted('${request._id}')" class="hidden inline-flex items-center gap-1.5 rounded-lg border border-green-600 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100 transition shadow-sm">
+                                        <i class="ri-checkbox-circle-line text-sm"></i>
+                                        <span id="btnMarkSelectedCompleteText">${t('markSelectedComplete') || 'Complete Selected'}</span>
+                                    </button>
+                                    <button type="button" id="btnMarkAllPendingComplete" onclick="markAllPendingNodaLinesCompleted('${request._id}')" class="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 transition shadow-sm">
+                                        <i class="ri-check-double-line text-sm"></i>
+                                        <span>${t('markCompleteAll') || 'Complete All'}</span>
+                                    </button>
+                                ` : ''}
                                 ${sortedLineItems.length ? `
                                     <button type="button" onclick="openNodaDetailExportModal()" class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100">
                                         <i class="ri-download-2-line"></i>
@@ -3383,6 +3396,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                             <table class="min-w-full">
                                 <thead class="bg-gray-50">
                                     <tr>
+                                        ${isEditMode ? `<th class="sticky top-0 z-10 bg-gray-50 px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase"><input type="checkbox" id="selectAllNodaLines" onchange="toggleSelectAllNodaLines(this.checked)" title="Select all eligible items" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" /></th>` : ''}
                                         ${renderNodaDetailSortableHeader('lineNumber', t('lineNumber'))}
                                         ${renderNodaDetailSortableHeader('partNumber', t('partNumber'))}
                                         ${renderNodaDetailSortableHeader('backNumber', t('backNumber'))}
@@ -3417,6 +3431,15 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                         
                                         return `
                                             <tr id="lineItem_${lineItem.lineNumber}" data-noda-line-number="${lineItem.lineNumber}" class="cursor-pointer transition-colors ${rowHighlightClass}" title="Click to view current inventory">
+                                                ${isEditMode ? `
+                                                    <td class="px-3 py-2 text-center" onclick="event.stopPropagation()">
+                                                        <input type="checkbox" class="noda-line-select rounded border-gray-300 text-blue-600 focus:ring-blue-500" 
+                                                            data-line-number="${lineItem.lineNumber}" 
+                                                            data-status="${lineItem.status}"
+                                                            onchange="updateNodaSelectionToolbar()"
+                                                            ${lineItem.status === 'completed' || lineItem.status === 'in-progress' ? 'disabled' : ''} />
+                                                    </td>
+                                                ` : ''}
                                                 <td class="px-4 py-2 text-sm font-medium text-gray-900">${lineItem.lineNumber}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.品番}</td>
                                                 <td class="px-4 py-2 text-sm text-gray-900">${lineItem.背番号}</td>
@@ -3478,7 +3501,7 @@ function showNodaDetailModal(request, isEditMode = false, preserveSort = false) 
                                                 ` : ''}
                                             </tr>
                                         `;
-                                    }).join('') : `<tr><td colspan="${isEditMode ? 10 : 9}" class="text-center py-4 text-gray-500">${t('noLineItemsFound')}</td></tr>`}
+                                    }).join('') : `<tr><td colspan="${isEditMode ? 11 : 9}" class="text-center py-4 text-gray-500">${t('noLineItemsFound')}</td></tr>`}
                                 </tbody>
                             </table>
                         </div>
@@ -5123,6 +5146,173 @@ window.updateLineItemStatus = async function(requestId, lineNumber, newStatus) {
 window.markLineItemCompleted = async function(requestId, lineNumber) {
     if (confirm(t('alertMarkLineItemCompleted').replace('{lineNumber}', lineNumber))) {
         await updateLineItemStatus(requestId, lineNumber, 'completed');
+    }
+};
+
+/**
+ * Toggle select all checkboxes in edit modal
+ */
+window.toggleSelectAllNodaLines = function(checked) {
+    const checkboxes = document.querySelectorAll('.noda-line-select:not(:disabled)');
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+    });
+    updateNodaSelectionToolbar();
+};
+
+/**
+ * Update selection count and toolbar button visibility
+ */
+window.updateNodaSelectionToolbar = function() {
+    const allCheckboxes = Array.from(document.querySelectorAll('.noda-line-select:not(:disabled)'));
+    const checkedBoxes = Array.from(document.querySelectorAll('.noda-line-select:checked'));
+    const selectAllCb = document.getElementById('selectAllNodaLines');
+    const selectedBtn = document.getElementById('btnMarkSelectedComplete');
+    const selectedText = document.getElementById('btnMarkSelectedCompleteText');
+    const selectionBadge = document.getElementById('nodaSelectionBadge');
+
+    if (selectAllCb) {
+        if (allCheckboxes.length > 0 && checkedBoxes.length === allCheckboxes.length) {
+            selectAllCb.checked = true;
+            selectAllCb.indeterminate = false;
+        } else if (checkedBoxes.length > 0) {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = true;
+        } else {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = false;
+        }
+    }
+
+    if (selectedBtn) {
+        if (checkedBoxes.length > 0) {
+            selectedBtn.classList.remove('hidden');
+            if (selectedText) {
+                selectedText.textContent = `${t('markSelectedComplete') || 'Complete Selected'} (${checkedBoxes.length})`;
+            }
+        } else {
+            selectedBtn.classList.add('hidden');
+        }
+    }
+
+    if (selectionBadge) {
+        if (checkedBoxes.length > 0) {
+            selectionBadge.classList.remove('hidden');
+            selectionBadge.textContent = `${checkedBoxes.length} selected`;
+        } else {
+            selectionBadge.classList.add('hidden');
+        }
+    }
+};
+
+/**
+ * Mark all selected line items as completed
+ */
+window.markSelectedNodaLinesCompleted = async function(requestId) {
+    const checkedBoxes = Array.from(document.querySelectorAll('.noda-line-select:checked'));
+    if (checkedBoxes.length === 0) {
+        alert(t('noLinesSelected') || 'Please select at least one item to complete.');
+        return;
+    }
+
+    const lineNumbers = checkedBoxes.map(cb => parseInt(cb.dataset.lineNumber, 10));
+    const confirmMsg = (t('alertMarkSelectedLinesCompleted') || 'Are you sure you want to mark {count} selected items as completed? This will deduct inventory for each item.').replace('{count}', lineNumbers.length);
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+
+    const selectedBtn = document.getElementById('btnMarkSelectedComplete');
+    const allBtn = document.getElementById('btnMarkAllPendingComplete');
+    if (selectedBtn) selectedBtn.disabled = true;
+    if (allBtn) allBtn.disabled = true;
+
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'batchUpdateLineItemStatus',
+                requestId: requestId,
+                data: {
+                    lineNumbers: lineNumbers,
+                    status: 'completed'
+                }
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast(`Successfully marked ${result.updatedCount || lineNumbers.length} items as completed`, 'success');
+            await editNodaRequest(requestId);
+            loadNodaData();
+        } else {
+            throw new Error(result.error || 'Failed to complete selected items');
+        }
+    } catch (error) {
+        console.error('Error marking selected line items as completed:', error);
+        alert(t('alertErrorUpdatingLineItem') + error.message);
+    } finally {
+        if (selectedBtn) selectedBtn.disabled = false;
+        if (allBtn) allBtn.disabled = false;
+    }
+};
+
+/**
+ * Mark all pending/paused line items as completed
+ */
+window.markAllPendingNodaLinesCompleted = async function(requestId) {
+    const eligibleBoxes = Array.from(document.querySelectorAll('.noda-line-select:not(:disabled)'));
+    const count = eligibleBoxes.length;
+
+    if (count === 0) {
+        alert(t('noEligibleLinesToComplete') || 'No eligible pending/paused items to complete.');
+        return;
+    }
+
+    const confirmMsg = (t('alertMarkAllLinesCompleted') || 'Are you sure you want to mark all {count} eligible items as completed? This will deduct inventory for each item.').replace('{count}', count);
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+
+    const selectedBtn = document.getElementById('btnMarkSelectedComplete');
+    const allBtn = document.getElementById('btnMarkAllPendingComplete');
+    if (selectedBtn) selectedBtn.disabled = true;
+    if (allBtn) allBtn.disabled = true;
+
+    try {
+        const response = await fetch(`${BASE_URL}api/noda-requests`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                action: 'batchUpdateLineItemStatus',
+                requestId: requestId,
+                data: {
+                    lineNumbers: 'all',
+                    status: 'completed'
+                }
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast(`Successfully marked ${result.updatedCount || count} items as completed`, 'success');
+            await editNodaRequest(requestId);
+            loadNodaData();
+        } else {
+            throw new Error(result.error || 'Failed to complete all pending items');
+        }
+    } catch (error) {
+        console.error('Error marking all line items as completed:', error);
+        alert(t('alertErrorUpdatingLineItem') + error.message);
+    } finally {
+        if (selectedBtn) selectedBtn.disabled = false;
+        if (allBtn) allBtn.disabled = false;
     }
 };
 
