@@ -1363,7 +1363,8 @@ async function exportFinancialsCSVServerLevel() {
 const FINANCIALS_BREAKDOWN_SOURCES = ["press", "slit", "srs", "kensa", "recovery"];
 const financialsBreakdownState = {
   ban: "", factory: "", fromDate: "", toDate: "",
-  focus: null, source: "press", page: 1, limit: 20, requestId: 0
+  focus: null, source: "press", page: 1, limit: 20, requestId: 0,
+  sortField: "date", sortDir: "desc"
 };
 
 function _fbT(key, fallback) {
@@ -1428,12 +1429,15 @@ function ensureFinancialsBreakdownModal() {
   modal.addEventListener("click", e => { if (e.target === modal) closeFinancialsBreakdown(); });
   modal.querySelector("#fbCloseBtn").addEventListener("click", closeFinancialsBreakdown);
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape" && !modal.classList.contains("hidden")) closeFinancialsBreakdown();
+    if (e.key !== "Escape") return;
+    if (document.querySelector("[data-fb-injected]")) closeFinancialsRecordDetail();
+    else if (!modal.classList.contains("hidden")) closeFinancialsBreakdown();
   });
   return modal;
 }
 
 function closeFinancialsBreakdown() {
+  closeFinancialsRecordDetail();
   document.getElementById("financialsBreakdownModal")?.classList.add("hidden");
 }
 
@@ -1445,7 +1449,7 @@ async function openFinancialsBreakdown(ban, focus = null) {
 
   const modal = ensureFinancialsBreakdownModal();
   Object.assign(financialsBreakdownState, {
-    ban, fromDate, toDate, focus, source: "press", page: 1,
+    ban, fromDate, toDate, focus, source: "press", page: 1, sortField: "date", sortDir: "desc",
     factory: document.getElementById("financialsFactoryFilter")?.value || ""
   });
   modal.classList.remove("hidden");
@@ -1532,12 +1536,13 @@ function renderFinancialsDefectShares(row) {
   const n = formatNumber;
   const useEN = (localStorage.getItem("lang") || "en") === "en";
   const pct = qty => row.totalNg > 0 ? (qty / row.totalNg) * 100 : 0;
+  const yen = qty => `¥${n(Math.round(qty * (row.pricePerPc || 0) * 100) / 100)}`;
   const blocks = (row.defectsByProcess || []).filter(p => p.ng > 0).map(p => {
     const line = (name, qty, muted) => `
       <div class="mb-1 ${muted ? "text-gray-400" : ""}">
         <div class="flex justify-between gap-3 text-xs">
           <span>${_fbEsc(name)}</span>
-          <span class="whitespace-nowrap"><b>${n(qty)}</b> <span class="text-gray-500">(${pct(qty).toFixed(1)}%)</span></span>
+          <span class="whitespace-nowrap"><b>${n(qty)}</b> <span class="text-gray-500">(${pct(qty).toFixed(1)}%)</span> · <span class="${muted ? "" : "text-red-600"}">${yen(qty)}</span></span>
         </div>
         <div class="h-1 bg-gray-100 rounded"><div class="h-1 rounded ${muted ? "bg-gray-300" : "bg-red-400"}" style="width:${Math.min(pct(qty), 100).toFixed(1)}%"></div></div>
       </div>`;
@@ -1545,7 +1550,7 @@ function renderFinancialsDefectShares(row) {
       <div class="border border-gray-200 rounded bg-white p-3">
         <div class="flex justify-between text-sm font-semibold text-gray-700 mb-2">
           <span>${_fbSourceLabel(p.process)}</span>
-          <span>${n(p.ng)} <span class="text-xs font-normal text-gray-500">(${pct(p.ng).toFixed(1)}%)</span></span>
+          <span>${n(p.ng)} <span class="text-xs font-normal text-gray-500">(${pct(p.ng).toFixed(1)}%)</span> · <span class="text-red-600">${yen(p.ng)}</span></span>
         </div>
         ${p.items.map(d => line((useEN && d.label_en) ? d.label_en : d.label, d.qty, false)).join("")}
         ${p.unclassified > 0 ? line(_fbT("breakdownUnclassified", "Unclassified"), p.unclassified, true) : ""}
@@ -1554,8 +1559,13 @@ function renderFinancialsDefectShares(row) {
   if (!blocks) return "";
   return `
     <div class="mt-3">
-      <div class="text-xs text-gray-500 mb-1">${_fbT("breakdownDefectShare", "NG by defect — quantity and % of total NG")} (${n(row.totalNg)})</div>
-      <div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))">${blocks}</div>
+      <div class="text-xs text-gray-500 mb-1">${_fbT("breakdownDefectShare", "NG by defect — quantity, % of total NG and ¥")} (${n(row.totalNg)})</div>
+      <div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(18rem,1fr))">${blocks}</div>
+      <div class="text-xs text-gray-600 mt-2">
+        ${_fbT("breakdownGrossYen", "Gross NG value")} ${n(row.totalNg)} × ¥${n(row.pricePerPc)} = <b>${yen(row.totalNg)}</b>
+        − ${_fbT("recoveredNg", "Recovered NG")} <span class="px-1 rounded" style="background:#fff3cd">${n(row.recoveredNg)} × ¥${n(row.pricePerPc)} = ${yen(row.recoveredNg)}</span>
+        = <b class="text-red-600">¥${n(row.scrapLoss)}</b>
+      </div>
     </div>`;
 }
 
@@ -1569,6 +1579,8 @@ function renderFinancialsBreakdownTabs() {
   tabs.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => {
     financialsBreakdownState.source = btn.dataset.source;
     financialsBreakdownState.page = 1;
+    financialsBreakdownState.sortField = "date";
+    financialsBreakdownState.sortDir = "desc";
     renderFinancialsBreakdownTabs();
     loadFinancialsBreakdownRecords();
   }));
@@ -1583,13 +1595,22 @@ async function loadFinancialsBreakdownRecords() {
   try {
     const data = await _fbPost("api/financials/breakdown/records", {
       ban: state.ban, factory: state.factory, fromDate: state.fromDate, toDate: state.toDate,
-      source: state.source, page: state.page, limit: state.limit
+      source: state.source, page: state.page, limit: state.limit,
+      sortField: state.sortField, sortDir: state.sortDir
     });
     if (requestId !== state.requestId) return; // a newer request superseded this one
     state.page = data.page;
     container.innerHTML = renderFinancialsBreakdownRecords(data);
     container.querySelector("[data-fb-prev]")?.addEventListener("click", () => { state.page -= 1; loadFinancialsBreakdownRecords(); });
     container.querySelector("[data-fb-next]")?.addEventListener("click", () => { state.page += 1; loadFinancialsBreakdownRecords(); });
+    // Header click → server-side sort (text columns start ascending, numeric ones descending)
+    container.querySelectorAll("th[data-fb-sort]").forEach(th => th.addEventListener("click", () => {
+      const key = th.dataset.fbSort;
+      state.sortDir = state.sortField === key ? (state.sortDir === "asc" ? "desc" : "asc") : (th.dataset.fbNum ? "desc" : "asc");
+      state.sortField = key;
+      state.page = 1;
+      loadFinancialsBreakdownRecords();
+    }));
   } catch (error) {
     if (requestId !== state.requestId) return;
     container.innerHTML = `<div class="text-sm text-red-600 py-4">${_fbEsc(error.message)}</div>`;
@@ -1604,10 +1625,20 @@ function renderFinancialsBreakdownRecords(data) {
   const defectCols = isRecovery ? [] : (data.defectColumns || []);
   const defectLabel = c => (useEN && c.label_en) ? c.label_en : c.label;
   const showMachine = data.source !== "kensa"; // kensa 設備 is a long table name that only wastes width
-  const head = isRecovery
-    ? [_fbT("breakdownDate", "Lot date"), _fbT("breakdownLot", "Lot"), "品番", _fbT("factory", "Factory"), _fbT("breakdownDefects", "Defect types"), _fbT("breakdownQty", "Qty")]
-    : [_fbT("breakdownDate", "Lot date"), _fbT("breakdownLot", "Lot"), "品番", _fbT("factory", "Factory"), ...(showMachine ? [_fbT("breakdownMachine", "Machine")] : []), _fbT("breakdownWorker", "Worker"), _fbT("breakdownProduced", "Produced"), "NG", ...defectCols.map(defectLabel)];
+  // Column model: { label, key } — key is the server-side sort key (null = not sortable)
+  const cols = isRecovery
+    ? [{ label: _fbT("breakdownDate", "Lot date"), key: "date" }, { label: _fbT("breakdownLot", "Lot"), key: "lot" },
+       { label: "品番", key: "hinban" }, { label: _fbT("factory", "Factory"), key: "factory" },
+       { label: _fbT("breakdownDefects", "Defect types"), key: null }, { label: _fbT("breakdownQty", "Qty"), key: "quantity" }]
+    : [{ label: _fbT("breakdownDate", "Lot date"), key: "date" }, { label: _fbT("breakdownLot", "Lot"), key: "lot" },
+       { label: "品番", key: "hinban" }, { label: _fbT("factory", "Factory"), key: "factory" },
+       ...(showMachine ? [{ label: _fbT("breakdownMachine", "Machine"), key: "machine" }] : []),
+       { label: _fbT("breakdownWorker", "Worker"), key: "worker" },
+       { label: _fbT("breakdownProduced", "Produced"), key: ["press", "kensa"].includes(data.source) ? "quantity" : null },
+       { label: "NG", key: "ng" },
+       ...defectCols.map(c => ({ label: defectLabel(c), key: `defect:${c.key}` }))];
   const textCols = isRecovery ? 5 : (showMachine ? 6 : 5); // leading left-aligned columns; the rest are numeric
+  const sortState = financialsBreakdownState;
   const body = data.records.map(r => isRecovery ? `
       <tr>
         <td class="px-3 py-2">${_fbEsc(r.lotDate || (r.createdAt || "").slice(0, 10))}</td>
@@ -1617,7 +1648,7 @@ function renderFinancialsBreakdownRecords(data) {
         <td class="px-3 py-2">${r.recoveries.map(x => `${_fbEsc(x.defectType)}: ${n(x.quantity)}`).join(", ")}</td>
         <td class="px-3 py-2 text-right font-semibold" style="background:#fff3cd">${n(r.quantity)}</td>
       </tr>` : `
-      <tr>
+      <tr class="cursor-pointer hover:bg-blue-50" data-fb-rec="${_fbEsc(r._id)}" data-fb-source="${_fbEsc(data.source)}" title="${_fbT("productionRecordDetails", "Production Record Details")}">
         <td class="px-3 py-2">${_fbEsc(r.date)}</td>
         <td class="px-3 py-2">${_fbEsc(r.lot)}</td>
         <td class="px-3 py-2">${_fbEsc(r.hinban)}</td>
@@ -1633,8 +1664,13 @@ function renderFinancialsBreakdownRecords(data) {
   return `
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm whitespace-nowrap">
-        <thead class="bg-gray-50 text-gray-600 text-xs"><tr>${head.map((h, i) => `<th class="px-3 py-2 whitespace-nowrap ${i >= textCols ? "text-right" : "text-left"}" ${i >= textCols && !isRecovery && i >= textCols + 2 ? 'style="min-width:7rem;white-space:normal"' : ""}>${_fbEsc(h)}</th>`).join("")}</tr></thead>
-        <tbody class="divide-y divide-gray-100">${body || `<tr><td colspan="${head.length}" class="px-3 py-4 text-gray-400">${_fbT("noData", "No data.")}</td></tr>`}</tbody>
+        <thead class="bg-gray-50 text-gray-600 text-xs"><tr>${cols.map((c, i) => {
+          const active = c.key && sortState.sortField === c.key;
+          const arrow = active ? (sortState.sortDir === "asc" ? " ▲" : " ▼") : "";
+          const attrs = c.key ? `data-fb-sort="${_fbEsc(c.key)}" ${i >= textCols ? "data-fb-num=1" : ""}` : "";
+          return `<th ${attrs} class="px-3 py-2 whitespace-nowrap ${i >= textCols ? "text-right" : "text-left"} ${c.key ? "cursor-pointer select-none hover:text-gray-900" : ""} ${active ? "text-blue-600" : ""}" ${i >= textCols + 2 && !isRecovery ? 'style="min-width:7rem;white-space:normal"' : ""}>${_fbEsc(c.label)}${arrow}</th>`;
+        }).join("")}</tr></thead>
+        <tbody class="divide-y divide-gray-100">${body || `<tr><td colspan="${cols.length}" class="px-3 py-4 text-gray-400">${_fbT("noData", "No data.")}</td></tr>`}</tbody>
       </table>
     </div>
     <div class="flex items-center justify-between mt-3 text-sm text-gray-600">
@@ -1647,8 +1683,54 @@ function renderFinancialsBreakdownRecords(data) {
     </div>`;
 }
 
+// ── 生産記録詳細 (reuses showSidebar from factories.js, read-only here) ─────────
+// showSidebar needs #detailModal / #sidebarBackdrop / #sidebarContent, which only exist on the
+// factories page, so a temporary copy is injected above the breakdown modal and removed on close.
+function closeFinancialsRecordDetail() {
+  document.querySelectorAll("[data-fb-injected]").forEach(el => el.remove());
+  document.body.style.overflow = "";
+}
+
+async function openFinancialsRecordDetail(source, id) {
+  if (typeof showSidebar !== "function") return;
+  try {
+    const { record } = await _fbPost("api/financials/breakdown/record", { source, id });
+    closeFinancialsRecordDetail();
+    const wrap = document.createElement("div");
+    wrap.dataset.fbInjected = "1";
+    wrap.innerHTML = `
+      <div id="sidebarBackdrop" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden" style="z-index:65"></div>
+      <div id="detailModal" class="fixed inset-0 hidden" style="z-index:70">
+        <div class="flex items-center justify-center min-h-screen p-4">
+          <div id="detailModalPanel" class="bg-white rounded-lg max-w-6xl w-full max-h-screen overflow-y-auto">
+            <div class="p-6 border-b border-gray-200">
+              <div class="flex items-center justify-between">
+                <h3 class="text-lg font-semibold">${_fbT("productionRecordDetails", "Production Record Details")}</h3>
+                <button id="fbRecordCloseBtn" class="text-gray-400 hover:text-gray-600"><i class="ri-close-line text-xl"></i></button>
+              </div>
+            </div>
+            <div id="sidebarContent" class="p-6"></div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector("#fbRecordCloseBtn").addEventListener("click", closeFinancialsRecordDetail);
+    showSidebar(record);
+    // The edit/save flow belongs to the factory overview (it reloads that page), so keep this view read-only
+    document.getElementById("editSidebarBtn")?.remove();
+  } catch (error) {
+    console.error("Record detail load failed:", error);
+    alert(error.message);
+  }
+}
+
 // Delegated click handler for the clickable Top 5 rows (data-fb-* attributes)
 document.addEventListener("click", e => {
+  const recRow = e.target.closest("tr[data-fb-rec]");
+  if (recRow) {
+    openFinancialsRecordDetail(recRow.dataset.fbSource, recRow.dataset.fbRec);
+    return;
+  }
   const row = e.target.closest("tr[data-fb-ban]");
   if (!row) return;
   openFinancialsBreakdown(row.dataset.fbBan, {
