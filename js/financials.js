@@ -1014,7 +1014,8 @@ function renderFinancialsTable(rows) {
   }
 
   body.innerHTML = rows.map(row => `
-    <tr>
+    <tr class="cursor-pointer hover:bg-gray-50" title="${_fbT('breakdownClickHint', 'Click to see how this was calculated')}"
+        data-fb-ban="${_fbEsc(row.ban)}" data-fb-hinban="${_fbEsc(row.hinban)}" data-fb-factory="${_fbEsc(row.factory)}" data-fb-expected="${row.scrapLoss || 0}" data-fb-metric="scrapLoss">
       <td class="px-4 py-3">${row.hinban || "-"}</td>
       <td class="px-4 py-3">${row.ban || "-"}</td>
       <td class="px-4 py-3">${row.model || "-"}</td>
