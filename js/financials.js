@@ -1491,6 +1491,7 @@ function renderFinancialsBreakdownSummary(data) {
           <li>${_fbT("scrapLoss", "Scrap Loss (¥)")} = ${n(r.ngAfterRecovery)} × ¥${n(r.pricePerPc)} = <b class="text-red-600">¥${n(r.scrapLoss)}</b></li>
           <li>${_fbT("yieldPercent", "Yield %")} = (${n(r.created)} − ${n(r.ngAfterRecovery)}) ÷ ${n(r.created)} = <b>${n(r.yieldPercent)}%</b></li>
         </ol>
+        ${renderFinancialsDefectShares(r)}
       </div>`;
   }).join("");
 
@@ -1523,6 +1524,38 @@ function renderFinancialsBreakdownSummary(data) {
         </div>` : ""}
       ${match ? `<div class="text-sm">${match}</div>` : ""}
       ${notes.map(x => `<div class="text-xs text-gray-500">${x}</div>`).join("")}
+    </div>`;
+}
+
+// Per-process defect quantities and their share (%) of the row's total NG (before recovery)
+function renderFinancialsDefectShares(row) {
+  const n = formatNumber;
+  const useEN = (localStorage.getItem("lang") || "en") === "en";
+  const pct = qty => row.totalNg > 0 ? (qty / row.totalNg) * 100 : 0;
+  const blocks = (row.defectsByProcess || []).filter(p => p.ng > 0).map(p => {
+    const line = (name, qty, muted) => `
+      <div class="mb-1 ${muted ? "text-gray-400" : ""}">
+        <div class="flex justify-between gap-3 text-xs">
+          <span>${_fbEsc(name)}</span>
+          <span class="whitespace-nowrap"><b>${n(qty)}</b> <span class="text-gray-500">(${pct(qty).toFixed(1)}%)</span></span>
+        </div>
+        <div class="h-1 bg-gray-100 rounded"><div class="h-1 rounded ${muted ? "bg-gray-300" : "bg-red-400"}" style="width:${Math.min(pct(qty), 100).toFixed(1)}%"></div></div>
+      </div>`;
+    return `
+      <div class="border border-gray-200 rounded bg-white p-3">
+        <div class="flex justify-between text-sm font-semibold text-gray-700 mb-2">
+          <span>${_fbSourceLabel(p.process)}</span>
+          <span>${n(p.ng)} <span class="text-xs font-normal text-gray-500">(${pct(p.ng).toFixed(1)}%)</span></span>
+        </div>
+        ${p.items.map(d => line((useEN && d.label_en) ? d.label_en : d.label, d.qty, false)).join("")}
+        ${p.unclassified > 0 ? line(_fbT("breakdownUnclassified", "Unclassified"), p.unclassified, true) : ""}
+      </div>`;
+  }).join("");
+  if (!blocks) return "";
+  return `
+    <div class="mt-3">
+      <div class="text-xs text-gray-500 mb-1">${_fbT("breakdownDefectShare", "NG by defect — quantity and % of total NG")} (${n(row.totalNg)})</div>
+      <div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(15rem,1fr))">${blocks}</div>
     </div>`;
 }
 
