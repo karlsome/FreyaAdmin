@@ -1162,7 +1162,8 @@ function renderFinancialsTop5(top5) {
     return;
   }
   body.innerHTML = top5.map((r, i) => `
-    <tr class="${i === 0 ? 'bg-red-50' : ''}">
+    <tr class="${i === 0 ? 'bg-red-50' : ''} cursor-pointer hover:bg-gray-100" title="${_fbT('breakdownClickHint', 'Click to see how this was calculated')}"
+        data-fb-ban="${_fbEsc(r.ban)}" data-fb-hinban="${_fbEsc(r.hinban)}" data-fb-factory="${_fbEsc(r.factory)}" data-fb-expected="${r.scrapLoss || 0}" data-fb-metric="scrapLoss">
       <td class="px-3 py-2 text-xs text-gray-500">${i + 1}</td>
       <td class="px-3 py-2 font-medium text-sm">${r.ban || '-'}</td>
       <td class="px-3 py-2 text-xs text-gray-500">${r.model || '-'}</td>
@@ -1181,7 +1182,8 @@ function renderFinancialsTop5Value(top5Value) {
     return;
   }
   body.innerHTML = top5Value.map((r, i) => `
-    <tr class="${i === 0 ? 'bg-green-50' : ''}">
+    <tr class="${i === 0 ? 'bg-green-50' : ''} cursor-pointer hover:bg-gray-100" title="${_fbT('breakdownClickHint', 'Click to see how this was calculated')}"
+        data-fb-ban="${_fbEsc(r.ban)}" data-fb-hinban="${_fbEsc(r.hinban)}" data-fb-factory="${_fbEsc(r.factory)}" data-fb-expected="${r.value || 0}" data-fb-metric="value">
       <td class="px-3 py-2 text-xs text-gray-500">${i + 1}</td>
       <td class="px-3 py-2 font-medium text-sm">${r.ban || '-'}</td>
       <td class="px-3 py-2 text-xs text-gray-500">${r.model || '-'}</td>
@@ -1353,6 +1355,276 @@ async function exportFinancialsCSVServerLevel() {
     }
   }
 }
+
+// ── Scrap Loss breakdown modal ───────────────────────────────────────────────
+// Click a Top 5 row → explains how its ¥ was calculated (/api/financials/breakdown)
+// and lists the raw source records, one server-side page at a time
+// (/api/financials/breakdown/records).
+const FINANCIALS_BREAKDOWN_SOURCES = ["press", "slit", "srs", "kensa", "recovery"];
+const financialsBreakdownState = {
+  ban: "", factory: "", fromDate: "", toDate: "",
+  focus: null, source: "press", page: 1, limit: 20, requestId: 0
+};
+
+function _fbT(key, fallback) {
+  const value = (typeof t === "function") ? t(key) : key;
+  return value && value !== key ? value : fallback;
+}
+
+function _fbEsc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function _fbBaseUrl() {
+  return typeof BASE_URL !== "undefined" ? BASE_URL : (window.BASE_URL || "http://localhost:3000/");
+}
+
+async function _fbPost(path, body) {
+  const response = await fetch(`${_fbBaseUrl()}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+function _fbSourceLabel(source) {
+  return {
+    press: _fbT("pressProcess", "Press"),
+    slit: _fbT("slitProcess", "Slit"),
+    srs: _fbT("srsProcess", "SRS"),
+    kensa: _fbT("kensaProcess", "Kensa"),
+    recovery: _fbT("recoveredNg", "Recovered NG")
+  }[source];
+}
+
+function ensureFinancialsBreakdownModal() {
+  let modal = document.getElementById("financialsBreakdownModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "financialsBreakdownModal";
+  modal.className = "hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4";
+  modal.style.zIndex = "60";
+  modal.innerHTML = `
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-[96vw] max-h-[92vh] flex flex-col">
+      <div class="flex items-start justify-between px-6 py-4 border-b border-gray-200">
+        <div>
+          <h3 id="fbTitle" class="text-lg font-semibold text-gray-900"></h3>
+          <div id="fbSubtitle" class="text-sm text-gray-500 mt-1"></div>
+        </div>
+        <button id="fbCloseBtn" class="text-gray-400 hover:text-gray-700 text-2xl leading-none" aria-label="Close">&times;</button>
+      </div>
+      <div class="overflow-y-auto px-6 py-4 space-y-5">
+        <div id="fbSummary"></div>
+        <div>
+          <div id="fbTabs" class="flex flex-wrap gap-2 border-b border-gray-200 mb-3"></div>
+          <div id="fbRecords"></div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener("click", e => { if (e.target === modal) closeFinancialsBreakdown(); });
+  modal.querySelector("#fbCloseBtn").addEventListener("click", closeFinancialsBreakdown);
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !modal.classList.contains("hidden")) closeFinancialsBreakdown();
+  });
+  return modal;
+}
+
+function closeFinancialsBreakdown() {
+  document.getElementById("financialsBreakdownModal")?.classList.add("hidden");
+}
+
+// focus = { hinban, factory, expected, metric } identifies the clicked Top 5 row
+async function openFinancialsBreakdown(ban, focus = null) {
+  const fromDate = document.getElementById("financialsFromDate")?.value;
+  const toDate = document.getElementById("financialsToDate")?.value;
+  if (!ban || !fromDate || !toDate) return;
+
+  const modal = ensureFinancialsBreakdownModal();
+  Object.assign(financialsBreakdownState, {
+    ban, fromDate, toDate, focus, source: "press", page: 1,
+    factory: document.getElementById("financialsFactoryFilter")?.value || ""
+  });
+  modal.classList.remove("hidden");
+  modal.querySelector("#fbTitle").textContent = `${ban} — ${_fbT("breakdownTitle", "Scrap Loss Breakdown")}`;
+  modal.querySelector("#fbSubtitle").textContent = `${fromDate} → ${toDate}`;
+  modal.querySelector("#fbSummary").innerHTML = `<div class="text-sm text-gray-400">${_fbT("loading", "Loading...")}</div>`;
+  renderFinancialsBreakdownTabs();
+  loadFinancialsBreakdownRecords();
+
+  try {
+    const { ban: b, factory, fromDate: f, toDate: to } = financialsBreakdownState;
+    const data = await _fbPost("api/financials/breakdown", { ban: b, factory, fromDate: f, toDate: to });
+    if (financialsBreakdownState.ban !== b) return;
+    if (data.model) modal.querySelector("#fbTitle").textContent = `${b} (${data.model}) — ${_fbT("breakdownTitle", "Scrap Loss Breakdown")}`;
+    modal.querySelector("#fbSummary").innerHTML = renderFinancialsBreakdownSummary(data);
+  } catch (error) {
+    console.error("Breakdown load failed:", error);
+    modal.querySelector("#fbSummary").innerHTML = `<div class="text-sm text-red-600">${_fbEsc(error.message)}</div>`;
+  }
+}
+
+function renderFinancialsBreakdownSummary(data) {
+  const n = formatNumber;
+  const focus = financialsBreakdownState.focus;
+  if (!data.rows.length) {
+    return `<div class="text-sm text-gray-500">${_fbT("noData", "No data.")}</div>`;
+  }
+
+  const rowCards = data.rows.map(r => {
+    const isFocus = focus && r.hinban === focus.hinban && r.factory === focus.factory;
+    const ngParts = `${_fbT("pressProcess", "Press")} ${n(r.pressNg)} + ${_fbT("slitProcess", "Slit")} ${n(r.slitNg)} + ${_fbT("srsProcess", "SRS")} ${n(r.srsNg)} + ${_fbT("kensaProcess", "Kensa")} ${n(r.kensaNg)}`;
+    return `
+      <div class="border rounded-lg p-4 ${isFocus ? "border-red-300 bg-red-50" : "border-gray-200"}">
+        <div class="flex flex-wrap justify-between gap-2 mb-2">
+          <div class="font-semibold text-gray-800">${_fbEsc(r.hinban)} <span class="text-xs font-normal text-gray-500">/ ${_fbEsc(r.factory)}</span></div>
+          <div class="text-lg font-bold text-red-600">¥${n(r.scrapLoss)}</div>
+        </div>
+        <ol class="text-sm text-gray-700 space-y-1 list-decimal list-inside">
+          <li>${_fbT("created", "Created")}: <b>${n(r.created)}</b> pcs</li>
+          <li>${_fbT("breakdownTotalNg", "Total NG")}: ${ngParts} = <b>${n(r.totalNg)}</b>${r.mergedZeroCreatedNg ? ` <span class="text-xs text-gray-500">(${_fbT("breakdownMerged", "incl. NG merged from lots with 0 created")}: ${n(r.mergedZeroCreatedNg)})</span>` : ""}</li>
+          <li>${_fbT("recoveredNg", "Recovered NG")}: <span class="px-1 rounded" style="background:#fff3cd">− ${n(r.recoveredNg)}</span> <span class="text-xs text-gray-500">(${n(r.recoveryDocCount)} ${_fbT("breakdownRecoveryDocs", "recovery entries")})</span> → ${_fbT("breakdownNetNg", "Net NG")} <b>${n(r.ngAfterRecovery)}</b></li>
+          <li>${_fbT("breakdownUnitPrice", "Unit price")}: <b>¥${n(r.pricePerPc)}</b> <span class="text-xs text-gray-500">(masterDB.pricePerPc, 品番 ${_fbEsc(r.hinban)})</span></li>
+          <li>${_fbT("scrapLoss", "Scrap Loss (¥)")} = ${n(r.ngAfterRecovery)} × ¥${n(r.pricePerPc)} = <b class="text-red-600">¥${n(r.scrapLoss)}</b></li>
+          <li>${_fbT("yieldPercent", "Yield %")} = (${n(r.created)} − ${n(r.ngAfterRecovery)}) ÷ ${n(r.created)} = <b>${n(r.yieldPercent)}%</b></li>
+        </ol>
+      </div>`;
+  }).join("");
+
+  const tot = data.totals;
+  let match = "";
+  if (focus && focus.expected != null) {
+    const focusRow = data.rows.find(r => r.hinban === focus.hinban && r.factory === focus.factory);
+    const actual = focusRow ? focusRow[focus.metric || "scrapLoss"] : null;
+    const ok = actual != null && Math.abs(actual - focus.expected) < 1;
+    match = ok
+      ? `<span class="text-green-700">✔ ${_fbT("breakdownMatches", "Matches the table value")} (¥${n(focus.expected)})</span>`
+      : `<span class="text-amber-700">⚠ ${_fbT("breakdownMismatch", "Differs from the table value")} (¥${n(focus.expected)} vs ¥${n(actual ?? 0)}) — ${_fbT("breakdownMismatchHint", "data may have changed since the page loaded")}</span>`;
+  }
+
+  const notes = [];
+  if (data.skippedNoPrice.length) {
+    notes.push(`${_fbT("breakdownNoPrice", "Excluded (no pricePerPc in masterDB)")}: ${data.skippedNoPrice.map(s => `${_fbEsc(s.hinban)} (${n(s.created)} / NG ${n(s.totalNg)})`).join(", ")}`);
+  }
+  if (data.unallocatedRecoveryDocs > 0) {
+    notes.push(`${n(data.unallocatedRecoveryDocs)} ${_fbT("breakdownUnallocated", "recovery entries could not be matched to a row")}`);
+  }
+
+  return `
+    <div class="space-y-3">
+      ${rowCards}
+      ${data.rows.length > 1 ? `
+        <div class="text-sm text-gray-700 border-t border-gray-200 pt-2">
+          <b>${_fbT("breakdownTotal", "Total")}</b>: ${_fbT("created", "Created")} ${n(tot.created)} · NG ${n(tot.totalNg)} − ${_fbT("recoveredNg", "Recovered NG")} ${n(tot.recoveredNg)} = ${n(tot.ngAfterRecovery)} ·
+          ${_fbT("scrapLoss", "Scrap Loss (¥)")} <b class="text-red-600">¥${n(tot.scrapLoss)}</b> · ${_fbT("yieldPercent", "Yield %")} ${n(tot.yieldPercent)}%
+        </div>` : ""}
+      ${match ? `<div class="text-sm">${match}</div>` : ""}
+      ${notes.map(x => `<div class="text-xs text-gray-500">${x}</div>`).join("")}
+    </div>`;
+}
+
+function renderFinancialsBreakdownTabs() {
+  const tabs = document.getElementById("fbTabs");
+  if (!tabs) return;
+  tabs.innerHTML = FINANCIALS_BREAKDOWN_SOURCES.map(source => {
+    const active = source === financialsBreakdownState.source;
+    return `<button data-source="${source}" class="px-3 py-2 text-sm -mb-px border-b-2 ${active ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent text-gray-500 hover:text-gray-800"}">${_fbSourceLabel(source)}</button>`;
+  }).join("");
+  tabs.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => {
+    financialsBreakdownState.source = btn.dataset.source;
+    financialsBreakdownState.page = 1;
+    renderFinancialsBreakdownTabs();
+    loadFinancialsBreakdownRecords();
+  }));
+}
+
+async function loadFinancialsBreakdownRecords() {
+  const container = document.getElementById("fbRecords");
+  if (!container) return;
+  const state = financialsBreakdownState;
+  const requestId = ++state.requestId;
+  container.innerHTML = `<div class="text-sm text-gray-400 py-4">${_fbT("loading", "Loading...")}</div>`;
+  try {
+    const data = await _fbPost("api/financials/breakdown/records", {
+      ban: state.ban, factory: state.factory, fromDate: state.fromDate, toDate: state.toDate,
+      source: state.source, page: state.page, limit: state.limit
+    });
+    if (requestId !== state.requestId) return; // a newer request superseded this one
+    state.page = data.page;
+    container.innerHTML = renderFinancialsBreakdownRecords(data);
+    container.querySelector("[data-fb-prev]")?.addEventListener("click", () => { state.page -= 1; loadFinancialsBreakdownRecords(); });
+    container.querySelector("[data-fb-next]")?.addEventListener("click", () => { state.page += 1; loadFinancialsBreakdownRecords(); });
+  } catch (error) {
+    if (requestId !== state.requestId) return;
+    container.innerHTML = `<div class="text-sm text-red-600 py-4">${_fbEsc(error.message)}</div>`;
+  }
+}
+
+function renderFinancialsBreakdownRecords(data) {
+  const n = formatNumber;
+  const isRecovery = data.source === "recovery";
+  // Per-defect columns (press/slit/srs fixed names, kensa from the model's defectDefinitions)
+  const useEN = (localStorage.getItem("lang") || "en") === "en";
+  const defectCols = isRecovery ? [] : (data.defectColumns || []);
+  const defectLabel = c => (useEN && c.label_en) ? c.label_en : c.label;
+  const showMachine = data.source !== "kensa"; // kensa 設備 is a long table name that only wastes width
+  const head = isRecovery
+    ? [_fbT("breakdownDate", "Lot date"), _fbT("breakdownLot", "Lot"), "品番", _fbT("factory", "Factory"), _fbT("breakdownDefects", "Defect types"), _fbT("breakdownQty", "Qty")]
+    : [_fbT("breakdownDate", "Lot date"), _fbT("breakdownLot", "Lot"), "品番", _fbT("factory", "Factory"), ...(showMachine ? [_fbT("breakdownMachine", "Machine")] : []), _fbT("breakdownWorker", "Worker"), _fbT("breakdownProduced", "Produced"), "NG", ...defectCols.map(defectLabel)];
+  const textCols = isRecovery ? 5 : (showMachine ? 6 : 5); // leading left-aligned columns; the rest are numeric
+  const body = data.records.map(r => isRecovery ? `
+      <tr>
+        <td class="px-3 py-2">${_fbEsc(r.lotDate || (r.createdAt || "").slice(0, 10))}</td>
+        <td class="px-3 py-2">${_fbEsc(r.lot)}</td>
+        <td class="px-3 py-2">${_fbEsc(r.hinban)}</td>
+        <td class="px-3 py-2">${_fbEsc(r.factory)}</td>
+        <td class="px-3 py-2">${r.recoveries.map(x => `${_fbEsc(x.defectType)}: ${n(x.quantity)}`).join(", ")}</td>
+        <td class="px-3 py-2 text-right font-semibold" style="background:#fff3cd">${n(r.quantity)}</td>
+      </tr>` : `
+      <tr>
+        <td class="px-3 py-2">${_fbEsc(r.date)}</td>
+        <td class="px-3 py-2">${_fbEsc(r.lot)}</td>
+        <td class="px-3 py-2">${_fbEsc(r.hinban)}</td>
+        <td class="px-3 py-2">${_fbEsc(r.factory)}</td>
+        ${showMachine ? `<td class="px-3 py-2">${_fbEsc(r.machine)}</td>` : ""}
+        <td class="px-3 py-2">${_fbEsc(r.worker)}</td>
+        <td class="px-3 py-2 text-right">${r.quantity == null ? "-" : n(r.quantity)}</td>
+        <td class="px-3 py-2 text-right font-semibold">${n(r.ng)}</td>
+        ${defectCols.map(c => { const v = r.defects?.[c.key] || 0; return `<td class="px-3 py-2 text-right ${v ? "text-red-600 font-medium" : "text-gray-300"}">${n(v)}</td>`; }).join("")}
+      </tr>`).join("");
+  const from = data.total ? (data.page - 1) * data.limit + 1 : 0;
+  const to = Math.min(data.page * data.limit, data.total);
+  return `
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm whitespace-nowrap">
+        <thead class="bg-gray-50 text-gray-600 text-xs"><tr>${head.map((h, i) => `<th class="px-3 py-2 whitespace-nowrap ${i >= textCols ? "text-right" : "text-left"}" ${i >= textCols && !isRecovery && i >= textCols + 2 ? 'style="min-width:7rem;white-space:normal"' : ""}>${_fbEsc(h)}</th>`).join("")}</tr></thead>
+        <tbody class="divide-y divide-gray-100">${body || `<tr><td colspan="${head.length}" class="px-3 py-4 text-gray-400">${_fbT("noData", "No data.")}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="flex items-center justify-between mt-3 text-sm text-gray-600">
+      <span>${from}–${to} / ${n(data.total)}</span>
+      <div class="flex gap-2">
+        <button data-fb-prev class="px-3 py-1 border rounded ${data.page <= 1 ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50"}" ${data.page <= 1 ? "disabled" : ""}>‹</button>
+        <span class="py-1">${data.page} / ${Math.max(data.totalPages, 1)}</span>
+        <button data-fb-next class="px-3 py-1 border rounded ${data.page >= data.totalPages ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50"}" ${data.page >= data.totalPages ? "disabled" : ""}>›</button>
+      </div>
+    </div>`;
+}
+
+// Delegated click handler for the clickable Top 5 rows (data-fb-* attributes)
+document.addEventListener("click", e => {
+  const row = e.target.closest("tr[data-fb-ban]");
+  if (!row) return;
+  openFinancialsBreakdown(row.dataset.fbBan, {
+    hinban: row.dataset.fbHinban,
+    factory: row.dataset.fbFactory,
+    expected: Number(row.dataset.fbExpected),
+    metric: row.dataset.fbMetric
+  });
+});
 
 window.initFinancialsPage = initFinancialsPage;
 window.toggleFinancialsSort = toggleFinancialsSort;
